@@ -141,7 +141,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}
 	if len(processTimeline) > 0 {
 		if shouldCompactProcessEvidenceForStateChangingRepair(step) {
-			processTimeline = compactProcessEvidenceTimelineForStateChangingRepair(processTimeline)
+			processTimeline = compactProcessEvidenceTimelineForStateChangingRepair(processTimeline, step)
 			progressDigest = currentProgressDigestFromProcessEvidenceTimeline(processTimeline)
 		}
 		ret[stepInputKeyProcessEvidenceTimeline] = processTimeline
@@ -237,11 +237,15 @@ func shouldCompactProcessEvidenceForStateChangingRepair(step *runModel.Step) boo
 		len(mapFromValue(step.Input["repairActionPackage"])) > 0
 }
 
-func compactProcessEvidenceTimelineForStateChangingRepair(input []map[string]any) []map[string]any {
+func compactProcessEvidenceTimelineForStateChangingRepair(input []map[string]any, step *runModel.Step) []map[string]any {
 	if len(input) == 0 {
 		return nil
 	}
-	selected := input
+	targetStepID := currentFailureStepIDFromRepairStep(step)
+	selected := selectProcessEvidenceForStateChangingRepair(input, targetStepID)
+	if len(selected) == 0 {
+		selected = input
+	}
 	if len(selected) > 8 {
 		selected = selected[len(selected)-8:]
 	}
@@ -282,6 +286,124 @@ func compactProcessEvidenceTimelineForStateChangingRepair(input []map[string]any
 		}
 	}
 	return ret
+}
+
+func currentFailureStepIDFromRepairStep(step *runModel.Step) common.StepID {
+	if step == nil || step.Input == nil {
+		return ""
+	}
+	input := step.Input
+	candidates := []string{
+		stringFromMap(input, "failedStepId"),
+		stringFromMap(input, stepInputKeyRepairOfStepID),
+		stringFromMap(input, stepInputKeyRepairOfRootStepID),
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		candidates = append(candidates,
+			stringFromMap(pkg, "failedStepId"),
+			stringFromMap(pkg, stepInputKeyRepairOfStepID),
+			stringFromMap(pkg, stepInputKeyRepairOfRootStepID),
+		)
+	}
+	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
+		candidates = append(candidates,
+			stringFromMap(progress, "failedStepId"),
+			stringFromMap(progress, "currentFailedStepId"),
+			stringFromMap(progress, "latestFailedStepId"),
+		)
+	}
+	return common.StepID(strings.TrimSpace(firstNonEmptyString(candidates...)))
+}
+
+func selectProcessEvidenceForStateChangingRepair(input []map[string]any, targetStepID common.StepID) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	target := strings.TrimSpace(string(targetStepID))
+	selected := make([]map[string]any, 0, min(len(input), 8))
+	seen := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 {
+			return
+		}
+		if target != "" && strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateFailed) && !processEvidenceMatchesRepairTarget(item, target) {
+			return
+		}
+		key := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "sourceRef"),
+			stringFromMap(item, "stepId"),
+			fmt.Sprintf("%v", item["order"]),
+		))
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		selected = append(selected, item)
+	}
+	if target != "" {
+		for idx := len(input) - 1; idx >= 0; idx-- {
+			item := input[idx]
+			if strings.TrimSpace(stringFromMap(item, "stepId")) == target {
+				add(item)
+			}
+		}
+		for idx := len(input) - 1; idx >= 0; idx-- {
+			item := input[idx]
+			if strings.TrimSpace(stringFromMap(item, "graphRootStepId")) == target {
+				add(item)
+			}
+		}
+	}
+	for idx := len(input) - 1; idx >= 0 && len(selected) < 4; idx-- {
+		item := input[idx]
+		state := strings.TrimSpace(stringFromMap(item, "state"))
+		actionKind := strings.TrimSpace(stringFromMap(item, "actionKind"))
+		if state == string(common.StepStateCompleted) && actionKind != "" && actionKind != "runtime" {
+			add(item)
+		}
+	}
+	for idx := len(input) - 1; idx >= 0 && len(selected) < 6; idx-- {
+		item := input[idx]
+		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateFailed) {
+			add(item)
+		}
+	}
+	for idx := len(input) - 1; idx >= 0 && len(selected) < 8; idx-- {
+		add(input[idx])
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		return compareProcessEvidenceOrder(selected[i], selected[j]) < 0
+	})
+	return selected
+}
+
+func processEvidenceMatchesRepairTarget(item map[string]any, target string) bool {
+	if len(item) == 0 || strings.TrimSpace(target) == "" {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(item, "stepId")) == target ||
+		strings.TrimSpace(stringFromMap(item, "graphRootStepId")) == target
+}
+
+func compareProcessEvidenceOrder(left, right map[string]any) int {
+	leftOrder := intFromAny(left["order"])
+	rightOrder := intFromAny(right["order"])
+	switch {
+	case leftOrder < rightOrder:
+		return -1
+	case leftOrder > rightOrder:
+		return 1
+	}
+	leftStep := strings.TrimSpace(stringFromMap(left, "stepId"))
+	rightStep := strings.TrimSpace(stringFromMap(right, "stepId"))
+	switch {
+	case leftStep < rightStep:
+		return -1
+	case leftStep > rightStep:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext map[string]any) {
@@ -552,12 +674,42 @@ func shouldExcludeStrictRepairMemoryItem(item *memorymodel.MemoryItem, currentRu
 	if item.RunID == "" || item.RunID == currentRunID {
 		return false
 	}
+	if strings.TrimSpace(item.MemoryType) == memorycommon.MemoryTypeDoDFeedback && !memoryItemHasStrictRepairReferenceBoundary(item) {
+		return true
+	}
 	switch runStates[item.RunID] {
 	case common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
 		return !memoryItemHasReferenceBoundary(item)
 	default:
 		return false
 	}
+}
+
+func memoryItemHasStrictRepairReferenceBoundary(item *memorymodel.MemoryItem) bool {
+	if item == nil {
+		return false
+	}
+	for _, tag := range item.Tags {
+		switch strings.TrimSpace(strings.ToLower(tag)) {
+		case "accepted_input", "user_confirmed", "decision":
+			return true
+		}
+	}
+	text := strings.ToLower(item.Summary + "\n" + item.Content)
+	for _, token := range []string{
+		"scope:",
+		"appliesto:",
+		"targetref:",
+		"evidenceref:",
+		"accepted_input",
+		"user_confirmed",
+		"decision",
+	} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func canSelectMemoryFromRun(item *memorymodel.MemoryItem, currentRunID common.RunID, runCounts map[common.RunID]int) bool {

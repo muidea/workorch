@@ -2096,3 +2096,17 @@ func TestParseLLMExecutionDecisionNormalizesValidationPlanAdvisoryField(t *testi
 		t.Fatalf("executionGraph = %+v, want graph preserved", decision.ExecutionGraph)
 	}
 }
+
+func TestParseLLMExecutionDecisionNormalizesStringPlanField(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"plan":"repair the current failed contract",
+		"executionGraph":{"nodes":[{"id":"verify","kind":"shell/command","input":{"command":"go","args":["test","./..."]}}]}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	if len(decision.Plan) != 1 || decision.Plan[0] != "repair the current failed contract" {
+		t.Fatalf("plan = %+v, want string plan normalized into []string", decision.Plan)
+	}
+}

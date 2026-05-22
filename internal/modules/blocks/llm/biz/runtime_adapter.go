@@ -1430,6 +1430,12 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return payload, nil
 	}
 	changed := false
+	if value, ok := doc["plan"]; ok {
+		if plan := advisoryDecisionPlanValue(value); len(plan) > 0 {
+			doc["plan"] = plan
+			changed = true
+		}
+	}
 	if value, ok := doc["validationPlan"]; ok {
 		if _, hasPlan := doc["plan"]; !hasPlan {
 			if plan := advisoryDecisionPlanValue(value); len(plan) > 0 {

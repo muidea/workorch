@@ -226,6 +226,64 @@ func TestRunExecutionContextPackageIncludesProcessEvidenceTimeline(t *testing.T)
 	}
 }
 
+func TestCompactProcessEvidenceTimelineForStateChangingRepairPrioritizesCurrentFailure(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-process-context/repair-001",
+		RunID: "run-process-context",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"stateChangingOutputRequired":     true,
+			"failedStepId":                    "run-process-context/graph-001/002-verify",
+			"repairActionPackage": map[string]any{
+				"failedStepId": "run-process-context/graph-001/002-verify",
+			},
+		},
+	}
+	timeline := []map[string]any{
+		{
+			"order":         1,
+			"stepId":        "run-process-context/provider-retry-001",
+			"kind":          "llm/workspace_execution",
+			"state":         string(common.StepStateFailed),
+			"failureReason": "invalid argument: openai llm provider error: context canceled",
+		},
+		{
+			"order":      2,
+			"stepId":     "run-process-context/graph-001/001-write",
+			"kind":       "patch/apply",
+			"actionKind": "artifact_write",
+			"state":      string(common.StepStateCompleted),
+			"summary":    "state-changing output completed",
+		},
+		{
+			"order":         3,
+			"stepId":        "run-process-context/graph-001/002-verify",
+			"kind":          "shell/command",
+			"state":         string(common.StepStateFailed),
+			"failureReason": "current verification failure",
+		},
+		{
+			"order":         4,
+			"stepId":        "run-process-context/provider-retry-002",
+			"kind":          "llm/workspace_execution",
+			"state":         string(common.StepStateFailed),
+			"failureReason": "invalid argument: openai llm provider error: context canceled",
+		},
+	}
+
+	compact := compactProcessEvidenceTimelineForStateChangingRepair(timeline, step)
+	digest := currentProgressDigestFromProcessEvidenceTimeline(compact)
+
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["stepId"] != "run-process-context/graph-001/002-verify" {
+		t.Fatalf("lastObservedFailure = %+v, want current repair target failure", failure)
+	}
+	if digest["currentGap"] != "current verification failure" {
+		t.Fatalf("currentGap = %v, want current failure reason", digest["currentGap"])
+	}
+}
+
 func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{
@@ -465,7 +523,31 @@ func TestStepInputMemorySelectionForStrictRepairRequiresHistoricalBoundary(t *te
 			Importance: 90,
 			Confidence: 90,
 		},
-	}, currentRunID, map[common.RunID]common.RunState{oldFailedRunID: common.RunStateFailed}, step, stepInputMemoryLimit)
+		{
+			ID:         "memory-failed-run-generic-dod-feedback",
+			RunID:      common.RunID("run-memory-strict-failed-generic-dod"),
+			MemoryType: memorycommon.MemoryTypeDoDFeedback,
+			Summary:    "DoD validation feedback",
+			Content:    "Validation failed in a previous run.",
+			Tags:       []string{"reference_value"},
+			Importance: 95,
+			Confidence: 95,
+		},
+		{
+			ID:         "memory-failed-run-scoped-dod-feedback",
+			RunID:      common.RunID("run-memory-strict-failed-scoped-dod"),
+			MemoryType: memorycommon.MemoryTypeDoDFeedback,
+			Summary:    "DoD validation feedback for scoped target",
+			Content:    "scope: current acceptance boundary\nappliesTo: reusable verification gap",
+			Tags:       []string{"reference_value"},
+			Importance: 94,
+			Confidence: 94,
+		},
+	}, currentRunID, map[common.RunID]common.RunState{
+		oldFailedRunID:                         common.RunStateFailed,
+		"run-memory-strict-failed-generic-dod": common.RunStateFailed,
+		"run-memory-strict-failed-scoped-dod":  common.RunStateFailed,
+	}, step, stepInputMemoryLimit)
 
 	if memoryItemsContainID(selected, "memory-failed-run-process") {
 		t.Fatalf("selected = %+v, want unbounded failed-run process memory excluded", selected)
@@ -473,8 +555,17 @@ func TestStepInputMemorySelectionForStrictRepairRequiresHistoricalBoundary(t *te
 	if !memoryItemsContainID(selected, "memory-failed-run-reference") {
 		t.Fatalf("selected = %+v, want bounded reference memory retained", selected)
 	}
+	if memoryItemsContainID(selected, "memory-failed-run-generic-dod-feedback") {
+		t.Fatalf("selected = %+v, want generic historical DoD feedback excluded in strict repair", selected)
+	}
+	if !memoryItemsContainID(selected, "memory-failed-run-scoped-dod-feedback") {
+		t.Fatalf("selected = %+v, want scoped historical DoD feedback retained", selected)
+	}
 	if !memoryItemsContainID(excluded, "memory-failed-run-process") {
 		t.Fatalf("excluded = %+v, want unbounded failed-run memory in exclusion trace", excluded)
+	}
+	if !memoryItemsContainID(excluded, "memory-failed-run-generic-dod-feedback") {
+		t.Fatalf("excluded = %+v, want generic historical DoD feedback in exclusion trace", excluded)
 	}
 }
 
