@@ -34,6 +34,125 @@ func TestRuntimeAdapterReadStatus(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterReadStatusInEmptyRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	repo := t.TempDir()
+	runGitForTest(t, repo, "init", "-q")
+
+	adapter := NewRuntimeAdapter(false)
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindRead,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+	})
+	if err != nil {
+		t.Fatalf("execute status in empty repo: %v", err)
+	}
+	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationStatus {
+		t.Fatalf("status output = %+v, want completed status", result.Output)
+	}
+	if result.Output["headCommit"] != "" {
+		t.Fatalf("headCommit = %v, want empty value before first commit", result.Output["headCommit"])
+	}
+	if result.Output["unbornHead"] != true {
+		t.Fatalf("unbornHead = %v, want true before first commit", result.Output["unbornHead"])
+	}
+}
+
+func TestRuntimeAdapterWriteInitInitializesWorkspaceRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	repo := t.TempDir()
+
+	adapter := NewRuntimeAdapter(true)
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+	})
+	if err != nil {
+		t.Fatalf("execute init: %v\noutput=%+v", err, result.Output)
+	}
+	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
+		t.Fatalf("init output = %+v, want completed init", result.Output)
+	}
+	if result.Output["initialized"] != true || result.Output["existingRepository"] != false {
+		t.Fatalf("init flags = %+v, want initialized new repository", result.Output)
+	}
+	if result.Output["unbornHead"] != true || result.Output["headCommit"] != "" {
+		t.Fatalf("head output = %+v, want unborn repository without head commit", result.Output)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		t.Fatalf(".git stat: %v, want initialized repository", err)
+	}
+	if got := strings.TrimSpace(gitOutputForTest(t, repo, "config", "core.hooksPath")); got != "/dev/null" {
+		t.Fatalf("core.hooksPath = %q, want /dev/null", got)
+	}
+}
+
+func TestRuntimeAdapterWriteInitIsIdempotentForExistingRepository(t *testing.T) {
+	repo := newTestRepo(t)
+
+	adapter := NewRuntimeAdapter(true)
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+	})
+	if err != nil {
+		t.Fatalf("execute idempotent init: %v\noutput=%+v", err, result.Output)
+	}
+	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
+		t.Fatalf("init output = %+v, want completed init", result.Output)
+	}
+	if result.Output["zeroWork"] != true || result.Output["existingRepository"] != true || result.Output["initialized"] != false {
+		t.Fatalf("init flags = %+v, want idempotent existing repository", result.Output)
+	}
+	if result.Output["headCommit"] == "" {
+		t.Fatalf("headCommit empty for existing committed repository: %+v", result.Output)
+	}
+}
+
+func TestRuntimeAdapterReadInitRejected(t *testing.T) {
+	dir := t.TempDir()
+	adapter := NewRuntimeAdapter(true)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindRead,
+		WorkspaceDeliverableDirectory: dir,
+		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+	})
+	if err == nil {
+		t.Fatal("execute init with git/read: expected error")
+	}
+	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
+		t.Fatalf("output = %+v, want init rejected for git/read", result.Output)
+	}
+}
+
+func TestRuntimeAdapterWriteInitRejectedWhenWriteDisabled(t *testing.T) {
+	dir := t.TempDir()
+	adapter := NewRuntimeAdapter(false)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: dir,
+		Input:                         map[string]any{"operation": gitcommon.OperationInit},
+	})
+	if err == nil {
+		t.Fatal("execute init with git/write disabled: expected error")
+	}
+	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
+		t.Fatalf("output = %+v, want init rejected when write disabled", result.Output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+		t.Fatalf(".git stat = %v, want no repository initialized", err)
+	}
+}
+
 func TestRuntimeAdapterRejectsUnsafePathspec(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(true)

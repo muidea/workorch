@@ -382,6 +382,16 @@ Claim-to-evidence 一致性也必须保持中立：summary、goalOutcome、imple
 
 LLM 输出 `executionGraph` 时，runtime 必须按当前 Soul 绑定阶段解析有效 Soul 绑定，并用中立 capability contract 校验 graph 节点：若 `allowedToolKinds` 非空且不含 `*`，所有节点 kind 必须在允许列表内；若 `allowedMCPServerRefs` 非空且不含 `*`，MCP 节点引用的 server 必须在允许列表内。该校验只依据 Soul 的能力白名单，不得写入具体业务领域或特定工具 fallback 规则。
 
+当某类 workspace 需要版本控制证据时，必须通过 WorkspaceTemplate 的中立
+`contextHints.versionControl.git.initializeOnCreate=true` 声明；workspace 创建层只按该
+hint 初始化本地 Git 仓库，不得在 orchestrator/runtime 核心中根据模板名、业务领域或
+Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词中的工具要求保持一致：
+若提示词要求使用 `git/read` 或 `git/write`，结构化白名单也必须显式包含对应 tool kind，
+否则该提示词视为无效约束并会造成 LLM 上下文冲突。
+运行期也可以通过中立 `git/write` 的 `operation=init` 初始化尚未建仓的 workspace
+交付目录；该操作只表达“为当前交付目录建立本地版本控制状态”，不得推导任何具体业务
+模板、Goal 语义、远程仓库或自动提交行为。已有同根仓库时必须返回幂等零工作结果。
+
 当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口或其他明确 contract failure 时才提升为 state-changing repair。
 
 若非 LLM 执行步骤失败原因是中立的瞬时执行超时（例如 runtime deadline / timeout，且尚未形成确定性失败证据），runtime repair 不应强制要求 state-changing 输出；应允许一次受预算约束的重试、缩小验证范围或返回 failed assessment / blocker。该规则只基于“执行超时”这一中立失败形态，不得写入特定命令、语言、测试框架或业务领域判断。

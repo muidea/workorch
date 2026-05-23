@@ -2818,8 +2818,8 @@ func appendGitRuntimeCapabilities(blockKinds []llmmodels.RuntimeBlockCapability)
 	if enabled && writeEnabled {
 		blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
 			Kind:        gitcommon.StepKindWrite,
-			Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: add, commit. add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
-			Input:       map[string]any{"operation": "add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
+			Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: init, add, commit. init initializes the workspace deliverable directory when it is not yet a Git repository; add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
+			Input:       map[string]any{"operation": "init|add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
 		})
 	}
 	return blockKinds

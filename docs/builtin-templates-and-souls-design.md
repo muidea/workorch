@@ -432,7 +432,7 @@ soulMD: |
 
   ## 允许的操作
   - 使用 git/read 查询仓库 status、diff、log、show 和 branch 证据
-  - 仅当目标明确要求本地提交时使用 git/write；先用 git/write add 显式暂存路径，再用 git/write commit 提交已 staged 内容
+  - 使用 git/write init 初始化尚未建仓的 workspace 交付目录；仅当目标明确要求本地提交时使用 git/write add/commit，先用 git/write add 显式暂存路径，再用 git/write commit 提交已 staged 内容
   - 使用 shell/command 执行 go、npm、python、make、docker、curl 等非 Git 开发工具
   - 使用 file_write/unified_diff 创建或修改源代码文件
   - 使用 MCP 工具访问数据库、API 等外部依赖

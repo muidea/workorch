@@ -563,6 +563,9 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	if description := runtimeCapabilityBlockDescription(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply); !strings.Contains(description, "complete, concrete, and directly applicable") {
 		t.Fatalf("patch/apply description = %q, want concrete patch guidance", description)
 	}
+	if description := runtimeCapabilityBlockDescription(provider.request.RuntimeCapabilities, gitcommon.StepKindWrite); !strings.Contains(description, "init, add, commit") {
+		t.Fatalf("git/write description = %q, want init operation declared", description)
+	}
 	for _, kind := range []string{
 		llmcommon.RuntimeBlockKindDecisionRequest,
 		llmcommon.RuntimeBlockKindApprovalRequest,

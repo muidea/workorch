@@ -398,8 +398,8 @@ Git block 不接受任意命令透传。仓库位置只能由
 
 定义输入：
 
-- `operation`: 必填，支持 `add` / `commit`
-- `pathspecs`: `add` 必填；`commit` 不接受
+- `operation`: 必填，支持 `init` / `add` / `commit`
+- `pathspecs`: `add` 必填；`init` / `commit` 不接受
 - `message`: `commit` 必填
 - `amend`: 第一版不支持
 - `reason`: 可选，说明本次变更与 Goal / DoD 的对应关系
@@ -429,11 +429,31 @@ Git block 不接受任意命令透传。仓库位置只能由
 规则：
 
 - `add` 必须显式给出 `pathspecs`，第一版不接受隐式全仓暂存。
+- `init` 只初始化 workspace 交付目录本身；已有同根仓库时返回 `zeroWork=true`，不得越界写入 workspace 交付目录之外。
 - `commit` 必须显式给出非空 `message`。
 - 若无 staged changes，`commit` 返回结构化零工作结果，不应伪成功。
 - 第一版不支持自动补全 commit identity；若环境缺失用户名或邮箱，返回明确错误。
 
 ### git/write operation 契约
+
+#### init
+
+输入：
+
+```json
+{
+  "operation": "init",
+  "reason": "initialize local version control for workspace evidence"
+}
+```
+
+规则：
+
+- `init` 只能作为 `git/write` 执行，因为它会创建本地 `.git` 状态。
+- `init` 在 `resolveRepo` 前执行，支持尚未建仓的 workspace 交付目录。
+- 若交付目录已是同根 Git 仓库，返回 completed + `zeroWork=true` + `existingRepository=true`。
+- 新初始化仓库必须返回 `unbornHead=true`，不得把 Git porcelain 的 `(initial)` 误写为 `headCommit`。
+- 初始化只配置本地仓库运行所需的安全默认值，例如禁用 hooks；不执行 commit、remote、branch checkout 或历史改写。
 
 #### add
 
@@ -687,7 +707,7 @@ defaultTimeout = "30s"
 - `writeEnabled = true`
 - `defaultTimeout = "30s"`
 
-说明：默认启用 `git/read` 和 `git/write`，但写能力仍只支持本地 `add` /
+说明：默认启用 `git/read` 和 `git/write`，但写能力仍只支持本地 `init` / `add` /
 `commit`，不支持 remote 操作、历史改写、分支切换或 hooks。
 
 ## 与 Soul / Template 的关系
@@ -722,7 +742,7 @@ LLM runtimeCapabilities 中应描述实际可用能力，不暗示完整 Git CLI
 ```json
 {
   "kind": "git/write",
-  "operations": ["add", "commit"],
+  "operations": ["init", "add", "commit"],
   "readOnly": false,
   "pathScoped": true,
   "requiresExplicitPathspecs": true,
@@ -739,13 +759,34 @@ software-dev execution Soul 应补充：
 
 - 使用 `patch/apply` 修改文件。
 - 使用 `git/read` 查看仓库状态和差异。
-- 只有用户目标明确要求提交时才使用 `git/write`。
+- 使用 `git/write init` 初始化尚未建仓的 workspace 交付目录；只有用户目标明确要求提交时才使用 `git/write add/commit`。
 - 不要通过 `shell/command` 调用 `git` 完成已由 Git block 支持的操作。
+- software-dev execution Soul 的结构化 `allowedToolKinds` 必须同步开放
+  `git/read` 与 `git/write`，不得只在 `soulMD` 文本中声明 Git 能力。
 
 software-dev validation Soul 应补充：
 
 - 使用 `git/read` 核对最终仓库状态。
 - 不使用 `git/write`。
+
+### Workspace 初始化
+
+需要 Git 证据的 WorkspaceTemplate 应通过中立 `contextHints` 声明：
+
+```json
+{
+  "versionControl": {
+    "git": {
+      "initializeOnCreate": true
+    }
+  }
+}
+```
+
+workorch 在创建 workspace 时只读取该通用 hint，并在交付目录初始化本地 Git
+仓库；核心 runtime 不得根据模板名称、业务领域或 Goal 文本硬编码 Git 初始化。
+已存在 `.git` 时必须保持原仓库不变。初始化只提供本地 `git/read` /
+`git/write` 可用性，不代表自动提交；是否提交仍由 Goal、DoD 与 Soul 策略决定。
 
 ## 与 patch / shell 的关系
 
@@ -953,6 +994,7 @@ Git 仓库。
 ## 验收标准
 
 - `git/read` 能在 Workspace 仓库中成功返回结构化状态证据。
+- `git/write:init` 能在非仓库 workspace 交付目录初始化本地 Git 仓库，并在已有仓库时返回幂等零工作结果。
 - `git/write:add` 只能在显式 `pathspecs` 下执行。
 - `git/write:commit` 必须要求提交信息，并返回 commit hash。
 - 非仓库目录、越界目录和禁用操作能稳定拒绝。
@@ -964,7 +1006,7 @@ Git 仓库。
 第一版应采用独立内置 Git block，能力面限制为：
 
 - `git/read`: `status`、`diff`、`log`、`show`、`branch`
-- `git/write`: `add`、`commit`
+- `git/write`: `init`、`add`、`commit`
 
 并保持最小配置：
 

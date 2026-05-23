@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -173,10 +174,73 @@ func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession
 	item.SoulBindings = bindings
 	item.ContextHints = cloneContextMap(template.ContextHints)
 	item.EvidencePolicies = cloneContextMapSlice(template.EvidencePolicies)
+	if workspaceTemplateRequestsGitInit(item.ContextHints) {
+		if err := initializeWorkspaceGitRepository(ctx, item.DeliverableDirectory); err != nil {
+			return nil, err
+		}
+	}
 	if err := workspaces.Update(ctx, item); err != nil {
 		return nil, err
 	}
 	return workspaces.Get(ctx, item.ID)
+}
+
+func workspaceTemplateRequestsGitInit(contextHints map[string]any) bool {
+	if len(contextHints) == 0 {
+		return false
+	}
+	versionControl, ok := contextHints["versionControl"].(map[string]any)
+	if !ok {
+		return false
+	}
+	gitConfig, ok := versionControl["git"].(map[string]any)
+	if !ok {
+		return false
+	}
+	value, ok := gitConfig["initializeOnCreate"].(bool)
+	return ok && value
+}
+
+func initializeWorkspaceGitRepository(ctx context.Context, deliverableDirectory string) error {
+	deliverableDirectory = strings.TrimSpace(deliverableDirectory)
+	if deliverableDirectory == "" {
+		return common.ErrInvalidArgument
+	}
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, ".git")); err == nil {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		return fmt.Errorf("%w: git binary is required to initialize workspace version control", common.ErrInvalidArgument)
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := runWorkspaceGitCommand(gitCtx, gitPath, deliverableDirectory, "init", "-q"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"config", "user.name", "WorkOrch"},
+		{"config", "user.email", "workorch@example.local"},
+		{"config", "core.hooksPath", "/dev/null"},
+	} {
+		if err := runWorkspaceGitCommand(gitCtx, gitPath, deliverableDirectory, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runWorkspaceGitCommand(ctx context.Context, gitPath string, dir string, args ...string) error {
+	cmd := exec.CommandContext(ctx, gitPath, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: git %s failed: %s", common.ErrInvalidArgument, strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, deliverableDirectory string) (Workspace, error) {

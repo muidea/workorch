@@ -97,6 +97,15 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	if err != nil {
 		return a.rejectedResult(request, operation, gitcommon.ErrorInvalidRequest, err)
 	}
+	if operation == gitcommon.OperationInit {
+		if request.Kind != gitcommon.StepKindWrite {
+			return a.rejectedResult(request, operation, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: git init requires git/write", common.ErrInvalidArgument))
+		}
+		if a == nil || !a.writeEnabled {
+			return a.rejectedResult(request, operation, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: git write runtime is disabled", common.ErrInvalidArgument))
+		}
+		return a.executeInit(ctx, request, timeout)
+	}
 	repo, err := a.resolveRepo(ctx, request, timeout)
 	if err != nil {
 		return a.failedResult(request, operation, gitcommon.ErrorNotGitRepository, err)
@@ -134,6 +143,8 @@ func (a *RuntimeAdapter) executeRead(ctx context.Context, request runtimemodel.S
 
 func (a *RuntimeAdapter) executeWrite(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, operation string, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
 	switch operation {
+	case gitcommon.OperationInit:
+		return a.executeInit(ctx, request, timeout)
 	case gitcommon.OperationAdd:
 		return a.executeAdd(ctx, request, repo, timeout)
 	case gitcommon.OperationCommit:
@@ -142,6 +153,57 @@ func (a *RuntimeAdapter) executeWrite(ctx context.Context, request runtimemodel.
 		err := fmt.Errorf("%w: unsupported git write operation %q", common.ErrInvalidArgument, operation)
 		return a.rejectedResultWithRepo(request, operation, repo, gitcommon.ErrorOperationDenied, err)
 	}
+}
+
+func (a *RuntimeAdapter) executeInit(ctx context.Context, request runtimemodel.StepExecutionRequest, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
+	deliverable, err := filepath.Abs(strings.TrimSpace(request.WorkspaceDeliverableDirectory))
+	if err != nil || deliverable == "" {
+		return a.rejectedResult(request, gitcommon.OperationInit, gitcommon.ErrorInvalidRequest, common.ErrInvalidArgument)
+	}
+	info, err := os.Stat(deliverable)
+	if err != nil {
+		return a.failedResult(request, gitcommon.OperationInit, gitcommon.ErrorInvalidRequest, err)
+	}
+	if !info.IsDir() {
+		err := fmt.Errorf("%w: workspace deliverable directory must be a directory", common.ErrInvalidArgument)
+		return a.rejectedResult(request, gitcommon.OperationInit, gitcommon.ErrorInvalidRequest, err)
+	}
+	if repo, ok, existingErr := a.existingRepoContext(ctx, request, deliverable, timeout); existingErr != nil {
+		return a.failedResult(request, gitcommon.OperationInit, gitcommon.ErrorNotGitRepository, existingErr)
+	} else if ok {
+		output := a.baseOutput(request, repo, gitcommon.OperationInit, gitCommandResult{}, "completed")
+		output["zeroWork"] = true
+		output["initialized"] = false
+		output["existingRepository"] = true
+		if repo.HeadCommit == "" {
+			output["unbornHead"] = true
+		}
+		output["summary"] = "git init skipped because workspace repository already exists"
+		return runtimemodel.StepExecutionResult{Output: output}, nil
+	}
+	cmd, err := a.runGit(ctx, deliverable, timeout, maxOutputBytes, "init", "-q")
+	if err != nil {
+		return a.commandFailureResult(request, repoContext{DeliverableDirectory: deliverable, RepoRoot: deliverable}, gitcommon.OperationInit, cmd, classifyGitError(cmd, err), err)
+	}
+	for _, args := range [][]string{
+		{"config", "user.name", "WorkOrch"},
+		{"config", "user.email", "workorch@example.local"},
+		{"config", "core.hooksPath", "/dev/null"},
+	} {
+		if configCmd, configErr := a.runGit(ctx, deliverable, timeout, maxOutputBytes, args...); configErr != nil {
+			return a.commandFailureResult(request, repoContext{DeliverableDirectory: deliverable, RepoRoot: deliverable}, gitcommon.OperationInit, configCmd, classifyGitError(configCmd, configErr), configErr)
+		}
+	}
+	repo, err := a.resolveRepo(ctx, request, timeout)
+	if err != nil {
+		return a.failedResult(request, gitcommon.OperationInit, gitcommon.ErrorNotGitRepository, err)
+	}
+	output := a.baseOutput(request, repo, gitcommon.OperationInit, cmd, "completed")
+	output["initialized"] = true
+	output["existingRepository"] = false
+	output["unbornHead"] = true
+	output["summary"] = "git init completed"
+	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
 func (a *RuntimeAdapter) executeStatus(ctx context.Context, request runtimemodel.StepExecutionRequest, repo repoContext, timeout time.Duration) (runtimemodel.StepExecutionResult, error) {
@@ -162,7 +224,9 @@ func (a *RuntimeAdapter) executeStatus(ctx context.Context, request runtimemodel
 	if branch != "" {
 		output["branch"] = branch
 	}
-	if head != "" {
+	if head == "(initial)" {
+		output["unbornHead"] = true
+	} else if head != "" {
 		output["headCommit"] = head
 	}
 	output["summary"] = fmt.Sprintf("git status completed with %d changed file(s)", len(files))
@@ -370,6 +434,20 @@ func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request runtimemodel.S
 	}, nil
 }
 
+func (a *RuntimeAdapter) existingRepoContext(ctx context.Context, request runtimemodel.StepExecutionRequest, deliverable string, timeout time.Duration) (repoContext, bool, error) {
+	if _, err := os.Stat(filepath.Join(deliverable, ".git")); err != nil {
+		if os.IsNotExist(err) {
+			return repoContext{}, false, nil
+		}
+		return repoContext{}, false, err
+	}
+	repo, err := a.resolveRepo(ctx, request, timeout)
+	if err != nil {
+		return repoContext{}, false, err
+	}
+	return repo, true, nil
+}
+
 func (a *RuntimeAdapter) runGit(ctx context.Context, repoRoot string, timeout time.Duration, limit int64, args ...string) (gitCommandResult, error) {
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
@@ -515,7 +593,7 @@ func (a *RuntimeAdapter) commandFailureResult(request runtimemodel.StepExecution
 
 func stageForOperation(operation string) string {
 	switch operation {
-	case gitcommon.OperationAdd, gitcommon.OperationCommit:
+	case gitcommon.OperationInit, gitcommon.OperationAdd, gitcommon.OperationCommit:
 		return "git_write"
 	default:
 		return "git_read"

@@ -66,6 +66,11 @@
     },
     "contextHints": {
       "stateChangePolicy": "must_produce_state_change",
+      "versionControl": {
+        "git": {
+          "initializeOnCreate": true
+        }
+      },
       "profileContracts": {
         "software-dev": {
           "acceptanceDimensions": [

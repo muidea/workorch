@@ -39,6 +39,14 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if item.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", item.ContextHints)
 	}
+	versionControl, ok := item.ContextHints["versionControl"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev versionControl context hint = %+v, want map", item.ContextHints["versionControl"])
+	}
+	gitConfig, ok := versionControl["git"].(map[string]any)
+	if !ok || gitConfig["initializeOnCreate"] != true {
+		t.Fatalf("software-dev git context hint = %+v, want initializeOnCreate=true", versionControl["git"])
+	}
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
@@ -89,6 +97,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	if execution == nil {
 		t.Fatal("soul-software-dev-execution missing")
 	}
+	assertStringSliceContains(t, execution.AllowedToolKinds, "git/read")
+	assertStringSliceContains(t, execution.AllowedToolKinds, "git/write")
+	assertSoulContains(t, execution.SoulMD, "git/write init")
 	assertSoulContains(t, execution.SoulMD, "最小代码或配置变更")
 	assertSoulContains(t, execution.SoulMD, "workspace 为空且 Goal/DoD 未要求既有源码")
 	assertSoulContains(t, execution.SoulMD, "每轮修改后先执行最小相关验证")
@@ -410,6 +421,16 @@ func assertStringListContains(t *testing.T, values []any, want string) {
 	t.Helper()
 	for _, raw := range values {
 		if value, _ := raw.(string); value == want {
+			return
+		}
+	}
+	t.Fatalf("list %+v missing %q", values, want)
+}
+
+func assertStringSliceContains(t *testing.T, values []string, want string) {
+	t.Helper()
+	for _, value := range values {
+		if value == want {
 			return
 		}
 	}

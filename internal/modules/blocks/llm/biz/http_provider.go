@@ -657,7 +657,7 @@ func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
 	if requestHasBlockKind(request, "git/read") || requestHasBlockKind(request, "git/write") {
 		lines = append(lines,
 			"- Prefer git/read for repository status, diff, log, show, and branch evidence instead of shell git commands.",
-			"- Use git/write only for the supported local operations add and commit. Use patch/apply for file content changes before staging them.",
+			"- Use git/write only for the supported local operations init, add, and commit. Use init only when the workspace deliverable directory is not yet a Git repository. Use patch/apply for file content changes before staging them.",
 			"- git/write commit does not accept pathspecs; stage files first with git/write add using explicit relative pathspecs, then commit the staged index with a non-empty message.",
 		)
 	}

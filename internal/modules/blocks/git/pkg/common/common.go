@@ -11,6 +11,7 @@ const (
 	OperationLog    = "log"
 	OperationShow   = "show"
 	OperationBranch = "branch"
+	OperationInit   = "init"
 	OperationAdd    = "add"
 	OperationCommit = "commit"
 )
