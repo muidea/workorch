@@ -119,7 +119,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                     column={1}
                     size="small"
                     items={[
-                      { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
+                      { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
                       { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
                       { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
                       { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) }

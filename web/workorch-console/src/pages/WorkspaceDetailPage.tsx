@@ -758,7 +758,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       }
       return;
     }
-    if ('title' in changedValues || 'description' in changedValues || 'workingDirectory' in changedValues) {
+    if ('title' in changedValues || 'description' in changedValues || 'deliverableDirectory' in changedValues) {
       setWorkspaceSetupDraftSession(undefined);
       setWorkspaceSetupDraftApplied(false);
     }
@@ -771,7 +771,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       workspaceSetupDraftSession.templateId === values.templateId &&
       workspaceSetupDraftSession.workspace?.title === values.title &&
       (workspaceSetupDraftSession.workspace?.description || '') === (values.description || '') &&
-      (workspaceSetupDraftSession.workspace?.workingDirectory || '') === (values.workingDirectory || '')
+      (workspaceSetupDraftSession.workspace?.deliverableDirectory || '') === (values.deliverableDirectory || '')
     ) {
       return workspaceSetupDraftSession;
     }
@@ -782,7 +782,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       templateId: values.templateId,
       title: values.title,
       description: values.description,
-      workingDirectory: values.workingDirectory,
+      deliverableDirectory: values.deliverableDirectory,
       dialogLanguage: typeof navigator !== 'undefined' ? navigator.language : undefined
     });
     setWorkspaceSetupDraftSession(created);
@@ -807,7 +807,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         templateId: values.templateId,
         title: values.title,
         description: values.description,
-        workingDirectory: values.workingDirectory,
+        deliverableDirectory: values.deliverableDirectory,
         draft: currentSetupDraftForGeneration(session),
         dialogLanguage: typeof navigator !== 'undefined' ? navigator.language : undefined
       };
@@ -957,7 +957,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       const goalValues = setupGoalForm.getFieldsValue();
       const dodValues = setupDoDForm.getFieldsValue();
       const soulBindingValues = setupSoulBindingsForm.getFieldsValue();
-      const workspace = await workorchApi.createWorkspace(workspaceValues.title, workspaceValues.description, workspaceValues.workingDirectory, workspaceValues.templateId);
+      const workspace = await workorchApi.createWorkspace(workspaceValues.title, workspaceValues.description, workspaceValues.deliverableDirectory, workspaceValues.templateId);
       await workorchApi.defineGoal(workspace.id, goalValues.text);
       await workorchApi.defineDoD(workspace.id, setupDoDItems(dodValues.items));
       await workorchApi.updateWorkspaceSoulBindings(workspace.id, normalizeSoulBindingFormValues(soulBindingValues));
@@ -1217,7 +1217,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
-                { key: 'workingDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.workingDirectory, { rows: 1, copyText: snapshot.workspace.workingDirectory }) },
+                { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
                 { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },
                 { key: 'stageSouls', label: '阶段执行人格', children: compactTags(stageBindingTags, 4) }
               ]}
@@ -2185,8 +2185,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" />
           </Form.Item>
-          <Form.Item name="workingDirectory" label="工作目录">
-            <Input placeholder="留空时自动使用 repository.dataDir/workspaces/工作空间 ID/working" />
+          <Form.Item name="deliverableDirectory" label="工作目录">
+            <Input placeholder="留空时自动使用 .workorch-workspaces/工作空间 ID" />
           </Form.Item>
         </Form>
         <div style={{ display: setupStep === workspaceSetupSmartDraftStep ? 'block' : 'none' }}>
@@ -2371,7 +2371,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               items={[
                 { key: 'title', label: '工作空间', children: workspaceForm.getFieldValue('title') || '-' },
                 { key: 'description', label: '描述', children: boundedParagraph(workspaceForm.getFieldValue('description'), { rows: 2 }) },
-                { key: 'workingDirectory', label: '工作目录', children: workspaceForm.getFieldValue('workingDirectory') || '自动生成' },
+                { key: 'deliverableDirectory', label: '工作目录', children: workspaceForm.getFieldValue('deliverableDirectory') || '自动生成' },
                 { key: 'goal', label: '目标', children: boundedParagraph(setupGoalForm.getFieldValue('text'), { rows: 3 }) },
                 { key: 'dod', label: '验收标准', children: compactTags(setupDoDItems(setupDoDForm.getFieldValue('items')), 6) },
                 {
@@ -2636,5 +2636,4 @@ export function displayMCPEndpoint(endpoint?: string) {
   const index = value.indexOf(marker);
   return index >= 0 ? value.slice(index) : value;
 }
-
 

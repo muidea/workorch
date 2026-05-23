@@ -47,6 +47,15 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if !ok || gitConfig["initializeOnCreate"] != true {
 		t.Fatalf("software-dev git context hint = %+v, want initializeOnCreate=true", versionControl["git"])
 	}
+	semanticNavigation, ok := item.ContextHints["semanticCodeNavigation"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev semanticCodeNavigation hint = %+v, want map", item.ContextHints["semanticCodeNavigation"])
+	}
+	if semanticNavigation["evidenceStrength"] != "auxiliary" {
+		t.Fatalf("software-dev semanticCodeNavigation = %+v, want auxiliary evidence", semanticNavigation)
+	}
+	assertStringListContains(t, semanticNavigation["defaultMCPServerIds"].([]any), "mcp-lsp-bridge")
+	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_diagnostics")
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
@@ -213,6 +222,8 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	ctx := context.Background()
 	soulRepo := memory.NewSoulRepository()
 	templateRepo := memory.NewWorkspaceTemplateRepository()
+	mcpServerRepo := memory.NewMCPServerRepository()
+	mcpCapabilityRepo := memory.NewMCPCapabilityRepository()
 
 	if err := soulRepo.Create(ctx, &soulmodel.Soul{
 		ID:     common.SoulID("soul-software-dev-planning"),
@@ -232,7 +243,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 		t.Fatalf("seed stale template: %v", err)
 	}
 
-	if err := EnsureBuiltinDefaults(ctx, soulRepo, templateRepo); err != nil {
+	if err := EnsureBuiltinDefaults(ctx, soulRepo, templateRepo, mcpServerRepo, mcpCapabilityRepo); err != nil {
 		t.Fatalf("EnsureBuiltinDefaults: %v", err)
 	}
 
@@ -259,6 +270,23 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
+	}
+	server, err := mcpServerRepo.Get(ctx, common.MCPServerID("mcp-lsp-bridge"))
+	if err != nil {
+		t.Fatalf("get mcp-lsp-bridge server: %v", err)
+	}
+	if server.Transport != "stdio" || server.Command != "lsp-bridge" || server.SessionPolicy != "long_lived" {
+		t.Fatalf("mcp-lsp-bridge server = %+v, want stdio command long_lived", server)
+	}
+	if server.Env["LSP_BRIDGE_CONFIG"] != "{workspaceInternalDirectory}/lsp-bridge/mcp-config.json" {
+		t.Fatalf("mcp-lsp-bridge env = %+v, want workspace placeholder", server.Env)
+	}
+	capability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_diagnostics"))
+	if err != nil {
+		t.Fatalf("get lsp diagnostics capability: %v", err)
+	}
+	if capability.Category != "code_semantics" || capability.RiskLevel != "read_only" {
+		t.Fatalf("lsp diagnostics capability = %+v, want code semantics read-only", capability)
 	}
 }
 

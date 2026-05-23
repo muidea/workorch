@@ -69,6 +69,9 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
+	if err := ensureWorkspaceManagedConfigs(workspace.InternalDirectory, workspace.ContextHints); err != nil {
+		return WorkspaceExecutionActivation{}, err
+	}
 	if workspace.ActiveRunID != "" {
 		run, err := exports.Repositories.Runs.Get(ctx, workspace.ActiveRunID)
 		if err != nil {
@@ -604,8 +607,10 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if dialogLanguage != "" {
 		contextData["dialogLanguage"] = dialogLanguage
 	}
-	mcpServerIDs := normalizeStringIDs(cmd.MCPServerIDs)
-	capabilityIDs := normalizeStringIDs(cmd.CapabilityIDs)
+	defaultMCPServerIDs := defaultMCPServerIDsFromContextHints(workspace.ContextHints)
+	defaultCapabilityIDs := defaultCapabilityIDsFromContextHints(workspace.ContextHints)
+	mcpServerIDs := appendDefaultIDs(normalizeStringIDs(cmd.MCPServerIDs), defaultMCPServerIDs)
+	capabilityIDs := appendDefaultIDs(normalizeStringIDs(cmd.CapabilityIDs), defaultCapabilityIDs)
 	memoryIDs := normalizeStringIDs(cmd.MemoryIDs)
 
 	var defaultSoul *soulmodel.Soul
@@ -665,12 +670,14 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		}
 	}
 	contextData["mcpSelection"] = map[string]any{
-		"policy":                 "skill_required_mcp_auto_bind",
+		"policy":                 "template_default_and_skill_required_mcp_auto_bind",
 		"requestedMCPServerIds":  normalizeStringIDs(cmd.MCPServerIDs),
+		"defaultMCPServerIds":    defaultMCPServerIDs,
 		"requiredMCPServerIds":   requiredMCPServerIDs,
 		"autoBoundMCPServerIds":  autoBoundMCPServerIDs,
 		"selectedMCPServerIds":   mcpServerIDs,
 		"requestedCapabilityIds": normalizeStringIDs(cmd.CapabilityIDs),
+		"defaultCapabilityIds":   defaultCapabilityIDs,
 		"requiredCapabilityIds":  requiredCapabilityIDs,
 		"autoBoundCapabilityIds": autoBoundCapabilityIDs,
 		"selectedCapabilityIds":  capabilityIDs,
@@ -680,7 +687,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	err = activationContextReadTasks(
 		func() error {
 			var err error
-			mcpServers, err = selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs)
+			mcpServers, err = selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs, workspace)
 			return err
 		},
 		func() error {
@@ -1085,7 +1092,7 @@ func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, 
 
 func selectedMCPServers(ctx context.Context, service interface {
 	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
-}, ids []string) ([]*mcpmodel.Server, error) {
+}, ids []string, workspace *workspacemodel.Workspace) ([]*mcpmodel.Server, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -1114,9 +1121,48 @@ func selectedMCPServers(ctx context.Context, service interface {
 		if !r.item.Enabled {
 			return nil, common.ErrConflict
 		}
-		ret = append(ret, r.item)
+		ret = append(ret, mcpServerForWorkspace(r.item, workspace))
 	}
 	return ret, nil
+}
+
+func mcpServerForWorkspace(item *mcpmodel.Server, workspace *workspacemodel.Workspace) *mcpmodel.Server {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Args = cloneStrings(item.Args)
+	cloned.AllowedTools = cloneStrings(item.AllowedTools)
+	cloned.AllowedResources = cloneStrings(item.AllowedResources)
+	cloned.AllowedPrompts = cloneStrings(item.AllowedPrompts)
+	cloned.Env = cloneMCPEnvForWorkspace(item.Env, workspace)
+	return &cloned
+}
+
+func cloneMCPEnvForWorkspace(env map[string]string, workspace *workspacemodel.Workspace) map[string]string {
+	if env == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(env))
+	for key, value := range env {
+		ret[key] = expandWorkspaceContextPlaceholders(value, workspace)
+	}
+	return ret
+}
+
+func expandWorkspaceContextPlaceholders(value string, workspace *workspacemodel.Workspace) string {
+	if workspace == nil {
+		return value
+	}
+	replacements := map[string]string{
+		"{workspaceId}":                   string(workspace.ID),
+		"{workspaceDeliverableDirectory}": workspace.DeliverableDirectory,
+		"{workspaceInternalDirectory}":    workspace.InternalDirectory,
+	}
+	for old, replacement := range replacements {
+		value = strings.ReplaceAll(value, old, replacement)
+	}
+	return value
 }
 
 func selectedMCPCapabilities(ctx context.Context, service interface {
@@ -1153,6 +1199,41 @@ func selectedMCPCapabilities(ctx context.Context, service interface {
 		ret = append(ret, r.item)
 	}
 	return ret, nil
+}
+
+func defaultMCPServerIDsFromContextHints(contextHints map[string]any) []string {
+	return defaultIDsFromContextHints(contextHints, "defaultMCPServerIds")
+}
+
+func defaultCapabilityIDsFromContextHints(contextHints map[string]any) []string {
+	return defaultIDsFromContextHints(contextHints, "defaultCapabilityIds")
+}
+
+func defaultIDsFromContextHints(contextHints map[string]any, key string) []string {
+	if len(contextHints) == 0 {
+		return nil
+	}
+	ret := make([]string, 0)
+	for _, value := range contextHints {
+		config, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		ret = appendDefaultIDs(ret, normalizeStringIDs(stringSliceFromAny(config[key])))
+	}
+	return ret
+}
+
+func appendDefaultIDs(base []string, defaults []string) []string {
+	ret := cloneStrings(base)
+	for _, id := range defaults {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(ret, id) {
+			continue
+		}
+		ret = append(ret, id)
+	}
+	return ret
 }
 
 func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
@@ -1599,11 +1680,28 @@ func mcpServerContexts(items []*mcpmodel.Server) []map[string]any {
 			"name":                  item.Name,
 			"transport":             item.Transport,
 			"enabled":               item.Enabled,
+			"command":               item.Command,
+			"args":                  cloneStrings(item.Args),
+			"env":                   redactedMCPEnvContext(item.Env),
 			"allowedTools":          cloneStrings(item.AllowedTools),
 			"allowedResources":      cloneStrings(item.AllowedResources),
 			"defaultApprovalPolicy": item.DefaultApprovalPolicy,
 			"timeoutMillis":         item.TimeoutMillis,
 		})
+	}
+	return ret
+}
+
+func redactedMCPEnvContext(env map[string]string) map[string]any {
+	if len(env) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, len(env))
+	for key, value := range env {
+		ret[key] = map[string]any{
+			"present":  value != "",
+			"redacted": value != "",
+		}
 	}
 	return ret
 }

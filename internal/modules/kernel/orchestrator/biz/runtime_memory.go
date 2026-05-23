@@ -248,7 +248,7 @@ func runtimeMemoryWriteHasReferenceBoundary(request runtimeMemoryWriteRequest) b
 
 func appendNecessaryOutputMemoryWriteRequests(requests []runtimeMemoryWriteRequest, run *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
 	requests = appendRepairLessonMemoryWrite(requests, run, step, output)
-	requests = appendProviderRetryToolMemoryWrite(requests, run, step, output)
+	requests = appendMCPFailureToolMemoryWrite(requests, run, step, output)
 	return requests
 }
 
@@ -351,8 +351,61 @@ func repairLessonContentHint(step *runModel.Step, output map[string]any) string 
 	return ""
 }
 
-func appendProviderRetryToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
-	return requests
+func appendMCPFailureToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
+	if step == nil || strings.TrimSpace(step.Kind) != "mcp/tool_call" || output == nil || hasMemoryWriteType(requests, memorycommon.MemoryTypeToolFeedback) {
+		return requests
+	}
+	class := strings.TrimSpace(stringFromMap(output, failureOutputKeyClass))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	status := strings.TrimSpace(stringFromMap(output, "status"))
+	if class != failureClassMCPRuntime && class != failureClassMCPCapabilityDenied && status != "failed" {
+		return requests
+	}
+	serverID := strings.TrimSpace(stringFromMap(output, "serverId"))
+	toolName := strings.TrimSpace(stringFromMap(output, "tool"))
+	if serverID == "" && toolName == "" {
+		return requests
+	}
+	summaryParts := []string{"MCP tool failure captured"}
+	if serverID != "" {
+		summaryParts = append(summaryParts, "server="+serverID)
+	}
+	if toolName != "" {
+		summaryParts = append(summaryParts, "tool="+toolName)
+	}
+	lines := []string{
+		"scope: runtime MCP tool availability or execution feedback",
+		"appliesTo: same MCP server/tool binding when selected as accepted input",
+		"evidenceRef: " + string(step.ID),
+	}
+	for _, item := range []struct {
+		key   string
+		value string
+	}{
+		{"serverId", serverID},
+		{"tool", toolName},
+		{"stage", stage},
+		{"failureClass", class},
+		{"failureSignature", stringFromMap(output, failureOutputKeySignature)},
+		{"error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(output, "reason"))},
+	} {
+		if value := strings.TrimSpace(item.value); value != "" {
+			lines = append(lines, item.key+": "+truncateLLMContextString(value))
+		}
+	}
+	if stderr := strings.TrimSpace(stringFromMap(output, "stderr")); stderr != "" {
+		lines = append(lines, "stderrPreview: "+truncateLLMContextString(stderr))
+	}
+	request := runtimeMemoryWriteRequest{
+		MemoryType: memorycommon.MemoryTypeToolFeedback,
+		Summary:    strings.Join(summaryParts, " "),
+		Content:    strings.Join(lines, "\n"),
+		Tags:       []string{"accepted_input", "tool_context", "mcp_context"},
+	}
+	if !shouldPersistRuntimeMemoryWrite(request) {
+		return requests
+	}
+	return append(requests, request)
 }
 
 func acceptedInputMemoryWriteRequests(run *runModel.Run, step *runModel.Step) []runtimeMemoryWriteRequest {

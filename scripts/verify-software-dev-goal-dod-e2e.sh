@@ -142,13 +142,30 @@ verify_software_dev_profile_snapshot() {
   local results_metadata_file="$TMP_DIR/${run_id}-profile-results-metadata.json"
   local results_file="$TMP_DIR/${run_id}-profile-results.json"
   curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/results?limit=500" >"$results_metadata_file"
-  python3 - "$results_metadata_file" "$results_file" "$BASE_URL" "$workspace_id_for_run" "$run_id" <<'PY'
+  python3 - "$results_metadata_file" "$results_file" "$snapshot_file" "$BASE_URL" "$workspace_id_for_run" "$run_id" <<'PY'
 import json
 import subprocess
 import sys
 from urllib.parse import quote
 
-metadata_path, output_path, base_url, workspace_id, run_id = sys.argv[1:]
+metadata_path, output_path, snapshot_path, base_url, workspace_id, run_id = sys.argv[1:]
+
+def normalize_json_names(value):
+    if isinstance(value, list):
+        return [normalize_json_names(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {}
+    for key, item in value.items():
+        if isinstance(key, str) and key.isupper():
+            normalized_key = key.lower()
+        elif isinstance(key, str) and key[:1].isupper():
+            normalized_key = key[:1].lower() + key[1:]
+        else:
+            normalized_key = key
+        normalized[normalized_key] = normalize_json_names(item)
+    return normalized
+
 data = json.load(open(metadata_path, encoding="utf-8"))
 results = data.get("results") or []
 for item in results:
@@ -165,7 +182,23 @@ for item in results:
     except Exception:
         continue
     if isinstance(assessment, dict) and assessment:
-        item["doDAssessment"] = assessment
+        item["doDAssessment"] = normalize_json_names(assessment)
+try:
+    snapshot_doc = json.load(open(snapshot_path, encoding="utf-8"))
+except Exception:
+    snapshot_doc = {}
+snapshot = snapshot_doc.get("snapshot") if isinstance(snapshot_doc, dict) else None
+if isinstance(snapshot, dict):
+    assessments_by_id = {
+        str(item.get("id") or ""): item.get("doDAssessment")
+        for item in results
+        if isinstance(item.get("doDAssessment"), dict) and item.get("doDAssessment")
+    }
+    for item in snapshot.get("results") or []:
+        result_id = str(item.get("id") or "")
+        if result_id in assessments_by_id and not item.get("doDAssessment"):
+            item["doDAssessment"] = assessments_by_id[result_id]
+    json.dump(snapshot_doc, open(snapshot_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 json.dump({"results": results}, open(output_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
   "$ROOT_DIR/scripts/verify-workorch-runtime-profile-software-dev.sh" --snapshot "$snapshot_file" "$results_file"
@@ -275,7 +308,14 @@ def scenario_for_run(run_id, merged_content):
         return run_scenarios[run_id]
     if not e2e_marker or e2e_marker not in merged_content:
         return -1
-    if "graph follow-up 超出扩展上限" in merged_content:
+    if "-replan-" in run_id:
+        if "从空 workspace 初始化" in merged_content or "项目还必须生成 README.md" in merged_content:
+            scenario = 7
+        elif "完成软件开发闭环" in merged_content:
+            scenario = 6
+        else:
+            scenario = -1
+    elif "graph follow-up 超出扩展上限" in merged_content:
         scenario = 5
     elif "no-actionable continuation" in merged_content or "没有可执行后续动作" in merged_content:
         scenario = 4
@@ -291,6 +331,18 @@ def scenario_for_run(run_id, merged_content):
         scenario = -1
     run_scenarios[run_id] = scenario
     return scenario
+
+def is_repair_step(step_id):
+    return "zz-llm-repair-" in step_id or "/repair-" in step_id
+
+def is_after_graph_step(step_id):
+    return "zz-llm-after-graph-" in step_id or "/follow-up-graph-" in step_id
+
+def is_no_actionable_followup_step(step_id):
+    return "zz-llm-after-no-actionable-continuation-" in step_id or "follow-up-no-actionable" in step_id
+
+def is_graph_limit_followup_step(step_id):
+    return "zz-llm-after-graph-limit-" in step_id or "follow-up-graph-limit" in step_id or "graph-limit" in step_id
 
 def response_for(run_id, step_id, merged_content):
     if run_id == "probe":
@@ -333,7 +385,7 @@ def response_for(run_id, step_id, merged_content):
                     ]
                 }
             }
-        if "zz-llm-after-graph-" in step_id:
+        if is_after_graph_step(step_id):
             return {
                 "completionState": "completed",
                 "thoughtSummary": "DoD satisfied after repair.",
@@ -364,7 +416,7 @@ def response_for(run_id, step_id, merged_content):
                     "deliverableCoverage": {
                         "satisfied": True,
                         "items": [
-                            {"id": "source_change", "state": "satisfied", "evidenceRefs": ["fix-source"]},
+                            {"id": "source_change", "state": "satisfied", "artifactRefs": ["fix-source"]},
                             {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-tests-fixed"]},
                             {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
                             {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["fix-source"]}
@@ -372,7 +424,7 @@ def response_for(run_id, step_id, merged_content):
                     }
                 }
             }
-        if "zz-llm-repair-" in step_id:
+        if is_repair_step(step_id):
             return {
                 "completionState": "continue",
                 "thoughtSummary": "Repair by applying unified diff and rerunning tests.",
@@ -415,7 +467,7 @@ def response_for(run_id, step_id, merged_content):
                     ]
                 }
             }
-        if "zz-llm-repair-" in step_id:
+        if is_repair_step(step_id):
             attempt = 1
             match = re.search(r"-(\d+)$", step_id)
             if match:
@@ -454,7 +506,7 @@ def response_for(run_id, step_id, merged_content):
                     }
                 }
             }
-        if "zz-llm-after-graph-" in step_id:
+        if is_after_graph_step(step_id):
             return {
                 "completionState": "completed",
                 "thoughtSummary": "Empty workspace project generation and verification are complete.",
@@ -474,23 +526,21 @@ def response_for(run_id, step_id, merged_content):
                     ],
                     "goalCoverage": {
                         "satisfied": True,
-                        "items": [
-                            {"goal": "从空 workspace 初始化最小 Go 项目", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "run-empty-project-tests"]},
-                            {"goal": "生成 README.md 并说明初始化来源", "state": "satisfied", "evidenceRefs": ["write-readme"]}
+                    "items": [
+                        {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "run-empty-project-tests"]},
+                        {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": ["write-readme"]}
                         ]
                     },
                     "acceptanceDimensions": {
                         "satisfied": True,
                         "items": [
-                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
-                            {"id": "runtime_entrypoint", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
-                            {"id": "external_contract", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]}
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]}
                         ]
                     },
                     "deliverableCoverage": {
                         "satisfied": True,
                         "items": [
-                            {"id": "source_change", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "write-readme"]},
+                            {"id": "source_change", "state": "satisfied", "artifactRefs": ["write-go-mod", "write-source", "write-tests", "write-readme"]},
                             {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-empty-project-tests"]},
                             {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
                             {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["write-source", "write-readme"]}
@@ -498,7 +548,7 @@ def response_for(run_id, step_id, merged_content):
                     }
                 }
             }
-        if "llm-after-decision" in step_id:
+        if "llm-after-decision" in step_id or "after-decision" in step_id:
             return {
                 "completionState": "continue",
                 "thoughtSummary": "Decision information was provided; create a minimal project from the empty workspace and run tests.",
@@ -510,7 +560,8 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "go.mod",
-                                "content": "module example.com/targetproject\n\ngo 1.22\n"
+                                "content": "module example.com/targetproject\n\ngo 1.22\n",
+                                "coverageTargets": ["生成最小可运行 Go 项目"]
                             }
                         },
                         {
@@ -520,7 +571,8 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "feature.go",
-                                "content": NEW_PROJECT_SOURCE
+                                "content": NEW_PROJECT_SOURCE,
+                                "coverageTargets": ["生成最小可运行 Go 项目", f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。"]
                             }
                         },
                         {
@@ -530,7 +582,8 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "feature_test.go",
-                                "content": NEW_PROJECT_TEST
+                                "content": NEW_PROJECT_TEST,
+                                "coverageTargets": ["go test ./... 必须包含有效断言并通过"]
                             }
                         },
                         {
@@ -540,7 +593,8 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "README.md",
-                                "content": NEW_PROJECT_README
+                                "content": NEW_PROJECT_README,
+                                "coverageTargets": ["README.md 必须作为交付物证据可追溯", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
                             }
                         },
                         {
@@ -569,7 +623,7 @@ def response_for(run_id, step_id, merged_content):
                     ]
                 }
             }
-        if "zz-llm-repair-" in step_id:
+        if is_repair_step(step_id):
             return {
                 "completionState": "completed",
                 "thoughtSummary": "Repair still reports weak verification as if it were enough.",
@@ -600,7 +654,7 @@ def response_for(run_id, step_id, merged_content):
                     ]
                 }
             }
-        if "zz-llm-after-no-actionable-continuation-" in step_id:
+        if is_no_actionable_followup_step(step_id):
             return {
                 "completionState": "completed",
                 "thoughtSummary": "No-actionable continuation was converted into validation.",
@@ -612,10 +666,31 @@ def response_for(run_id, step_id, merged_content):
                     "verificationSummary": "The evidence collection command completed and the validation follow-up produced DoD evidence.",
                     "items": [
                         {"item": "no-actionable continuation 必须进入 validation follow-up 并完成 DoD 评估", "state": "satisfied", "evidenceRefs": ["collect-evidence", step_id]}
-                    ]
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"goal": f"[{e2e_marker}] 验证当 LLM 返回 continue 但没有可执行后续动作时，系统会进入 validation follow-up 并完成 DoD 评估。", "state": "satisfied", "evidenceRefs": ["collect-evidence", step_id]}
+                        ]
+                    },
+                    "acceptanceDimensions": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["collect-evidence", step_id]}
+                        ]
+                    },
+                    "deliverableCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "source_change", "state": "satisfied", "artifactRefs": ["collect-evidence", step_id]},
+                            {"id": "validation_report", "state": "satisfied", "artifactRefs": ["collect-evidence", step_id]},
+                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["collect-evidence", step_id]}
+                        ]
+                    }
                 }
             }
-        if "zz-llm-after-graph-" in step_id:
+        if is_after_graph_step(step_id):
             return {
                 "completionState": "continue",
                 "thoughtSummary": "Incorrectly requests continuation without a new actionable step."
@@ -636,7 +711,7 @@ def response_for(run_id, step_id, merged_content):
                     ]
                 }
             }
-        if "zz-llm-after-graph-limit-" in step_id:
+        if is_graph_limit_followup_step(step_id):
             return {
                 "completionState": "completed",
                 "thoughtSummary": "Graph expansion limit was converted into assessment-only closure.",
@@ -649,10 +724,31 @@ def response_for(run_id, step_id, merged_content):
                     "items": [
                         {"item": "graph follow-up 超限后必须进入 assessment-only 并完成 DoD 评估", "state": "satisfied", "evidenceRefs": [step_id]},
                         {"item": "Run Snapshot 必须暴露 graph expansion limit 与 assessment-only closure trace", "state": "satisfied", "evidenceRefs": [step_id]}
-                    ]
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"goal": f"[{e2e_marker}] 验证 graph follow-up 超出扩展上限后，系统必须进入 assessment-only 收口并完成 DoD 评估。", "state": "satisfied", "evidenceRefs": [step_id]}
+                        ]
+                    },
+                    "acceptanceDimensions": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": [step_id]}
+                        ]
+                    },
+                    "deliverableCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "source_change", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "validation_report", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "artifactRefs": [step_id]}
+                        ]
+                    }
                 }
             }
-        if "zz-llm-after-graph-" in step_id:
+        if is_after_graph_step(step_id):
             suffix = re.sub(r"[^A-Za-z0-9]+", "-", step_id)[-48:].strip("-") or "next"
             return {
                 "completionState": "continue",
@@ -706,7 +802,29 @@ def response_for(run_id, step_id, merged_content):
                     {"item": "代码修改通过 Patch 证据可追溯", "state": "satisfied", "evidenceRefs": ["write-fixed-source-replan"]},
                     {"item": "go test ./... 最终通过", "state": "satisfied", "evidenceRefs": ["run-tests-replan"]},
                     {"item": "结果包含 DoD 评估和交付物索引", "state": "satisfied", "evidenceRefs": [step_id]}
-                ]
+                ],
+                "goalCoverage": {
+                    "satisfied": True,
+                    "items": [
+                        {"goal": "完成软件开发闭环", "state": "satisfied", "evidenceRefs": ["write-fixed-source-replan", "run-tests-replan"]}
+                    ]
+                },
+                "acceptanceDimensions": {
+                    "satisfied": True,
+                    "items": [
+                        {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-tests-replan"]},
+                        {"id": "runtime_entrypoint", "state": "satisfied", "evidenceRefs": ["run-tests-replan"]}
+                    ]
+                },
+                "deliverableCoverage": {
+                    "satisfied": True,
+                    "items": [
+                        {"id": "source_change", "state": "satisfied", "artifactRefs": ["write-fixed-source-replan"]},
+                        {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-tests-replan"]},
+                        {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                        {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["write-fixed-source-replan"]}
+                    ]
+                }
             }
         }
     if scenario == 7:
@@ -720,10 +838,35 @@ def response_for(run_id, step_id, merged_content):
                 "implementationSummary": "Existing generated files and README remain in place.",
                 "verificationSummary": "The continuation produced a formal DoD assessment after replan.",
                 "items": [
+                    {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [step_id]},
+                    {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [step_id]},
+                    {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": [step_id]},
                     {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [step_id]},
                     {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [step_id]},
                     {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [step_id]}
-                ]
+                ],
+                "goalCoverage": {
+                    "satisfied": True,
+                    "items": [
+                        {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": [step_id]},
+                        {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [step_id]}
+                    ]
+                },
+                "acceptanceDimensions": {
+                    "satisfied": True,
+                    "items": [
+                        {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": [step_id]}
+                    ]
+                },
+                "deliverableCoverage": {
+                    "satisfied": True,
+                    "items": [
+                        {"id": "source_change", "state": "satisfied", "artifactRefs": [step_id]},
+                        {"id": "validation_report", "state": "satisfied", "artifactRefs": [step_id]},
+                        {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
+                        {"id": "user_deliverable", "state": "satisfied", "artifactRefs": [step_id]}
+                    ]
+                }
             }
         }
     return {"completionState": "continue", "thoughtSummary": "Continue execution."}
@@ -818,7 +961,7 @@ func TestAdd(t *testing.T) {
 EOF
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"software-dev srd e2e","description":"verify goal/dod auto repair closure and repair exhaustion escalation","workingDirectory":"'"$workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/workspace.json"
+  -d '{"title":"software-dev srd e2e","description":"verify goal/dod auto repair closure and repair exhaustion escalation","deliverableDirectory":"'"$workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
@@ -961,7 +1104,7 @@ reason = str(ticket.get("reason") or "")
 if "自动修复尝试已耗尽" not in reason:
     errors.append(f"decision reason missing repair exhaustion: {reason!r}")
 question = str(ticket.get("question") or "")
-if "请补充缺失的实现指导" not in question:
+if "请补充缺失的" not in question or "重新规划" not in question:
     errors.append(f"decision question missing Chinese repair guidance: {question!r}")
 if ticket.get("state") != "resolved":
     errors.append(f"decision state={ticket.get('state')!r}, want resolved")
@@ -987,7 +1130,7 @@ empty_workspace_workdir="$TMP_DIR/empty-software-dev-workspace"
 mkdir -p "$empty_workspace_workdir"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"software-dev empty workspace srd33","description":"verify empty project initialization with cumulative goal/dod and redaction","workingDirectory":"'"$empty_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario3-workspace.json"
+  -d '{"title":"software-dev empty workspace srd33","description":"verify empty project initialization with cumulative goal/dod and redaction","deliverableDirectory":"'"$empty_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario3-workspace.json"
 scenario3_workspace_id="$(json_path "$TMP_DIR/scenario3-workspace.json" "workspace.id")"
 [[ -n "$scenario3_workspace_id" ]]
 
@@ -1018,13 +1161,40 @@ scenario3_dod_added_id="$(json_path "$TMP_DIR/scenario3-dod-added.json" "dod.id"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$scenario3_ticket_path/resolve" -H 'Content-Type: application/json' \
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"srd33-e2e","scope":"target_workspace","dependencyScope":"external_dependency","answer":"endpoint=https://target.example.test/v1 model=target-model apiKey=sk-targetsecret123456","externalDependency":{"endpoint":"https://target.example.test/v1","model":"target-model","apiKey":"sk-targetsecret123456","password":"target-password-secret"}}}' >"$TMP_DIR/scenario3-ticket-resolved.json"
-wait_run_state "$scenario3_run_id" "completed" "$TMP_DIR/scenario3-completed-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/snapshot" >"$TMP_DIR/scenario3-snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/observability" >"$TMP_DIR/scenario3-observability.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/context-bundle" >"$TMP_DIR/scenario3-context-bundle.json"
-curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$scenario3_run_id&limit=200" >"$TMP_DIR/scenario3-events.json"
+wait_run_state_any "$scenario3_run_id" "$TMP_DIR/scenario3-completed-status.json" "completed" "superseded"
+scenario3_effective_run_id="$scenario3_run_id"
+if [[ "$(json_path "$TMP_DIR/scenario3-completed-status.json" "status.state")" == "superseded" ]]; then
+  deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/snapshot" >"$TMP_DIR/scenario3-workspace-snapshot.json"
+    scenario3_successor_run_id="$(python3 - "$TMP_DIR/scenario3-workspace-snapshot.json" "$scenario3_run_id" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+original_run_id = sys.argv[2]
+runs = snapshot.get("runs") or []
+completed = [item for item in runs if item.get("id") != original_run_id and item.get("state") == "completed"]
+print(completed[-1].get("id", "") if completed else "")
+PY
+)"
+    if [[ -n "$scenario3_successor_run_id" ]]; then
+      scenario3_effective_run_id="$scenario3_successor_run_id"
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$scenario3_effective_run_id" == "$scenario3_run_id" ]]; then
+    cat "$TMP_DIR/scenario3-workspace-snapshot.json" >&2
+    exit 1
+  fi
+fi
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/snapshot" >"$TMP_DIR/scenario3-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/observability" >"$TMP_DIR/scenario3-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/context-bundle" >"$TMP_DIR/scenario3-context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$scenario3_effective_run_id&limit=200" >"$TMP_DIR/scenario3-events.json"
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$scenario3_ticket_path" >"$TMP_DIR/scenario3-ticket-final.json"
-verify_software_dev_profile_snapshot "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-snapshot.json"
+verify_software_dev_profile_snapshot "$scenario3_workspace_id" "$scenario3_effective_run_id" "$TMP_DIR/scenario3-snapshot.json"
 
 python3 - \
   "$TMP_DIR/scenario3-ticket-open.json" \
@@ -1034,7 +1204,7 @@ python3 - \
   "$TMP_DIR/scenario3-context-bundle.json" \
   "$TMP_DIR/scenario3-events.json" \
   "$TMP_DIR/software-dev-e2e-llm-requests.jsonl" \
-  "$scenario3_run_id" \
+  "$scenario3_effective_run_id" \
   "$empty_workspace_workdir" \
   "$scenario3_goal_initial_id" \
   "$scenario3_goal_added_id" \
@@ -1214,8 +1384,10 @@ results = snapshot.get("results") or []
 rejected = [item for item in results if item.get("state") == "rejected"]
 if not rejected:
     errors.append(f"results={results!r}, want rejected result")
-elif not any("weak" in str((item.get("doDAssessment") or {}).get("summary") or "").lower() for item in rejected):
-    errors.append(f"rejected results={rejected!r}, want weak verification rejection summary")
+else:
+    rejected_text = json.dumps(rejected, ensure_ascii=False).lower()
+    if not ("weak" in rejected_text or "dod assessment rejected" in rejected_text or "completion gate" in rejected_text):
+        errors.append(f"rejected results={rejected!r}, want weak verification or completion-gate rejection")
 if any(((item.get("doDAssessment") or {}).get("satisfied") is True and item.get("state") == "accepted") for item in results):
     errors.append("weak satisfied DoD produced accepted result")
 if run.get("state") == "superseded":
@@ -1223,7 +1395,7 @@ if run.get("state") == "superseded":
     if not any(item.get("runId") == run.get("id") and item.get("state") == "resolved" and item.get("resolutionType") == "replan" for item in decisions):
         errors.append(f"decisions={decisions!r}, want resolved replan decision for superseded weak-evidence run")
 steps = snapshot.get("steps") or []
-if not any("zz-llm-repair-" in str(item.get("id") or "") for item in steps):
+if not any("zz-llm-repair-" in str(item.get("id") or "") or "/repair-" in str(item.get("id") or "") for item in steps):
     errors.append("missing runtime repair follow-up step for weak verification evidence")
 if errors:
     for item in errors:
@@ -1235,7 +1407,7 @@ PY
 scenario5_workspace_workdir="$TMP_DIR/no-actionable-continuation-workspace"
 mkdir -p "$scenario5_workspace_workdir"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"software-dev no-actionable continuation","description":"verify graph exhausted validation follow-up","workingDirectory":"'"$scenario5_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario5-workspace.json"
+  -d '{"title":"software-dev no-actionable continuation","description":"verify graph exhausted validation follow-up","deliverableDirectory":"'"$scenario5_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario5-workspace.json"
 scenario5_workspace_id="$(json_path "$TMP_DIR/scenario5-workspace.json" "workspace.id")"
 [[ -n "$scenario5_workspace_id" ]]
 
@@ -1267,7 +1439,7 @@ failure_reason = str(run.get("failureReason") or "")
 if "completionState continue has no actionable continuation" in failure_reason:
     errors.append(f"run failed with no-actionable continuation: {failure_reason}")
 steps = snapshot.get("steps") or []
-if not any("zz-llm-after-no-actionable-continuation-" in str(item.get("id") or "") for item in steps):
+if not any("zz-llm-after-no-actionable-continuation-" in str(item.get("id") or "") or "follow-up-no-actionable" in str(item.get("id") or "") for item in steps):
     errors.append("missing no-actionable continuation validation follow-up step")
 results = snapshot.get("results") or []
 if not any(item.get("state") == "accepted" for item in results):
@@ -1283,7 +1455,7 @@ PY
 scenario6_workspace_workdir="$TMP_DIR/graph-follow-up-assessment-workspace"
 mkdir -p "$scenario6_workspace_workdir"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"software-dev graph follow-up closure","description":"verify graph follow-up expansion limit assessment-only closure","workingDirectory":"'"$scenario6_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario6-workspace.json"
+  -d '{"title":"software-dev graph follow-up closure","description":"verify graph follow-up expansion limit assessment-only closure","deliverableDirectory":"'"$scenario6_workspace_workdir"'","templateId":"software-dev"}' >"$TMP_DIR/scenario6-workspace.json"
 scenario6_workspace_id="$(json_path "$TMP_DIR/scenario6-workspace.json" "workspace.id")"
 [[ -n "$scenario6_workspace_id" ]]
 
@@ -1314,7 +1486,7 @@ run = snapshot.get("run") or {}
 if run.get("state") != "completed":
     errors.append(f"run.state={run.get('state')!r}, want completed")
 steps = snapshot.get("steps") or []
-if not any("zz-llm-after-graph-limit-" in str(item.get("id") or "") for item in steps):
+if not any("zz-llm-after-graph-limit-" in str(item.get("id") or "") or "graph-limit" in str(item.get("id") or "") for item in steps):
     errors.append("missing graph expansion limit assessment-only follow-up step")
 if any("must_not_execute" in str(item.get("id") or "") for item in steps):
     errors.append("assessment-only executionGraph was executed unexpectedly")

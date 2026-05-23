@@ -8265,6 +8265,75 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureWithoutTargetSc
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsRepairWrapperRootClass(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-budget-wrapper-root-class")
+	rootStepID := common.StepID(runID + "/step-1")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
+		stepID := common.StepID(fmt.Sprintf("%s/repair-001-of-planning-001-%d", runID, attempt))
+		if attempt == 1 {
+			stepID = common.StepID(string(runID) + "/repair-001-of-planning-001")
+		}
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  1,
+				stepInputKeyRepairOfStepID:        string(rootStepID),
+				stepInputKeyRepairOfRootStepID:    string(rootStepID),
+				stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+				stepInputKeyRepairOfFailureSig:    fmt.Sprintf("class=dod_coverage_missing|stage=llm_dod_assessment|error=missing coverage attempt %d", attempt),
+			},
+			Output: map[string]any{
+				"stage":                   "llm_dod_assessment",
+				"error":                   fmt.Sprintf("dodAssessment does not cover all current DoD items attempt %d", attempt),
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: fmt.Sprintf("class=dod_coverage_missing|stage=llm_dod_assessment|error=missing coverage output %d", attempt),
+			},
+		}); err != nil {
+			t.Fatalf("seed repair wrapper %d: %v", attempt, err)
+		}
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-planning-001-91"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfStepID:        string(rootStepID),
+			stepInputKeyRepairOfRootStepID:    string(rootStepID),
+			stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+			stepInputKeyRepairOfFailureSig:    "class=dod_coverage_missing|stage=llm_dod_assessment|error=missing coverage current input",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			"error":                   "dodAssessment does not cover all current DoD items",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment|error=missing coverage current output",
+		},
+	}
+
+	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+		t.Fatalf("exact attempt count = %d, want signature-specific count to stay independent", got)
+	}
+	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+		t.Fatalf("effective attempt count = %d, want root/class wrapper attempts counted", got)
+	}
+	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-wrapper-root-class")}, failedStep) {
+		t.Fatalf("repeated repair wrapper failures should exhaust runtime repair budget")
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentRepairContractFailure(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-runtime-repair-budget-current-repair-contract")
@@ -11254,6 +11323,50 @@ func TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsTransientProviderRetry(t *
 	}
 	if len(requests) != 0 {
 		t.Fatalf("memory requests = %+v, want transient provider retry rejected", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_MCPFailureWritesBoundedToolFeedback(t *testing.T) {
+	runID := common.RunID("run-mcp-tool-feedback")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/tool-001"),
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+	}
+	output := map[string]any{
+		"status":                  "failed",
+		"stage":                   "mcp_tool_call_server_unavailable",
+		"serverId":                "mcp-code",
+		"tool":                    "semantic.lookup",
+		"error":                   "executable not found",
+		failureOutputKeyClass:     failureClassMCPRuntime,
+		failureOutputKeySignature: "class=mcp_runtime_failed|kind=mcp/tool_call|serverId=mcp-code|tool=semantic.lookup",
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-mcp-tool-feedback"}, step, output)
+	if !memoryWriteRequestContains(requests, memorycommon.MemoryTypeToolFeedback, "serverId: mcp-code") ||
+		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeToolFeedback, "tool: semantic.lookup") ||
+		!memoryWriteRequestContains(requests, memorycommon.MemoryTypeToolFeedback, "evidenceRef: "+string(step.ID)) {
+		t.Fatalf("memory requests = %+v, want bounded MCP tool feedback", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeMemoryRejectsSensitiveMCPEnvFeedback(t *testing.T) {
+	requests, err := runtimeMemoryWriteRequests(map[string]any{
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": memorycommon.MemoryTypeToolFeedback,
+				"summary":    "Accepted tool and MCP context",
+				"content":    "mcpServers: mcp-code\nenv: API_KEY=secret-value",
+				"tags":       []string{"accepted_input", "tool_context", "mcp_context"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeMemoryWriteRequests: %v", err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want sensitive env feedback rejected", requests)
 	}
 }
 
@@ -25101,6 +25214,7 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 		GoalID:           "goal-decision-replan",
 		DoDID:            "dod-decision-replan",
 		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{"compressedContext": map[string]any{"runId": string(runID)}},
 		State:            common.RunStateBlockedOnDecision,
 		BlockingTicketID: ticketID,
 	}); err != nil {
@@ -25150,8 +25264,19 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 		mapFromValue(successor.ExecutionContext["replanContinuation"])["predecessorRunId"] != string(runID) {
 		t.Fatalf("successor = %+v, want completed replan continuation with inherited definitions/context", successor)
 	}
+	if _, ok := successor.ExecutionContext["compressedContext"]; ok {
+		compressed := mapFromValue(successor.ExecutionContext["compressedContext"])
+		if compressed["runId"] != string(successor.ID) || compressed["workspaceId"] != string(workspaceID) {
+			t.Fatalf("successor compressedContext = %+v, want successor run identity", compressed)
+		}
+	} else {
+		t.Fatalf("successor missing compressedContext")
+	}
 	if len(runtime.calls) != 1 || runtime.calls[0] != "run-decision-replan-replan-001/step-1" {
 		t.Fatalf("runtime calls = %#v, want successor step dispatched", runtime.calls)
+	}
+	if !publishedRunCreatedFor(hub.Published(), "run-decision-replan-replan-001") {
+		t.Fatalf("published events = %+v, want run-created event for successor", hub.Published())
 	}
 }
 
@@ -25272,6 +25397,15 @@ func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *te
 	if len(runtime.calls) != 1 || runtime.calls[0] != "run-legacy-repair-replan-replan-001/step-1" {
 		t.Fatalf("runtime calls = %#v, want successor step dispatched", runtime.calls)
 	}
+}
+
+func publishedRunCreatedFor(items []events.Envelope, runID common.RunID) bool {
+	for _, item := range items {
+		if item.Topic == events.TopicRunCreated && item.RunID == string(runID) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeOrchestrator_ResumeRunRequiresResolvedApproval(t *testing.T) {

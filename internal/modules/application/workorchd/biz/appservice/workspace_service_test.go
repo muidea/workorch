@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -52,6 +53,55 @@ func TestCreateWorkspaceWithTemplateInitializesGitRepositoryWhenRequested(t *tes
 	out, err := exec.Command("git", "-C", item.DeliverableDirectory, "status", "--short").CombinedOutput()
 	if err != nil {
 		t.Fatalf("git status failed: %v output=%s", err, out)
+	}
+}
+
+func TestCreateWorkspaceWithTemplateEnsuresManagedWorkspaceConfig(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:       "template-managed-config",
+		Name:     "managed config template",
+		DoDItems: []string{"managed config available"},
+		ContextHints: map[string]any{
+			"managedWorkspaceConfigs": []any{
+				map[string]any{
+					"path":         "tools/config.json",
+					"format":       "json",
+					"mergeMissing": true,
+					"content": map[string]any{
+						"languages": map[string]any{
+							"go": map[string]any{
+								"command": []any{"gopls", "serve"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+
+	item, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "managed config workspace",
+		TemplateID: "template-managed-config",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	configPath := filepath.Join(item.InternalDirectory, "tools", "config.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read managed config: %v", err)
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal managed config: %v", err)
+	}
+	languages, _ := payload["languages"].(map[string]any)
+	if _, ok := languages["go"]; !ok {
+		t.Fatalf("managed config languages = %+v, want go", languages)
 	}
 }
 

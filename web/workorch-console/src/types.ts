@@ -248,7 +248,7 @@ export type Workspace = {
   id: string;
   title: string;
   description?: string;
-  workingDirectory: string;
+  deliverableDirectory: string;
   state: string;
   activeRunId?: string;
   defaultSoulId?: string;
@@ -357,7 +357,7 @@ export type WorkspaceTemplate = {
 export type WorkspaceSetupDraftWorkspace = {
   title?: string;
   description?: string;
-  workingDirectory?: string;
+  deliverableDirectory?: string;
 };
 
 export type WorkspaceSetupDraftMessage = {
@@ -424,6 +424,9 @@ export type MCPServer = {
   name: string;
   transport: string;
   endpoint?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   enabled: boolean;
   allowedTools?: string[];
   allowedResources?: string[];

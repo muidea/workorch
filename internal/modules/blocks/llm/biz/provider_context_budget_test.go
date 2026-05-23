@@ -305,6 +305,49 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForProviderRetry(t *testing.T
 	}
 }
 
+func TestEnforceProviderRequestBudgetDoesNotHalveContextRetryBudget(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-context-retry",
+		RunID:       "run-context-retry",
+		StepID:      "run-context-retry/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":      "execution",
+			"providerRetryFollowUp": true,
+			"providerRetryAttempt":  1,
+			"failureClass":          "context_too_large",
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": strings.Repeat("goal contract ", 600)},
+				"dod":  map[string]any{"items": []any{strings.Repeat("acceptance contract ", 400)}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    32768,
+				MaxInputTokens:         21504,
+				ReservedOutputTokens:   4096,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         86016,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if got.ContextBudget.StageBudgetRatio != 1 || got.ContextBudget.StageBudgetSource != "provider_retry_context_contract" {
+		t.Fatalf("contextBudget = %+v, want full budget for context retry", got.ContextBudget)
+	}
+	if got.ContextBudget.P0Overflow {
+		t.Fatalf("contextBudget = %+v, context retry must not create artificial P0 overflow", got.ContextBudget)
+	}
+}
+
 func TestEnforceProviderRequestBudgetPreservesDirectStateChangingRecoveryContract(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-direct-recovery",
@@ -772,6 +815,88 @@ func TestEnforceProviderRequestBudgetAcceptsRepairActionProgressAsProcessEvidenc
 				},
 				"requiredOutput": map[string]any{
 					"mustDeclareCoverageTargets": true,
+				},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing process evidence", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, did not expect fail_fast", got.ContextBudget.ContextGateAction)
+	}
+}
+
+func TestEnforceProviderRequestBudgetAcceptsFailedStepContextAsProcessEvidence(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-repair-failed-step-context",
+		RunID:       "run-repair-failed-step-context",
+		StepID:      "run-repair-failed-step-context/repair-002",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeStage": "repair",
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "completionState continue has no actionable continuation",
+				"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+			},
+			"failedStepInput": map[string]any{
+				"continuationFollowUp": true,
+				"previousStepId":       "run-repair-failed-step-context/repair-001",
+			},
+			"failedStepOutput": map[string]any{
+				"error":        "completionState continue has no actionable continuation",
+				"failureClass": "runtime_failed",
+				"stage":        "llm_plan",
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing process evidence", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, did not expect fail_fast", got.ContextBudget.ContextGateAction)
+	}
+}
+
+func TestEnforceProviderRequestBudgetAcceptsReplanContinuationAsProcessEvidence(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-replan-continuation",
+		RunID:       "run-replan-continuation",
+		StepID:      "run-replan-continuation/follow-up-graph-planning-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"graphFollowUp": true,
+			"executionContextPackage": map[string]any{
+				"replanContinuation": map[string]any{
+					"currentProgressDigest": map[string]any{
+						"currentGap":         "completionState continue has no actionable continuation",
+						"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+					},
+					"failureContext": map[string]any{
+						"failedStepId":     "run-replan-continuation/repair-010",
+						"failureClass":     "runtime_failed",
+						"failureSignature": "class=runtime_failed|kind=llm/workspace_execution",
+					},
+					"processEvidenceTimeline": []map[string]any{{
+						"stepId":       "run-replan-continuation/graph-001/001-run-tests",
+						"kind":         "shell/command",
+						"state":        "failed",
+						"failureClass": "shell_command_failed",
+					}},
 				},
 			},
 		},

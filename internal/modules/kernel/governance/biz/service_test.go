@@ -599,7 +599,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenManualRequired(t *testing.T)
 		},
 		state: common.DecisionTicketStateOpen,
 	})
-	handled, eval := evaluateRuntimeRepairExhaustionTicket(ticket, ticketEvaluation{
+	handled, eval := (*Service)(nil).evaluateRuntimeRepairExhaustionTicket(context.Background(), ticket, nil, ticketEvaluation{
 		evidenceRefs: []string{string(ticket.ID)},
 	})
 	if !handled {
@@ -607,6 +607,65 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenManualRequired(t *testing.T)
 	}
 	if eval.canAutoResolve || eval.policyBlocked != "manual_recovery_required" {
 		t.Fatalf("eval = %+v, want manual escalation", eval)
+	}
+}
+
+func TestServiceEscalatesRuntimeRepairExhaustionAfterAutoReplanLineage(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	workspaceID := common.WorkspaceID("ws-replan-lineage-budget")
+	predecessorID := common.RunID("run-replan-lineage-budget")
+	successorID := common.RunID("run-replan-lineage-budget-replan-001")
+	ticketID := common.TicketID("ticket-replan-lineage-budget")
+
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
+		ID:          predecessorID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateSuperseded,
+	}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{
+		ID:          successorID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateBlockedOnDecision,
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId":  string(predecessorID),
+				"resolutionType":    "replan",
+				"resolutionPayload": map[string]any{"recoveryAction": "replan"},
+			},
+		},
+	}))
+	ticket := ticket(&ticketFixture{
+		id:          ticketID,
+		workspaceID: workspaceID,
+		runID:       successorID,
+		kind:        "provide_missing_info",
+		question:    "Choose the recovery path.",
+		reason:      "runtime repair attempts exhausted after automatic replan",
+		context: map[string]any{
+			"recoveryPolicy":         recoveryPolicyRuntimeRepairExhausted,
+			"allowedRecoveryActions": []any{"retry_same_step", "replan", "provide_information", "terminate"},
+		},
+		state: common.DecisionTicketStateOpen,
+	})
+	svc := &Service{runs: runRepo}
+
+	handled, eval := svc.evaluateRuntimeRepairExhaustionTicket(ctx, ticket, &runmodel.Run{
+		ID:          successorID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId":  string(predecessorID),
+				"resolutionType":    "replan",
+				"resolutionPayload": map[string]any{"recoveryAction": "replan"},
+			},
+		},
+	}, ticketEvaluation{evidenceRefs: []string{string(ticketID)}})
+	if !handled {
+		t.Fatalf("repair exhaustion ticket was not handled")
+	}
+	if eval.canAutoResolve || eval.policyBlocked != "replan_lineage_budget_exhausted" {
+		t.Fatalf("eval = %+v, want replan lineage budget escalation", eval)
 	}
 }
 

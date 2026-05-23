@@ -59,6 +59,55 @@ func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) e
 
 var _ repository.StepRepository = (*countingStepRepository)(nil)
 
+func TestProjectStepOutputKeepsMCPStructuredEvidence(t *testing.T) {
+	output := projectStepOutput("mcp/tool_call", map[string]any{
+		"operation": "mcp/tool_call",
+		"serverId":  "mcp-stdio",
+		"tool":      "repo.summary",
+		"transport": "stdio",
+		"status":    "completed",
+		"result": map[string]any{
+			"structuredContent": map[string]any{
+				"transport": "stdio",
+				"tool":      "repo.summary",
+				"arguments": map[string]any{
+					"path": ".",
+				},
+				"ok":          true,
+				"largeNoise":  "should be removed",
+				"nestedNoise": []any{"should be removed"},
+			},
+			"isError": false,
+			"content": []any{
+				map[string]any{"type": "text", "text": strings.Repeat("x", 4096)},
+			},
+		},
+		"rawNoise": "should be removed",
+	})
+
+	expected := map[string]any{
+		"operation": "mcp/tool_call",
+		"serverId":  "mcp-stdio",
+		"tool":      "repo.summary",
+		"transport": "stdio",
+		"status":    "completed",
+		"result": map[string]any{
+			"structuredContent": map[string]any{
+				"transport": "stdio",
+				"tool":      "repo.summary",
+				"arguments": map[string]any{
+					"path": ".",
+				},
+				"ok": true,
+			},
+			"isError": false,
+		},
+	}
+	if !reflect.DeepEqual(output, expected) {
+		t.Fatalf("projected output = %#v, want %#v", output, expected)
+	}
+}
+
 type blockingWorkspaceRepository struct {
 	base    repository.WorkspaceRepository
 	started chan string

@@ -1772,7 +1772,7 @@ func compactMCPServerContexts(items []map[string]any) []map[string]any {
 	ret := make([]map[string]any, 0, min(len(items), 8))
 	for _, item := range items {
 		ret = append(ret, pickExecutionContextFields(item, []string{
-			"id", "name", "transport", "enabled", "allowedTools", "allowedResources", "defaultApprovalPolicy", "timeoutMillis",
+			"id", "name", "transport", "enabled", "command", "args", "env", "allowedTools", "allowedResources", "defaultApprovalPolicy", "timeoutMillis",
 		}))
 		if len(ret) >= 8 {
 			break

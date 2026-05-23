@@ -1887,6 +1887,8 @@ func cloneSkill(item *skillmodel.Skill) *skillmodel.Skill {
 
 func cloneMCPServer(item *mcpmodel.Server) *mcpmodel.Server {
 	cloned := *item
+	cloned.Args = cloneStringSlice(item.Args)
+	cloned.Env = cloneStringMap(item.Env)
 	cloned.AllowedTools = cloneStringSlice(item.AllowedTools)
 	cloned.AllowedResources = cloneStringSlice(item.AllowedResources)
 	cloned.AllowedPrompts = cloneStringSlice(item.AllowedPrompts)
@@ -2104,6 +2106,17 @@ func cloneStringSlice(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func clonePatch(item *run.Patch) run.Patch {

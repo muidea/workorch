@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -217,13 +219,13 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, _ runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
 	defer cancel()
 	if strings.EqualFold(strings.TrimSpace(server.SessionPolicy), sessionPolicyLongLived) {
-		return a.executeLongLivedStdioOperation(callCtx, server, spec)
+		return a.executeLongLivedStdioOperation(callCtx, request, server, spec)
 	}
-	session, err := newInitializedStdioSession(callCtx, server, spec.ServerID)
+	session, err := newInitializedStdioSession(callCtx, request, server, spec.ServerID)
 	startedAt := time.Now().UTC()
 	if err != nil {
 		return failedResult(spec, failedStage(spec), err), err
@@ -249,16 +251,17 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, _ runtimemod
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
+func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, spec operationSpec) (runtimemodel.StepExecutionResult, error) {
 	startedAt := time.Now().UTC()
-	session, err := a.getOrCreateStdioSession(ctx, server, spec.ServerID)
+	sessionKey := stdioSessionKey(request.WorkspaceID, spec.ServerID)
+	session, err := a.getOrCreateStdioSession(ctx, request, server, sessionKey)
 	if err != nil {
 		return failedResult(spec, failedStage(spec), err), err
 	}
 	response, streamEvents, execErr := session.Execute(ctx, spec, nextJSONRPCID())
 	duration := time.Since(startedAt)
 	if execErr != nil {
-		a.evictStdioSession(spec.ServerID, session)
+		a.evictStdioSession(sessionKey, session)
 		stderrText := session.Close()
 		stage := failedStage(spec)
 		if errorsIsDeadline(ctx) {
@@ -277,7 +280,7 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, ser
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
-func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
 	a.sessionMu.Lock()
 	if session := a.sessions[serverID]; session != nil {
 		a.sessionMu.Unlock()
@@ -285,7 +288,7 @@ func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, server *mc
 	}
 	a.sessionMu.Unlock()
 
-	session, err := newInitializedStdioSession(ctx, server, serverID)
+	session, err := newInitializedStdioSession(ctx, request, server, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -308,8 +311,8 @@ func (a *RuntimeAdapter) evictStdioSession(serverID string, target *stdioSession
 	a.sessionMu.Unlock()
 }
 
-func newInitializedStdioSession(ctx context.Context, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
-	command, args, err := parseStdioEndpoint(server.Endpoint)
+func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
+	command, args, env, err := stdioLaunchConfig(server, request)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +320,9 @@ func newInitializedStdioSession(ctx context.Context, server *mcpmodel.Server, se
 	defer cancel()
 
 	cmd := exec.Command(command, args...)
+	if len(env) > 0 {
+		cmd.Env = mergeEnv(os.Environ(), env)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -667,6 +673,111 @@ func parseStdioEndpoint(endpoint string) (string, []string, error) {
 		return "", nil, fmt.Errorf("%w: mcp stdio endpoint command is required", common.ErrInvalidArgument)
 	}
 	return fields[0], fields[1:], nil
+}
+
+func stdioLaunchConfig(server *mcpmodel.Server, request runtimemodel.StepExecutionRequest) (string, []string, map[string]string, error) {
+	if server == nil {
+		return "", nil, nil, common.ErrInvalidArgument
+	}
+	if strings.TrimSpace(server.Endpoint) != "" {
+		command, args, err := parseStdioEndpoint(server.Endpoint)
+		return command, args, nil, err
+	}
+	command := strings.TrimSpace(server.Command)
+	if command == "" {
+		return "", nil, nil, fmt.Errorf("%w: stdio MCP server requires endpoint or command", common.ErrInvalidArgument)
+	}
+	return command, expandWorkspaceStringSlice(server.Args, request), cloneStringEnvForWorkspace(server.Env, request), nil
+}
+
+func stdioSessionKey(workspaceID common.WorkspaceID, serverID string) string {
+	if workspaceID == "" {
+		return strings.TrimSpace(serverID)
+	}
+	return string(workspaceID) + "\x00" + strings.TrimSpace(serverID)
+}
+
+func mergeEnv(base []string, extra map[string]string) []string {
+	values := make(map[string]string, len(base)+len(extra))
+	for _, item := range base {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		values[key] = value
+	}
+	for key, value := range extra {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		values[key] = value
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ret := make([]string, 0, len(keys))
+	for _, key := range keys {
+		ret = append(ret, key+"="+values[key])
+	}
+	return ret
+}
+
+func cloneStringEnv(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneStringEnvForWorkspace(input map[string]string, request runtimemodel.StepExecutionRequest) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		ret[key] = expandWorkspaceString(value, request)
+	}
+	return ret
+}
+
+func expandWorkspaceStringSlice(input []string, request runtimemodel.StepExecutionRequest) []string {
+	if input == nil {
+		return nil
+	}
+	ret := make([]string, 0, len(input))
+	for _, value := range input {
+		ret = append(ret, expandWorkspaceString(value, request))
+	}
+	return ret
+}
+
+func expandWorkspaceString(value string, request runtimemodel.StepExecutionRequest) string {
+	replacements := map[string]string{
+		"{workspaceId}":                   string(request.WorkspaceID),
+		"{runId}":                         string(request.RunID),
+		"{stepId}":                        string(request.StepID),
+		"{workspaceDeliverableDirectory}": request.WorkspaceDeliverableDirectory,
+		"{workspaceInternalDirectory}":    request.WorkspaceInternalDirectory,
+	}
+	for old, replacement := range replacements {
+		value = strings.ReplaceAll(value, old, replacement)
+	}
+	return value
 }
 
 func writeJSONRPCLine(w io.Writer, payload any) error {

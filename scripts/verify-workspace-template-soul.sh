@@ -23,6 +23,8 @@ report_failure() {
     echo "--- $file ---" >&2
     if [[ "$file" == *.json ]]; then
       python3 -m json.tool "$file" >&2 || cat "$file" >&2
+    elif [[ "$file" == *.js ]]; then
+      wc -c "$file" >&2
     else
       cat "$file" >&2
     fi
@@ -71,6 +73,37 @@ if not eval(code, {"data": data}):
 PY
 }
 
+download_console_assets() {
+  local index_file="$TMP_DIR/workorch-console.js"
+  curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$index_file"
+  python3 - "$index_file" "$TMP_DIR/console-assets.txt" <<'PY'
+import re
+import sys
+
+bundle_path, output_path = sys.argv[1:3]
+with open(bundle_path, "r", encoding="utf-8") as fh:
+    text = fh.read()
+assets = sorted(set(re.findall(r'assets/[A-Za-z0-9._-]+\.js', text)))
+with open(output_path, "w", encoding="utf-8") as fh:
+    for asset in assets:
+        fh.write(asset + "\n")
+PY
+  local asset
+  while IFS= read -r asset; do
+    [[ -n "$asset" ]] || continue
+    curl -fsS "$BASE_URL/console/$asset" >"$TMP_DIR/$(basename "$asset")"
+  done <"$TMP_DIR/console-assets.txt"
+  cat "$TMP_DIR"/*.js >"$TMP_DIR/console-bundle-text.txt"
+}
+
+assert_console_text() {
+  local text="$1"
+  if ! grep -F "$text" "$TMP_DIR/console-bundle-text.txt" >/dev/null; then
+    echo "console bundle missing text: $text" >&2
+    exit 1
+  fi
+}
+
 trap report_failure ERR
 trap cleanup EXIT
 
@@ -81,13 +114,13 @@ assert_json "$TMP_DIR/healthz.json" "healthz status" 'data.get("status") == "ok"
 curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
 assert_json "$TMP_DIR/readyz.json" "readyz status" 'data.get("status") == "ready"'
 
-curl -fsS "$BASE_URL/console/assets/workorch-console.js" >"$TMP_DIR/workorch-console.js"
-grep '执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '工作空间模板（Workspace Template）' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '执行人格定义已删除' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '删除工作空间模板' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '调整工作空间执行人格（Soul）' "$TMP_DIR/workorch-console.js" >/dev/null
-grep '执行人格配置已保存' "$TMP_DIR/workorch-console.js" >/dev/null
+download_console_assets
+assert_console_text '执行人格（Soul）'
+assert_console_text '工作空间模板（Workspace Template）'
+assert_console_text '执行人格定义已删除'
+assert_console_text '删除工作空间模板'
+assert_console_text '调整执行人格'
+assert_console_text '执行人格配置已保存'
 
 cat >"$TMP_DIR/soul-create.json" <<JSON
 {

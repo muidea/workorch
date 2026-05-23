@@ -12,6 +12,9 @@ type CreateServerCommand struct {
 	Name                  string
 	Transport             string
 	Endpoint              string
+	Command               string
+	Args                  []string
+	Env                   map[string]string
 	Enabled               bool
 	AllowedTools          []string
 	AllowedResources      []string

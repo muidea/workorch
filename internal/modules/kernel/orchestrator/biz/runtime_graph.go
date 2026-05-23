@@ -1739,6 +1739,9 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	if output := compactStepOutputForRunEvidenceSummary(step.Output); len(output) > 0 {
 		item["output"] = output
 	}
+	if toolEvidence := compactMCPToolEvidenceSummary(step); len(toolEvidence) > 0 {
+		item["toolEvidence"] = toolEvidence
+	}
 	return item
 }
 
@@ -2137,5 +2140,167 @@ func compactStepOutputForRunEvidenceSummary(output map[string]any) map[string]an
 	}
 	delete(ret, stepOutputKeyExecutionGraph)
 	delete(ret, stepOutputKeyNextInput)
+	if strings.TrimSpace(stringFromMap(ret, "operation")) == "mcp/tool_call" {
+		delete(ret, "result")
+		delete(ret, "streamEvents")
+	}
 	return ret
+}
+
+func compactMCPToolEvidenceSummary(step *runModel.Step) map[string]any {
+	if step == nil || strings.TrimSpace(step.Kind) != "mcp/tool_call" || len(step.Output) == 0 {
+		return nil
+	}
+	output := step.Output
+	ret := map[string]any{
+		"operation": firstNonEmptyString(stringFromMap(output, "operation"), "mcp/tool_call"),
+	}
+	for _, key := range []string{
+		"serverId",
+		"tool",
+		"status",
+		"stage",
+		"durationMillis",
+		"statusCode",
+		"error",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+	} {
+		if value, ok := output[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if stderr := strings.TrimSpace(stringFromMap(output, "stderr")); stderr != "" {
+		ret["stderrPreview"] = truncateLLMContextString(stderr)
+	}
+	if result := compactMCPToolResultSummary(output["result"]); len(result) > 0 {
+		ret["resultSummary"] = result
+	}
+	if events := mapSliceFromValue(output["streamEvents"]); len(events) > 0 {
+		ret["streamEventCount"] = len(events)
+	}
+	if input := mapFromValue(output["input"]); len(input) > 0 {
+		ret["inputSummary"] = compactMCPToolInputSummary(input)
+	}
+	return ret
+}
+
+func compactMCPToolInputSummary(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"path", "uri", "root_path", "lang_id", "line", "col", "symbol", "query"} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if len(ret) == 0 {
+		ret["fieldCount"] = len(input)
+	}
+	return ret
+}
+
+func compactMCPToolResultSummary(value any) map[string]any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case map[string]any:
+		return compactMCPToolResultMapSummary(typed)
+	case []map[string]any:
+		return map[string]any{"itemCount": len(typed), "items": compactMCPToolResultItems(typed)}
+	case []any:
+		return map[string]any{"itemCount": len(typed), "items": compactMCPToolResultAnyItems(typed)}
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return nil
+		}
+		return map[string]any{"textPreview": compactLLMContextString(text)}
+	default:
+		return map[string]any{"value": compactLLMContextValue(value, 1)}
+	}
+}
+
+func compactMCPToolResultMapSummary(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"status", "summary", "message", "truncated", "total", "limit", "severity", "source"} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	for _, key := range []string{"diagnostics", "items", "references", "locations", "results"} {
+		if items := compactMCPToolResultItems(mapSliceFromValue(input[key])); len(items) > 0 {
+			ret[key] = items
+			ret[key+"Count"] = len(mapSliceFromValue(input[key]))
+		}
+	}
+	for _, key := range []string{"content", "structuredContent"} {
+		if nested := mapFromValue(input[key]); len(nested) > 0 {
+			ret[key] = compactMCPToolResultMapSummary(nested)
+		}
+	}
+	if len(ret) == 0 {
+		ret["fields"] = sortedMapKeys(input, 12)
+	}
+	return ret
+}
+
+func compactMCPToolResultItems(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := min(len(items), 8)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		item := items[idx]
+		next := map[string]any{}
+		for _, key := range []string{"path", "uri", "file", "line", "col", "range", "severity", "source", "code", "message", "name", "kind", "truncated"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(next) == 0 {
+			next["fields"] = sortedMapKeys(item, 8)
+		}
+		ret = append(ret, next)
+	}
+	return ret
+}
+
+func compactMCPToolResultAnyItems(items []any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	limit := min(len(items), 8)
+	ret := make([]map[string]any, 0, limit)
+	for idx := 0; idx < limit; idx++ {
+		if item := mapFromValue(items[idx]); len(item) > 0 {
+			ret = append(ret, compactMCPToolResultItems([]map[string]any{item})[0])
+			continue
+		}
+		ret = append(ret, map[string]any{"value": compactLLMContextValue(items[idx], 1)})
+	}
+	return ret
+}
+
+func sortedMapKeys(input map[string]any, limit int) []string {
+	if len(input) == 0 || limit <= 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) > limit {
+		keys = keys[:limit]
+	}
+	return keys
 }

@@ -867,6 +867,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successorContext == nil {
 		successorContext = map[string]any{}
 	}
+	delete(successorContext, "compressedContext")
 	if history := mapSliceFromValue(successorContext["governanceHistory"]); len(history) > 0 {
 		successorContext["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(history, 6)
 	}
@@ -913,13 +914,99 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
 	}
+	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)
 	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
 		return err
 	}
 	if err := o.runs.Create(ctx, successor); err != nil {
 		return err
 	}
+	if err := o.publishRunCreated(ctx, successor); err != nil {
+		return err
+	}
 	return o.StartRun(ctx, successor.ID)
+}
+
+func compressedContextForCreatedRuntimeRun(run *runModel.Run) map[string]any {
+	if run == nil || run.ID == "" || run.WorkspaceID == "" {
+		return nil
+	}
+	language := runDialogLanguage(run)
+	return map[string]any{
+		"version":          "workorch.compressedContext.v1",
+		"mode":             "deterministic_recovery_summary",
+		"workspaceId":      string(run.WorkspaceID),
+		"runId":            string(run.ID),
+		"summary":          localizedRuntimeCreatedRunSummary(language),
+		"currentMilestone": "execution_steps",
+		"milestones": []map[string]any{
+			{"id": "run_created", "title": localizedRuntimeMilestoneTitle(language, "run_created"), "state": "completed", "evidenceRefs": []string{string(run.ID)}},
+			{"id": "execution_steps", "title": localizedRuntimeMilestoneTitle(language, "execution_steps"), "state": "pending"},
+			{"id": "governance", "title": localizedRuntimeMilestoneTitle(language, "governance"), "state": "pending"},
+			{"id": "validation", "title": localizedRuntimeMilestoneTitle(language, "validation"), "state": "pending"},
+			{"id": "formal_result", "title": localizedRuntimeMilestoneTitle(language, "formal_result"), "state": "pending"},
+		},
+		"recovery": map[string]any{
+			"mode":       "continue",
+			"nextAction": localizedRuntimeRecoveryNextAction(language),
+			"runId":      string(run.ID),
+		},
+		"sourceSectionRefs":  []string{"workspace", "run", "task_progress", "recovery"},
+		"sourceEvidenceRefs": []string{string(run.ID)},
+		"retentionPolicy":    localizedRuntimeRetentionPolicy(language),
+	}
+}
+
+func localizedRuntimeCreatedRunSummary(language string) string {
+	if prefersChinese(language) {
+		return "运行（Run）已创建，尚无执行证据"
+	}
+	return "run created with no execution evidence yet"
+}
+
+func localizedRuntimeMilestoneTitle(language string, key string) string {
+	if prefersChinese(language) {
+		switch key {
+		case "run_created":
+			return "运行（Run）已创建"
+		case "execution_steps":
+			return "执行步骤"
+		case "governance":
+			return "决策与审批治理"
+		case "validation":
+			return "验证"
+		case "formal_result":
+			return "结果（Result）/交付物（Artifact）"
+		}
+	}
+	switch key {
+	case "run_created":
+		return "Run Created"
+	case "execution_steps":
+		return "Execution Steps"
+	case "governance":
+		return "Decision and Approval Governance"
+	case "validation":
+		return "Validation"
+	case "formal_result":
+		return "Result / Artifact"
+	default:
+		return key
+	}
+}
+
+func localizedRuntimeRecoveryNextAction(language string) string {
+	if prefersChinese(language) {
+		return "继续执行_run"
+	}
+	return "continue_run"
+}
+
+func localizedRuntimeRetentionPolicy(language string) string {
+	if prefersChinese(language) {
+		return "保留恢复点、阻塞项、里程碑、最新证据摘要及结果（Result）/交付物（Artifact）引用；需要时按源引用重新加载完整证据"
+	}
+	return "Retain recovery checkpoints, blockers, milestones, latest evidence summary, and Result/Artifact refs; reload full evidence by source refs when needed."
 }
 
 func (o *RuntimeOrchestrator) nextReplanRunID(ctx context.Context, predecessor common.RunID) (common.RunID, error) {

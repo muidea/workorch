@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -886,6 +887,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		ID:           "mcp-activation-context",
 		Name:         "Activation Context MCP",
 		Transport:    "stdio",
+		Command:      "repo-context",
+		Args:         []string{"--stdio"},
+		Env:          map[string]string{"LSP_BRIDGE_CONFIG": "/secret/workspace/mcp-config.json", "EMPTY_VALUE": ""},
 		Enabled:      true,
 		AllowedTools: []string{"repo.summary"},
 	}); err != nil {
@@ -964,6 +968,21 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 	if !contextStringSliceContains(executionContext["mcpServerIds"], "mcp-activation-context") {
 		t.Fatalf("mcpServerIds = %+v, want selected MCP server", executionContext["mcpServerIds"])
+	}
+	mcpServers := contextMapSliceFromValue(t, executionContext["mcpServers"])
+	if len(mcpServers) != 1 {
+		t.Fatalf("mcpServers = %+v, want selected MCP server context", executionContext["mcpServers"])
+	}
+	if mcpServers[0]["command"] != "repo-context" {
+		t.Fatalf("mcp server context = %+v, want command", mcpServers[0])
+	}
+	envContext, _ := mcpServers[0]["env"].(map[string]any)
+	if fmt.Sprint(envContext["LSP_BRIDGE_CONFIG"]) == "/secret/workspace/mcp-config.json" ||
+		!strings.Contains(fmt.Sprint(envContext["LSP_BRIDGE_CONFIG"]), "redacted") {
+		t.Fatalf("mcp server env context = %+v, want redacted secret value", envContext)
+	}
+	if fmt.Sprint(envContext["EMPTY_VALUE"]) == "redacted" {
+		t.Fatalf("mcp server env context = %+v, want empty value not marked redacted", envContext)
 	}
 	if !contextStringSliceContains(executionContext["capabilityIds"], "mcp-activation-context:tool:repo.summary") {
 		t.Fatalf("capabilityIds = %+v, want selected MCP capability", executionContext["capabilityIds"])
@@ -2155,6 +2174,154 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	}
 }
 
+func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	if err := exports.Services.MCPService.CreateServer(ctx, mcpmodule.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-template-default"),
+		Name:          "Template Default MCP",
+		Transport:     "stdio",
+		Command:       "template-tool",
+		Env:           map[string]string{"CONFIG_PATH": "{workspaceInternalDirectory}/tool/config.json"},
+		Enabled:       true,
+		AllowedTools:  []string{"tool.lookup"},
+		TimeoutMillis: 1000,
+	}); err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	if _, err := exports.Services.MCPService.UpdateCapability(ctx, mcpmodule.UpdateCapabilityCommand{
+		ID:        common.MCPCapabilityID("mcp-template-default:tool:tool.lookup"),
+		ServerID:  common.MCPServerID("mcp-template-default"),
+		Kind:      "tool",
+		Name:      "tool.lookup",
+		Category:  "semantic",
+		Enabled:   true,
+		RiskLevel: "read_only",
+	}); err != nil {
+		t.Fatalf("CreateCapability: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close setup session: %v", err)
+	}
+
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   "template-default-mcp",
+		Name: "Default MCP Template",
+		ContextHints: map[string]any{
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds": []any{"mcp-template-default"},
+				"defaultCapabilityIds": []any{
+					"mcp-template-default:tool:tool.lookup",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "default mcp workspace",
+		TemplateID: "template-default-mcp",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use default mcp context")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"default mcp is visible"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
+	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-template-default")
+	assertAnyStringListContains(t, selection["selectedMCPServerIds"], "mcp-template-default")
+	servers := contextMapSliceFromValue(t, item.Run.ExecutionContext["mcpServers"])
+	if len(servers) != 1 || servers[0]["id"] != "mcp-template-default" {
+		t.Fatalf("mcpServers = %+v, want template default server", servers)
+	}
+	env := contextMapFromValue(t, servers[0]["env"])
+	config := contextMapFromValue(t, env["CONFIG_PATH"])
+	if config["present"] != true || config["redacted"] != true {
+		t.Fatalf("mcp env context = %+v, want redacted present config", env)
+	}
+	if strings.Contains(fmt.Sprint(servers[0]), workspace.InternalDirectory) {
+		t.Fatalf("mcp server context leaked workspace internal directory: %+v", servers[0])
+	}
+}
+
+func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   "template-managed-config-activation",
+		Name: "Managed Config Activation Template",
+		ContextHints: map[string]any{
+			"managedWorkspaceConfigs": []any{
+				map[string]any{
+					"path":         "lsp-bridge/mcp-config.json",
+					"format":       "json",
+					"mergeMissing": true,
+					"content": map[string]any{
+						"languages": map[string]any{
+							"go": map[string]any{
+								"command": []any{"gopls", "serve"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "activation managed config workspace",
+		TemplateID: "template-managed-config-activation",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	configPath := filepath.Join(workspace.InternalDirectory, "lsp-bridge", "mcp-config.json")
+	if err := os.Remove(configPath); err != nil {
+		t.Fatalf("remove managed config: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "repair missing managed config")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"managed config exists"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	if _, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	}); err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("managed config stat after activation: %v", err)
+	}
+}
+
 func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
@@ -3202,6 +3369,25 @@ func contextMapSliceFromValue(t *testing.T, value any) []map[string]any {
 		t.Fatalf("unmarshal context slice value: %v", err)
 	}
 	return ret
+}
+
+func assertAnyStringListContains(t *testing.T, value any, want string) {
+	t.Helper()
+	switch typed := value.(type) {
+	case []string:
+		for _, item := range typed {
+			if item == want {
+				return
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if stringItem, _ := item.(string); stringItem == want {
+				return
+			}
+		}
+	}
+	t.Fatalf("list %+v missing %q", value, want)
 }
 
 func assertSoulRoutingBinding(t *testing.T, bindings map[string]any, stage string, soulID string, source string) {

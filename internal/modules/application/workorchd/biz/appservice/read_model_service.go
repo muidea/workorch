@@ -3203,11 +3203,11 @@ func projectStepView(item presenter.StepView) presenter.StepView {
 		ID:     item.ID,
 		Kind:   item.Kind,
 		State:  item.State,
-		Output: projectStepOutput(item.Output),
+		Output: projectStepOutput(item.Kind, item.Output),
 	}
 }
 
-func projectStepOutput(output map[string]any) map[string]any {
+func projectStepOutput(kind string, output map[string]any) map[string]any {
 	if len(output) == 0 {
 		return nil
 	}
@@ -3246,6 +3246,7 @@ func projectStepOutput(output map[string]any) map[string]any {
 		"targetRef":                    {},
 		"tool":                         {},
 		"toolCallId":                   {},
+		"transport":                    {},
 		"uri":                          {},
 		"validationId":                 {},
 		"workspaceExecutionSummary":    {},
@@ -3258,10 +3259,87 @@ func projectStepOutput(output map[string]any) map[string]any {
 		}
 		ret[key] = value
 	}
+	if strings.TrimSpace(kind) == "mcp/tool_call" {
+		if result := projectMCPToolCallResult(output["result"]); len(result) > 0 {
+			ret["result"] = result
+		}
+	}
 	if len(ret) == 0 {
 		return nil
 	}
 	return ret
+}
+
+func projectMCPToolCallResult(value any) map[string]any {
+	raw, ok := value.(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if structured := projectMCPStructuredContent(raw["structuredContent"]); len(structured) > 0 {
+		ret["structuredContent"] = structured
+	}
+	if isError, ok := raw["isError"].(bool); ok {
+		ret["isError"] = isError
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectMCPStructuredContent(value any) map[string]any {
+	raw, ok := value.(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"arguments": {},
+		"name":      {},
+		"ok":        {},
+		"tool":      {},
+		"transport": {},
+	}
+	ret := map[string]any{}
+	for key, item := range raw {
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+		if projected, ok := projectReadModelScalarMapValue(item); ok {
+			ret[key] = projected
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectReadModelScalarMapValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case string:
+		if len(typed) <= eventPayloadStringLimit {
+			return typed, true
+		}
+		return typed[:eventPayloadStringLimit] + "...", true
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return typed, true
+	case map[string]any:
+		ret := map[string]any{}
+		for key, item := range typed {
+			if projected, ok := projectReadModelScalarMapValue(item); ok {
+				ret[key] = projected
+			}
+		}
+		if len(ret) == 0 {
+			return nil, false
+		}
+		return ret, true
+	default:
+		return nil, false
+	}
 }
 
 func pageRunToolCalls(items []*runmodel.ToolCall, query ToolCallQuery) ToolCallPage {

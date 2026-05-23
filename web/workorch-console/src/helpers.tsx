@@ -1835,7 +1835,7 @@ export type WorkspaceSetupFormValues = {
   templateId?: string;
   title: string;
   description?: string;
-  workingDirectory?: string;
+  deliverableDirectory?: string;
 };
 
 export type GoalSetupFormValues = {

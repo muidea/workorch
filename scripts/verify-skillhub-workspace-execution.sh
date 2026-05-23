@@ -62,6 +62,7 @@ start_mock_provider() {
   cat >"$TMP_DIR/llm_mock_provider.py" <<'PY'
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -73,7 +74,9 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             request = {}
         if self.path.endswith("/chat/completions"):
-            step_id = request.get("stepId", "skillhub-auto-step")
+            user_content = "\n".join(str(item.get("content", "")) for item in request.get("messages") or [])
+            matched_step = re.search(r'"stepId"\s*:\s*"([^"]+)"', user_content)
+            step_id = matched_step.group(1) if matched_step else "step-1"
             payload = {
                 "thoughtSummary": "SkillHub automatic skill selection completed.",
                 "completionState": "completed",
@@ -101,7 +104,17 @@ class Handler(BaseHTTPRequestHandler):
                             "state": "satisfied",
                             "evidenceRefs": [step_id]
                         }
-                    ]
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {
+                                "requirement": "verify go multi module dev skillhub auto mcp execution",
+                                "state": "satisfied",
+                                "evidenceRefs": [step_id]
+                            }
+                        ]
+                    }
                 }
             }
             content = json.dumps(payload, ensure_ascii=False)
@@ -278,11 +291,11 @@ grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"skillhub execution workspace","description":"verify SkillHub global and workspace Skill selection","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
-working_directory="$(json_path "$TMP_DIR/workspace.json" "workspace.workingDirectory")"
+deliverable_directory="$(json_path "$TMP_DIR/workspace.json" "workspace.deliverableDirectory")"
 [[ -n "$workspace_id" ]]
-[[ -n "$working_directory" ]]
-mkdir -p "$working_directory"
-(cd "$working_directory" && printf 'y\n' | skill-hub use "$GLOBAL_SKILL_ID" >/dev/null && skill-hub apply "$GLOBAL_SKILL_ID" >/dev/null)
+[[ -n "$deliverable_directory" ]]
+mkdir -p "$deliverable_directory"
+(cd "$deliverable_directory" && printf 'y\n' | skill-hub use "$GLOBAL_SKILL_ID" >/dev/null && skill-hub apply "$GLOBAL_SKILL_ID" >/dev/null)
 
 curl -fsS "$BASE_URL/api/v1/workorch/skills?workspaceId=$workspace_id" >"$TMP_DIR/skills.json"
 grep "\"id\": \"skillhub:global:$GLOBAL_SKILL_ID\"" "$TMP_DIR/skills.json" >/dev/null

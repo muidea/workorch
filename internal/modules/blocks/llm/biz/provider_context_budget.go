@@ -187,6 +187,10 @@ func providerContextStageBudgetRatio(input map[string]any) (float64, string) {
 		return 1, "runtime_repair"
 	}
 	if boolValue(input["providerRetryFollowUp"]) {
+		switch strings.TrimSpace(stringValue(input["failureClass"])) {
+		case "context_too_large", "context_integrity_failed":
+			return 1, "provider_retry_context_contract"
+		}
 		return 0.5, "provider_retry"
 	}
 	stage := strings.TrimSpace(strings.ToLower(firstNonEmptyProviderContextString(
@@ -765,6 +769,17 @@ func providerInputHasProcessEvidence(input map[string]any) bool {
 	}
 	pkg := recordFromAny(input["executionContextPackage"])
 	if len(mapSliceFromAny(pkg["processEvidenceTimeline"])) > 0 && len(recordFromAny(pkg["currentProgressDigest"])) > 0 {
+		return true
+	}
+	replan := recordFromAny(pkg["replanContinuation"])
+	if len(mapSliceFromAny(replan["processEvidenceTimeline"])) > 0 &&
+		len(recordFromAny(replan["currentProgressDigest"])) > 0 &&
+		len(recordFromAny(replan["failureContext"])) > 0 {
+		return true
+	}
+	if len(recordFromAny(input["currentProgressDigest"])) > 0 &&
+		len(recordFromAny(input["failedStepInput"])) > 0 &&
+		len(recordFromAny(input["failedStepOutput"])) > 0 {
 		return true
 	}
 	repairPkg := recordFromAny(input["repairActionPackage"])

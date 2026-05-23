@@ -20,6 +20,29 @@ func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *r
 	return o.publishRunStateChangedAtStep(ctx, run, "")
 }
 
+func (o *RuntimeOrchestrator) publishRunCreated(ctx context.Context, run *runModel.Run) error {
+	if o.eventHub == nil || run == nil {
+		return nil
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        events.TopicRunCreated,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "run",
+		SubjectID:    string(run.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		Payload: events.RunPayload(
+			run.GoalID,
+			run.DoDID,
+			run.State,
+			run.BlockingTicketID,
+			run.BlockingApprovalID,
+			run.FailureReason,
+		),
+	})
+}
+
 func (o *RuntimeOrchestrator) publishRunStateChangedAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
 	if err := o.recordRunCheckpointAtStep(ctx, run, currentStepID); err != nil {
 		return err

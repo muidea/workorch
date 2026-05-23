@@ -7,12 +7,13 @@ import (
 	"errors"
 	"strings"
 
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-//go:embed defaults/templates.json defaults/souls.json
+//go:embed defaults/templates.json defaults/souls.json defaults/mcp_servers.json defaults/mcp_capabilities.json
 var embeddedDefaults embed.FS
 
 type embeddedTemplate struct {
@@ -40,6 +41,44 @@ type embeddedSoul struct {
 	SoulMD                      string   `json:"soulMD"`
 }
 
+type embeddedMCPServer struct {
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Transport             string            `json:"transport"`
+	Endpoint              string            `json:"endpoint,omitempty"`
+	Command               string            `json:"command,omitempty"`
+	Args                  []string          `json:"args,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	Enabled               bool              `json:"enabled"`
+	AllowedTools          []string          `json:"allowedTools,omitempty"`
+	AllowedResources      []string          `json:"allowedResources,omitempty"`
+	AllowedPrompts        []string          `json:"allowedPrompts,omitempty"`
+	DefaultApprovalPolicy string            `json:"defaultApprovalPolicy,omitempty"`
+	SessionPolicy         string            `json:"sessionPolicy,omitempty"`
+	TimeoutMillis         int               `json:"timeoutMillis,omitempty"`
+}
+
+type embeddedMCPCapability struct {
+	ID             string         `json:"id"`
+	ServerID       string         `json:"serverId"`
+	Kind           string         `json:"kind"`
+	Name           string         `json:"name"`
+	DisplayName    string         `json:"displayName,omitempty"`
+	Description    string         `json:"description,omitempty"`
+	Category       string         `json:"category,omitempty"`
+	Tags           []string       `json:"tags,omitempty"`
+	UsageHint      string         `json:"usageHint,omitempty"`
+	InputSummary   string         `json:"inputSummary,omitempty"`
+	OutputSummary  string         `json:"outputSummary,omitempty"`
+	StageHints     []string       `json:"stageHints,omitempty"`
+	RiskLevel      string         `json:"riskLevel,omitempty"`
+	Schema         map[string]any `json:"schema,omitempty"`
+	URI            string         `json:"uri,omitempty"`
+	Enabled        bool           `json:"enabled"`
+	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
+	Status         string         `json:"status,omitempty"`
+}
+
 func loadEmbeddedTemplates() ([]embeddedTemplate, error) {
 	data, err := embeddedDefaults.ReadFile("defaults/templates.json")
 	if err != nil {
@@ -64,7 +103,31 @@ func loadEmbeddedSouls() ([]embeddedSoul, error) {
 	return items, nil
 }
 
-func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulRepository, templateRepo repository.WorkspaceTemplateRepository) error {
+func loadEmbeddedMCPServers() ([]embeddedMCPServer, error) {
+	data, err := embeddedDefaults.ReadFile("defaults/mcp_servers.json")
+	if err != nil {
+		return nil, err
+	}
+	var items []embeddedMCPServer
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func loadEmbeddedMCPCapabilities() ([]embeddedMCPCapability, error) {
+	data, err := embeddedDefaults.ReadFile("defaults/mcp_capabilities.json")
+	if err != nil {
+		return nil, err
+	}
+	var items []embeddedMCPCapability
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulRepository, templateRepo repository.WorkspaceTemplateRepository, mcpServerRepo repository.MCPServerRepository, mcpCapabilityRepo repository.MCPCapabilityRepository) error {
 	if soulRepo == nil || templateRepo == nil {
 		return nil
 	}
@@ -106,6 +169,34 @@ func EnsureBuiltinDefaults(ctx context.Context, soulRepo repository.SoulReposito
 			return err
 		}
 	}
+	if mcpServerRepo != nil {
+		servers, err := loadEmbeddedMCPServers()
+		if err != nil {
+			return err
+		}
+		for _, server := range servers {
+			if server.ID == "" {
+				continue
+			}
+			if err := upsertBuiltinMCPServer(ctx, mcpServerRepo, mcpServerFromEmbedded(server)); err != nil {
+				return err
+			}
+		}
+	}
+	if mcpCapabilityRepo != nil {
+		capabilities, err := loadEmbeddedMCPCapabilities()
+		if err != nil {
+			return err
+		}
+		for _, capability := range capabilities {
+			if capability.ID == "" {
+				continue
+			}
+			if err := upsertBuiltinMCPCapability(ctx, mcpCapabilityRepo, mcpCapabilityFromEmbedded(capability)); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -135,6 +226,32 @@ func upsertBuiltinWorkspaceTemplate(ctx context.Context, repo repository.Workspa
 	return nil
 }
 
+func upsertBuiltinMCPServer(ctx context.Context, repo repository.MCPServerRepository, item *mcpmodel.Server) error {
+	if item == nil || item.ID == "" {
+		return nil
+	}
+	if err := repo.Update(ctx, item); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return repo.Create(ctx, item)
+		}
+		return err
+	}
+	return nil
+}
+
+func upsertBuiltinMCPCapability(ctx context.Context, repo repository.MCPCapabilityRepository, item *mcpmodel.Capability) error {
+	if item == nil || item.ID == "" {
+		return nil
+	}
+	if err := repo.Update(ctx, item); err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return repo.Create(ctx, item)
+		}
+		return err
+	}
+	return nil
+}
+
 func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemplate {
 	return &repository.WorkspaceTemplate{
 		ID:               t.ID,
@@ -146,6 +263,48 @@ func workspaceTemplateFromEmbedded(t embeddedTemplate) *repository.WorkspaceTemp
 		SoulBindings:     t.SoulBindings,
 		ContextHints:     cloneContextMap(t.ContextHints),
 		EvidencePolicies: cloneEmbeddedEvidencePolicies(t.EvidencePolicies),
+	}
+}
+
+func mcpServerFromEmbedded(item embeddedMCPServer) *mcpmodel.Server {
+	return &mcpmodel.Server{
+		ID:                    common.MCPServerID(item.ID),
+		Name:                  strings.TrimSpace(item.Name),
+		Transport:             strings.TrimSpace(item.Transport),
+		Endpoint:              strings.TrimSpace(item.Endpoint),
+		Command:               strings.TrimSpace(item.Command),
+		Args:                  filterEmptyStrings(item.Args),
+		Env:                   cloneStringMap(item.Env),
+		Enabled:               item.Enabled,
+		AllowedTools:          filterEmptyStrings(item.AllowedTools),
+		AllowedResources:      filterEmptyStrings(item.AllowedResources),
+		AllowedPrompts:        filterEmptyStrings(item.AllowedPrompts),
+		DefaultApprovalPolicy: strings.TrimSpace(item.DefaultApprovalPolicy),
+		SessionPolicy:         strings.TrimSpace(item.SessionPolicy),
+		TimeoutMillis:         item.TimeoutMillis,
+	}
+}
+
+func mcpCapabilityFromEmbedded(item embeddedMCPCapability) *mcpmodel.Capability {
+	return &mcpmodel.Capability{
+		ID:             common.MCPCapabilityID(item.ID),
+		ServerID:       common.MCPServerID(item.ServerID),
+		Kind:           strings.TrimSpace(item.Kind),
+		Name:           strings.TrimSpace(item.Name),
+		DisplayName:    strings.TrimSpace(item.DisplayName),
+		Description:    strings.TrimSpace(item.Description),
+		Category:       strings.TrimSpace(item.Category),
+		Tags:           filterEmptyStrings(item.Tags),
+		UsageHint:      strings.TrimSpace(item.UsageHint),
+		InputSummary:   strings.TrimSpace(item.InputSummary),
+		OutputSummary:  strings.TrimSpace(item.OutputSummary),
+		StageHints:     filterEmptyStrings(item.StageHints),
+		RiskLevel:      strings.TrimSpace(item.RiskLevel),
+		Schema:         cloneContextMap(item.Schema),
+		URI:            strings.TrimSpace(item.URI),
+		Enabled:        item.Enabled,
+		ApprovalPolicy: strings.TrimSpace(item.ApprovalPolicy),
+		Status:         strings.TrimSpace(item.Status),
 	}
 }
 
@@ -196,6 +355,17 @@ func cloneEmbeddedEvidencePolicyValue(value any) any {
 	default:
 		return value
 	}
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 func filterEmptyStrings(items []string) []string {

@@ -195,7 +195,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	case runtimeRecoveryActionContextIntegrityBlocked:
 		return o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepair:
-		attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep) + 1
+		attempt := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) + 1
 		input := o.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr)
 		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt))
 		if err != nil {
@@ -885,6 +885,10 @@ func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForEffectiveScope(ctx con
 	exactAttempts := o.runtimeRepairAttemptCountForStep(ctx, runID, failedStep)
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	if targetScope == "" {
+		rootClassAttempts := o.runtimeRepairAttemptCountForRootClassInWindow(ctx, runID, failedStep)
+		if rootClassAttempts > exactAttempts {
+			return rootClassAttempts
+		}
 		return exactAttempts
 	}
 	class, _ := runtimeRepairScopeClassAndSignature(failedStep)
@@ -916,6 +920,43 @@ func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForScopeInWindow(ctx cont
 			continue
 		}
 		if runtimeRepairStepMatchesScope(step, scope) {
+			count++
+		}
+	}
+	return count
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairAttemptCountForRootClassInWindow(ctx context.Context, runID common.RunID, failedStep *runModel.Step) int {
+	if o == nil || o.steps == nil || runID == "" || failedStep == nil || !boolValue(failedStep.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return 0
+	}
+	windowRoot := runtimeRepairTargetBudgetWindowRoot(failedStep)
+	if windowRoot == "" {
+		return 0
+	}
+	failureClass, _ := runtimeRepairScopeClassAndSignature(failedStep)
+	failureClass = strings.TrimSpace(failureClass)
+	if failureClass == "" {
+		return 0
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if !isRuntimeRepairBudgetStep(runID, step) {
+			continue
+		}
+		if runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
+			continue
+		}
+		stepClass := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(step.Input, stepInputKeyRepairOfFailureClass),
+			stringFromMap(step.Input, failureOutputKeyClass),
+			stringFromMap(step.Output, failureOutputKeyClass),
+		))
+		if stepClass == failureClass {
 			count++
 		}
 	}

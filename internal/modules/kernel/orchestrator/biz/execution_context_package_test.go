@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -141,6 +142,70 @@ func TestRunExecutionContextPackagePreservesExecutionContractDetails(t *testing.
 	}
 	if accepted := stringSliceFromValue(requirements[0]["acceptedStepKinds"]); len(accepted) != 2 || accepted[0] != "shell/command" || accepted[1] != "patch/apply" {
 		t.Fatalf("acceptedStepKinds = %+v, want preserved accepted kinds", requirements[0]["acceptedStepKinds"])
+	}
+}
+
+func TestProcessEvidenceTimelineCompactsMCPToolEvidence(t *testing.T) {
+	run := &runmodel.Run{ID: "run-mcp-evidence", WorkspaceID: "ws-mcp-evidence"}
+	step := &runmodel.Step{
+		ID:    "run-mcp-evidence/tool-001",
+		RunID: run.ID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"serverId": "mcp-code",
+			"tool":     "semantic.lookup",
+			"input": map[string]any{
+				"path": "/repo/main.go",
+				"line": 12,
+				"col":  4,
+			},
+		},
+		Output: map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-code",
+			"tool":      "semantic.lookup",
+			"status":    "completed",
+			"stage":     "mcp_tool_call_completed",
+			"result": map[string]any{
+				"diagnostics": []map[string]any{
+					{
+						"path":     "/repo/main.go",
+						"line":     12,
+						"col":      4,
+						"severity": "error",
+						"message":  "undefined symbol",
+					},
+				},
+				"blob": strings.Repeat("x", 16*1024),
+			},
+		},
+	}
+
+	timeline := processEvidenceTimelineFromRunSteps(run, []*runmodel.Step{step}, "")
+	if len(timeline) != 1 {
+		t.Fatalf("timeline = %+v, want one MCP evidence item", timeline)
+	}
+	item := timeline[0]
+	output := mapFromValue(item["output"])
+	if _, ok := output["result"]; ok {
+		t.Fatalf("output = %+v, want raw MCP result omitted from process evidence", output)
+	}
+	toolEvidence := mapFromValue(item["toolEvidence"])
+	resultSummary := mapFromValue(toolEvidence["resultSummary"])
+	diagnostics := mapSliceFromValue(resultSummary["diagnostics"])
+	if toolEvidence["serverId"] != "mcp-code" ||
+		toolEvidence["tool"] != "semantic.lookup" ||
+		len(diagnostics) != 1 ||
+		diagnostics[0]["message"] != "undefined symbol" {
+		t.Fatalf("toolEvidence = %+v, want compact diagnostic summary", toolEvidence)
+	}
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal timeline item: %v", err)
+	}
+	if strings.Contains(string(encoded), strings.Repeat("x", 256)) {
+		t.Fatalf("timeline item leaked large MCP result payload")
 	}
 }
 

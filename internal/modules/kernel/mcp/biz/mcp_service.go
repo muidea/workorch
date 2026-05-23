@@ -104,7 +104,7 @@ func validateServerCommand(cmd mcpservice.CreateServerCommand) error {
 	if cmd.TimeoutMillis < 0 {
 		return common.ErrInvalidArgument
 	}
-	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) || hasBlank(cmd.AllowedPrompts) {
+	if hasBlank(cmd.AllowedTools) || hasBlank(cmd.AllowedResources) || hasBlank(cmd.AllowedPrompts) || hasBlankMapKey(cmd.Env) {
 		return common.ErrInvalidArgument
 	}
 	switch strings.TrimSpace(cmd.SessionPolicy) {
@@ -301,6 +301,9 @@ func serverFromCommand(cmd mcpservice.CreateServerCommand) *mcpmodel.Server {
 		Name:                  cmd.Name,
 		Transport:             cmd.Transport,
 		Endpoint:              cmd.Endpoint,
+		Command:               strings.TrimSpace(cmd.Command),
+		Args:                  compactStrings(cmd.Args),
+		Env:                   cloneStringMap(cmd.Env),
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
@@ -314,6 +317,15 @@ func serverFromCommand(cmd mcpservice.CreateServerCommand) *mcpmodel.Server {
 func hasBlank(values []string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBlankMapKey(values map[string]string) bool {
+	for key := range values {
+		if strings.TrimSpace(key) == "" {
 			return true
 		}
 	}
@@ -353,6 +365,21 @@ func cloneMap(input map[string]any) map[string]any {
 	}
 	ret := make(map[string]any, len(input))
 	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
 		ret[key] = value
 	}
 	return ret

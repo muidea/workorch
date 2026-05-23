@@ -82,7 +82,7 @@ func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.Background
 }
 
 func (r *Runtime) Run(ctx context.Context) *cd.Error {
-	if err := appbootstrap.EnsureBuiltinDefaults(ctx, r.repositories.Souls, r.repositories.WorkspaceTemplates); err != nil {
+	if err := appbootstrap.EnsureBuiltinDefaults(ctx, r.repositories.Souls, r.repositories.WorkspaceTemplates, r.repositories.MCPServers, r.repositories.MCPCapabilities); err != nil {
 		return cd.NewError(cd.IllegalParam, "ensure builtin defaults: "+err.Error())
 	}
 	return nil

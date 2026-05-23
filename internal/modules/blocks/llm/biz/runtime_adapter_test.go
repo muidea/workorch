@@ -174,8 +174,8 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
 	}
-	if usage["providerId"] != nil || usage["provider"] != nil || usage["model"] != nil || usage["estimated"] != true {
-		t.Fatalf("llmUsage = %+v, want usage without persisted provider/model binding", usage)
+	if usage["providerId"] != "reasoning" || usage["provider"] != llmcommon.ProviderCompatible || usage["model"] != "test-model" || usage["estimated"] != true {
+		t.Fatalf("llmUsage = %+v, want observable provider/model usage metadata", usage)
 	}
 	if usage["usageSource"] != llmcommon.UsageSourceEstimated {
 		t.Fatalf("llmUsage = %+v, want estimated usage source", usage)

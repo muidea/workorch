@@ -244,6 +244,106 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing.T) {
+	ctx := context.Background()
+	internalDir := filepath.Join(t.TempDir(), "internal")
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-command"),
+		Name:          "stdio command",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "{workspaceInternalDirectory}/config.json"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                common.WorkspaceID("ws-mcp-command"),
+		WorkspaceInternalDirectory: internalDir,
+		RunID:                      common.RunID("run-mcp-command"),
+		StepID:                     common.StepID("run-mcp-command/mcp-stdio-1"),
+		Kind:                       "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-command",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	resultPayload, ok := result.Output["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %#v, want decoded response", result.Output["result"])
+	}
+	structured, ok := resultPayload["structuredContent"].(map[string]any)
+	if !ok || structured["envEcho"] != filepath.Join(internalDir, "config.json") {
+		t.Fatalf("structured content = %#v, want env echo from command env", resultPayload["structuredContent"])
+	}
+}
+
+func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
+	ctx := context.Background()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-endpoint-priority"),
+		Name:          "stdio endpoint priority",
+		Transport:     "stdio",
+		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_ENV_ECHO=from-endpoint " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "from-command"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-endpoint-priority",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	resultPayload, _ := result.Output["result"].(map[string]any)
+	structured, _ := resultPayload["structuredContent"].(map[string]any)
+	if structured["envEcho"] != "from-endpoint" {
+		t.Fatalf("structured content = %#v, want endpoint env to take priority", structured)
+	}
+}
+
+func TestRuntimeAdapterRejectsStdioWithoutEndpointOrCommand(t *testing.T) {
+	ctx := context.Background()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-missing-command"),
+		Name:          "stdio missing command",
+		Transport:     "stdio",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-missing-command",
+			"tool":     "repo.summary",
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "endpoint or command") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want explicit missing endpoint or command", err)
+	}
+	if result.Output["stage"] != "mcp_tool_call_failed" {
+		t.Fatalf("output = %+v, want failed stage", result.Output)
+	}
+}
+
 func TestRuntimeAdapterExecutesAllowedStdioResourceRead(t *testing.T) {
 	ctx := context.Background()
 	service := newMCPService(t, kernelmcp.CreateServerCommand{
@@ -306,6 +406,46 @@ func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 	}
 	if got := strings.Count(string(raw), "initialized\n"); got != 1 {
 		t.Fatalf("initialize count = %d, want one long-lived process initialization; raw=%q", got, string(raw))
+	}
+}
+
+func TestRuntimeAdapterLongLivedStdioSessionIsWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-workspace-session"),
+		Name:          "stdio workspace session",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_INIT_FILE": initFile},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "long_lived",
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	defer adapter.Close()
+
+	for _, workspaceID := range []common.WorkspaceID{"ws-one", "ws-one", "ws-two"} {
+		result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+			WorkspaceID: workspaceID,
+			Kind:        "mcp/tool_call",
+			Input: map[string]any{
+				"serverId": "mcp-stdio-workspace-session",
+				"tool":     "repo.summary",
+			},
+		})
+		if err != nil {
+			t.Fatalf("ExecuteRuntimeStep workspace=%s: %v output=%+v", workspaceID, err, result.Output)
+		}
+	}
+	raw, err := os.ReadFile(initFile)
+	if err != nil {
+		t.Fatalf("read init file: %v", err)
+	}
+	if got := strings.Count(string(raw), "initialized\n"); got != 2 {
+		t.Fatalf("initialize count = %d, want one session per workspace; raw=%q", got, string(raw))
 	}
 }
 
@@ -403,6 +543,7 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 					"structuredContent": map[string]any{
 						"tool":      request.Params["name"],
 						"arguments": request.Params["arguments"],
+						"envEcho":   os.Getenv("WORKORCH_MCP_STDIO_ENV_ECHO"),
 						"ok":        true,
 					},
 					"isError": false,

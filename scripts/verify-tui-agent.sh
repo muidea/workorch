@@ -124,8 +124,11 @@ if $SCRIPTED; then
       fail "TUI-E2E-03: legacy REPL marker found"
     fi
 
-    # TUI-E2E-10: Interrupt and cleanup (no server child process).
-    if ! pgrep -f "workorch --server" >/dev/null 2>&1; then
+    # TUI-E2E-10: Default TUI invocation must not launch its own server child.
+    # Deployed-instance verification may already have an external
+    # `workorch --server` process, so only fail when that process is a child of
+    # this verifier process.
+    if ! pgrep -P "$$" -f "workorch --server" >/dev/null 2>&1; then
       pass "TUI-E2E-10: no server child process"
     else
       fail "TUI-E2E-10: server child process detected"

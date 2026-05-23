@@ -71,6 +71,50 @@
           "initializeOnCreate": true
         }
       },
+      "semanticCodeNavigation": {
+        "provider": "mcp",
+        "optional": true,
+        "evidenceStrength": "auxiliary",
+        "defaultMCPServerIds": ["mcp-lsp-bridge"],
+        "defaultCapabilityIds": [
+          "mcp-lsp-bridge:tool:lsp_initialize",
+          "mcp-lsp-bridge:tool:lsp_sync",
+          "mcp-lsp-bridge:tool:lsp_definition",
+          "mcp-lsp-bridge:tool:lsp_hover",
+          "mcp-lsp-bridge:tool:lsp_references",
+          "mcp-lsp-bridge:tool:lsp_diagnostics"
+        ],
+        "notes": [
+          "semantic navigation is optional and must not replace build/test/lint or direct DoD evidence",
+          "empty semantic results are inconclusive"
+        ]
+      },
+      "managedWorkspaceConfigs": [
+        {
+          "path": "lsp-bridge/mcp-config.json",
+          "format": "json",
+          "mergeMissing": true,
+          "content": {
+            "languages": {
+              "go": {
+                "command": ["gopls", "serve"]
+              },
+              "python": {
+                "command": ["pyright-langserver", "--stdio"]
+              },
+              "typescript": {
+                "command": ["typescript-language-server", "--stdio"]
+              },
+              "rust": {
+                "command": ["rust-analyzer"]
+              },
+              "shell": {
+                "command": ["bash-language-server", "start"]
+              }
+            }
+          }
+        }
+      ],
       "profileContracts": {
         "software-dev": {
           "acceptanceDimensions": [

@@ -482,6 +482,35 @@ llm = data.get("configuration", {}).get("llm", {})
 providers = llm.get("providers") or []
 default_provider = llm.get("defaultProviderId") or "verify"
 default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+model_capabilities = llm.get("modelCapabilities") or []
+
+def clean_inference_profile(item):
+    profile = item.get("inferenceProfile") or {}
+    allowed = {
+        "temperature",
+        "maxOutputTokens",
+        "reasoningEffort",
+        "thinkingBudgetTokens",
+    }
+    return {key: profile[key] for key in allowed if key in profile}
+
+def clean_context_profile(item):
+    profile = item.get("contextProfile") or {}
+    allowed = {
+        "profileMode",
+        "contextWindowTokens",
+        "maxInputTokens",
+        "reservedOutputTokens",
+        "safetyRatio",
+        "contextUtilizationRatio",
+        "bytesHardLimit",
+        "maxRequestBytes",
+        "estimatedTokensPerByte",
+        "inputTokenPrice",
+        "outputTokenPrice",
+        "currency",
+    }
+    return {key: profile[key] for key in allowed if key in profile}
 
 def clean_provider(item):
     ret = {
@@ -494,14 +523,21 @@ def clean_provider(item):
         "chatCompletions": bool(item.get("chatCompletions", True)),
         "streaming": bool(item.get("streaming", False)),
         "nonChatOperations": item.get("nonChatOperations") or [],
+        "failoverEnabled": bool(item.get("failoverEnabled", False)),
+        "failoverProviders": item.get("failoverProviders") or [],
     }
-    if item.get("contextProfile"):
-        ret["contextProfile"] = item.get("contextProfile")
+    inference_profile = clean_inference_profile(item)
+    if inference_profile:
+        ret["inferenceProfile"] = inference_profile
+    context_profile = clean_context_profile(item)
+    if context_profile:
+        ret["contextProfile"] = context_profile
     return ret
 
 original = {
     "defaultProviderId": default_provider,
     "defaultEmbeddingProviderId": default_embedding_provider,
+    "modelCapabilities": model_capabilities,
     "providers": [clean_provider(item) for item in providers if item.get("id")],
 }
 if not original["providers"]:
@@ -579,6 +615,7 @@ updated_providers.append({
 update = {
     "defaultProviderId": "verify",
     "defaultEmbeddingProviderId": "verify",
+    "modelCapabilities": model_capabilities,
     "providers": updated_providers,
 }
 with open(update_path, "w", encoding="utf-8") as handle:
@@ -624,6 +661,53 @@ wait_run_state() {
 
   cat "$output_file" >&2
   return 1
+}
+
+wait_run_state_any() {
+  local run_id="$1"
+  local output_file="$2"
+  shift 2
+  local deadline=$((SECONDS + RUN_WAIT_SECONDS))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    if python3 - "$output_file" "$@" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+state = (data.get("status") or {}).get("state")
+raise SystemExit(0 if state in set(sys.argv[2:]) else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$output_file" >&2
+  return 1
+}
+
+find_replan_successor_run() {
+  local predecessor_run_id="$1"
+  local output_file="$2"
+
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$output_file"
+  python3 - "$output_file" "$predecessor_run_id" <<'PY'
+import json
+import sys
+
+snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+predecessor = sys.argv[2]
+for run in snapshot.get("runs") or []:
+    context = run.get("executionContext") or {}
+    replan = context.get("replanContinuation") or {}
+    if replan.get("predecessorRunId") == predecessor:
+        print(run.get("id", ""))
+        raise SystemExit(0)
+raise SystemExit(f"missing replan successor for predecessor {predecessor!r}")
+PY
 }
 
 assert_run_recovery_read_models() {
@@ -1047,12 +1131,24 @@ grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/workspace-snapshot-after-gove
 grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
-grep '"state": "failed"' "$TMP_DIR/schema-failure-activation.json" >/dev/null
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
+wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
-assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed" "provider_native"
+schema_run_state="$(json_path "$TMP_DIR/schema-failure-status.json" "status.state")"
+if [[ "$schema_run_state" == "superseded" ]]; then
+  assert_run_recovery_read_models "$schema_run_id" "schema-failure" "superseded" "provider_native"
+  schema_successor_run_id="$(find_replan_successor_run "$schema_run_id" "$TMP_DIR/schema-failure-workspace-snapshot.json")"
+  [[ -n "$schema_successor_run_id" ]]
+  wait_run_state "$schema_successor_run_id" "completed" "$TMP_DIR/schema-failure-successor-status.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_successor_run_id/snapshot" >"$TMP_DIR/schema-failure-successor-snapshot.json"
+  grep '"replanContinuation"' "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
+  grep "\"predecessorRunId\": \"$schema_run_id\"" "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
+  assert_run_recovery_read_models "$schema_successor_run_id" "schema-failure-successor" "completed" "provider_native"
+else
+  assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed" "provider_native"
+fi
 
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null

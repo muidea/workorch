@@ -65,17 +65,20 @@ type Skill struct {
 }
 
 type MCPServer struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Transport             string   `json:"transport"`
-	Endpoint              string   `json:"endpoint,omitempty"`
-	Enabled               bool     `json:"enabled"`
-	AllowedTools          []string `json:"allowedTools,omitempty"`
-	AllowedResources      []string `json:"allowedResources,omitempty"`
-	AllowedPrompts        []string `json:"allowedPrompts,omitempty"`
-	DefaultApprovalPolicy string   `json:"defaultApprovalPolicy,omitempty"`
-	SessionPolicy         string   `json:"sessionPolicy,omitempty"`
-	TimeoutMillis         int      `json:"timeoutMillis,omitempty"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Transport             string            `json:"transport"`
+	Endpoint              string            `json:"endpoint,omitempty"`
+	Command               string            `json:"command,omitempty"`
+	Args                  []string          `json:"args,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	Enabled               bool              `json:"enabled"`
+	AllowedTools          []string          `json:"allowedTools,omitempty"`
+	AllowedResources      []string          `json:"allowedResources,omitempty"`
+	AllowedPrompts        []string          `json:"allowedPrompts,omitempty"`
+	DefaultApprovalPolicy string            `json:"defaultApprovalPolicy,omitempty"`
+	SessionPolicy         string            `json:"sessionPolicy,omitempty"`
+	TimeoutMillis         int               `json:"timeoutMillis,omitempty"`
 }
 
 type MCPTool struct {
@@ -540,6 +543,9 @@ func CreateMCPServerWithSession(ctx context.Context, session *RuntimeSession, cm
 		Name:                  cmd.Name,
 		Transport:             cmd.Transport,
 		Endpoint:              cmd.Endpoint,
+		Command:               cmd.Command,
+		Args:                  cloneStrings(cmd.Args),
+		Env:                   cloneStringMap(cmd.Env),
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
@@ -583,11 +589,22 @@ func UpdateMCPServerWithSession(ctx context.Context, session *RuntimeSession, se
 		return MCPServer{}, common.ErrInvalidArgument
 	}
 	cmd.ID = serverID
+	env := cloneStringMap(cmd.Env)
+	if cmd.Env == nil {
+		existing, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(serverID))
+		if err != nil {
+			return MCPServer{}, err
+		}
+		env = cloneStringMap(existing.Env)
+	}
 	if err := exports.Services.MCPService.UpdateServer(ctx, mcpmodule.UpdateServerCommand{
 		ServerID:              common.MCPServerID(cmd.ID),
 		Name:                  cmd.Name,
 		Transport:             cmd.Transport,
 		Endpoint:              cmd.Endpoint,
+		Command:               cmd.Command,
+		Args:                  cloneStrings(cmd.Args),
+		Env:                   env,
 		Enabled:               cmd.Enabled,
 		AllowedTools:          cloneStrings(cmd.AllowedTools),
 		AllowedResources:      cloneStrings(cmd.AllowedResources),
@@ -1204,6 +1221,9 @@ func mapMCPServer(item *mcpmodel.Server) MCPServer {
 		Name:                  item.Name,
 		Transport:             item.Transport,
 		Endpoint:              item.Endpoint,
+		Command:               item.Command,
+		Args:                  cloneStrings(item.Args),
+		Env:                   redactStringMap(item.Env),
 		Enabled:               item.Enabled,
 		AllowedTools:          cloneStrings(item.AllowedTools),
 		AllowedResources:      cloneStrings(item.AllowedResources),
@@ -1314,6 +1334,21 @@ func cloneStrings(input []string) []string {
 		return nil
 	}
 	return append([]string(nil), input...)
+}
+
+func redactStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		if value == "" {
+			out[key] = ""
+			continue
+		}
+		out[key] = "redacted"
+	}
+	return out
 }
 
 func cloneMap(input map[string]any) map[string]any {

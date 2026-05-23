@@ -25,6 +25,7 @@ done
 # outcomes from domain-specific goals, tools, or payload fields.
 domain_specific_pattern='weather\.current|weatherDescription|temperatureC|humidityPercent|windSpeedKmh|Open-Meteo|Hangzhou|杭州|天气|气温|湿度|风速'
 software_dev_bias_pattern='Code Change|code-change|go test \./|npm test|pytest|implementation planning|implementation path|affected files|verification commands|Verification commands|Patch targets|code_agent|target repository|new project|newproject|project root|projectlocation|workingdirectory|source_change|validation_report'
+lsp_profile_pattern='lsp|LSP|lsp-bridge|semanticCodeNavigation'
 
 if matches="$(
   rg -n --hidden -S "$domain_specific_pattern" "${paths[@]}" \
@@ -63,6 +64,26 @@ commands, or deliverable ids to workspace templates, Souls, profile contracts,
 profile verifiers, e2e scripts, tests, or documentation. Generic runtime layers
 must express only neutral stage, capability, evidence, target, result, and
 repair contracts.
+EOF
+  exit 1
+fi
+
+if matches="$(
+  rg -n --hidden -S "$lsp_profile_pattern" internal/modules/kernel internal/modules/blocks internal/pkg \
+    -g '!**/*_test.go' \
+    -g '!**/dist/**' \
+    -g '!**/node_modules/**' \
+    -g '!**/.git/**'
+)"; then
+  cat >&2 <<EOF
+Boundary contract violation: reusable runtime code must not contain LSP profile-specific logic.
+
+$matches
+
+Keep LSP Bridge integration in workspace templates, Souls, capabilities,
+profile verifiers, e2e scripts, tests, or documentation. Generic runtime layers
+may only handle neutral MCP servers, capabilities, tool calls, evidence,
+failure, context, and recovery contracts.
 EOF
   exit 1
 fi

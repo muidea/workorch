@@ -141,28 +141,28 @@ export const workorchApi = {
     const body = await request<{ contextBundle: ContextBundle }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/context-bundle`);
     return body.contextBundle;
   },
-  createWorkspace: async (title: string, description?: string, workingDirectory?: string, templateId?: string) => {
+  createWorkspace: async (title: string, description?: string, deliverableDirectory?: string, templateId?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
       method: 'POST',
-      body: JSON.stringify({ title, description, workingDirectory, templateId })
+      body: JSON.stringify({ title, description, deliverableDirectory, templateId })
     });
     return body.workspace;
   },
-  createWorkspaceSetupDraftSession: async (requestBody: { templateId?: string; title?: string; description?: string; workingDirectory?: string; dialogLanguage?: string }) => {
+  createWorkspaceSetupDraftSession: async (requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; dialogLanguage?: string }) => {
     const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions`, {
       method: 'POST',
       body: JSON.stringify(requestBody)
     });
     return body.draftSession;
   },
-  appendWorkspaceSetupDraftMessage: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; workingDirectory?: string; content: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
+  appendWorkspaceSetupDraftMessage: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; content: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
     const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(requestBody)
     });
     return body.draftSession;
   },
-  regenerateWorkspaceSetupDraft: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; workingDirectory?: string; content?: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
+  regenerateWorkspaceSetupDraft: async (sessionId: string, requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; content?: string; draft?: WorkspaceSetupDraft; dialogLanguage?: string }) => {
     const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/regenerate`, {
       method: 'POST',
       body: JSON.stringify(requestBody)

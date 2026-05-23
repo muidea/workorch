@@ -19,6 +19,7 @@ import (
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -191,7 +192,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	}
 	goal, dod := s.loadGoalAndDoD(ctx, run.GoalID, run.DoDID)
 	memoryItems := s.loadMemoryItems(ctx, ticket.WorkspaceID)
-	eval := s.evaluateTicket(ctx, ticket, goal, dod, memoryItems)
+	eval := s.evaluateTicket(ctx, ticket, run, goal, dod, memoryItems)
 	trace := &governancemodel.AutoGovernanceTrace{
 		ID:                 common.AutoGovernanceTraceID(fmt.Sprintf("%s/auto-governance", ticket.ID)),
 		WorkspaceID:        ticket.WorkspaceID,
@@ -456,7 +457,7 @@ type approvalEvaluation struct {
 	evidenceRefs   []string
 }
 
-func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Ticket, goal *workspace.Goal, dod *workspace.DoD, memoryItems []*memorymodel.MemoryItem) ticketEvaluation {
+func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Ticket, run *runmodel.Run, goal *workspace.Goal, dod *workspace.DoD, memoryItems []*memorymodel.MemoryItem) ticketEvaluation {
 	ret := ticketEvaluation{
 		canAutoResolve: false,
 		confidence:     0.0,
@@ -500,7 +501,7 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		ret.reason = "auto governance budget policy blocked ticket resolution"
 		return ret
 	}
-	if handled, recoveryEval := evaluateRuntimeRepairExhaustionTicket(ticket, ret); handled {
+	if handled, recoveryEval := s.evaluateRuntimeRepairExhaustionTicket(ctx, ticket, run, ret); handled {
 		if recoveryEval.canAutoResolve {
 			recoveryEval.budgetAfter = budgetUsed + 1
 			if goal != nil && goal.ID != "" {
@@ -587,7 +588,7 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 	}
 }
 
-func evaluateRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket, base ticketEvaluation) (bool, ticketEvaluation) {
+func (s *Service) evaluateRuntimeRepairExhaustionTicket(ctx context.Context, ticket *decisionmodel.Ticket, run *runmodel.Run, base ticketEvaluation) (bool, ticketEvaluation) {
 	if ticket == nil || strings.TrimSpace(stringFromMap(ticket.Context, "recoveryPolicy")) != recoveryPolicyRuntimeRepairExhausted {
 		return false, base
 	}
@@ -609,6 +610,11 @@ func evaluateRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket, base ti
 		ret.reason = "runtime recovery policy does not allow auto replan"
 		return true, ret
 	}
+	if s != nil && s.autoReplanLineageDepth(ctx, run) > 0 {
+		ret.policyBlocked = "replan_lineage_budget_exhausted"
+		ret.reason = "runtime recovery already used automatic replan in this lineage"
+		return true, ret
+	}
 	ret.canAutoResolve = true
 	ret.answer = "replan"
 	ret.confidence = 0.91
@@ -619,6 +625,36 @@ func evaluateRuntimeRepairExhaustionTicket(ticket *decisionmodel.Ticket, base ti
 		"recoveryAction": "replan",
 	}
 	return true, ret
+}
+
+func (s *Service) autoReplanLineageDepth(ctx context.Context, run *runmodel.Run) int {
+	if s == nil || s.runs == nil || run == nil || run.ID == "" {
+		return 0
+	}
+	depth := 0
+	seen := map[common.RunID]bool{}
+	for current := run; current != nil && current.ID != "" && !seen[current.ID]; {
+		seen[current.ID] = true
+		replan := mapFromMap(current.ExecutionContext, "replanContinuation")
+		if len(replan) == 0 {
+			return depth
+		}
+		payload := mapFromMap(replan, "resolutionPayload")
+		if strings.EqualFold(stringFromMap(replan, "resolutionType"), decisioncommon.ResolutionTypeReplan) ||
+			strings.EqualFold(stringFromMap(payload, "recoveryAction"), "replan") {
+			depth++
+		}
+		predecessorID := common.RunID(strings.TrimSpace(stringFromMap(replan, "predecessorRunId")))
+		if predecessorID == "" {
+			return depth
+		}
+		predecessor, err := s.runs.Get(ctx, predecessorID)
+		if err != nil || predecessor == nil {
+			return depth
+		}
+		current = predecessor
+	}
+	return depth
 }
 
 func (s *Service) evaluateApproval(ctx context.Context, approval *approvalmodel.Approval, goal *workspace.Goal, dod *workspace.DoD, governanceCfg workorchconfig.GovernanceConfig) approvalEvaluation {
@@ -1185,6 +1221,22 @@ func stringSliceFromMap(input map[string]any, key string) []string {
 		return ret
 	}
 	return nil
+}
+
+func mapFromMap(input map[string]any, key string) map[string]any {
+	if input == nil {
+		return nil
+	}
+	raw, ok := input[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case map[string]any:
+		return typed
+	default:
+		return nil
+	}
 }
 
 func boolFromMap(input map[string]any, key string) bool {

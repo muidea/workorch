@@ -110,7 +110,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def decision_payload(user_content):
     if '"runId": "probe"' in user_content:
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    if '"assessmentOnly": true' in user_content or '"graphFollowUp": true' in user_content or '"previousStepOutput"' in user_content:
+    if re.search(r'"assessmentOnly"\s*:\s*true', user_content) or re.search(r'"graphFollowUp"\s*:\s*true', user_content) or re.search(r'"previousStepOutput"\s*:', user_content):
         previous = re.search(r'"previousStepId": "([^"]+)"', user_content)
         evidence = previous.group(1) if previous else "mcp-stdio-call"
         return {
@@ -123,7 +123,15 @@ def decision_payload(user_content):
                     "item": "stdio MCP tool call completes",
                     "state": "satisfied",
                     "evidenceRefs": [evidence]
-                }]
+                }],
+                "goalCoverage": {
+                    "satisfied": True,
+                    "items": [{
+                        "requirement": "Plan and execute one approved MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.",
+                        "state": "satisfied",
+                        "evidenceRefs": [evidence]
+                    }]
+                }
             }
         }
     return {
@@ -144,6 +152,15 @@ def decision_payload(user_content):
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        if self.path == "/v1/embeddings":
+            response = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
+            encoded = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         if self.path != "/v1/chat/completions":
             self.send_response(404)
             self.end_headers()
@@ -308,11 +325,11 @@ updated_providers.append({
     "disabled": False,
     "chatCompletions": True,
     "streaming": False,
-    "nonChatOperations": [],
+    "nonChatOperations": ["embeddings"] if default_embedding_provider == "verify" else [],
 })
 update = {
     "defaultProviderId": "verify",
-    "defaultEmbeddingProviderId": default_embedding_provider,
+    "defaultEmbeddingProviderId": "verify" if default_embedding_provider == "verify" else default_embedding_provider,
     "providers": updated_providers,
 }
 with open(update_path, "w", encoding="utf-8") as handle:

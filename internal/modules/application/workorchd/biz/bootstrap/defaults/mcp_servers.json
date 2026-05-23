@@ -1,0 +1,25 @@
+[
+  {
+    "id": "mcp-lsp-bridge",
+    "name": "LSP Bridge",
+    "transport": "stdio",
+    "command": "lsp-bridge",
+    "args": [],
+    "env": {
+      "LSP_BRIDGE_CONFIG": "{workspaceInternalDirectory}/lsp-bridge/mcp-config.json",
+      "WORKORCH_WORKSPACE_ROOT": "{workspaceDeliverableDirectory}"
+    },
+    "enabled": true,
+    "sessionPolicy": "long_lived",
+    "timeoutMillis": 30000,
+    "defaultApprovalPolicy": "auto",
+    "allowedTools": [
+      "lsp_initialize",
+      "lsp_sync",
+      "lsp_definition",
+      "lsp_hover",
+      "lsp_references",
+      "lsp_diagnostics"
+    ]
+  }
+]

@@ -20,12 +20,31 @@ function displayMCPEndpoint(endpoint?: string) {
   return index >= 0 ? value.slice(index) : value;
 }
 
+function parseEnvLines(value?: string) {
+  const env: Record<string, string> = {};
+  for (const line of splitLines(value)) {
+    const index = line.indexOf('=');
+    const key = (index >= 0 ? line.slice(0, index) : line).trim();
+    if (!key) {
+      continue;
+    }
+    env[key] = index >= 0 ? line.slice(index + 1) : '';
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+function joinEnvKeys(env?: Record<string, string>) {
+  return Object.keys(env ?? {}).sort().join('\n');
+}
+
 function mcpServerPayload(values: MCPServerFormValues): MCPServer {
-  return {
+  const payload: MCPServer = {
     id: values.id.trim(),
     name: values.name.trim(),
     transport: values.transport,
     endpoint: values.endpoint?.trim(),
+    command: values.command?.trim(),
+    args: splitLines(values.args),
     enabled: values.enabled !== false,
     allowedTools: splitLines(values.allowedTools),
     allowedResources: splitLines(values.allowedResources),
@@ -34,6 +53,12 @@ function mcpServerPayload(values: MCPServerFormValues): MCPServer {
     sessionPolicy: values.sessionPolicy?.trim(),
     timeoutMillis: values.timeoutMillis
   };
+  if (values.envMode === 'clear') {
+    payload.env = {};
+  } else if (values.envMode === 'set') {
+    payload.env = parseEnvLines(values.env) ?? {};
+  }
+  return payload;
 }
 
 interface MCPServerFormValues {
@@ -41,6 +66,10 @@ interface MCPServerFormValues {
   name: string;
   transport: string;
   endpoint?: string;
+  command?: string;
+  args?: string;
+  envMode?: 'keep' | 'set' | 'clear';
+  env?: string;
   enabled: boolean;
   allowedTools?: string;
   allowedResources?: string;
@@ -171,6 +200,10 @@ export function RuntimeControlPage() {
       name: server.name,
       transport: server.transport,
       endpoint: displayMCPEndpoint(server.endpoint),
+      command: server.command,
+      args: joinLines(server.args),
+      envMode: 'keep',
+      env: '',
       enabled: server.enabled,
       allowedTools: joinLines(server.allowedTools),
       allowedResources: joinLines(server.allowedResources),
@@ -190,6 +223,11 @@ export function RuntimeControlPage() {
       enabled: true,
       sessionPolicy: 'transient',
       timeoutMillis: 60000,
+      endpoint: '',
+      command: '',
+      args: '',
+      envMode: 'keep',
+      env: '',
       allowedTools: '',
       allowedResources: '',
       allowedPrompts: ''
@@ -262,6 +300,7 @@ export function RuntimeControlPage() {
     { title: '服务 ID', dataIndex: 'id', copyable: true },
     { title: '名称', dataIndex: 'name' },
     { title: '传输', dataIndex: 'transport', width: 120 },
+    { title: '启动', width: 120, render: (_, item) => item.endpoint?.trim() ? 'endpoint' : item.command?.trim() ? 'command' : '-' },
     { title: '会话', dataIndex: 'sessionPolicy', width: 130, render: (_, item) => item.sessionPolicy || 'transient' },
     { title: '启用', dataIndex: 'enabled', width: 100, render: (_, item) => item.enabled ? <Tag color="green">已启用</Tag> : <Tag color="red">已禁用</Tag> },
     { title: '工具', render: (_, item) => item.allowedTools?.length ?? 0, width: 90 },
@@ -453,6 +492,9 @@ export function RuntimeControlPage() {
                 items={[
                   { key: 'id', label: '服务 ID', children: selectedServer.id },
                   { key: 'endpoint', label: '端点', children: displayMCPEndpoint(selectedServer.endpoint) || '-' },
+                  { key: 'command', label: '命令', children: selectedServer.command || '-' },
+                  { key: 'args', label: '参数', children: joinLines(selectedServer.args) || '-' },
+                  { key: 'env', label: '环境变量', children: joinEnvKeys(selectedServer.env) || '-' },
                   { key: 'approval', label: '默认审批策略', children: selectedServer.defaultApprovalPolicy || '-' },
                   { key: 'timeout', label: '超时毫秒', children: selectedServer.timeoutMillis ?? '-' }
                 ]}
@@ -535,6 +577,22 @@ export function RuntimeControlPage() {
             </Form.Item>
             <Form.Item name="endpoint" label="端点">
               <Input placeholder="stdio 命令路径，或 HTTP endpoint URL" />
+            </Form.Item>
+            <Form.Item name="command" label="命令">
+              <Input placeholder="endpoint 为空时使用，例如 lsp-bridge" />
+            </Form.Item>
+            <Form.Item name="args" label="参数">
+              <Input.TextArea rows={2} placeholder="每行一个参数；不使用 shell 字符串" />
+            </Form.Item>
+            <Form.Item name="env" label="环境变量">
+              <Input.TextArea rows={3} placeholder="每行 KEY=VALUE；支持 KEY= 设置为空值" />
+            </Form.Item>
+            <Form.Item name="envMode" label="环境变量提交方式">
+              <Select options={[
+                { value: 'keep', label: '保留已有环境变量' },
+                { value: 'set', label: '使用上方输入覆盖' },
+                { value: 'clear', label: '清空环境变量' }
+              ]} />
             </Form.Item>
             <Form.Item name="enabled" label="是否启用">
               <Select options={[

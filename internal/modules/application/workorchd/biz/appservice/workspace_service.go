@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -179,6 +180,9 @@ func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession
 			return nil, err
 		}
 	}
+	if err := ensureWorkspaceManagedConfigs(item.InternalDirectory, item.ContextHints); err != nil {
+		return nil, err
+	}
 	if err := workspaces.Update(ctx, item); err != nil {
 		return nil, err
 	}
@@ -230,6 +234,115 @@ func initializeWorkspaceGitRepository(ctx context.Context, deliverableDirectory 
 		}
 	}
 	return nil
+}
+
+func ensureWorkspaceManagedConfigs(internalDirectory string, contextHints map[string]any) error {
+	internalDirectory = strings.TrimSpace(internalDirectory)
+	if internalDirectory == "" || len(contextHints) == 0 {
+		return nil
+	}
+	configs, ok := contextHints["managedWorkspaceConfigs"].([]any)
+	if !ok || len(configs) == 0 {
+		return nil
+	}
+	for _, raw := range configs {
+		config, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := ensureWorkspaceManagedConfig(internalDirectory, config); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureWorkspaceManagedConfig(internalDirectory string, config map[string]any) error {
+	relPath := strings.TrimSpace(stringValueFromMap(config, "path"))
+	if relPath == "" {
+		return common.ErrInvalidArgument
+	}
+	cleanRelPath := filepath.Clean(relPath)
+	if filepath.IsAbs(cleanRelPath) || cleanRelPath == "." || strings.HasPrefix(cleanRelPath, ".."+string(os.PathSeparator)) || cleanRelPath == ".." {
+		return common.ErrInvalidArgument
+	}
+	target := filepath.Join(internalDirectory, cleanRelPath)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	format := strings.ToLower(strings.TrimSpace(stringValueFromMap(config, "format")))
+	switch format {
+	case "", "json":
+		return ensureWorkspaceManagedJSONConfig(target, config["content"], boolValueFromMap(config, "mergeMissing"))
+	default:
+		return fmt.Errorf("%w: unsupported workspace managed config format %q", common.ErrInvalidArgument, format)
+	}
+}
+
+func ensureWorkspaceManagedJSONConfig(target string, content any, mergeMissing bool) error {
+	defaults, ok := content.(map[string]any)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	if existingRaw, err := os.ReadFile(target); err == nil {
+		if !mergeMissing {
+			return nil
+		}
+		existing := map[string]any{}
+		if len(strings.TrimSpace(string(existingRaw))) > 0 {
+			if err := json.Unmarshal(existingRaw, &existing); err != nil {
+				return err
+			}
+		}
+		merged := mergeMissingMap(existing, defaults)
+		return writeStableJSONFile(target, merged)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return writeStableJSONFile(target, defaults)
+}
+
+func mergeMissingMap(existing map[string]any, defaults map[string]any) map[string]any {
+	if existing == nil {
+		existing = map[string]any{}
+	}
+	for key, value := range defaults {
+		if current, ok := existing[key]; ok {
+			currentMap, currentOK := current.(map[string]any)
+			defaultMap, defaultOK := value.(map[string]any)
+			if currentOK && defaultOK {
+				existing[key] = mergeMissingMap(currentMap, defaultMap)
+			}
+			continue
+		}
+		existing[key] = cloneContextValue(value)
+	}
+	return existing
+}
+
+func stringValueFromMap(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return value
+}
+
+func boolValueFromMap(values map[string]any, key string) bool {
+	if values == nil {
+		return false
+	}
+	value, _ := values[key].(bool)
+	return value
+}
+
+func writeStableJSONFile(target string, payload any) error {
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(target, raw, 0o644)
 }
 
 func runWorkspaceGitCommand(ctx context.Context, gitPath string, dir string, args ...string) error {
