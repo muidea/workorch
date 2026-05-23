@@ -322,6 +322,7 @@ func repairActionPackagePromptSection(input map[string]any) string {
 	section := map[string]any{}
 	for _, key := range []string{
 		"currentFailure",
+		"lastFailureDiagnostics",
 		"requiredOutput",
 		"structuredFailureSignals",
 		"targetSnapshots",

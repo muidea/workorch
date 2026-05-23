@@ -3209,6 +3209,9 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if currentFailure := repairActionCurrentFailure(input, rawFailedOutput...); len(currentFailure) > 0 {
 		pkg["currentFailure"] = currentFailure
 	}
+	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
+		pkg["lastFailureDiagnostics"] = diagnostics
+	}
 	for _, key := range []string{
 		failureOutputKeyClass,
 		failureOutputKeySignature,
@@ -3678,12 +3681,57 @@ func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[str
 	add("targetScope", stringFromMap(input, "failureTargetScope"))
 	add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
 	add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(input, "failureReason")))
+	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
+		add("stderrPreview", stringFromMap(diagnostics, "stderrPreview"))
+		add("stdoutPreview", stringFromMap(diagnostics, "stdoutPreview"))
+	}
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		add("diagnosticKind", stringFromMap(diagnostics, "kind"))
 		add("diagnosticStage", stringFromMap(diagnostics, "stage"))
 		add("diagnosticErrorDetail", stringFromMap(diagnostics, "errorDetail"))
 		if _, ok := ret["targetRef"]; !ok {
 			add("targetRef", stringFromMap(diagnostics, "targetRef"))
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func repairActionLastFailureDiagnostics(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 && len(rawFailedOutput) == 0 {
+		return nil
+	}
+	if diagnostics := mapFromValue(input["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		return compactFailureStepOutputForRuntimeContext(diagnostics)
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if len(output) == 0 {
+		return nil
+	}
+	if diagnostics := mapFromValue(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		return compactFailureStepOutputForRuntimeContext(diagnostics)
+	}
+	compact := compactFailureStepOutputForRuntimeContext(output)
+	if len(compact) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"error",
+		"reason",
+		"stage",
+		"command",
+		"args",
+		"exitCode",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"stdoutPreview",
+		"stderrPreview",
+	} {
+		if value, ok := compact[key]; ok && value != nil {
+			ret[key] = value
 		}
 	}
 	if len(ret) == 0 {

@@ -591,7 +591,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 	if repairActionPackage := recordFromAny(input["repairActionPackage"]); len(repairActionPackage) > 0 {
 		for key := range repairActionPackage {
 			switch strings.TrimSpace(key) {
-			case "currentExecutionProgress", "currentFailure", "previousRejectedOutputSummary", "coverageTargetSet":
+			case "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "previousRejectedOutputSummary", "coverageTargetSet":
 				refs = append(refs, "input.repairActionPackage."+key)
 			}
 		}
@@ -624,7 +624,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 		}
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
-		for _, key := range []string{"coverageTargetSet", "currentExecutionProgress", "requiredOutput", "targetSnapshots"} {
+		for _, key := range []string{"coverageTargetSet", "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "requiredOutput", "targetSnapshots"} {
 			if _, ok := pkg[key]; ok {
 				fields = append(fields, "input.repairActionPackage."+key)
 			}
@@ -894,7 +894,7 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		pkgOut := map[string]any{}
-		for _, key := range []string{"requiredOutput", "coverageRepairRequired", "coverageTargetSet", "currentExecutionProgress", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
+		for _, key := range []string{"requiredOutput", "coverageRepairRequired", "coverageTargetSet", "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "structuredFailureSignals", "patchRepairSuggestions", "previousRejectedOutputSummary", "strategyReassessment"} {
 			if value, ok := pkg[key]; ok {
 				pkgOut[key] = budgetProviderValue(value, 0, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 			}

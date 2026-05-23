@@ -560,6 +560,14 @@ func TestEnforceProviderRequestBudgetRecordsContextIntegrityAudit(t *testing.T) 
 					"coverageTargetToken": "target-1",
 					"targetText":          "target one",
 				}},
+				"currentFailure": map[string]any{
+					"failureClass":     "shell_command_failed",
+					"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1",
+					"stderrPreview":    "main.go:12:2: undefined: missingThing",
+				},
+				"lastFailureDiagnostics": map[string]any{
+					"stderrPreview": "main.go:12:2: undefined: missingThing",
+				},
 				"currentExecutionProgress": map[string]any{
 					"coverageGapCount": 1,
 				},
@@ -588,7 +596,9 @@ func TestEnforceProviderRequestBudgetRecordsContextIntegrityAudit(t *testing.T) 
 		"input.goal",
 		"input.dod",
 		"input.repairActionPackage.coverageTargetSet",
+		"input.repairActionPackage.currentFailure",
 		"input.repairActionPackage.currentExecutionProgress",
+		"input.repairActionPackage.lastFailureDiagnostics",
 		"input.repairActionPackage.requiredOutput",
 		"input.repairActionPackage.targetSnapshots",
 	} {

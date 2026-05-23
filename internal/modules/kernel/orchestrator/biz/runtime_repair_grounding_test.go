@@ -311,6 +311,14 @@ func TestRuntimeRepairActionPackageIncludesStructuredFailureSignalsAndForbiddenR
 	if len(actionPackage) == 0 {
 		t.Fatalf("repairActionPackage = %#v, want actionable package", input["repairActionPackage"])
 	}
+	lastFailure := mapFromValue(actionPackage["lastFailureDiagnostics"])
+	if !strings.Contains(stringFromMap(lastFailure, "stderrPreview"), "provider_matrix_test.go:51:32") {
+		t.Fatalf("lastFailureDiagnostics = %#v, want latest stderr preview preserved", lastFailure)
+	}
+	currentFailure := mapFromValue(actionPackage["currentFailure"])
+	if !strings.Contains(stringFromMap(currentFailure, "stderrPreview"), "provider_matrix_test.go:51:32") {
+		t.Fatalf("currentFailure = %#v, want actionable stderr preview preserved", currentFailure)
+	}
 	signals := mapFromValue(actionPackage["structuredFailureSignals"])
 	if !stringSliceContains(stringSliceFromValue(signals["targetRefs"]), "provider_matrix_test.go") {
 		t.Fatalf("repairActionPackage.structuredFailureSignals = %#v, want target ref", actionPackage["structuredFailureSignals"])
