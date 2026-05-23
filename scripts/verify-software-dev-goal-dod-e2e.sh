@@ -11,6 +11,21 @@ E2E_MARKER="software-dev-e2e-$VERIFY_SUFFIX"
 TMP_DIR="${WORKORCH_SOFTWARE_DEV_E2E_ARTIFACT_DIR:-$(mktemp -d)}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/software-dev-e2e-llm-mock.log"
+LOCK_DIR="/tmp/workorch-e2e-llm-config.lock"
+LOCK_HELD=0
+
+acquire_llm_config_lock() {
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    if mkdir "$LOCK_DIR" >/dev/null 2>&1; then
+      LOCK_HELD=1
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "timed out acquiring LLM config lock: $LOCK_DIR" >&2
+  return 1
+}
 
 cleanup() {
   if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
@@ -21,6 +36,9 @@ cleanup() {
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$LOCK_HELD" == "1" ]]; then
+    rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
   fi
 }
 
@@ -53,6 +71,24 @@ current = data
 for part in sys.argv[2].split("."):
     current = current[part]
 print(current)
+PY
+}
+
+json_path_or_empty() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    current = data
+    for part in sys.argv[2].split("."):
+        current = current[part]
+except Exception:
+    print("")
+else:
+    print(current)
 PY
 }
 
@@ -133,6 +169,93 @@ PY
   done
   cat "$output_file" >&2
   return 1
+}
+
+list_workspace_run_ids() {
+  local workspace_id="$1"
+  local output_file="$TMP_DIR/${workspace_id}-runs.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"
+  python3 - "$output_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+runs = data.get("runs") or []
+ids = []
+for item in runs:
+    run_id = str(item.get("id") or "").strip()
+    if run_id:
+        ids.append(run_id)
+print(",".join(ids))
+PY
+}
+
+recover_activation_run_id() {
+  local workspace_id="$1"
+  local known_run_ids_csv="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"; then
+      local recovered
+      recovered="$(python3 - "$output_file" "$known_run_ids_csv" <<'PY'
+import json
+import re
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+known = {item.strip() for item in sys.argv[2].split(",") if item.strip()}
+runs = data.get("runs") or []
+base_candidates = []
+fallback_candidates = []
+for item in runs:
+    run_id = str(item.get("id") or "").strip()
+    if not run_id or run_id in known:
+        continue
+    numeric_match = re.fullmatch(r"run-(\d+)", run_id)
+    if numeric_match:
+        base_candidates.append((int(numeric_match.group(1)), run_id))
+        continue
+    fallback_candidates.append(run_id)
+if base_candidates:
+    base_candidates.sort(reverse=True)
+    print(base_candidates[0][1])
+elif fallback_candidates:
+    print(sorted(fallback_candidates)[-1])
+PY
+)"
+      if [[ -n "$recovered" ]]; then
+        printf '%s\n' "$recovered"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+activate_workspace_execution() {
+  local workspace_id="$1"
+  local payload="$2"
+  local output_file="$3"
+  local known_run_ids_csv="$4"
+  local recovery_file="$TMP_DIR/${workspace_id}-activation-recovery-runs.json"
+  local run_id=""
+
+  if ! curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+    -H 'Content-Type: application/json' \
+    -d "$payload" >"$output_file"; then
+    echo "execution activation response unavailable, attempting run recovery" >&2
+  fi
+
+  run_id="$(json_path_or_empty "$output_file" "activation.run.id")"
+  if [[ -n "$run_id" ]]; then
+    printf '%s\n' "$run_id"
+    return 0
+  fi
+
+  echo "execution activation response missing valid run id, recovering from workspace runs" >&2
+  recover_activation_run_id "$workspace_id" "$known_run_ids_csv" "$recovery_file"
 }
 
 verify_software_dev_profile_snapshot() {
@@ -927,6 +1050,7 @@ trap report_failure ERR
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
+acquire_llm_config_lock
 start_mock_provider
 wait_mock
 wait_ready
@@ -976,10 +1100,12 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
 # Scenario-1: software-dev automatic repair and delivery closure.
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","priority":2}' >"$TMP_DIR/scenario1-activation.json"
-scenario1_run_id="$(json_path "$TMP_DIR/scenario1-activation.json" "activation.run.id")"
+scenario1_known_run_ids="$(list_workspace_run_ids "$workspace_id")"
+scenario1_run_id="$(activate_workspace_execution \
+  "$workspace_id" \
+  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","priority":2}' \
+  "$TMP_DIR/scenario1-activation.json" \
+  "$scenario1_known_run_ids")"
 wait_run_state "$scenario1_run_id" "completed" "$TMP_DIR/scenario1-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/snapshot" >"$TMP_DIR/scenario1-snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/observability" >"$TMP_DIR/scenario1-observability.json"
@@ -1035,10 +1161,12 @@ PY
 # then the server schedules a continuation run. Auto-governance may resolve
 # the ticket directly; otherwise this e2e resolves it explicitly so the
 # continuation contract is still verified under stricter configurations.
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario2-activation.json"
-scenario2_run_id="$(json_path "$TMP_DIR/scenario2-activation.json" "activation.run.id")"
+scenario2_known_run_ids="$(list_workspace_run_ids "$workspace_id")"
+scenario2_run_id="$(activate_workspace_execution \
+  "$workspace_id" \
+  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
+  "$TMP_DIR/scenario2-activation.json" \
+  "$scenario2_known_run_ids")"
 wait_run_state_any "$scenario2_run_id" "$TMP_DIR/scenario2-status.json" "superseded" "blocked_on_decision"
 scenario2_state="$(json_path "$TMP_DIR/scenario2-status.json" "status.state")"
 scenario2_resolution_mode="auto"
@@ -1142,10 +1270,12 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/
   -d '{"items":["空 workspace 不要求用户提供源码来源","生成最小可运行 Go 项目","go test ./... 必须包含有效断言并通过"]}' >"$TMP_DIR/scenario3-dod-initial.json"
 scenario3_dod_initial_id="$(json_path "$TMP_DIR/scenario3-dod-initial.json" "dod.id")"
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$scenario3_goal_initial_id"'","doDId":"'"$scenario3_dod_initial_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario3-activation.json"
-scenario3_run_id="$(json_path "$TMP_DIR/scenario3-activation.json" "activation.run.id")"
+scenario3_known_run_ids="$(list_workspace_run_ids "$scenario3_workspace_id")"
+scenario3_run_id="$(activate_workspace_execution \
+  "$scenario3_workspace_id" \
+  '{"goalId":"'"$scenario3_goal_initial_id"'","doDId":"'"$scenario3_dod_initial_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
+  "$TMP_DIR/scenario3-activation.json" \
+  "$scenario3_known_run_ids")"
 wait_run_state "$scenario3_run_id" "blocked_on_decision" "$TMP_DIR/scenario3-blocked-status.json"
 scenario3_ticket_id="$(json_path "$TMP_DIR/scenario3-blocked-status.json" "status.blockingTicketId")"
 scenario3_ticket_path="$(url_encode "$scenario3_ticket_id")"
@@ -1338,29 +1468,13 @@ if errors:
 PY
 
 # Scenario-4: weak verification evidence must not satisfy DoD and must enter repair/escalation.
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario4-activation.json"
-scenario4_run_id="$(json_path "$TMP_DIR/scenario4-activation.json" "activation.run.id")"
-scenario4_activation_state="$(json_path "$TMP_DIR/scenario4-activation.json" "activation.run.state")"
-if [[ "$scenario4_activation_state" == "blocked_on_decision" || "$scenario4_activation_state" == "superseded" ]]; then
-  python3 - "$TMP_DIR/scenario4-activation.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
-import json
-import sys
-
-activation = json.load(open(sys.argv[1], encoding="utf-8")).get("activation") or {}
-run = activation.get("run") or {}
-status = {
-    "id": run.get("id", ""),
-    "workspaceId": run.get("workspaceId", ""),
-    "state": run.get("state", ""),
-    "blockingTicketId": run.get("blockingTicketId", ""),
-}
-json.dump({"status": status}, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
-PY
-else
-  wait_run_state_any "$scenario4_run_id" "$TMP_DIR/scenario4-blocked-status.json" "blocked_on_decision" "superseded"
-fi
+scenario4_known_run_ids="$(list_workspace_run_ids "$scenario3_workspace_id")"
+scenario4_run_id="$(activate_workspace_execution \
+  "$scenario3_workspace_id" \
+  '{"goalId":"'"$scenario3_goal_added_id"'","doDId":"'"$scenario3_dod_added_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
+  "$TMP_DIR/scenario4-activation.json" \
+  "$scenario4_known_run_ids")"
+wait_run_state_any "$scenario4_run_id" "$TMP_DIR/scenario4-blocked-status.json" "blocked_on_decision" "superseded"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario4_run_id/snapshot" >"$TMP_DIR/scenario4-snapshot.json"
 
 python3 - "$TMP_DIR/scenario4-snapshot.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
@@ -1419,10 +1533,12 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/
   -d '{"items":["no-actionable continuation 必须进入 validation follow-up 并完成 DoD 评估"]}' >"$TMP_DIR/scenario5-dod.json"
 scenario5_dod_id="$(json_path "$TMP_DIR/scenario5-dod.json" "dod.id")"
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$scenario5_goal_id"'","doDId":"'"$scenario5_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario5-activation.json"
-scenario5_run_id="$(json_path "$TMP_DIR/scenario5-activation.json" "activation.run.id")"
+scenario5_known_run_ids="$(list_workspace_run_ids "$scenario5_workspace_id")"
+scenario5_run_id="$(activate_workspace_execution \
+  "$scenario5_workspace_id" \
+  '{"goalId":"'"$scenario5_goal_id"'","doDId":"'"$scenario5_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
+  "$TMP_DIR/scenario5-activation.json" \
+  "$scenario5_known_run_ids")"
 wait_run_state "$scenario5_run_id" "completed" "$TMP_DIR/scenario5-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario5_run_id/snapshot" >"$TMP_DIR/scenario5-snapshot.json"
 
@@ -1467,10 +1583,12 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/
   -d '{"items":["graph follow-up 超限后必须进入 assessment-only 并完成 DoD 评估","Run Snapshot 必须暴露 graph expansion limit 与 assessment-only closure trace"]}' >"$TMP_DIR/scenario6-dod.json"
 scenario6_dod_id="$(json_path "$TMP_DIR/scenario6-dod.json" "dod.id")"
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/execution-activations" \
-  -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$scenario6_goal_id"'","doDId":"'"$scenario6_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' >"$TMP_DIR/scenario6-activation.json"
-scenario6_run_id="$(json_path "$TMP_DIR/scenario6-activation.json" "activation.run.id")"
+scenario6_known_run_ids="$(list_workspace_run_ids "$scenario6_workspace_id")"
+scenario6_run_id="$(activate_workspace_execution \
+  "$scenario6_workspace_id" \
+  '{"goalId":"'"$scenario6_goal_id"'","doDId":"'"$scenario6_dod_id"'","llmProviderId":"verify","dialogLanguage":"zh-CN","priority":2}' \
+  "$TMP_DIR/scenario6-activation.json" \
+  "$scenario6_known_run_ids")"
 wait_run_state "$scenario6_run_id" "completed" "$TMP_DIR/scenario6-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/snapshot" >"$TMP_DIR/scenario6-snapshot.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/observability" >"$TMP_DIR/scenario6-observability.json"

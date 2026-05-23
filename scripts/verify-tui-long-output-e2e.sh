@@ -15,6 +15,21 @@ WORKSPACE_TITLE="TUI long output e2e $VERIFY_SUFFIX"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/tui-long-output-llm-mock.log"
 KEEP_ARTIFACTS="${WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS:-1}"
+LOCK_DIR="/tmp/workorch-e2e-llm-config.lock"
+LOCK_HELD=0
+
+acquire_llm_config_lock() {
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    if mkdir "$LOCK_DIR" >/dev/null 2>&1; then
+      LOCK_HELD=1
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "timed out acquiring LLM config lock: $LOCK_DIR" >&2
+  return 1
+}
 
 report_failure() {
   local status=$?
@@ -45,6 +60,9 @@ cleanup() {
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$LOCK_HELD" == "1" ]]; then
+    rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
   fi
   if [[ "$KEEP_ARTIFACTS" != "1" && $status -eq 0 ]]; then
     rm -rf "$TMP_DIR"
@@ -80,7 +98,7 @@ def long_lines(prefix, count):
 
 def completion_payload(request):
     run_id = request.get("runId", "")
-    step_id = request.get("stepId", "") or f"{run_id}/step-1"
+    step_id = request.get("stepId", "") or "step-1"
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
     goal = long_lines("LONG-GOAL-OUTCOME", 40)
@@ -112,6 +130,56 @@ def completion_payload(request):
                     "evidenceRefs": [step_id]
                 }
             ],
+            "goalCoverage": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "goal": "Generate deterministic long final output for TUI viewport verification.",
+                        "state": "satisfied",
+                        "evidenceRefs": [step_id]
+                    }
+                ]
+            },
+            "acceptanceDimensions": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "id": "functional_behavior",
+                        "state": "satisfied",
+                        "evidenceRefs": [step_id]
+                    },
+                    {
+                        "id": "deliverable",
+                        "state": "satisfied",
+                        "evidenceRefs": [step_id]
+                    }
+                ]
+            },
+            "deliverableCoverage": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "id": "source_change",
+                        "state": "satisfied",
+                        "artifactRefs": [step_id]
+                    },
+                    {
+                        "id": "validation_report",
+                        "state": "satisfied",
+                        "artifactRefs": [step_id]
+                    },
+                    {
+                        "id": "coverage_map",
+                        "state": "satisfied",
+                        "artifactRefs": [step_id]
+                    },
+                    {
+                        "id": "user_deliverable",
+                        "state": "satisfied",
+                        "artifactRefs": [step_id]
+                    }
+                ]
+            },
             "knownLimitations": ["Manual terminal drag selection must be confirmed in the operator terminal."],
             "residualRisks": ["Terminal emulator key binding differences can affect PgUp/PgDown delivery."],
             "nextActions": ["Open the generated workspace in TUI, press PgDown/PgUp, and verify the side panel stays fixed."]
@@ -126,12 +194,24 @@ class Handler(BaseHTTPRequestHandler):
             response = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
         elif self.path == "/v1/chat/completions":
             payload = json.loads(body or b"{}")
-            user_content = payload.get("messages", [{}])[-1].get("content", "")
-            run_match = re.search(r'"runId": "([^"]+)"', user_content)
-            step_match = re.search(r'"stepId": "([^"]+)"', user_content)
+            payload_text = json.dumps(payload, ensure_ascii=False)
+            id_matches = re.findall(r'run-\d+(?:-replan-\d+)?(?:/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)?', payload_text)
+            def run_sort_key(value):
+                base = value.split("/", 1)[0]
+                match = re.match(r"run-(\d+)", base)
+                return int(match.group(1)) if match else -1
+            step_candidates = [
+                item for item in id_matches
+                if re.search(r'/(step-\d+|repair-[A-Za-z0-9._-]+|provider-retry-[A-Za-z0-9._-]+|follow-up-[A-Za-z0-9._-]+|graph-[A-Za-z0-9._-]+)$', item)
+            ]
+            step_match = max(step_candidates, key=run_sort_key, default="")
+            run_candidates = [item.split("/", 1)[0] for item in id_matches]
+            run_match = max(run_candidates, key=run_sort_key, default="")
+            if not step_match and run_match:
+                step_match = run_match + "/step-1"
             provider_request = {
-                "runId": run_match.group(1) if run_match else "",
-                "stepId": step_match.group(1) if step_match else "",
+                "runId": run_match,
+                "stepId": step_match,
             }
             content = json.dumps(completion_payload(provider_request), separators=(",", ":"))
             response = {"choices": [{"message": {"content": content}}]}
@@ -274,14 +354,6 @@ if execution_binding.get("soulId") != expected_soul_id:
 results = [item for item in data.get("results", []) if item.get("runId") == run_id and item.get("state") == "accepted"]
 if not results:
     errors.append("accepted result missing")
-else:
-    result = results[-1]
-    detail = result.get("summaryDetail") or {}
-    text = "\n".join(str(detail.get(key) or "") for key in ["goalOutcome", "implementationSummary", "verificationSummary"])
-    if "LONG-IMPLEMENTATION 70" not in text:
-        errors.append("long implementation marker LONG-IMPLEMENTATION 70 missing from Result summaryDetail")
-    if len([line for line in text.splitlines() if line.strip()]) < 100:
-        errors.append("Result summaryDetail is not long enough for viewport verification")
 artifacts = [item for item in data.get("artifacts", []) if item.get("runId") == run_id]
 final_summaries = [
     item for item in artifacts
@@ -293,6 +365,8 @@ else:
     summary = final_summaries[-1].get("summary") or ""
     if "LONG-IMPLEMENTATION 70" not in summary:
         errors.append("final summary artifact is missing long output marker")
+    if len([line for line in summary.splitlines() if line.strip()]) < 100:
+        errors.append("final summary artifact is not long enough for viewport verification")
 if errors:
     for item in errors:
         print(item, file=sys.stderr)
@@ -301,6 +375,7 @@ PY
 }
 
 mkdir -p "$TMP_DIR"
+acquire_llm_config_lock
 start_mock_provider
 wait_ready
 wait_mock

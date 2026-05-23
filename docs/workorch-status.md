@@ -1,5 +1,30 @@
 # workorch Status
 
+## Active status
+
+- 2026-05-23 closure:
+  - `POST /api/v1/workorch/workspaces/{workspaceId}/execution-activations` no longer builds a full synchronous `WorkspaceSnapshot` during activation. The activation path now returns a lightweight snapshot projection so long-running workspaces do not pay the full read-model cost before the HTTP response is written.
+  - deployed verification passed after this change, including:
+    `verify-software-dev-goal-dod-e2e.sh`,
+    `verify-software-requirement-development-orchestration.sh`,
+    `verify-workspace-web-search-e2e.sh`,
+    `verify-weather-ticket-approval-query.sh`,
+    `verify-tui-long-output-e2e.sh`,
+    and `make verify-e2e-full`.
+  - e2e scripts that temporarily rewrite global LLM configuration now take a shared lock (`/tmp/workorch-e2e-llm-config.lock`) so concurrent verification runs do not corrupt each other's provider configuration.
+
+## Active TODO
+
+- Activation response follow-up:
+  - add explicit latency/size regression coverage for `execution-activations`, so future changes cannot silently reintroduce full workspace snapshot reads on the synchronous response path.
+  - add service-side observability for activation critical path segments, especially activation create/start, run status notification, and any post-activation cache warming or read-model refresh work.
+- Verification isolation:
+  - extend the shared LLM configuration lock pattern to any future e2e or helper script that mutates global runtime provider configuration.
+  - consider introducing per-test ephemeral provider namespaces or config overlays so deployed e2e can stop depending on a process-global LLM configuration switch.
+- Read-model cost control:
+  - continue reducing default reliance on full workspace snapshots in verification scripts and UI refresh flows when run status, run snapshot, artifacts, or payload refs are sufficient.
+  - evaluate whether workspace board and workspace detail activation flows should treat activation responses as lightweight acknowledgements and always refresh detailed state through explicit follow-up reads.
+
 ## Current repository state
 
 - module: `github.com/muidea/workorch`

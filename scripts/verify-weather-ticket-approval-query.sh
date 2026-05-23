@@ -35,6 +35,21 @@ KEEP_ARTIFACTS="${WORKORCH_WEATHER_GOVERNANCE_KEEP_ARTIFACTS:-1}"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/weather-governance-llm-mock.log"
 WEATHER_HELPER="$MCP_ENDPOINT_DIR/weather_mcp_helper.py"
+LOCK_DIR="/tmp/workorch-e2e-llm-config.lock"
+LOCK_HELD=0
+
+acquire_llm_config_lock() {
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    if mkdir "$LOCK_DIR" >/dev/null 2>&1; then
+      LOCK_HELD=1
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "timed out acquiring LLM config lock: $LOCK_DIR" >&2
+  return 1
+}
 
 cleanup() {
   local status=$?
@@ -46,6 +61,9 @@ cleanup() {
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$LOCK_HELD" == "1" ]]; then
+    rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
   fi
   if [[ "$KEEP_ARTIFACTS" != "1" && $status -eq 0 ]]; then
     rm -rf "$TMP_DIR"
@@ -392,6 +410,25 @@ def parse_provider_request(payload):
     return request
 
 
+def goal_text_from_request(request):
+    input_payload = request.get("input") or {}
+    for container_key in ("executionContextPackage", "executionContext"):
+        container = input_payload.get(container_key) or {}
+        goal = container.get("goal") or {}
+        text = goal.get("text") or goal.get("Text")
+        if text:
+            return text
+    goal = input_payload.get("goal") or {}
+    return goal.get("text") or goal.get("Text") or "本次是指定城市天气查询治理验收"
+
+
+def previous_evidence_ref(request):
+    step_input = request.get("input") or {}
+    raw = request.get("raw", "")
+    previous_match = re.search(r'"previousStepId"\s*:\s*"([^"]+)"', raw)
+    return step_input.get("previousStepId") or (previous_match.group(1) if previous_match else "") or request.get("stepId") or request.get("runId") or "weather-current"
+
+
 def decision_payload(request):
     run_id = request.get("runId", "")
     step_id = request.get("stepId", "")
@@ -400,9 +437,20 @@ def decision_payload(request):
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
 
-    if step_input.get("graphFollowUp") or step_input.get("previousStepOutput") or '"graphFollowUp": true' in raw or '"previousStepOutput"' in raw:
-        previous_match = re.search(r'"previousStepId"\s*:\s*"([^"]+)"', raw)
-        previous_step_id = step_input.get("previousStepId") or (previous_match.group(1) if previous_match else "weather-current")
+    assessment_follow_up = (
+        step_input.get("graphFollowUp")
+        or step_input.get("previousStepOutput")
+        or step_input.get("assessmentOnly")
+        or step_input.get("assessmentOnlyContractCorrection")
+        or "follow-up-graph" in step_id
+        or "assessment-correction" in step_id
+        or '"graphFollowUp"' in raw
+        or '"previousStepOutput"' in raw
+        or '"assessmentOnly"' in raw
+        or '"assessmentOnlyContractCorrection"' in raw
+    )
+    if assessment_follow_up:
+        previous_step_id = previous_evidence_ref(request)
         return {
             "thoughtSummary": f"{PROVINCE}{CITY} weather evidence was collected through the approved MCP tool call.",
             "completionState": "completed",
@@ -431,6 +479,14 @@ def decision_payload(request):
                         "evidenceRefs": [previous_step_id],
                     },
                 ],
+                "goalCoverage": {
+                    "satisfied": True,
+                    "items": [{
+                        "requirement": goal_text_from_request(request),
+                        "state": "satisfied",
+                        "evidenceRefs": [previous_step_id],
+                    }],
+                },
             },
         }
 
@@ -490,6 +546,15 @@ def decision_payload(request):
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        if self.path == "/v1/embeddings":
+            response = {"data": [{"embedding": [0.12, 0.23, 0.34]}]}
+            encoded = json.dumps(response, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         if self.path != "/v1/chat/completions":
             self.send_response(404)
             self.end_headers()
@@ -581,11 +646,11 @@ updated_providers.append({
     "disabled": False,
     "chatCompletions": True,
     "streaming": False,
-    "nonChatOperations": [],
+    "nonChatOperations": ["embeddings"],
 })
 update = {
     "defaultProviderId": provider_id,
-    "defaultEmbeddingProviderId": original.get("defaultEmbeddingProviderId", ""),
+    "defaultEmbeddingProviderId": provider_id,
     "providers": updated_providers,
 }
 with open(update_path, "w", encoding="utf-8") as handle:
@@ -635,13 +700,15 @@ wait_run_state() {
 }
 
 validate_snapshot() {
-  python3 - "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$ticket_id" "$approval_id" "$COUNTRY" "$PROVINCE" "$CITY" <<'PY'
+  python3 - "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$ticket_id" "$approval_id" "$COUNTRY" "$PROVINCE" "$CITY" "$BASE_URL" "$workspace_id" <<'PY'
 import json
 import sys
+import urllib.parse
+import urllib.request
 
 snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
 observability = json.load(open(sys.argv[2], encoding="utf-8"))["observability"]
-ticket_id, approval_id, country, province, city = sys.argv[3:]
+ticket_id, approval_id, country, province, city, base_url, workspace_id = sys.argv[3:]
 run = snapshot["run"]
 routing = (run.get("executionContext") or {}).get("soulRouting") or {}
 bindings = routing.get("bindings") or {}
@@ -655,6 +722,18 @@ approvals = snapshot.get("approvals") or []
 results = snapshot.get("results") or []
 artifacts = snapshot.get("artifacts") or []
 errors = []
+
+def read_runtime_payload(step_id):
+    if not step_id:
+        return {}
+    ref = f"workorch://workspaces/{workspace_id}/runs/{run['id']}/steps/{step_id}/output.json"
+    url = base_url.rstrip("/") + "/api/v1/workorch/runtime/payloads?ref=" + urllib.parse.quote(ref, safe="")
+    try:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        errors.append(f"failed to read runtime payload {ref}: {exc}")
+        return {}
 
 if run.get("state") != "completed":
     errors.append(f"run state is {run.get('state')!r}, want completed: {run.get('failureReason', '')}")
@@ -686,6 +765,12 @@ else:
     output = selected_step.get("output") or {}
     result = output.get("result") or {}
     structured = result.get("structuredContent") or {}
+    if not structured:
+        raw_output = read_runtime_payload(selected_step.get("id"))
+        if raw_output:
+            output = raw_output
+            result = output.get("result") or {}
+            structured = result.get("structuredContent") or {}
     query = structured.get("query") or {}
     current = structured.get("current") or {}
     if output.get("transport") != "stdio":
@@ -767,6 +852,8 @@ PY
 
 trap report_failure ERR
 trap cleanup EXIT
+
+acquire_llm_config_lock
 
 mkdir -p "$TMP_DIR"
 cd "$ROOT_DIR"

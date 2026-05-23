@@ -1808,8 +1808,18 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	if item.Snapshot.Workspace.ID != string(workspace.ID) {
 		t.Fatalf("activation snapshot workspace=%+v, want selected workspace", item.Snapshot.Workspace)
 	}
-	if countingWorkspaces.getCalls != 3 {
-		t.Fatalf("workspace Get calls = %d, want activation/start/run snapshot reads without extra WorkspaceSnapshot Get", countingWorkspaces.getCalls)
+	if countingWorkspaces.getCalls != 2 {
+		t.Fatalf("workspace Get calls = %d, want lightweight activation path without extra full workspace snapshot read", countingWorkspaces.getCalls)
+	}
+	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Runs[0].ID != item.Run.ID {
+		t.Fatalf("activation snapshot runs = %+v, want only current activation run", item.Snapshot.Runs)
+	}
+	if len(item.Snapshot.EventRecords) != 0 ||
+		len(item.Snapshot.Results) != 0 ||
+		len(item.Snapshot.Artifacts) != 0 ||
+		len(item.Snapshot.Decisions) != 0 ||
+		len(item.Snapshot.Approvals) != 0 {
+		t.Fatalf("activation snapshot = %+v, want lightweight activation projection without heavy workspace evidence", item.Snapshot)
 	}
 }
 

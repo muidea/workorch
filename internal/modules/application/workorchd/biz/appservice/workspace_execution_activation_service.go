@@ -97,24 +97,18 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
-				runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
+				startedRun, err := exports.Repositories.Runs.Get(ctx, runID)
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
-				snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
-				if err != nil {
-					return WorkspaceExecutionActivation{}, err
-				}
+				snapshot := activationSnapshot(workspace, startedRun, goal, dod)
 				return WorkspaceExecutionActivation{
 					Workspace: snapshot.Workspace,
-					Run:       runSnapshot.Run,
+					Run:       mapRun(startedRun),
 					Snapshot:  snapshot,
 				}, nil
 			}
-			snapshot, err := readWorkspaceSnapshotFromExports(ctx, session, common.WorkspaceID(workspaceID))
-			if err != nil {
-				return WorkspaceExecutionActivation{}, err
-			}
+			snapshot := activationSnapshot(workspace, run, goal, dod)
 			return WorkspaceExecutionActivation{
 				Workspace: snapshot.Workspace,
 				Run:       mapRun(run),
@@ -136,19 +130,56 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
-	runSnapshot, err := readRunSnapshotFromExports(ctx, session, runID)
+	startedRun, err := exports.Repositories.Runs.Get(ctx, runID)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
-	snapshot, err := readWorkspaceSnapshotFromExportsWithRunSnapshot(ctx, session, common.WorkspaceID(workspaceID), &runSnapshot)
-	if err != nil {
-		return WorkspaceExecutionActivation{}, err
-	}
+	snapshot := activationSnapshot(workspace, startedRun, goal, dod)
 	return WorkspaceExecutionActivation{
 		Workspace: snapshot.Workspace,
-		Run:       runSnapshot.Run,
+		Run:       mapRun(startedRun),
 		Snapshot:  snapshot,
 	}, nil
+}
+
+func activationSnapshot(workspace *workspacemodel.Workspace, run *runmodel.Run, goal *workspacemodel.Goal, dod *workspacemodel.DoD) WorkspaceSnapshot {
+	projectedWorkspace := mapWorkspaceWithRunProjection(workspace, run)
+	if run == nil {
+		ret := WorkspaceSnapshot{
+			Workspace: projectedWorkspace,
+		}
+		if goal != nil {
+			ret.Goals = []Goal{mapGoal(goal)}
+		}
+		if dod != nil {
+			ret.DoDs = []DoD{mapDoD(dod)}
+		}
+		ret.Outcome = mapWorkspaceOutcome(ret)
+		return ret
+	}
+
+	runView := mapRun(run)
+	runSnapshot := RunSnapshot{
+		Workspace: projectedWorkspace,
+		Run:       runView,
+	}
+	runSnapshot.TaskProgress = mapTaskProgress(runSnapshot)
+	runSnapshot.Outcome = mapRunOutcome(runSnapshot)
+
+	ret := WorkspaceSnapshot{
+		Workspace:    projectedWorkspace,
+		Run:          &runView,
+		Outcome:      mapWorkspaceOutcome(WorkspaceSnapshot{Workspace: projectedWorkspace, Runs: []Run{runView}, TaskProgress: runSnapshot.TaskProgress}),
+		TaskProgress: runSnapshot.TaskProgress,
+		Runs:         []Run{runView},
+	}
+	if goal != nil {
+		ret.Goals = []Goal{mapGoal(goal)}
+	}
+	if dod != nil {
+		ret.DoDs = []DoD{mapDoD(dod)}
+	}
+	return ret
 }
 
 func isActivationTerminalRunState(state common.RunState) bool {

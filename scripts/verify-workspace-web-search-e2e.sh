@@ -15,6 +15,21 @@ LLM_MOCK_PID=""
 WEB_MOCK_PID=""
 LLM_MOCK_LOG="$TMP_DIR/llm-mock.log"
 WEB_MOCK_LOG="$TMP_DIR/web-mock.log"
+LOCK_DIR="/tmp/workorch-e2e-llm-config.lock"
+LOCK_HELD=0
+
+acquire_llm_config_lock() {
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS <= deadline )); do
+    if mkdir "$LOCK_DIR" >/dev/null 2>&1; then
+      LOCK_HELD=1
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "timed out acquiring LLM config lock: $LOCK_DIR" >&2
+  return 1
+}
 
 report_failure() {
   local status=$?
@@ -53,6 +68,9 @@ cleanup() {
     kill "$WEB_MOCK_PID" >/dev/null 2>&1 || true
     wait "$WEB_MOCK_PID" >/dev/null 2>&1 || true
   fi
+  if [[ "$LOCK_HELD" == "1" ]]; then
+    rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
+  fi
   rm -rf "$TMP_DIR"
 }
 
@@ -70,6 +88,8 @@ print(current)
 PY
 }
 
+acquire_llm_config_lock
+
 start_llm_mock() {
   cat >"$TMP_DIR/llm_mock_provider.py" <<'PY'
 import json
@@ -79,6 +99,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 calls = {}
 source_url = "https://93.184.216.34/workorch-web-search-source"
+
+def provider_request_from_payload(payload):
+    messages = payload.get("messages") or []
+    merged_content = "\n".join(str(item.get("content", "")) for item in messages)
+    run_matches = re.findall(r'"runId"\s*:\s*"([^"]+)"', merged_content)
+    if not run_matches:
+        run_matches = re.findall(r'\brunId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
+    step_matches = re.findall(r'"stepId"\s*:\s*"([^"]+)"', merged_content)
+    if not step_matches:
+        step_matches = re.findall(r'\bstepId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
+    return {
+        "runId": run_matches[-1] if run_matches else "",
+        "stepId": step_matches[-1] if step_matches else "",
+    }
 
 def decision_payload(run_id, step_id):
     if run_id == "probe":
@@ -125,7 +159,17 @@ def decision_payload(run_id, step_id):
                     "state": "satisfied",
                     "evidenceRefs": [step_id]
                 }
-            ]
+            ],
+            "goalCoverage": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "requirement": "verify governed Web Search source traceability",
+                        "state": "satisfied",
+                        "evidenceRefs": [step_id]
+                    }
+                ]
+            }
         }
     }
 
@@ -146,12 +190,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         size = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(size))
-        user_content = payload["messages"][-1]["content"]
-        run_match = re.search(r'"runId": "([^"]+)"', user_content)
-        step_match = re.search(r'"stepId": "([^"]+)"', user_content)
-        run_id = run_match.group(1) if run_match else ""
-        step_id = step_match.group(1) if step_match else ""
-        content = json.dumps(decision_payload(run_id, step_id), separators=(",", ":"))
+        provider_request = provider_request_from_payload(payload)
+        content = json.dumps(decision_payload(provider_request["runId"], provider_request["stepId"]), separators=(",", ":"))
         response = {"choices": [{"message": {"content": content}}]}
         encoded = json.dumps(response).encode("utf-8")
         self.send_response(200)
@@ -327,11 +367,11 @@ updated_llm_providers.append({
     "disabled": False,
     "chatCompletions": True,
     "streaming": False,
-    "nonChatOperations": [],
+    "nonChatOperations": ["embeddings"],
 })
 updated_llm = {
     "defaultProviderId": llm_provider_id,
-    "defaultEmbeddingProviderId": original_llm.get("defaultEmbeddingProviderId", ""),
+    "defaultEmbeddingProviderId": llm_provider_id,
     "providers": updated_llm_providers,
 }
 
