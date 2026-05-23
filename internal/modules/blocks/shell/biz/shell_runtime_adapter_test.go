@@ -184,6 +184,40 @@ func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPrefersWorkEvidenceMarkersOverZeroWorkMarkers(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "printf '? pkg [no test files]\\n=== RUN   TestExample\\n--- PASS: TestExample (0.00s)\\nok  pkg 0.001s\\n'"},
+			"evidencePolicies": []map[string]any{
+				{
+					"appliesTo":           "shell/command",
+					"commandName":         "sh",
+					"argsContain":         []string{"-c"},
+					"zeroWorkMarkers":     []string{"[no test files]"},
+					"workEvidenceMarkers": []string{"=== RUN", "--- PASS:", "ok  "},
+					"qualityOnZeroWork":   string(common.EvidenceQualityInconclusive),
+					"evidenceReason":      "configured zero-work marker matched",
+					"evidenceTags":        []string{"test", "zero_work"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	if result.Output["zeroWork"] == true {
+		t.Fatalf("output = %+v, want work evidence to override zero-work marker", result.Output)
+	}
+	if result.Output["evidenceQuality"] == string(common.EvidenceQualityInconclusive) {
+		t.Fatalf("output = %+v, want evidence quality not inconclusive", result.Output)
+	}
+}
+
 func TestSanitizeSuccessfulCommandStderrStripsCurlProgressMeter(t *testing.T) {
 	progress := "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n" +
 		"                                 Dload  Upload   Total   Spent    Left  Speed\n" +

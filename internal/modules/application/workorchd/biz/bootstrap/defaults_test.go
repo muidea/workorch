@@ -51,6 +51,13 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
+	policy := item.EvidencePolicies[0]
+	if _, ok := policy["workEvidenceMarkers"]; !ok {
+		t.Fatalf("software-dev evidence policy missing workEvidenceMarkers: %+v", policy)
+	}
+	markers := policy["workEvidenceMarkers"].([]any)
+	assertStringListContains(t, markers, "=== RUN")
+	assertStringListContains(t, markers, "--- PASS:")
 }
 
 func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {

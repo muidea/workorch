@@ -61,6 +61,11 @@ func shellEvidencePolicyZeroWork(policy map[string]any, output map[string]any) b
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
+	for _, marker := range evidencePolicyStringSlice(policy["workEvidenceMarkers"]) {
+		if marker != "" && strings.Contains(text, strings.ToLower(marker)) {
+			return false
+		}
+	}
 	for _, marker := range evidencePolicyStringSlice(policy["zeroWorkMarkers"]) {
 		if marker != "" && strings.Contains(text, strings.ToLower(marker)) {
 			return true

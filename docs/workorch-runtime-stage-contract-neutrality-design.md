@@ -80,6 +80,8 @@ Runtime 统一使用中立阶段，不使用业务阶段名称作为核心状态
 
 Acceptance 阶段允许 runtime 做领域中立的结构归一化：当 LLM 已声明 `dodAssessment` satisfied，但遗漏子项 `state` 或 `evidenceRefs` 时，runtime 可以从当前 run 已完成、非弱证据、可追溯的 shell/tool/patch/validation evidence 中补齐引用。该能力只修正结构缺口，不判断具体业务是否正确；若没有可用证据，或证据属于 read-only、zero-work、inconclusive、invalid，则必须保持失败并进入 repair / rejected result / decision 收口。
 
+聚合命令的 evidence quality 判定必须支持正反两类 profile 配置：`zeroWorkMarkers` 表示弱证据信号，`workEvidenceMarkers` 表示同一输出中已经存在真实工作证据。当两类标记同时出现时，runtime 只能按通用优先级判定为非 zero-work，不能因为某个子目标或子包输出局部 zero-work 标记而否定整条聚合命令的有效工作证据。具体 marker 内容仍属于 profile/template 数据，core 不内置语言、测试框架或业务领域规则。
+
 ## 阶段转换合同
 
 ### 标准路径

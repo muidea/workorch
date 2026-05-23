@@ -158,6 +158,11 @@
           "[no test files]",
           "0 tests"
         ],
+        "workEvidenceMarkers": [
+          "=== RUN",
+          "--- PASS:",
+          "ok  "
+        ],
         "qualityOnZeroWork": "inconclusive",
         "zeroWork": true,
         "evidenceTags": ["software-dev", "test", "zero_work"],

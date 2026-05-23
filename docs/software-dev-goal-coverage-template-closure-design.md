@@ -125,6 +125,7 @@ Core 不判断入口命名是否合理，只校验声明、产物和证据之间
 Profile 可以声明：
 
 - weak evidence marker。
+- work evidence marker，用于聚合命令中抵消局部 weak / zero-work marker。
 - minimum assertion expectation。
 - required evidence kinds。
 - required branch categories。
@@ -132,6 +133,7 @@ Profile 可以声明：
 Core 只执行：
 
 - 标记 weak / inconclusive evidence。
+- 当同一输出同时命中 work evidence marker 和 zero-work marker 时，优先保留有效工作证据，不把整条聚合命令降级为 zero-work。
 - 阻止 weak evidence 自动支撑 satisfied。
 - 把 quality gap 转成结构化 repair diagnostic。
 
