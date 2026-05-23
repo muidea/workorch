@@ -214,8 +214,16 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
 	m.approvals = append([]backend.ApprovalInfo(nil), msg.Approvals...)
 
-	run := msg.ActiveRun
+	workspaceHasLive := msg.WorkspaceHasLive || msg.Workspace.ActiveRunID != ""
+	activeRun := msg.ActiveRun
+	displayRun := msg.DisplayRun
+	if displayRun == nil {
+		displayRun = activeRun
+	}
+	run := displayRun
 	if run == nil {
+		m.activeRunID = ""
+		m.running = false
 		if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 			m.dodItems = append([]string(nil), msg.DoD.Items...)
 		}
@@ -224,7 +232,11 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.syncBlockingApprovalFromList()
 		return
 	}
-	m.activeRunID = string(run.ID)
+	if workspaceHasLive && activeRun != nil {
+		m.activeRunID = string(activeRun.ID)
+	} else {
+		m.activeRunID = ""
+	}
 	goalText := effectiveGoalText(run)
 	if goalText == "" && msg.Goal != nil {
 		goalText = strings.TrimSpace(msg.Goal.Text)
@@ -265,7 +277,11 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Snapshot != nil && payload[events.PayloadKeyFailureReason] == "" {
 		payload[events.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
 	}
-	m.applyRunState(state, payload)
+	if workspaceHasLive {
+		m.applyRunState(state, payload)
+	} else {
+		m.applyWorkspaceProgress(msg.Workspace.State)
+	}
 	if msg.Status != nil && msg.Status.CurrentStepKind != "" && m.progress == progressRunning {
 		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
 	}
@@ -396,15 +412,19 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 		m.progress = progressRunning
 		m.progressText = string(state) + "; waiting for progress or final result"
 	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+		m.running = false
 		m.progress = progressWaitingDecision
 		m.progressText = "Waiting for workspace input"
 	case common.WorkspaceStateCompleted:
+		m.running = false
 		m.progress = progressCompleted
 		m.progressText = "Completed"
 	case common.WorkspaceStateFailed:
+		m.running = false
 		m.progress = progressFailed
 		m.progressText = "Workspace failed"
 	default:
+		m.running = false
 		m.progress = progressIdle
 		m.progressText = ""
 	}

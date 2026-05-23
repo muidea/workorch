@@ -10,16 +10,18 @@ type WorkspaceListMsg struct {
 }
 
 type WorkspaceContextMsg struct {
-	Workspace *backend.WorkspaceInfo
-	Snapshot  *backend.WorkspaceSnapshotInfo
-	Runs      []backend.RunInfo
-	ActiveRun *backend.RunInfo
-	Status    *backend.RunStatusInfo
-	Goal      *backend.GoalInfo
-	DoD       *backend.DoDInfo
-	Decisions []backend.DecisionInfo
-	Approvals []backend.ApprovalInfo
-	Error     error
+	Workspace        *backend.WorkspaceInfo
+	Snapshot         *backend.WorkspaceSnapshotInfo
+	Runs             []backend.RunInfo
+	ActiveRun        *backend.RunInfo
+	DisplayRun       *backend.RunInfo
+	Status           *backend.RunStatusInfo
+	Goal             *backend.GoalInfo
+	DoD              *backend.DoDInfo
+	Decisions        []backend.DecisionInfo
+	Approvals        []backend.ApprovalInfo
+	WorkspaceHasLive bool
+	Error            error
 }
 
 type WorkspaceCreatedMsg struct {

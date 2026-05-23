@@ -43,36 +43,39 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 				return WorkspaceContextMsg{Error: err}
 			}
 			if snapshot != nil {
-				activeRunID := snapshot.Workspace.ActiveRunID
-				if activeRunID == "" {
-					activeRunID = snapshot.Outcome.RunID
+				liveRunID := snapshot.Workspace.ActiveRunID
+				activeRun := selectWorkspaceRun(liveRunID, snapshot.Runs)
+				displayRun := activeRun
+				if displayRun == nil && snapshot.Outcome.RunID != "" {
+					displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
 				}
-				activeRun := selectWorkspaceRun(activeRunID, snapshot.Runs)
 				var status *backend.RunStatusInfo
 				var goal *backend.GoalInfo
 				var dod *backend.DoDInfo
-				if activeRun != nil {
-					status, _ = be.Run().Status(ctx, activeRun.ID)
-					if activeRun.GoalID != "" {
-						goal, _ = be.Goal().Get(ctx, activeRun.GoalID)
+				if displayRun != nil {
+					status, _ = be.Run().Status(ctx, displayRun.ID)
+					if displayRun.GoalID != "" {
+						goal, _ = be.Goal().Get(ctx, displayRun.GoalID)
 					}
-					if activeRun.DoDID != "" {
-						dod, _ = be.DoD().Get(ctx, activeRun.DoDID)
+					if displayRun.DoDID != "" {
+						dod, _ = be.DoD().Get(ctx, displayRun.DoDID)
 					}
 				}
 				if dod == nil {
 					dod = latestDoDFromBackend(ctx, be, wsID)
 				}
 				return WorkspaceContextMsg{
-					Workspace: &snapshot.Workspace,
-					Snapshot:  snapshot,
-					Runs:      snapshot.Runs,
-					ActiveRun: activeRun,
-					Status:    status,
-					Goal:      goal,
-					DoD:       dod,
-					Decisions: snapshot.Decisions,
-					Approvals: snapshot.Approvals,
+					Workspace:        &snapshot.Workspace,
+					Snapshot:         snapshot,
+					Runs:             snapshot.Runs,
+					ActiveRun:        activeRun,
+					DisplayRun:       displayRun,
+					Status:           status,
+					Goal:             goal,
+					DoD:              dod,
+					Decisions:        snapshot.Decisions,
+					Approvals:        snapshot.Approvals,
+					WorkspaceHasLive: snapshot.Workspace.ActiveRunID != "",
 				}
 			}
 		}
@@ -116,14 +119,16 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 			return WorkspaceContextMsg{Error: err}
 		}
 		return WorkspaceContextMsg{
-			Workspace: workspace,
-			Runs:      runs,
-			ActiveRun: run,
-			Status:    status,
-			Goal:      goal,
-			DoD:       dod,
-			Decisions: decisions,
-			Approvals: approvals,
+			Workspace:        workspace,
+			Runs:             runs,
+			ActiveRun:        run,
+			DisplayRun:       run,
+			Status:           status,
+			Goal:             goal,
+			DoD:              dod,
+			Decisions:        decisions,
+			Approvals:        approvals,
+			WorkspaceHasLive: workspace.ActiveRunID != "",
 		}
 	}
 }

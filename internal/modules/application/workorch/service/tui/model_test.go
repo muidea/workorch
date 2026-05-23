@@ -1356,6 +1356,33 @@ func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-old"
+	m.running = true
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateFailed},
+			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "failed result", Reason: "weak evidence"},
+			Runs:      []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateFailed, FailureReason: "weak evidence"}},
+		},
+		DisplayRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateFailed, FailureReason: "weak evidence"},
+		Goal:       &backend.GoalInfo{ID: "goal-1", Text: "goal"},
+	})
+	m = asModel(next)
+	if m.activeRunID != "" || m.running {
+		t.Fatalf("active run state = %q/%v, want no live run", m.activeRunID, m.running)
+	}
+	if m.progress != progressFailed || m.progressText != "Workspace failed" {
+		t.Fatalf("progress = %s/%q, want failed workspace state", m.progress, m.progressText)
+	}
+	if m.currentTask != "goal" || m.result != "failed result" {
+		t.Fatalf("display state = task:%q result:%q, want terminal run details retained", m.currentTask, m.result)
+	}
+}
+
 func TestModelWorkspaceContextUsesEffectiveGoalAndDoDFromRunContext(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceContextMsg{
