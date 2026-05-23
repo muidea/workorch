@@ -1313,10 +1313,28 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 runs/<run-id>/
   steps/<run-id>/graph-002/007-run-go-test/metadata.json
   tool-calls/<run-id>/graph-002/007-run-go-test/runtime-execute/output.json
-  llm-calls/<run-id>/repair-001/request.json
+  llm-calls/<run-id>/001-step-1/request.json
+  llm-calls/<run-id>/002-follow-up-graph-planning-001-list_workspace/request.json
+  llm-calls/<run-id>/003-repair-001-of-graph-004-004-verify/request.json
   checkpoints/<run-id>/checkpoint/0007.json
   results/<run-id>/result/dod-assessment.json
 ```
+
+All mutable runtime evidence collections that are stored as directories must use
+a shared sequence-scoped path rule rather than ad hoc per-collection naming:
+`<collection>/<run-id>/<sequence>-<readable-label>/`.
+
+- `sequence` is a zero-padded monotonic number such as `001`, `002`, `003`.
+- `readable-label` is a sanitized, business-neutral projection of the logical
+  object ID after removing the run prefix.
+- repeated writes for the same logical object ID must reuse the existing
+  sequence directory instead of allocating a new one.
+- the helper implementing this rule must be shared by `llm-calls`, `steps`,
+  `tool-calls`, `validations`, and any future mutable directory-scoped runtime
+  evidence collection.
+
+This rule ensures directory lexical order reflects execution order while still
+keeping names readable and causally associated.
 
 ### 禁止项
 

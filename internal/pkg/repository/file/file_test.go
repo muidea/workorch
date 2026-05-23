@@ -147,7 +147,7 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("legacy step.json stat err = %v, want not exist", err)
 	}
-	itemDir := filepath.Join(filepath.Dir(root), "steps", filepath.FromSlash(safeRepositoryItemFileName(string(stepID))))
+	itemDir := filepath.Join(filepath.Dir(root), "steps", "run-item", "001-step-1")
 	for _, name := range []string{"metadata.json", "input.json", "output.json"} {
 		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
 			t.Fatalf("step item %s stat: %v", name, err)
@@ -182,7 +182,7 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("legacy tool_call.json stat err = %v, want not exist", err)
 	}
-	itemDir := filepath.Join(filepath.Dir(root), "tool-calls", filepath.FromSlash(safeRepositoryItemFileName(string(toolCallID))))
+	itemDir := filepath.Join(filepath.Dir(root), "tool-calls", "run-item", "001-step-1-tool-1")
 	for _, name := range []string{"metadata.json", "arguments.json", "output.json"} {
 		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
 			t.Fatalf("tool call item %s stat: %v", name, err)
@@ -194,6 +194,59 @@ func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Arguments["command"] != "true" || items[0].Output["exitCode"] != float64(0) {
 		t.Fatalf("tool calls = %+v, want rehydrated arguments/output", items)
+	}
+}
+
+func TestRuntimeEvidenceRepositoriesUseRunScopedSequencePathsAndReuseExistingPaths(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runID := common.RunID("run-evidence")
+	stepID := common.StepID("run-evidence/graph-001/001-plan")
+
+	stepRepo := NewStepRepository(filepath.Join(root, "step.json"))
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/planning",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	stepDir := filepath.Join(root, "steps", "run-evidence", "001-graph-001-001-plan")
+	if _, err := os.Stat(filepath.Join(stepDir, "metadata.json")); err != nil {
+		t.Fatalf("step sequence dir stat: %v", err)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step by logical id: %v", err)
+	}
+	step.State = common.StepStateCompleted
+	step.Output = map[string]any{"status": "done"}
+	if err := stepRepo.Update(ctx, step); err != nil {
+		t.Fatalf("update step: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stepDir, "output.json")); err != nil {
+		t.Fatalf("step update should reuse sequence dir: %v", err)
+	}
+
+	validationRepo := NewValidationResultRepository(filepath.Join(root, "validation_result.json"))
+	validationID := common.ValidationResultID("run-evidence/graph-001/001-plan/validation/runtime-step")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:             validationID,
+		WorkspaceID:    common.WorkspaceID("ws-evidence"),
+		RunID:          runID,
+		StepID:         stepID,
+		ValidationKind: "runtime_step",
+		State:          common.ValidationResultStatePassed,
+	}); err != nil {
+		t.Fatalf("create validation: %v", err)
+	}
+	validationDir := filepath.Join(root, "validations", "run-evidence", "001-graph-001-001-plan-validation-runtime-step")
+	if _, err := os.Stat(filepath.Join(validationDir, "metadata.json")); err != nil {
+		t.Fatalf("validation sequence dir stat: %v", err)
+	}
+	if _, err := validationRepo.Get(ctx, validationID); err != nil {
+		t.Fatalf("get validation by logical id: %v", err)
 	}
 }
 
@@ -240,7 +293,9 @@ func TestRunEvidenceRepositoriesStoreItemsWithoutMapRewrite(t *testing.T) {
 		t.Fatalf("create validation result: %v", err)
 	}
 	assertLegacyMapAbsent(t, validationPath)
-	assertItemFileExists(t, filepath.Join(root, "validations"), string(validationID))
+	if _, err := os.Stat(filepath.Join(root, "validations", "run-evidence", "001-validation-1", "metadata.json")); err != nil {
+		t.Fatalf("expected sequence-scoped validation result: %v", err)
+	}
 
 	checkpointPath := filepath.Join(root, "runtime_checkpoint.json")
 	checkpointRepo := NewRuntimeCheckpointRepository(checkpointPath)

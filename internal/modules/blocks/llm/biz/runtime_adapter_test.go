@@ -783,11 +783,38 @@ func TestRuntimeAdapterUsesStreamingProviderWhenCapabilityDeclared(t *testing.T)
 	if !ok || refs["requestRef"] == "" || refs["responseRef"] == "" || refs["streamRef"] == "" || refs["usageRef"] == "" {
 		t.Fatalf("llmCallRefs = %+v, want persisted request/response/stream/usage refs", result.Output["llmCallRefs"])
 	}
-	itemDir := filepath.Join(request.WorkspaceInternalDirectory, "runs", string(request.RunID), "llm-calls", safeLLMCallEvidenceFileName(string(request.StepID)))
+	callPath := llmCallEvidencePath(request.WorkspaceInternalDirectory, string(request.RunID), string(request.StepID))
+	if callPath != filepath.ToSlash(filepath.Join(string(request.RunID), "001-llm-1")) {
+		t.Fatalf("llm call path = %q, want sequence-prefixed path under run id", callPath)
+	}
+	itemDir := filepath.Join(request.WorkspaceInternalDirectory, "runs", string(request.RunID), "llm-calls", filepath.FromSlash(callPath))
 	for _, name := range []string{"request.json", "response.json", "response.sse", "usage.json"} {
 		if _, err := os.Stat(filepath.Join(itemDir, name)); err != nil {
 			t.Fatalf("llm evidence %s stat: %v", name, err)
 		}
+	}
+}
+
+func TestLLMCallEvidencePathUsesRunScopedSequencePrefix(t *testing.T) {
+	internalRoot := t.TempDir()
+	runID := "run-001"
+	if got := llmCallEvidencePath(internalRoot, runID, "run-001/step-1"); got != "run-001/001-step-1" {
+		t.Fatalf("first call path = %q, want run-scoped sequence prefix", got)
+	}
+	if err := os.MkdirAll(filepath.Join(internalRoot, "runs", runID, "llm-calls", "run-001", "001-step-1"), 0o755); err != nil {
+		t.Fatalf("mkdir first call: %v", err)
+	}
+	if got := llmCallEvidencePath(internalRoot, runID, "run-001/step-1"); got != "run-001/001-step-1" {
+		t.Fatalf("existing call path = %q, want stable path for same step", got)
+	}
+	if got := llmCallEvidencePath(internalRoot, runID, "run-001/follow-up-graph-planning-001-list_workspace"); got != "run-001/002-follow-up-graph-planning-001-list_workspace" {
+		t.Fatalf("follow-up call path = %q, want next sequence before semantic label", got)
+	}
+	if err := os.MkdirAll(filepath.Join(internalRoot, "runs", runID, "llm-calls", "run-001", "002-follow-up-graph-planning-001-list_workspace"), 0o755); err != nil {
+		t.Fatalf("mkdir follow-up call: %v", err)
+	}
+	if got := llmCallEvidencePath(internalRoot, runID, "run-001/repair-001-of-graph-004-004-verify"); got != "run-001/003-repair-001-of-graph-004-004-verify" {
+		t.Fatalf("repair call path = %q, want sequence order before repair label", got)
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
+	"github.com/muidea/workorch/internal/pkg/runtimepath"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -771,59 +772,14 @@ func llmCallEvidenceRootAndRefs(request runtimemodel.StepExecutionRequest) (stri
 	if internalRoot == "" || request.WorkspaceID == "" || request.RunID == "" || request.StepID == "" {
 		return "", llmCallEvidenceRefs{}, false
 	}
-	stepSafe := safeLLMCallEvidenceFileName(string(request.StepID))
-	root := filepath.Join(internalRoot, "runs", string(request.RunID), "llm-calls", stepSafe)
-	baseRef := "workorch://workspaces/" + string(request.WorkspaceID) + "/runs/" + string(request.RunID) + "/llm-calls/" + stepSafe
+	callPath := llmCallEvidencePath(internalRoot, string(request.RunID), string(request.StepID))
+	root := filepath.Join(internalRoot, "runs", string(request.RunID), "llm-calls", filepath.FromSlash(callPath))
+	baseRef := "workorch://workspaces/" + string(request.WorkspaceID) + "/runs/" + string(request.RunID) + "/llm-calls/" + callPath
 	return root, llmCallEvidenceRefs{BaseRef: baseRef}, true
 }
 
-func safeLLMCallEvidenceFileName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "empty"
-	}
-	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	cleaned := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if name := safeLLMCallEvidencePathSegment(part); name != "" {
-			cleaned = append(cleaned, name)
-		}
-	}
-	if len(cleaned) == 0 {
-		return "empty"
-	}
-	return filepath.Join(cleaned...)
-}
-
-func safeLLMCallEvidencePathSegment(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "." || value == ".." {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		keep := r >= 'a' && r <= 'z' ||
-			r >= 'A' && r <= 'Z' ||
-			r >= '0' && r <= '9' ||
-			r == '-' || r == '_' || r == '.'
-		if keep {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	ret := strings.Trim(b.String(), ".-")
-	if ret == "" || ret == "." || ret == ".." {
-		return "item"
-	}
-	return ret
+func llmCallEvidencePath(internalRoot string, runID string, stepID string) string {
+	return runtimepath.SequenceScopedPath(filepath.Join(internalRoot, "runs", runID, "llm-calls"), runID, stepID)
 }
 
 func llmStreamEventsSSE(events []llmmodels.ProviderStreamEvent) []byte {

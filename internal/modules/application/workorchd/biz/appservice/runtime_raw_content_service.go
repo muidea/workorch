@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/runtimepath"
 )
 
 type RuntimeRawContent struct {
@@ -32,8 +33,12 @@ func ReadRuntimeRawContentWithSession(ctx context.Context, session *RuntimeSessi
 	}
 	switch parsed.Collection {
 	case "llm-calls", "steps", "tool-calls":
-		root := filepath.Join(session.RepositoryDataDir(), "internal", "workspaces", string(parsed.WorkspaceID), "runs", string(parsed.RunID), parsed.Collection, filepath.FromSlash(parsed.ItemPath))
-		cleanPath, err := safeRuntimeRawContentPath(root, parsed.FileName)
+		collectionRoot := filepath.Join(session.RepositoryDataDir(), "internal", "workspaces", string(parsed.WorkspaceID), "runs", string(parsed.RunID), parsed.Collection)
+		itemRoot, err := runtimeRawItemRoot(collectionRoot, parsed.RunID, parsed.ItemPath)
+		if err != nil {
+			return RuntimeRawContent{}, err
+		}
+		cleanPath, err := safeRuntimeRawContentPath(itemRoot, parsed.FileName)
 		if err != nil {
 			return RuntimeRawContent{}, err
 		}
@@ -94,6 +99,27 @@ func ReadRuntimeRawContentWithSession(ctx context.Context, session *RuntimeSessi
 	default:
 		return RuntimeRawContent{}, common.ErrInvalidArgument
 	}
+}
+
+func runtimeRawItemRoot(collectionRoot string, runID common.RunID, itemPath string) (string, error) {
+	collectionRoot = filepath.Clean(strings.TrimSpace(collectionRoot))
+	itemPath = strings.Trim(strings.TrimSpace(itemPath), "/")
+	if collectionRoot == "" || collectionRoot == "." || itemPath == "" {
+		return "", common.ErrInvalidArgument
+	}
+	direct := filepath.Join(collectionRoot, filepath.FromSlash(itemPath))
+	if _, err := os.Stat(direct); err == nil {
+		return direct, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	sequenced := runtimepath.SequenceScopedRoot(collectionRoot, runtimepath.SequenceScopedPath(collectionRoot, string(runID), itemPath))
+	if _, err := os.Stat(sequenced); err == nil {
+		return sequenced, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	return "", common.ErrNotFound
 }
 
 func ReadRuntimeRawContentWithBackend(ctx context.Context, backend string, dataRoot string, ref string) (RuntimeRawContent, error) {

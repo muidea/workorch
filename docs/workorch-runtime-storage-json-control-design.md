@@ -56,13 +56,13 @@ runs/<run-id>/
   index.json
 
   steps/
-    <step-id-path>/
+    <run-id>/<step-sequence>-<step-label>/
       metadata.json
       input.json
       output.json
 
   tool-calls/
-    <tool-call-id-path>/
+    <run-id>/<tool-call-sequence>-<tool-call-label>/
       metadata.json
       arguments.json
       output.json
@@ -71,7 +71,8 @@ runs/<run-id>/
     <patch-id-path>.json
 
   validations/
-    <validation-id-path>.json
+    <run-id>/<validation-sequence>-<validation-label>/
+      metadata.json
 
   checkpoints/
     <checkpoint-id-path>.json
@@ -98,14 +99,17 @@ runs/<run-id>/
       <event-id-path>.json
 
   llm-calls/
-    <step-id-path>/
+    <run-id>/<call-sequence>-<step-label>/
       request.json
       response.sse
       response.json
       usage.json
 ```
 
-`<id-path>` must be a readable, filesystem-safe projection of the logical ID that preserves structural hierarchy where useful.
+`<label>` must be a readable, filesystem-safe projection of the logical ID after
+removing the run prefix. Directory-scoped mutable runtime evidence collections
+must allocate these paths through a shared sequence-scoped helper so the same
+logical object ID always resolves to the same physical directory.
 
 Rules:
 
@@ -124,9 +128,9 @@ Mutable item records such as steps and tool calls must be stored as item-level f
 For a step:
 
 ```text
-steps/<step-id-path>/metadata.json
-steps/<step-id-path>/input.json
-steps/<step-id-path>/output.json
+steps/<run-id>/<step-sequence>-<step-label>/metadata.json
+steps/<run-id>/<step-sequence>-<step-label>/input.json
+steps/<run-id>/<step-sequence>-<step-label>/output.json
 ```
 
 `metadata.json` contains list/detail fields:
@@ -191,11 +195,18 @@ Raw LLM call data must not be stored in step/tool-call/event primary payloads.
 Store it under:
 
 ```text
-llm-calls/<step-id-path>/request.json
-llm-calls/<step-id-path>/response.sse
-llm-calls/<step-id-path>/response.json
-llm-calls/<step-id-path>/usage.json
+llm-calls/<run-id>/<call-sequence>-<step-label>/request.json
+llm-calls/<run-id>/<call-sequence>-<step-label>/response.sse
+llm-calls/<run-id>/<call-sequence>-<step-label>/response.json
+llm-calls/<run-id>/<call-sequence>-<step-label>/usage.json
 ```
+
+`call-sequence` is a zero-padded monotonic sequence scoped to the run, starting
+at `001`. It must be the first sortable token in the call directory name so
+lexical directory order reflects actual provider call order. `step-label`
+preserves the safe semantic step label, for example
+`001-step-1`, `002-follow-up-graph-planning-001-list_workspace`, or
+`003-repair-001-of-graph-004-004-verify`.
 
 Step/tool-call/event records should reference these files through logical refs.
 
@@ -390,9 +401,9 @@ Expected behavior:
    - Contract tests verify the resolver roots, internal subdirectories, and absence of the old `working/` level for new workspaces.
 2. Implement itemized step/tool-call file repositories.
    - Status: completed for file backend.
-   - `StepRepository` now stores each step under `steps/<step-id-path>/metadata.json`, `input.json`, and `output.json`.
-   - `ToolCallRepository` now stores each tool call under `tool-calls/<tool-call-id-path>/metadata.json`, `arguments.json`, and `output.json`.
-   - Item storage now keeps readable ID hierarchy by default; IDs containing `/` expand into nested directories under the collection root.
+   - `StepRepository` now stores each step under `steps/<run-id>/<step-sequence>-<step-label>/metadata.json`, `input.json`, and `output.json`.
+   - `ToolCallRepository` now stores each tool call under `tool-calls/<run-id>/<tool-call-sequence>-<tool-call-label>/metadata.json`, `arguments.json`, and `output.json`.
+   - Item storage now keeps readable run-scoped sequence order by default and reuses the same physical directory for repeated updates of the same logical ID.
    - Create/update/delete now touch only the target item directory instead of rewriting a run-wide `step.json` or `tool_call.json`.
 3. Implement JSONL event repository with pagination.
    - Status: completed for append-only storage, payload splitting, and bounded HTTP list queries.
@@ -402,7 +413,7 @@ Expected behavior:
 4. Split LLM raw request/response/stream data into refs.
    - Status: completed for runtime LLM block outputs and console raw-ref access.
    - `StepExecutionRequest` now carries `WorkspaceInternalDirectory` so runtime blocks can write internal evidence without touching deliverables.
-   - The LLM runtime block writes provider request, raw response, stream SSE, repair response when present, and usage summary under `runs/<run-id>/llm-calls/<step-id-path>/`.
+   - The LLM runtime block writes provider request, raw response, stream SSE, repair response when present, and usage summary under `runs/<run-id>/llm-calls/<run-id>/<call-sequence>-<step-label>/`.
    - Step output keeps `llmCallRefs`, `streamDiagnostics`, `contextBudget`, and `llmUsage`; raw `streamEvents` are no longer embedded in primary step output by the LLM block.
    - Runtime timeline read models can render bounded stream summaries from `streamDiagnostics`; legacy in-output `streamEvents` remain readable only as historical input.
    - `GET /api/v1/workorch/runtime/payloads?ref=...` exposes explicit raw-ref reads for whitelisted LLM call files under workspace internal storage.
@@ -453,7 +464,8 @@ Expected behavior:
 8. Remove old map JSON repository paths from new workspace creation.
    - Status: completed for current run-scoped runtime and governance collections.
    - Completed for `event_record.json`, `step.json`, `tool_call.json`, `patch.json`, `validation_result.json`, `runtime_checkpoint.json`, `result.json`, `artifact.json`, `ticket.json`, `resolution.json`, and `approval.json`.
-   - `PatchRepository`, `ValidationResultRepository`, `RuntimeCheckpointRepository`, `ResultRepository`, and `ArtifactRepository` now store new records as item-level JSON files under `patches/`, `validations/`, `checkpoints/`, `results/`, and `artifacts/`.
+   - `ValidationResultRepository` now stores each item under `validations/<run-id>/<validation-sequence>-<validation-label>/metadata.json`.
+   - `PatchRepository`, `RuntimeCheckpointRepository`, `ResultRepository`, and `ArtifactRepository` now store new records as item-level JSON files under `patches/`, `checkpoints/`, `results/`, and `artifacts/`.
    - `DecisionTicketRepository`, `DecisionResolutionRepository`, and `ApprovalRepository` now store new records as item-level JSON files under `decisions/tickets/`, `decisions/resolutions/`, and `approvals/`.
    - Create/update/delete now touch only the target item file for those run evidence and governance collections instead of rewriting a run-wide map.
 

@@ -582,18 +582,20 @@ func TestNewWithBackendFilePartitionsRunScopedRepositories(t *testing.T) {
 			t.Fatalf("unexpected root-scoped %s err=%v", fileName, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(runRoot, "steps", filepath.FromSlash(string(stepID)), "metadata.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(runRoot, "steps", string(runID), "001-step-bootstrap-partition", "metadata.json")); err != nil {
 		t.Fatalf("expected item-scoped step metadata: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(runRoot, "tool-calls", filepath.FromSlash(string(toolCallID)), "metadata.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(runRoot, "tool-calls", string(runID), "001-tool-bootstrap-partition", "metadata.json")); err != nil {
 		t.Fatalf("expected item-scoped tool call metadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(runRoot, "validations", string(runID), "001-validation-bootstrap-partition", "metadata.json")); err != nil {
+		t.Fatalf("expected item-scoped validation metadata: %v", err)
 	}
 	for _, item := range []struct {
 		dir string
 		id  string
 	}{
 		{dir: "patches", id: "patch-bootstrap-partition"},
-		{dir: "validations", id: "validation-bootstrap-partition"},
 		{dir: "checkpoints", id: "checkpoint-bootstrap-partition"},
 		{dir: "results", id: "result-bootstrap-partition"},
 		{dir: "artifacts", id: "artifact-bootstrap-partition"},

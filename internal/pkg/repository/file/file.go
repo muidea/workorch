@@ -25,6 +25,7 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/runtimepath"
 )
 
 type WorkspaceRepository struct {
@@ -1259,56 +1260,11 @@ func safeEventRecordFileName(value string) string {
 }
 
 func safeRepositoryItemFileName(value string) string {
-	return readableRepositoryItemName(value)
+	return runtimepath.SafePath(value)
 }
 
 func readableRepositoryItemName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "empty"
-	}
-	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	cleaned := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if name := safeRepositoryPathSegment(part); name != "" {
-			cleaned = append(cleaned, name)
-		}
-	}
-	if len(cleaned) == 0 {
-		return "empty"
-	}
-	return filepath.Join(cleaned...)
-}
-
-func safeRepositoryPathSegment(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "." || value == ".." {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		keep := r >= 'a' && r <= 'z' ||
-			r >= 'A' && r <= 'Z' ||
-			r >= '0' && r <= '9' ||
-			r == '-' || r == '_' || r == '.'
-		if keep {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	ret := strings.Trim(b.String(), ".-")
-	if ret == "" || ret == "." || ret == ".." {
-		return "item"
-	}
-	return ret
+	return runtimepath.SafePath(value)
 }
 
 func repositoryItemRoot(path string, legacyFileName string, directoryName string) string {
@@ -1340,6 +1296,34 @@ func repositoryMetadataDirs(root string) ([]string, error) {
 		ret = append(ret, filepath.Dir(path))
 	}
 	return ret, nil
+}
+
+func repositorySequenceScopedDir(root string, scopeID string, itemID string) string {
+	return filepath.Join(root, filepath.FromSlash(runtimepath.SequenceScopedPath(root, scopeID, itemID)))
+}
+
+func repositoryMetadataDirByID[T any](root string, id string, idOf func(T) string) (string, error) {
+	dirs, err := repositoryMetadataDirs(root)
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range dirs {
+		data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		var item T
+		if err := json.Unmarshal(data, &item); err != nil {
+			return "", err
+		}
+		if idOf(item) == id {
+			return dir, nil
+		}
+	}
+	return "", common.ErrNotFound
 }
 
 func repositoryFiles(root string, match string) ([]string, error) {
@@ -1940,11 +1924,29 @@ func (r *StepRepository) stepRoot() string {
 }
 
 func (r *StepRepository) stepDir(id common.StepID) string {
-	return filepath.Join(r.stepRoot(), safeRepositoryItemFileName(string(id)))
+	if dir, err := repositoryMetadataDirByID[run.Step](r.stepRoot(), string(id), func(item run.Step) string {
+		return string(item.ID)
+	}); err == nil {
+		return dir
+	}
+	runID, _, _ := strings.Cut(string(id), "/")
+	return repositorySequenceScopedDir(r.stepRoot(), runID, string(id))
+}
+
+func (r *StepRepository) stepDirForItem(item *run.Step) string {
+	if item == nil {
+		return r.stepDir("")
+	}
+	if dir, err := repositoryMetadataDirByID[run.Step](r.stepRoot(), string(item.ID), func(existing run.Step) string {
+		return string(existing.ID)
+	}); err == nil {
+		return dir
+	}
+	return repositorySequenceScopedDir(r.stepRoot(), string(item.RunID), string(item.ID))
 }
 
 func (r *StepRepository) saveStep(item *run.Step) error {
-	dir := r.stepDir(item.ID)
+	dir := r.stepDirForItem(item)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -2117,11 +2119,29 @@ func (r *ToolCallRepository) toolCallRoot() string {
 }
 
 func (r *ToolCallRepository) toolCallDir(id common.ToolCallID) string {
-	return filepath.Join(r.toolCallRoot(), safeRepositoryItemFileName(string(id)))
+	if dir, err := repositoryMetadataDirByID[run.ToolCall](r.toolCallRoot(), string(id), func(item run.ToolCall) string {
+		return string(item.ID)
+	}); err == nil {
+		return dir
+	}
+	runID, _, _ := strings.Cut(string(id), "/")
+	return repositorySequenceScopedDir(r.toolCallRoot(), runID, string(id))
+}
+
+func (r *ToolCallRepository) toolCallDirForItem(item *run.ToolCall) string {
+	if item == nil {
+		return r.toolCallDir("")
+	}
+	if dir, err := repositoryMetadataDirByID[run.ToolCall](r.toolCallRoot(), string(item.ID), func(existing run.ToolCall) string {
+		return string(existing.ID)
+	}); err == nil {
+		return dir
+	}
+	return repositorySequenceScopedDir(r.toolCallRoot(), string(item.RunID), string(item.ID))
 }
 
 func (r *ToolCallRepository) saveToolCall(item *run.ToolCall) error {
-	dir := r.toolCallDir(item.ID)
+	dir := r.toolCallDirForItem(item)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -2295,7 +2315,7 @@ func (r *ValidationResultRepository) Create(_ context.Context, item *run.Validat
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	path := r.validationResultPath(item.ID)
+	path := r.validationResultPathForItem(item)
 	if _, err := os.Stat(path); err == nil {
 		return common.ErrConflict
 	} else if err != nil && !os.IsNotExist(err) {
@@ -2336,7 +2356,7 @@ func (r *ValidationResultRepository) Update(_ context.Context, item *run.Validat
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	path := r.validationResultPath(item.ID)
+	path := r.validationResultPathForItem(item)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return common.ErrNotFound
 	} else if err != nil {
@@ -2354,7 +2374,7 @@ func (r *ValidationResultRepository) Delete(_ context.Context, id common.Validat
 	} else if err != nil {
 		return err
 	}
-	return os.Remove(path)
+	return os.RemoveAll(filepath.Dir(path))
 }
 
 func (r *ValidationResultRepository) validationResultRoot() string {
@@ -2362,11 +2382,29 @@ func (r *ValidationResultRepository) validationResultRoot() string {
 }
 
 func (r *ValidationResultRepository) validationResultPath(id common.ValidationResultID) string {
-	return repositoryItemPath(r.validationResultRoot(), string(id))
+	if dir, err := repositoryMetadataDirByID[run.ValidationResult](r.validationResultRoot(), string(id), func(item run.ValidationResult) string {
+		return string(item.ID)
+	}); err == nil {
+		return filepath.Join(dir, "metadata.json")
+	}
+	runID, _, _ := strings.Cut(string(id), "/")
+	return filepath.Join(repositorySequenceScopedDir(r.validationResultRoot(), runID, string(id)), "metadata.json")
+}
+
+func (r *ValidationResultRepository) validationResultPathForItem(item *run.ValidationResult) string {
+	if item == nil {
+		return r.validationResultPath("")
+	}
+	if dir, err := repositoryMetadataDirByID[run.ValidationResult](r.validationResultRoot(), string(item.ID), func(existing run.ValidationResult) string {
+		return string(existing.ID)
+	}); err == nil {
+		return filepath.Join(dir, "metadata.json")
+	}
+	return filepath.Join(repositorySequenceScopedDir(r.validationResultRoot(), string(item.RunID), string(item.ID)), "metadata.json")
 }
 
 func (r *ValidationResultRepository) list(matches func(run.ValidationResult) bool) ([]*run.ValidationResult, error) {
-	paths, err := repositoryItemPaths(r.validationResultRoot())
+	paths, err := repositoryFiles(r.validationResultRoot(), "metadata.json")
 	if err != nil {
 		return nil, err
 	}

@@ -20,7 +20,7 @@ func TestReadRuntimeRawContentWithBackendReturnsLLMCallFile(t *testing.T) {
 	workspaceID := "ws-raw-content"
 	runID := "run-raw-content"
 	stepPath := "run-raw-content/llm-1"
-	root := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "llm-calls", filepath.FromSlash(stepPath))
+	root := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "llm-calls", runID, "001-llm-1")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir llm raw root: %v", err)
 	}
@@ -47,9 +47,9 @@ func TestReadRuntimeRawContentWithBackendReturnsStepAndToolPayloadFiles(t *testi
 	workspaceID := "ws-raw-runtime"
 	runID := "run-raw-runtime"
 	stepID := "run-raw-runtime/step-1"
-	toolCallID := "run-raw-runtime/tool-1"
-	stepDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "steps", filepath.FromSlash(stepID))
-	toolDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "tool-calls", filepath.FromSlash(toolCallID))
+	toolCallID := "run-raw-runtime/step-1/tool-1"
+	stepDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "steps", runID, "001-step-1")
+	toolDir := filepath.Join(dataRoot, "internal", "workspaces", workspaceID, "runs", runID, "tool-calls", runID, "001-step-1-tool-1")
 	if err := os.MkdirAll(stepDir, 0o755); err != nil {
 		t.Fatalf("mkdir step dir: %v", err)
 	}
