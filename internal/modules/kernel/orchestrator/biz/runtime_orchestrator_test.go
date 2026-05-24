@@ -20162,6 +20162,120 @@ func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *tes
 	}
 }
 
+func TestDefinitionChangeAssessmentRejectsHistoricalOnlyEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-definition-change-current-evidence")
+	currentValidationRef := string(runID) + "/graph-001/001-verify-latest/validation/runtime-step"
+	currentStepID := common.StepID(runID + "/graph-001/001-verify-latest")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     currentStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "latest definition verified"},
+	}); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(currentValidationRef),
+		WorkspaceID:     "ws-definition-change-current-evidence",
+		RunID:           runID,
+		StepID:          currentStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed current validation: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-definition-change-current-evidence",
+		DoDID:           "dod-definition-change-current-evidence",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"definitionChangeImpact": map[string]any{"changed": true},
+		},
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "done",
+		"items": []map[string]any{{
+			"item":         "new DoD item",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+		}},
+		"goalCoverage": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"item":         "new Goal requirement",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+			}},
+		},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "functional_behavior",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+		}},
+		"deliverableCoverage": map[string]any{
+			"items": []map[string]any{{
+				"item":         "validation_report",
+				"state":        "satisfied",
+				"artifactRefs": []string{"run-old/artifact/result-summary"},
+			}},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "requires current run evidenceRefs") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want current-run evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	missing := mapSliceFromValue(diagnostic.RuntimeFailureDiagnostics()["missingDoDItems"])
+	if len(missing) == 0 || missing[0]["source"] != "definitionChangeCurrentRunEvidence" {
+		t.Fatalf("runtime diagnostics = %+v, want definition-change evidence gap", diagnostic.RuntimeFailureDiagnostics())
+	}
+
+	assessment["items"] = []map[string]any{{
+		"item":         "new DoD item",
+		"state":        "satisfied",
+		"evidenceRefs": []string{"run-old/graph-001/001-verify-old", currentValidationRef},
+	}}
+	goalCoverage := mapFromValue(assessment["goalCoverage"])
+	goalCoverage["items"] = []map[string]any{{
+		"item":         "new Goal requirement",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	assessment["goalCoverage"] = goalCoverage
+	assessment["acceptanceDimensions"] = []map[string]any{{
+		"id":           "functional_behavior",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	deliverableCoverage := mapFromValue(assessment["deliverableCoverage"])
+	deliverableCoverage["items"] = []map[string]any{{
+		"item":         "validation_report",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	assessment["deliverableCoverage"] = deliverableCoverage
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality with current evidence: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := memory.NewResultRepository()

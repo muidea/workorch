@@ -65,6 +65,9 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 	if o == nil || run == nil || assessment == nil {
 		return nil
 	}
+	if err := o.validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, run, assessment); err != nil {
+		return err
+	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
 	if ok && o.evidence.ValidationResults != nil {
 		for _, item := range items {
@@ -105,6 +108,111 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 		return err
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEvidence(ctx context.Context, run *runModel.Run, assessment map[string]any) error {
+	if run == nil || assessment == nil || !runHasDefinitionChangeImpact(run) {
+		return nil
+	}
+	for _, scoped := range definitionChangeAssessmentCoverageItems(assessment) {
+		if strings.ToLower(strings.TrimSpace(stringFromMap(scoped.item, "state"))) != "satisfied" {
+			continue
+		}
+		refs := evidenceRefsFromValue(scoped.item["evidenceRefs"])
+		if o.hasCurrentRunUsableEvidenceRef(ctx, run.ID, refs) {
+			continue
+		}
+		name := evidenceKindRequirementItemName(profileEvidenceKindRequirement{Scope: scoped.scope}, scoped.item)
+		if name == "" {
+			name = scoped.scope
+		}
+		cause := fmt.Errorf("%w: definition-changed %s item %q requires current run evidenceRefs", common.ErrInvalidArgument, scoped.scope, name)
+		return &doDAssessmentEvidenceQualityError{
+			cause: cause,
+			items: []map[string]any{{
+				"kind":         scoped.scope,
+				"item":         name,
+				"state":        "failed",
+				"source":       "definitionChangeCurrentRunEvidence",
+				"evidenceRefs": refs,
+				"reason":       "The workspace Goal or DoD changed in this activation, so historical evidence can only be used as lineage and cannot by itself close the latest definition.",
+				"impact":       "The latest effective Goal and DoD may not have been reprocessed or revalidated in the current run.",
+				"suggestedNextActions": []string{
+					"Run or produce bounded current-run evidence for this coverage item.",
+					"Return failed/skipped assessment if the latest definition is not yet implemented or verified.",
+				},
+			}},
+		}
+	}
+	return nil
+}
+
+type definitionChangeCoverageItem struct {
+	scope string
+	item  map[string]any
+}
+
+func definitionChangeAssessmentCoverageItems(assessment map[string]any) []definitionChangeCoverageItem {
+	ret := make([]definitionChangeCoverageItem, 0)
+	if items, ok := doDAssessmentItemMaps(assessment["items"]); ok {
+		for _, item := range items {
+			ret = append(ret, definitionChangeCoverageItem{scope: "dod_item", item: item})
+		}
+	}
+	for _, item := range assessmentItemsForEvidenceKindRequirement("goal_coverage", assessment) {
+		ret = append(ret, definitionChangeCoverageItem{scope: "goal_coverage", item: item})
+	}
+	for _, item := range assessmentItemsForEvidenceKindRequirement("acceptance_dimension", assessment) {
+		ret = append(ret, definitionChangeCoverageItem{scope: "acceptance_dimension", item: item})
+	}
+	for _, item := range assessmentItemsForEvidenceKindRequirement("deliverable", assessment) {
+		ret = append(ret, definitionChangeCoverageItem{scope: "deliverable", item: item})
+	}
+	return ret
+}
+
+func runHasDefinitionChangeImpact(run *runModel.Run) bool {
+	if run == nil {
+		return false
+	}
+	return boolValue(mapFromValue(run.ExecutionContext["definitionChangeImpact"])["changed"])
+}
+
+func (o *RuntimeOrchestrator) hasCurrentRunUsableEvidenceRef(ctx context.Context, runID common.RunID, refs []string) bool {
+	if runID == "" {
+		return false
+	}
+	for _, ref := range refs {
+		if o.currentRunEvidenceRefUsable(ctx, runID, ref) {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *RuntimeOrchestrator) currentRunEvidenceRefUsable(ctx context.Context, runID common.RunID, ref string) bool {
+	ref = strings.Trim(strings.TrimSpace(ref), "/")
+	if ref == "" || runID == "" {
+		return false
+	}
+	prefix := string(runID) + "/"
+	if ref != string(runID) && !strings.HasPrefix(ref, prefix) {
+		return false
+	}
+	if o != nil {
+		if o.evidence.ValidationResults != nil {
+			if item, err := o.evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil && item != nil {
+				return item.RunID == runID && validationEvidenceCanSatisfyDoD(qualityFromValidationResult(item))
+			}
+		}
+		if ok, err := o.patchEvidenceRefUsable(ctx, ref); err == nil && ok {
+			return true
+		}
+		if step, ok, err := o.stepByEvidenceRef(ctx, ref); err == nil && ok {
+			return step.RunID == runID && completionEvidenceStepFallbackUsable(step)
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceKindRequirements(ctx context.Context, run *runModel.Run, assessment map[string]any) error {
