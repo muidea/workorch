@@ -243,6 +243,10 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - 触发 replan 的 failure context，包括 failure class、failure signature、failure target scope、failed step id/kind、failed step output summary、最近 repair attempts 或可用摘要。
 - predecessor run 的中立过程证据摘要，包括 `processEvidenceTimeline` 与 `currentProgressDigest`。该摘要必须保留最近有效动作、最近失败、当前缺口和下一步要求，且每条 evidence 必须带 `sourceRef` / step ref。
 
+若本次 activation 同时检测到 `definitionChangeImpact.changed=true`，说明 effective Goal / DoD 已发生新增、补充、删除或同 ID 修订。此时旧 `governanceHistory` 仍可作为 summary/ref-only history 进入上下文，但旧 `replanContinuation` 与旧 `rejectedResultContinuation` 不得再作为 actionable continuation 注入新 run。runtime 必须把本轮视为基于最新 definition 的新规划 / 新验收基准，先重新做 gap analysis、目标覆盖判断与必要的执行计划选择；旧 repair target、旧 strategy reassessment、旧 rejected result required evidence 只能作为候选历史证据，不能驱动 initial step 进入 repair continuation。
+
+当定义变更压过旧 continuation 时，activation context 应显式记录中立策略标记，例如 `definitionChangeContinuationPolicy=definition_change_supersedes_prior_actionable_continuation`。该标记只表达运行态优先级，不解释任何业务语义；它用于审计为什么旧治理决议没有被提升为当前可执行恢复合同。
+
 已 resolved 的 `replan` 决策是 run 级恢复信号。若 run 仍处于 `running` 且没有 active blocker，runtime resume 不得只检查当前 terminal step 是否直接绑定该 ticket；当 resolved replan ticket 绑定的 step 仍是当前 run 内的 failed step 时，即使后续存在同 lineage 的并行失败分支、provider retry 分支或辅助失败步骤，也必须创建 successor run 或显式终态化，不得保持 `running` 空转。
 
 Successor 的首个 LLM step 不应只知道“需要重规划”。它必须获得足够的失败证据来判断哪些产物可以保留、哪些路径已失败、哪些 contract 仍然必须继承。若 successor 被设为 state-changing repair continuation，则其初始输入必须继续携带 `stateChangingOutputRequired`、`repairObjective` 与对应 guidance；同时不得把历史 provider/model 等运行期动态绑定写入 successor 的恢复上下文。

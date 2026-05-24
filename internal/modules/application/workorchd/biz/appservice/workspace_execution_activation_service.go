@@ -628,8 +628,9 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		contextData["dods"] = workspaceDoDs
 		contextData["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
 	}
-	if impact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions); len(impact) > 0 {
-		contextData["definitionChangeImpact"] = impact
+	definitionChangeImpact := definitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions)
+	if len(definitionChangeImpact) > 0 {
+		contextData["definitionChangeImpact"] = definitionChangeImpact
 	}
 	dialogLanguage := languageNameFromLocale(cmd.DialogLanguage)
 	if dialogLanguage == "" {
@@ -752,16 +753,24 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	}
 	if len(governanceHistory) > 0 {
 		contextData["governanceHistory"] = governanceHistory
-		if replanContinuation := replanContinuationFromGovernanceHistory(governanceHistory); len(replanContinuation) > 0 {
-			contextData["replanContinuation"] = replanContinuation
+		if !definitionChangeImpactChanged(definitionChangeImpact) {
+			if replanContinuation := replanContinuationFromGovernanceHistory(governanceHistory); len(replanContinuation) > 0 {
+				contextData["replanContinuation"] = replanContinuation
+			}
+		} else {
+			contextData["definitionChangeContinuationPolicy"] = "definition_change_supersedes_prior_actionable_continuation"
 		}
 	}
-	rejectedContinuation, err := rejectedResultContinuationForActivation(ctx, exports.Repositories.Results, workspace.ID, effectiveGoal.ID, effectiveDoD.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(rejectedContinuation) > 0 {
-		contextData["rejectedResultContinuation"] = rejectedContinuation
+	if !definitionChangeImpactChanged(definitionChangeImpact) {
+		rejectedContinuation, err := rejectedResultContinuationForActivation(ctx, exports.Repositories.Results, workspace.ID, effectiveGoal.ID, effectiveDoD.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(rejectedContinuation) > 0 {
+			contextData["rejectedResultContinuation"] = rejectedContinuation
+		}
+	} else {
+		contextData["definitionChangeContinuationPolicy"] = "definition_change_supersedes_prior_actionable_continuation"
 	}
 	if len(workspace.EvidencePolicies) > 0 {
 		contextData["evidencePolicies"] = cloneContextMapSlice(workspace.EvidencePolicies)
@@ -930,8 +939,10 @@ func mergeActivationExecutionContextPatch(contextData map[string]any, patch map[
 		"activation": {}, "workspaceId": {}, "goalId": {}, "doDId": {},
 		"goal": {}, "goals": {}, "goalDefinitionPolicy": {},
 		"dod": {}, "dods": {}, "doDDefinitionPolicy": {},
-		"definitionChangeImpact":     {},
-		"rejectedResultContinuation": {},
+		"definitionChangeImpact":             {},
+		"definitionChangeContinuationPolicy": {},
+		"rejectedResultContinuation":         {},
+		"replanContinuation":                 {},
 	}
 	for key, value := range patch {
 		key = strings.TrimSpace(key)
@@ -990,6 +1001,14 @@ func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 			"do not weaken prior acceptance evidence or constraints",
 		},
 	}
+}
+
+func definitionChangeImpactChanged(impact map[string]any) bool {
+	if len(impact) == 0 {
+		return false
+	}
+	value, ok := impact["changed"].(bool)
+	return ok && value
 }
 
 func latestDefinitionID(ids []string, effectiveID string) string {

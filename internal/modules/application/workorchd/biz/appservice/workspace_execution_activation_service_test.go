@@ -1230,6 +1230,124 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	}
 }
 
+func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-definition-change-new-run", "definition change new run", "", "workspaces/definition-change-new-run")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "initial goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend initial: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"initial dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("session exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ContextHints = map[string]any{"stateChangePolicy": "must_produce_state_change"}
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace context hints: %v", err)
+	}
+	priorRunID := common.RunID("run-definition-change-prior")
+	priorTicketID := common.TicketID("ticket-definition-change-prior")
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          priorRunID,
+		WorkspaceID: common.WorkspaceID(workspace.ID),
+		GoalID:      common.GoalID(goal.ID),
+		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateFailed,
+	}); err != nil {
+		t.Fatalf("create prior run: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:           priorTicketID,
+		WorkspaceID:  common.WorkspaceID(workspace.ID),
+		RunID:        priorRunID,
+		StepID:       "run-definition-change-prior/repair-001",
+		Reason:       "prior repair exhausted",
+		DecisionKind: "provide_missing_info",
+		Question:     "Choose recovery strategy",
+		State:        common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"failureClass":                   "runtime_failed",
+			"failureSignature":               "class=runtime_failed|kind=llm/workspace_execution|failureTargets=old-target",
+			"failureTargetScope":             "old-target",
+			"failedStepOutput":               map[string]any{"error": "old target failed"},
+		},
+	}); err != nil {
+		t.Fatalf("create prior ticket: %v", err)
+	}
+	if err := exports.Repositories.Resolutions.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-definition-change-prior",
+		TicketID: priorTicketID,
+		Type:     "replan",
+		Payload:  map[string]any{"recoveryAction": "replan"},
+	}); err != nil {
+		t.Fatalf("create prior resolution: %v", err)
+	}
+	if _, err := UpdateGoalWithSession(ctx, session, goal.ID, "initial goal\nnew requirement added through tui goal command"); err != nil {
+		t.Fatalf("UpdateGoalWithSession: %v", err)
+	}
+	_ = session.Close(ctx)
+
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if len(contextMapSliceFromValue(t, item.Run.ExecutionContext["governanceHistory"])) != 1 {
+		t.Fatalf("governanceHistory = %#v, want prior governance retained as history", item.Run.ExecutionContext["governanceHistory"])
+	}
+	if replan := contextMapFromValue(t, item.Run.ExecutionContext["replanContinuation"]); len(replan) != 0 {
+		t.Fatalf("replanContinuation = %+v, want suppressed after definition change", replan)
+	}
+	if rejected := contextMapFromValue(t, item.Run.ExecutionContext["rejectedResultContinuation"]); len(rejected) != 0 {
+		t.Fatalf("rejectedResultContinuation = %+v, want suppressed after definition change", rejected)
+	}
+	impact := contextMapFromValue(t, item.Run.ExecutionContext["definitionChangeImpact"])
+	if impact["changed"] != true {
+		t.Fatalf("definitionChangeImpact = %+v, want changed=true", impact)
+	}
+	if item.Run.ExecutionContext["definitionChangeContinuationPolicy"] != "definition_change_supersedes_prior_actionable_continuation" {
+		t.Fatalf("definitionChangeContinuationPolicy = %v, want supersede policy", item.Run.ExecutionContext["definitionChangeContinuationPolicy"])
+	}
+	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	}
+	if len(runSnapshot.Steps) != 1 {
+		t.Fatalf("steps = %+v, want first step", runSnapshot.Steps)
+	}
+	step := runSnapshot.Steps[0]
+	if step.Input["runtimeStage"] == "repair" ||
+		step.Input["replanStateChangingContinuation"] == true ||
+		step.Input["repairObjective"] != nil {
+		t.Fatalf("first step input = %+v, want definition-change run to start from normal planning", step.Input)
+	}
+	stepContext := contextMapFromValue(t, step.Input["executionContextPackage"])
+	if impact := contextMapFromValue(t, stepContext["definitionChangeImpact"]); impact["changed"] != true {
+		t.Fatalf("step executionContextPackage = %+v, want definition change impact", stepContext)
+	}
+}
+
 func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t *testing.T) {
 	ctx := context.Background()
 	session, _ := newTestRuntimeSession(t, "memory", "")
