@@ -1313,6 +1313,13 @@ func TestRuntimeAdapterBuildsPromptContextFromGovernanceAndGoalDoDHistory(t *tes
 		len(provider.request.ContextBudget.CachePlan.AdapterHint.CacheablePrefix) == 0 {
 		t.Fatalf("adapterHint = %+v, want provider-neutral optional cache hint", provider.request.ContextBudget.CachePlan.AdapterHint)
 	}
+	cacheablePrefix := provider.request.ContextBudget.CachePlan.AdapterHint.CacheablePrefix
+	if cacheablePrefix[len(cacheablePrefix)-1] != "C2.runtime-capability-summary" {
+		t.Fatalf("cacheablePrefix = %+v, want contiguous C0/C1/C2 prefix ending at runtime capability summary", cacheablePrefix)
+	}
+	if stringSliceContains(cacheablePrefix, "C3.workspace-run") || stringSliceContains(cacheablePrefix, "C4.current-progress") {
+		t.Fatalf("cacheablePrefix = %+v, should not include dynamic sections", cacheablePrefix)
+	}
 }
 
 func TestProviderCachePlanKeepsStablePrefixWhenGoalDoDChanges(t *testing.T) {

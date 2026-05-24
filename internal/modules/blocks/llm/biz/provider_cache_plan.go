@@ -101,12 +101,15 @@ func providerAdapterCacheHint(plan llmmodels.ProviderCachePlan) llmmodels.Provid
 	cacheablePrefix := make([]string, 0, len(plan.SectionHashes))
 	volatileSections := make([]string, 0, len(plan.SectionHashes))
 	for _, section := range plan.SectionHashes {
-		switch promptSectionGroup(section.SectionID) {
-		case "C0", "C1", "C2":
+		group := promptSectionGroup(section.SectionID)
+		if group == "C0" || group == "C1" || group == "C2" {
 			cacheablePrefix = append(cacheablePrefix, section.SectionID)
-		case "C4":
+			continue
+		}
+		if group == "C4" {
 			volatileSections = append(volatileSections, section.SectionID)
 		}
+		break
 	}
 	breakers := make([]string, 0, len(plan.CacheBreakers))
 	for _, breaker := range plan.CacheBreakers {

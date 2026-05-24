@@ -504,6 +504,10 @@ Cache-aware request 组织不得改变运行事实的发生顺序。Canonical re
 C0 -> C1 -> C2 -> C3 -> C4 -> C5 -> requestedAction
 ```
 
+Provider-facing message 必须把 `C0/C1/C2` 组织为真实连续前缀，而不是只在 metadata 中标记为 cacheable。`cachePlan.adapterHint.cacheablePrefix` 只能包含从 request 第一个 section 开始连续出现的 C0/C1/C2 sections；一旦遇到 C3/C4/C5 或 assistant 历史消息，prefix 必须停止，后续即使存在稳定 section 也不得继续放入 `cacheablePrefix`。这条规则用于避免“审计显示可缓存，但实际 provider prefix 已被动态 stage/run 字段打断”的误判。
+
+`C3.workspace-run`、`C3.stage-contract`、`C3.repair-action-package`、`C4.previous-decision`、`C4.process-evidence-timeline`、`C4.validation-signal` 等包含 runId、stepId、当前失败、当前进展、历史决策或验证证据的 section 必须位于连续可缓存前缀之后。`C2.runtime-capability-summary` 属于 capability contract，只要内容来源是声明式 capability catalog 而不是当前执行状态，就应放入 C2 前缀；若某个能力摘要被上下文预算压缩或替换，必须导致 `capabilityContractHash` 变化，并在 usage audit 中可见。
+
 同级 section 内固定顺序：
 
 ```text
@@ -762,7 +766,7 @@ Provider adapter 不可以做：
 
 ### LCAC-P2: C0-C5 Section Builder
 
-状态：已完成基础 section 映射；C4 细粒度 event tape 拆分仍归属 LCAC-P3。
+状态：已完成基础 section 映射，并已将 provider-facing 顺序收口为连续 C0/C1/C2 可缓存前缀；C4 细粒度 event tape 拆分仍归属 LCAC-P3。
 
 目标：把原有 prompt sections 映射到 C0-C5。
 
@@ -782,7 +786,7 @@ Provider adapter 不可以做：
 
 - C0 已不包含 workspaceId/runId/stepId/current failure，能力合同已从 C0 拆出到 C2。
 - C1 已包含完整 Goal / DoD 原文和 definitionChangeImpact，并保留 raw_required protectedSections。
-- C2 已独立表达 runtime capability contract / governance policy。
+- C2 已独立表达 runtime capability contract / governance policy / runtime capability summary，并位于 C3 workspace-run 之前，形成真实 provider-facing 连续缓存前缀。
 - C3 已表达 workspace-run、stage-contract、repair-action-package。
 - C4 已承载 previous-decision、execution-signals、current-action；后续 LCAC-P3 继续把混合 execution-signals 拆成 typed event tape。
 
@@ -888,6 +892,7 @@ Provider adapter 不可以做：
 | LCAC-09 | P1 | done | provider adapter cache hint 预留 | core 不绑定 provider，adapter 可选消费 cachePlan |
 | LCAC-10 | P1 | done | request log 核对脚本 | 可对比连续请求的 section hash 和 cacheBreakers |
 | LCAC-11 | P1 | done | 文档摘要回填核心合同 | 将强制性规则摘要合入 runtime stage neutrality design |
+| LCAC-12 | P0 | done | 连续可缓存前缀收口 | provider-facing section 顺序为 C0 -> C1 -> C2 -> C3 -> C4 -> C5，`cacheablePrefix` 不跨越动态 section |
 
 LCAC-08 至 LCAC-11 已落地：
 

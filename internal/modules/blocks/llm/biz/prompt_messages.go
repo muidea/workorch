@@ -89,7 +89,12 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 
 	appendSection("C0.request-intent", "user", "normalize_allowed", requestIntentPrompt(request))
 	appendSection("C0.language-and-contract", "user", "normalize_allowed", languageAndContractPrompt(request))
+	appendSection("C1.goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
+	appendSection("C1.dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
+	appendSection("C1.effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
 	appendSection("C2.capability-contract", "user", "normalize_allowed", capabilityPromptSection(request))
+	appendSection("C2.governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
+	appendSection("C2.runtime-capability-summary", "user", "normalize_allowed", runtimeCapabilitySummaryPromptSection(request))
 	appendSection("C3.workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
 		"workspaceId": request.WorkspaceID,
 		"runId":       request.RunID,
@@ -98,12 +103,8 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 		"model":       request.Model,
 		"schema":      request.Schema,
 	}))
-	appendSection("C1.goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
-	appendSection("C1.dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
-	appendSection("C1.effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
 	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input))
 	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input))
-	appendSection("C2.governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
 	appendSection("C4.previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	for _, event := range executionSignalPromptEvents(request) {
 		appendSection(event.SectionID, event.Role, "normalize_allowed", event.Content)
@@ -588,12 +589,6 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if memory := memorySignalPayload(request.Input); len(memory) > 0 {
 		appendEvent("C4.memory-recall", "Memory Recall Signal", memory)
 	}
-	if len(request.RuntimeCapabilities.BlockKinds) > 0 ||
-		len(request.RuntimeCapabilities.ServiceAPIs) > 0 ||
-		request.RuntimeCapabilities.ShellPolicy.Enabled ||
-		len(request.RuntimeCapabilities.ShellPolicy.UnavailableCommands) > 0 {
-		appendEvent("C2.runtime-capability-summary", "Runtime Capability Summary", request.RuntimeCapabilities)
-	}
 	if len(request.TraceRefs) > 0 {
 		appendEvent("C5.trace-refs", "Trace References", request.TraceRefs)
 	}
@@ -607,6 +602,16 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 		appendEvent("C4.execution-signals", "Execution Context and Evidence Signals", executionSignalsPayload(request))
 	}
 	return events
+}
+
+func runtimeCapabilitySummaryPromptSection(request llmmodels.ProviderRequest) string {
+	if len(request.RuntimeCapabilities.BlockKinds) == 0 &&
+		len(request.RuntimeCapabilities.ServiceAPIs) == 0 &&
+		!request.RuntimeCapabilities.ShellPolicy.Enabled &&
+		len(request.RuntimeCapabilities.ShellPolicy.UnavailableCommands) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Runtime Capability Summary", request.RuntimeCapabilities)
 }
 
 func executionSignalsPromptSection(request llmmodels.ProviderRequest) string {

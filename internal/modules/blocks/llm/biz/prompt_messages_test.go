@@ -202,6 +202,47 @@ func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-prefix",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{{Kind: "file/read", Description: "read file"}},
+		},
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"goal": "goal text",
+				"dod":  "dod text",
+			},
+			"currentRuntimeStage": "execution",
+			"currentProgressDigest": map[string]any{
+				"nextRequiredAction": "continue",
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	if context == nil {
+		t.Fatalf("promptContext = nil")
+	}
+	seenDynamic := false
+	for _, section := range context.Sections {
+		group := promptSectionGroup(section.ID)
+		if group == "C3" || group == "C4" || group == "C5" {
+			seenDynamic = true
+			continue
+		}
+		if (group == "C0" || group == "C1" || group == "C2") && seenDynamic {
+			t.Fatalf("cacheable section %s appears after dynamic sections; order=%+v", section.ID, promptContextSectionIDsForTest(context))
+		}
+	}
+}
+
 func promptContextSectionByID(context *llmmodels.PromptContext, sectionID string) (llmmodels.PromptSection, bool) {
 	if context == nil {
 		return llmmodels.PromptSection{}, false
@@ -212,6 +253,17 @@ func promptContextSectionByID(context *llmmodels.PromptContext, sectionID string
 		}
 	}
 	return llmmodels.PromptSection{}, false
+}
+
+func promptContextSectionIDsForTest(context *llmmodels.PromptContext) []string {
+	if context == nil {
+		return nil
+	}
+	ret := make([]string, 0, len(context.Sections))
+	for _, section := range context.Sections {
+		ret = append(ret, section.ID)
+	}
+	return ret
 }
 
 func TestMemorySignalPayloadFiltersNonReferenceMemoryNoise(t *testing.T) {
