@@ -634,12 +634,21 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 
 - `implementation_gap`：已有 evidence 表明实现缺失、实现错误、artifact 无法应用或非只读执行失败，repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把实现缺口修复降级为只读 exploration graph。
 - `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，但尚未形成实现错误诊断时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
+- `hybrid_gap`：validation / completion 阶段已经具备明确 coverage gap，并且当前代码/graph evidence 已提示至少一部分缺口需要 state-changing implementation 或 state-changing test updates 才能关闭。此时 runtime 不应把 failed `dodAssessment` 仅视为纯 assessment 结果；应显式把 repair 目标提升为“优先输出 bounded state-changing repair graph，必要时附带对应 verification nodes”，避免先输出 failed assessment 再由 runtime 被动二次归约。
 
 当 state-changing repair 输入已经携带 `missingDoDItems`、`missingGoalCoverage` 或 `missingDeliverableCoverage` 时，返回的 `patch/apply` 至少必须有一个节点声明中立 `coverageTargets`，并且目标必须匹配对应缺口的原始 DoD item 文本、`goalRequirementId`、Goal coverage item 文本或 deliverable coverage 文本。该字段只表达“这个 state-changing artifact 试图关闭哪个 coverage gap”，不表示 runtime 认可其业务正确性；最终是否满足仍由后续 validation / acceptance evidence 判断。若 patch 不能绑定任何具体缺口，应返回 failed `dodAssessment` 或 blocker，而不是提交泛化骨架、marker、报告或只具备形式变更的 patch。
 
 `coverageTargets` 可以是字符串数组，也可以是结构化对象数组。结构化对象允许使用中立字段表达目标，例如 `coverageTargetToken`、`goalRequirementId`、`targetText`、`item`、`raw`、`requirement`、`goal`、`goalItem`、`id` 或 `expectationId`；runtime 只做规范化后的精确 coverage target 匹配，不解释业务含义、不基于具体领域关键词推断是否满足。
 
 Coverage contract 必须贯穿 planning -> execution -> follow-up -> repair -> validation，而不能只在 repair 阶段生效。但 `coverageTargets` 只在当前输入明确携带 `missingDoDItems` / `missingGoalCoverage` / `missingDeliverableCoverage` / `coverageTargetSet`，或 `repairActionPackage.coverageTargetSet` 时强制要求。普通 state-changing repair，例如编译错误、目标文件语法错误、patch context mismatch、schema recovery 后的目标文件最小修复，只需满足 target relevance、当前快照、state-changing graph 和 bounded verification 合同，不得因为全局 `stateChangePolicy=must_produce_state_change` 或完整 Goal/DoD 文本存在而强制 LLM 猜测 `coverageTargets`。真正 coverage-bound 的 `patch/apply` state-changing artifact 必须显式声明 `coverageTargets` 并匹配当前 coverage target set；任何后续验证节点必须显式声明 `targetRef`、`relatedFailureTargets`、`verificationScope`、`boundedReason` 或依赖一个已绑定 coverage target 的 state-changing artifact。该规则避免 coverage 缺口修复退化为形式变更，同时避免普通诊断修复被无关 coverage 元数据阻塞。
+
+对于 `graphFollowUp=true` 且 `runtimeStage=verification|acceptance` 的 strict convergence follow-up，如果当前证据已经明确指出 missing DoD / Goal / deliverable coverage，并且这些缺口可由后续自动 repair 关闭，LLM 不应优先返回“只有 failed dodAssessment、没有 actionable continuation”的结果。更符合合同的输出顺序应为：
+
+1. 直接返回 bounded state-changing repair graph，并绑定相应 `coverageTargets`；
+2. 若无法立即 state-change，但可以先补 concrete verification evidence，则返回 bounded verification evidence graph；
+3. 只有在确实无法自动推进时，才返回 failed `dodAssessment`，并明确哪些 gap 需要 runtime repair / replan。
+
+该规则仍是中立的：core 不判断具体业务实现方案，只要求“当缺口和修复目标已经结构化存在时，follow-up 输出优先给出可执行 continuation，而不是停在纯描述性失败”。
 
 所有 state-changing artifact 的合同校验必须发生在副作用执行之前。`patchRequests`、`patch/apply` graph node、`nextStep=patch/apply` 和 runtime patch output 在写入 workspace、创建 applied patch evidence、记录 completed step evidence 之前，都必须先通过适用的 coverage target、target relevance、state-changing graph、bounded verification 等中立合同校验。只有 coverage-bound 输入缺少或不匹配 `coverageTargets` 时，runtime 才应 fail-fast 并进入 repair/provider retry/schema recovery；普通诊断修复不得被提升为 coverage target violation。`coverageTargets` 属于 patch 的中立治理元数据，必须从 LLM decision schema、top-level `patchRequests`、`executionGraph.nodes[].input`、patch evidence、runtime validator 与后续 `repairActionPackage` 全链路保留；任何 schema normalization、decision mapping、evidence compaction 或 provider retry 都不得静默丢弃该字段。
 

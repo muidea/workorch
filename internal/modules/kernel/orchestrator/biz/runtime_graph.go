@@ -14,6 +14,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func (o *RuntimeOrchestrator) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {
@@ -171,10 +172,14 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionState != "" && completionState != "completed" {
-		last.State = common.StepStateFailed
-		last.Output = runtimeFailureOutput(last.Output, fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
-		_ = o.steps.Update(ctx, last)
-		return o.FailRun(ctx, currentRun.ID, fmt.Sprintf("%s: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState))
+		return o.handleGraphBatchCompletionGateFailure(
+			ctx,
+			currentRun,
+			last,
+			last.Output,
+			"runtime completion gate failed",
+			fmt.Errorf("%w: completionState %s has no actionable continuation", common.ErrInvalidArgument, completionState),
+		)
 	}
 	last.Output = normalizeCompletionGateDoDAssessmentOutput(currentRun, last, last.Output)
 	normalizedOutput, evidenceNormalizeErr := o.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, currentRun, last.Output)
@@ -185,21 +190,46 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	_ = o.steps.Update(ctx, last)
 	assessment, summary, err := validatedCompletionDoDAssessment(currentRun, last.Output)
 	if err != nil {
-		last.State = common.StepStateFailed
-		last.Output = runtimeFailureOutput(last.Output, err)
-		_ = o.steps.Update(ctx, last)
-		return o.FailRun(ctx, currentRun.ID, err.Error())
+		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
 	if err := o.validateDoDAssessmentEvidenceQuality(ctx, currentRun, assessment); err != nil {
-		last.State = common.StepStateFailed
-		last.Output = runtimeFailureOutput(last.Output, err)
-		_ = o.steps.Update(ctx, last)
-		return o.FailRun(ctx, currentRun.ID, err.Error())
+		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	output map[string]any,
+	summary string,
+	execErr error,
+) error {
+	if run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	step.State = common.StepStateFailed
+	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
+	attachRuntimeFailureClassification(step.Output, classification)
+	attachRuntimeFailureDiagnostics(step, classification, execErr)
+	errText := errorString(execErr)
+	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
+	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+	_ = o.steps.Update(ctx, step)
+	_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	if shouldCloseCompletionGateFailureWithoutRepair(summary, step, step.Output) {
+		reason := errText
+		if reason == "" {
+			reason = firstNonEmptyString(stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason"), "runtime step failed")
+		}
+		return o.failRunWithRejectedCompletionResult(ctx, run, step, reason)
+	}
+	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
 }
 
 func runtimeGraphSpecFromStep(step *runModel.Step) (runtimemodel.BlockExecutionGraph, bool) {

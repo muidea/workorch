@@ -13713,6 +13713,98 @@ func TestRuntimeOrchestrator_RepairsRepeatedContinueWithoutActionableContinuatio
 	}
 }
 
+func TestRuntimeOrchestrator_GraphBatchFailedAssessmentRoutesToRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	var repairInput map[string]any
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "patch-alpha", Kind: "graph/mock"},
+		{ID: "verify-beta", Kind: "graph/mock"},
+	}}
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			repairInput = request.Input
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": true,
+					"summary":   "repair closed missing coverage",
+					"items": []map[string]any{{
+						"item":         "missing target is covered",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(request.StepID)},
+					}},
+				},
+			}, nil
+		}
+		switch request.StepID {
+		case "run-graph-batch-failed-assessment/step-1":
+			return map[string]any{
+				"status":                    "completed",
+				stepOutputKeyExecutionGraph: graph,
+			}, nil
+		case graphScopedStepID("run-graph-batch-failed-assessment", 1, 1, "patch-alpha"):
+			return map[string]any{"status": "completed"}, nil
+		case graphScopedStepID("run-graph-batch-failed-assessment", 1, 2, "verify-beta"):
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyLLMDecision: map[string]any{
+					"completionState": "failed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied": false,
+						"summary":   "missing target needs follow-up repair",
+						"items": []map[string]any{{
+							"item":  "missing target is covered",
+							"state": "failed",
+						}},
+						"nextActions": []string{"repair missing target", "rerun bounded verification"},
+					},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected step %s", request.StepID)
+		}
+	}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-batch-failed-assessment")
+	runID := common.RunID("run-graph-batch-failed-assessment")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-graph-batch-failed-assessment"),
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	if repairInput == nil {
+		t.Fatalf("runtime repair follow-up was not dispatched for graph batch failed assessment")
+	}
+	if missing := mapSliceFromValue(repairInput["missingDoDItems"]); len(missing) != 1 || missing[0]["item"] != "missing target is covered" {
+		t.Fatalf("repairInput missingDoDItems = %+v, want failed assessment item", repairInput["missingDoDItems"])
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after graph batch repair", runItem)
+	}
+}
+
 func TestRuntimeOrchestrator_RepairsInconclusiveSatisfiedDoDAssessmentBeforeEscalation(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

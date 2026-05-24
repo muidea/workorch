@@ -199,6 +199,7 @@ Planning / execution / validation Soul 都应要求：
 - 对每个 Goal leaf requirement 标注覆盖方式。
 - 明确哪些测试覆盖主路径、错误路径、配置路径、持久化路径、并发路径。
 - 如果只能 smoke test，不能用它支撑复杂能力 satisfied。
+- 当 graph follow-up / completion follow-up 已经识别出具体 DoD 或 Goal coverage 缺口时，优先把缺口映射成“需要修改哪些文件、需要补哪些测试、需要跑哪些验证命令”的可执行修复图；不要先停在只描述缺口的 failed assessment，除非该缺口确实无法自动推进。
 
 ### 4. Runtime Entrypoint Integrity
 
@@ -218,6 +219,21 @@ Validation Soul 应补充：
 - 若 Goal 涉及协议兼容或格式转换，必须验证输入输出格式、关键字段和错误透传。
 - 若 Goal 涉及流式/增量输出，必须验证正常结束、异常结束和统计/收尾逻辑。
 - 若 Goal 涉及持久化或审计，必须验证记录字段、追加行为和并发安全。
+
+### 6. Completion-to-Repair 行为约束
+
+software-dev planning / execution / validation souls 应额外强调：
+
+- 当当前 run 已完成一轮 graph，且 completion assessment 发现未满足项时，首先判断这些缺口属于：
+  - 仍需实现/补代码；
+  - 已实现但缺测试/缺验证；
+  - 仅缺结构化 assessment 引用。
+- 如果缺口可以自动修复，优先输出 bounded repair graph：
+  - state-changing patch/apply 节点；
+  - 与之绑定的验证命令；
+  - 对应 `coverageTargets`。
+- 只有在无法从当前 workspace、当前 graph evidence 和当前 contract 机械推进时，才返回 failed assessment 交给 runtime 再决定 repair / replan。
+- 对于 API、流式、配置、持久化、副作用、并发等高风险维度，发现缺口时不得只给“后续建议”，必须尽量直接补测试或补实现。
 
 这些要求仍是 profile 层，不进入 core runtime。
 

@@ -84,6 +84,8 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(joined, "patch/preview or patch/apply failure") ||
 		!strings.Contains(joined, "assessmentOnly") ||
 		!strings.Contains(joined, "Graph follow-up is a closure step") ||
+		!strings.Contains(joined, "strict-convergence graph follow-up") ||
+		!strings.Contains(joined, "bounded executable continuation graph") ||
 		!strings.Contains(joined, "runtimeCapabilities") {
 		t.Fatalf("messages = %+v, want runtime capability boundary", gotPayload.Messages)
 	}
