@@ -994,6 +994,7 @@ func providerCachePlanOutput(plan *llmmodels.ProviderCachePlan) map[string]any {
 			"name":               item.Name,
 			"cacheability":       item.Cacheability,
 			"hash":               item.Hash,
+			"sizeBytes":          item.SizeBytes,
 			"sourceRefs":         append([]string(nil), item.SourceRefs...),
 			"definitionRevision": item.DefinitionRevision,
 		})
@@ -1105,6 +1106,7 @@ func buildLLMUsageOutput(
 	if totalTokens == 0 && (inputTokens > 0 || outputTokens > 0) {
 		totalTokens = inputTokens + outputTokens
 	}
+	cacheUsage := providerCacheUsageOutput(call, inputTokens)
 	ret := map[string]any{
 		"workspaceId":   string(request.WorkspaceID),
 		"runId":         string(request.RunID),
@@ -1127,16 +1129,112 @@ func buildLLMUsageOutput(
 		"durationMs":    int(completedAt.Sub(startedAt).Milliseconds()),
 		"status":        status,
 	}
-	if estimatedCost, currency, ok := estimateUsageCost(inputTokens, outputTokens, call.runtime.Config.ContextProfile); ok {
-		ret["estimatedCost"] = estimatedCost
-		ret["currency"] = currency
-		ret["costEstimated"] = true
-		ret["costSource"] = llmcommon.CostSourceProfilePricing
+	if len(cacheUsage) > 0 {
+		ret["cacheUsage"] = cacheUsage
 	}
 	if strings.TrimSpace(failureClass) != "" {
 		ret["failureClass"] = strings.TrimSpace(failureClass)
 	}
 	return ret
+}
+
+func providerCacheUsageOutput(call providerCallResult, inputTokens int) map[string]any {
+	plan := providerCachePlanFromBudget(call.request.ContextBudget)
+	cacheReadTokens := 0
+	cacheWriteTokens := 0
+	cacheCreationTokens := 0
+	cacheableInputTokens := 0
+	nonCacheableInputTokens := 0
+	source := "cache_plan_estimated"
+	estimated := true
+	if call.usage != nil {
+		cacheReadTokens = max(0, call.usage.CacheReadTokens)
+		cacheWriteTokens = max(0, call.usage.CacheWriteTokens)
+		cacheCreationTokens = max(0, call.usage.CacheCreationTokens)
+		cacheableInputTokens = max(0, call.usage.CacheableInputTokens)
+		nonCacheableInputTokens = max(0, call.usage.NonCacheableInputTokens)
+		if cacheReadTokens > 0 || cacheWriteTokens > 0 || cacheCreationTokens > 0 || cacheableInputTokens > 0 || nonCacheableInputTokens > 0 {
+			source = llmcommon.UsageSourceProviderNative
+			estimated = false
+		}
+	}
+	if cacheableInputTokens == 0 && plan != nil {
+		cacheableInputTokens = estimateCacheableInputTokensFromPlan(plan, inputTokens)
+	}
+	if nonCacheableInputTokens == 0 && inputTokens > 0 && cacheableInputTokens > 0 {
+		nonCacheableInputTokens = max(0, inputTokens-cacheableInputTokens)
+	}
+	if cacheReadTokens == 0 && cacheWriteTokens == 0 && cacheCreationTokens == 0 && cacheableInputTokens == 0 && nonCacheableInputTokens == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"estimated":               estimated,
+		"source":                  source,
+		"cacheReadTokens":         cacheReadTokens,
+		"cacheWriteTokens":        cacheWriteTokens,
+		"cacheCreationTokens":     cacheCreationTokens,
+		"cacheableInputTokens":    cacheableInputTokens,
+		"nonCacheableInputTokens": nonCacheableInputTokens,
+	}
+	if plan != nil {
+		ret["cacheKey"] = plan.CacheKey
+		ret["stablePrefixHash"] = plan.StablePrefixHash
+		ret["workspaceDefinitionHash"] = plan.WorkspaceDefinitionHash
+		ret["capabilityContractHash"] = plan.CapabilityContractHash
+		ret["stageBundleHash"] = plan.StageBundleHash
+		ret["volatileTailHash"] = plan.VolatileTailHash
+		ret["cacheableSections"] = append([]string(nil), plan.AdapterHint.CacheablePrefix...)
+		ret["volatileSections"] = append([]string(nil), plan.AdapterHint.VolatileSections...)
+		ret["cacheBreakers"] = append([]string(nil), plan.AdapterHint.CacheBreakers...)
+	}
+	return ret
+}
+
+func providerCachePlanFromBudget(budget *llmmodels.ProviderContextBudget) *llmmodels.ProviderCachePlan {
+	if budget == nil || budget.CachePlan == nil {
+		return nil
+	}
+	return budget.CachePlan
+}
+
+func estimateCacheableInputTokensFromPlan(plan *llmmodels.ProviderCachePlan, inputTokens int) int {
+	if plan == nil || inputTokens <= 0 || len(plan.SectionHashes) == 0 {
+		return 0
+	}
+	cacheable := map[string]bool{}
+	for _, sectionID := range plan.AdapterHint.CacheablePrefix {
+		cacheable[strings.TrimSpace(sectionID)] = true
+	}
+	if len(cacheable) == 0 {
+		return 0
+	}
+	cacheableBytes := 0
+	totalBytes := 0
+	for _, section := range plan.SectionHashes {
+		size := providerCacheSectionSize(section)
+		if size <= 0 {
+			continue
+		}
+		totalBytes += size
+		if cacheable[strings.TrimSpace(section.SectionID)] {
+			cacheableBytes += size
+		}
+	}
+	if totalBytes <= 0 || cacheableBytes <= 0 {
+		return 0
+	}
+	estimated := int(float64(inputTokens) * float64(cacheableBytes) / float64(totalBytes))
+	if estimated > inputTokens {
+		return inputTokens
+	}
+	return estimated
+}
+
+func providerCacheSectionSize(section llmmodels.ProviderCacheSectionHash) int {
+	if section.SizeBytes > 0 {
+		return section.SizeBytes
+	}
+	return 1
 }
 
 func providerRequestBytes(request llmmodels.ProviderRequest) int {
@@ -1169,23 +1267,6 @@ func estimateUsageTokensFromBytes(bytes int, tokensPerByte float64) int {
 		tokensPerByte = defaultEstimatedTokensPerByte
 	}
 	return int(math.Ceil(float64(bytes) * tokensPerByte))
-}
-
-func estimateUsageCost(inputTokens, outputTokens int, profile llmmodels.ProviderContextProfile) (float64, string, bool) {
-	inputPrice := profile.InputTokenPrice
-	outputPrice := profile.OutputTokenPrice
-	if inputPrice <= 0 && outputPrice <= 0 {
-		return 0, "", false
-	}
-	cost := float64(inputTokens)*inputPrice + float64(outputTokens)*outputPrice
-	if cost <= 0 {
-		return 0, "", false
-	}
-	currency := strings.ToUpper(strings.TrimSpace(profile.Currency))
-	if currency == "" {
-		currency = "USD"
-	}
-	return cost, currency, true
 }
 
 func validateNonChatProviderOperation(operation string, capabilities llmmodels.ProviderCapabilities) error {

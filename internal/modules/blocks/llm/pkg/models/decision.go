@@ -112,6 +112,7 @@ type ProviderCacheSectionHash struct {
 	Name               string   `json:"name,omitempty"`
 	Cacheability       string   `json:"cacheability,omitempty"`
 	Hash               string   `json:"hash,omitempty"`
+	SizeBytes          int      `json:"sizeBytes,omitempty"`
 	SourceRefs         []string `json:"sourceRefs,omitempty"`
 	DefinitionRevision string   `json:"definitionRevision,omitempty"`
 }
@@ -155,15 +156,17 @@ type ProviderContextProfile struct {
 	BytesHardLimit          int     `json:"bytesHardLimit,omitempty"`
 	MaxRequestBytes         int     `json:"maxRequestBytes,omitempty"`
 	EstimatedTokensPerByte  float64 `json:"estimatedTokensPerByte,omitempty"`
-	InputTokenPrice         float64 `json:"inputTokenPrice,omitempty"`
-	OutputTokenPrice        float64 `json:"outputTokenPrice,omitempty"`
-	Currency                string  `json:"currency,omitempty"`
 }
 
 type ProviderUsage struct {
-	InputTokens  int `json:"inputTokens,omitempty"`
-	OutputTokens int `json:"outputTokens,omitempty"`
-	TotalTokens  int `json:"totalTokens,omitempty"`
+	InputTokens             int `json:"inputTokens,omitempty"`
+	OutputTokens            int `json:"outputTokens,omitempty"`
+	TotalTokens             int `json:"totalTokens,omitempty"`
+	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
+	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
+	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
+	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
 }
 
 type ProviderCompletionResult struct {

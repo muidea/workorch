@@ -47,9 +47,6 @@ timeout = "60s"
 disabled = false
 streaming = true
 nonChatOperations = ["embeddings"]
-inputTokenPrice = 0.000001
-outputTokenPrice = 0.000002
-currency = "usd"
 
 [webSearch]
 defaultProvider = "search"
@@ -116,11 +113,6 @@ maxRepeatedSamePrompt = 1
 		!provider.ChatCompletions || !provider.Streaming || len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
 		t.Fatalf("provider = %+v, want ready redacted local provider", provider)
 	}
-	if provider.ContextProfile.Currency != "USD" ||
-		provider.ContextProfile.InputTokenPrice != 0.000001 ||
-		provider.ContextProfile.OutputTokenPrice != 0.000002 {
-		t.Fatalf("provider context profile = %+v, want pricing fields exposed", provider.ContextProfile)
-	}
 	if cfg.WebSearch.DefaultProviderID != "search" || len(cfg.WebSearch.Providers) != 1 || len(cfg.WebSearch.ProviderTemplates) != 1 {
 		t.Fatalf("web search configuration = %+v, want search provider and template", cfg.WebSearch)
 	}
@@ -186,9 +178,6 @@ disabled = false
 			Timeout:           stringPtr("45s"),
 			NonChatOperations: []string{"embeddings", "embeddings"},
 			ContextProfile: &UpdateLLMProviderContextProfile{
-				InputTokenPrice:        float64Ptr(0.000001),
-				OutputTokenPrice:       float64Ptr(0.000002),
-				Currency:               stringPtr("USD"),
 				EstimatedTokensPerByte: float64Ptr(0.25),
 			},
 		}),
@@ -204,11 +193,8 @@ disabled = false
 		len(provider.NonChatOperations) != 1 || provider.NonChatOperations[0] != "embeddings" {
 		t.Fatalf("provider = %+v, want updated model and preserved api key", provider)
 	}
-	if provider.ContextProfile.InputTokenPrice != 0.000001 ||
-		provider.ContextProfile.OutputTokenPrice != 0.000002 ||
-		provider.ContextProfile.Currency != "USD" ||
-		provider.ContextProfile.EstimatedTokensPerByte != 0.25 {
-		t.Fatalf("provider context profile = %+v, want updated profile pricing", provider.ContextProfile)
+	if provider.ContextProfile.EstimatedTokensPerByte != 0.25 {
+		t.Fatalf("provider context profile = %+v, want updated profile", provider.ContextProfile)
 	}
 
 	current, err := workorchconfig.Current()
@@ -225,11 +211,8 @@ disabled = false
 		len(current.LLM.Providers["local"].NonChatOperations) != 1 {
 		t.Fatalf("current llm capabilities = %+v, want persisted provider capabilities", current.LLM.Providers["local"])
 	}
-	if current.LLM.Providers["local"].InputTokenPrice != 0.000001 ||
-		current.LLM.Providers["local"].OutputTokenPrice != 0.000002 ||
-		current.LLM.Providers["local"].Currency != "USD" ||
-		current.LLM.Providers["local"].EstimatedTokensPerByte != 0 {
-		t.Fatalf("current llm context profile = %+v, want persisted profile pricing", current.LLM.Providers["local"])
+	if current.LLM.Providers["local"].EstimatedTokensPerByte != 0 {
+		t.Fatalf("current llm context profile = %+v, want auto profile to omit manual token estimate", current.LLM.Providers["local"])
 	}
 }
 
@@ -285,9 +268,6 @@ reservedOutputTokens = 4096
 safetyRatio = 0.8
 bytesHardLimit = 98304
 estimatedTokensPerByte = 0.25
-inputTokenPrice = 0.000001
-outputTokenPrice = 0.000002
-currency = "USD"
 `
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -431,9 +411,6 @@ reservedOutputTokens = 4096
 safetyRatio = 0.8
 bytesHardLimit = 98304
 estimatedTokensPerByte = 0.25
-inputTokenPrice = 0.000001
-outputTokenPrice = 0.000002
-currency = "USD"
 `
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -459,9 +436,8 @@ currency = "USD"
 		provider.ContextProfile.ContextWindowTokens != 65536 ||
 		provider.ContextProfile.MaxInputTokens != 46080 ||
 		provider.ContextProfile.ReservedOutputTokens != 4096 ||
-		provider.ContextProfile.BytesHardLimit != 184320 ||
-		provider.ContextProfile.Currency != "USD" {
-		t.Fatalf("provider context profile = %+v, want auto budget with preserved pricing", provider.ContextProfile)
+		provider.ContextProfile.BytesHardLimit != 184320 {
+		t.Fatalf("provider context profile = %+v, want auto budget", provider.ContextProfile)
 	}
 }
 

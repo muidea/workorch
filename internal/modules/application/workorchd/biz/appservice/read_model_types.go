@@ -706,14 +706,11 @@ type LLMUsageTrace struct {
 	TotalTokens   int            `json:"totalTokens,omitempty"`
 	Estimated     bool           `json:"estimated"`
 	UsageSource   string         `json:"usageSource,omitempty"`
-	EstimatedCost float64        `json:"estimatedCost,omitempty"`
-	CostEstimated bool           `json:"costEstimated"`
-	CostSource    string         `json:"costSource,omitempty"`
-	Currency      string         `json:"currency,omitempty"`
 	RequestBytes  int            `json:"requestBytes,omitempty"`
 	ResponseBytes int            `json:"responseBytes,omitempty"`
 	Streaming     bool           `json:"streaming"`
 	ContextBudget map[string]any `json:"contextBudget,omitempty"`
+	CacheUsage    map[string]any `json:"cacheUsage,omitempty"`
 	StartedAt     string         `json:"startedAt,omitempty"`
 	CompletedAt   string         `json:"completedAt,omitempty"`
 	DurationMs    int            `json:"durationMs,omitempty"`
@@ -724,38 +721,35 @@ type LLMUsageTrace struct {
 }
 
 type LLMUsageSummary struct {
-	EntryTotal             int                              `json:"entryTotal"`
-	InputTokens            int                              `json:"inputTokens"`
-	OutputTokens           int                              `json:"outputTokens"`
-	TotalTokens            int                              `json:"totalTokens"`
-	EstimatedCost          float64                          `json:"estimatedCost,omitempty"`
-	Currency               string                           `json:"currency,omitempty"`
-	EstimatedEntries       int                              `json:"estimatedEntries"`
-	ProviderNativeEntries  int                              `json:"providerNativeEntries"`
-	CostEstimatedEntries   int                              `json:"costEstimatedEntries"`
-	FailedEntries          int                              `json:"failedEntries"`
-	CostBreakdown          []LLMUsageCostBreakdown          `json:"costBreakdown,omitempty"`
-	ProviderModelBreakdown []LLMUsageProviderModelBreakdown `json:"providerModelBreakdown,omitempty"`
-}
-
-type LLMUsageCostBreakdown struct {
-	Currency      string  `json:"currency"`
-	EstimatedCost float64 `json:"estimatedCost"`
-	EntryTotal    int     `json:"entryTotal"`
+	EntryTotal              int                              `json:"entryTotal"`
+	InputTokens             int                              `json:"inputTokens"`
+	OutputTokens            int                              `json:"outputTokens"`
+	TotalTokens             int                              `json:"totalTokens"`
+	EstimatedEntries        int                              `json:"estimatedEntries"`
+	ProviderNativeEntries   int                              `json:"providerNativeEntries"`
+	FailedEntries           int                              `json:"failedEntries"`
+	CacheReadTokens         int                              `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens        int                              `json:"cacheWriteTokens,omitempty"`
+	CacheCreationTokens     int                              `json:"cacheCreationTokens,omitempty"`
+	CacheableInputTokens    int                              `json:"cacheableInputTokens,omitempty"`
+	NonCacheableInputTokens int                              `json:"nonCacheableInputTokens,omitempty"`
+	CacheEstimatedEntries   int                              `json:"cacheEstimatedEntries,omitempty"`
+	CacheProviderEntries    int                              `json:"cacheProviderEntries,omitempty"`
+	ProviderModelBreakdown  []LLMUsageProviderModelBreakdown `json:"providerModelBreakdown,omitempty"`
 }
 
 type LLMUsageProviderModelBreakdown struct {
-	ProviderID       string  `json:"providerId,omitempty"`
-	Provider         string  `json:"provider,omitempty"`
-	Model            string  `json:"model,omitempty"`
-	Currency         string  `json:"currency,omitempty"`
-	EntryTotal       int     `json:"entryTotal"`
-	InputTokens      int     `json:"inputTokens"`
-	OutputTokens     int     `json:"outputTokens"`
-	TotalTokens      int     `json:"totalTokens"`
-	EstimatedCost    float64 `json:"estimatedCost,omitempty"`
-	EstimatedEntries int     `json:"estimatedEntries"`
-	FailedEntries    int     `json:"failedEntries"`
+	ProviderID       string `json:"providerId,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
+	EntryTotal       int    `json:"entryTotal"`
+	InputTokens      int    `json:"inputTokens"`
+	OutputTokens     int    `json:"outputTokens"`
+	TotalTokens      int    `json:"totalTokens"`
+	CacheReadTokens  int    `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int    `json:"cacheWriteTokens,omitempty"`
+	EstimatedEntries int    `json:"estimatedEntries"`
+	FailedEntries    int    `json:"failedEntries"`
 }
 
 type WebSource struct {

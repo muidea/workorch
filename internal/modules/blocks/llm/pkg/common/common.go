@@ -46,9 +46,6 @@ const (
 	EnvBytesHardLimit          = "bytesHardLimit"
 	EnvMaxRequestBytes         = "maxRequestBytes"
 	EnvTokensPerByte           = "estimatedTokensPerByte"
-	EnvInputTokenPrice         = "inputTokenPrice"
-	EnvOutputTokenPrice        = "outputTokenPrice"
-	EnvCurrency                = "currency"
 	EnvFailoverEnabled         = "failoverEnabled"
 	EnvFailoverProviders       = "failoverProviders"
 )
@@ -61,8 +58,4 @@ const (
 const (
 	UsageSourceEstimated      = "estimated"
 	UsageSourceProviderNative = "provider_native"
-)
-
-const (
-	CostSourceProfilePricing = "profile_pricing"
 )

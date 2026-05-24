@@ -208,9 +208,6 @@ type UpdateLLMProviderContextProfile struct {
 	BytesHardLimit          *int     `json:"bytesHardLimit,omitempty"`
 	MaxRequestBytes         *int     `json:"maxRequestBytes,omitempty"`
 	EstimatedTokensPerByte  *float64 `json:"estimatedTokensPerByte,omitempty"`
-	InputTokenPrice         *float64 `json:"inputTokenPrice,omitempty"`
-	OutputTokenPrice        *float64 `json:"outputTokenPrice,omitempty"`
-	Currency                *string  `json:"currency,omitempty"`
 }
 
 type UpdateWebSearchConfigurationCommand struct {
@@ -701,15 +698,6 @@ func applyLLMProviderContextProfileUpdate(next *workorchconfig.LLMProviderConfig
 	if update.EstimatedTokensPerByte != nil {
 		next.EstimatedTokensPerByte = *update.EstimatedTokensPerByte
 	}
-	if update.InputTokenPrice != nil {
-		next.InputTokenPrice = *update.InputTokenPrice
-	}
-	if update.OutputTokenPrice != nil {
-		next.OutputTokenPrice = *update.OutputTokenPrice
-	}
-	if update.Currency != nil {
-		next.Currency = strings.TrimSpace(*update.Currency)
-	}
 }
 
 func simplifyAutoLLMProviderContextProfile(next *workorchconfig.LLMProviderConfig) {
@@ -902,9 +890,6 @@ func cloneLLMProviderConfig(source workorchconfig.LLMProviderConfig) workorchcon
 		BytesHardLimit:          source.BytesHardLimit,
 		MaxRequestBytes:         source.MaxRequestBytes,
 		EstimatedTokensPerByte:  source.EstimatedTokensPerByte,
-		InputTokenPrice:         source.InputTokenPrice,
-		OutputTokenPrice:        source.OutputTokenPrice,
-		Currency:                source.Currency,
 	}
 }
 

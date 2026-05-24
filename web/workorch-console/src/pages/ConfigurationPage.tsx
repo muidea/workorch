@@ -798,15 +798,6 @@ export function ConfigurationPage() {
                       <Form.Item name={['contextProfile', 'estimatedTokensPerByte']} label="Token/Byte 估算">
                         <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
                       </Form.Item>
-                      <Form.Item name={['contextProfile', 'inputTokenPrice']} label="输入 Token 单价">
-                        <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'outputTokenPrice']} label="输出 Token 单价">
-                        <InputNumber min={0} step={0.000001} style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item name={['contextProfile', 'currency']} label="计费币种">
-                        <Input placeholder="USD" />
-                      </Form.Item>
                     </>
                   ) : null}
                 </Form.Item>

@@ -506,9 +506,6 @@ def clean_context_profile(item):
         "bytesHardLimit",
         "maxRequestBytes",
         "estimatedTokensPerByte",
-        "inputTokenPrice",
-        "outputTokenPrice",
-        "currency",
     }
     return {key: profile[key] for key in allowed if key in profile}
 
@@ -571,9 +568,6 @@ updated_providers.append({
     "nonChatOperations": ["embeddings"],
     "contextProfile": {
         "estimatedTokensPerByte": 0.25,
-        "inputTokenPrice": 0.000001,
-        "outputTokenPrice": 0.000002,
-        "currency": "USD",
     },
 })
 updated_providers.append({
@@ -589,9 +583,6 @@ updated_providers.append({
     "nonChatOperations": ["embeddings"],
     "contextProfile": {
         "estimatedTokensPerByte": 0.25,
-        "inputTokenPrice": 0.000001,
-        "outputTokenPrice": 0.000002,
-        "currency": "USD",
     },
 })
 updated_providers.append({
@@ -607,9 +598,6 @@ updated_providers.append({
     "nonChatOperations": ["embeddings"],
     "contextProfile": {
         "estimatedTokensPerByte": 0.25,
-        "inputTokenPrice": 0.000001,
-        "outputTokenPrice": 0.000002,
-        "currency": "USD",
     },
 })
 update = {
@@ -787,7 +775,6 @@ if not usage_traces:
 else:
     estimated_entries = 0
     native_entries = 0
-    cost_estimated_entries = 0
     for trace in usage_traces:
         estimated = bool(trace.get("estimated"))
         usage_source = trace.get("usageSource")
@@ -802,12 +789,6 @@ else:
             native_entries += 1
             if usage_source != "provider_native":
                 errors.append(f"llm usage trace native/source mismatch: {trace}")
-        if trace.get("estimatedCost", 0) and not trace.get("costEstimated"):
-            errors.append(f"llm usage trace cost semantics mismatch: {trace}")
-        if trace.get("costEstimated"):
-            cost_estimated_entries += 1
-            if not trace.get("costSource"):
-                errors.append(f"llm usage trace missing costSource: {trace}")
 
     summary = observability.get("llmUsageSummary") or {}
     if summary.get("entryTotal") != len(usage_traces):
@@ -816,17 +797,6 @@ else:
         errors.append(f"llm usage summary estimatedEntries mismatch: {summary} vs {estimated_entries}")
     if summary.get("providerNativeEntries") != native_entries:
         errors.append(f"llm usage summary providerNativeEntries mismatch: {summary} vs {native_entries}")
-    if summary.get("costEstimatedEntries") != cost_estimated_entries:
-        errors.append(f"llm usage summary costEstimatedEntries mismatch: {summary} vs {cost_estimated_entries}")
-    if cost_estimated_entries > 0:
-        cost_breakdown = summary.get("costBreakdown") or []
-        if not cost_breakdown:
-            errors.append(f"llm usage summary missing costBreakdown for estimated costs: {summary}")
-        if len(cost_breakdown) == 1:
-            currency = cost_breakdown[0].get("currency")
-            estimated_cost = cost_breakdown[0].get("estimatedCost")
-            if summary.get("currency") != currency or summary.get("estimatedCost") != estimated_cost:
-                errors.append(f"llm usage single-currency summary mismatch: {summary}")
     if expected_usage_source:
         if not any((item.get("usageSource") or "") == expected_usage_source for item in usage_traces):
             errors.append(f"llm usage traces missing expected usageSource={expected_usage_source!r}: {usage_traces}")
@@ -921,17 +891,9 @@ import sys
 snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
 summary = snapshot.get("llmUsageSummary") or {}
 breakdown = summary.get("providerModelBreakdown") or []
-cost_breakdown = summary.get("costBreakdown") or []
 
 if not breakdown:
     raise SystemExit(f"workspace llm usage summary missing providerModelBreakdown: {summary}")
-if not cost_breakdown:
-    raise SystemExit(f"workspace llm usage summary missing costBreakdown: {summary}")
-if len(cost_breakdown) == 1:
-    currency = cost_breakdown[0].get("currency")
-    estimated_cost = cost_breakdown[0].get("estimatedCost")
-    if summary.get("currency") != currency or summary.get("estimatedCost") != estimated_cost:
-        raise SystemExit(f"workspace single-currency cost summary mismatch: {summary}")
 
 required = {
     ("verify", "verify-model"),
@@ -946,8 +908,6 @@ if missing:
 for item in breakdown:
     if (item.get("providerId"), item.get("model")) in required and int(item.get("entryTotal") or 0) <= 0:
         raise SystemExit(f"workspace provider/model breakdown has empty entryTotal: {item}")
-    if (item.get("providerId"), item.get("model")) in required and not item.get("currency"):
-        raise SystemExit(f"workspace provider/model breakdown missing currency for priced provider: {item}")
 PY
 }
 

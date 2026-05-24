@@ -88,9 +88,6 @@ export type ProviderContextProfile = {
   bytesHardLimit?: number;
   maxRequestBytes?: number;
   estimatedTokensPerByte?: number;
-  inputTokenPrice?: number;
-  outputTokenPrice?: number;
-  currency?: string;
 };
 
 export type LLMProviderTemplate = {
@@ -153,9 +150,6 @@ export type UpdateLLMProviderContextProfile = {
   bytesHardLimit?: number;
   maxRequestBytes?: number;
   estimatedTokensPerByte?: number;
-  inputTokenPrice?: number;
-  outputTokenPrice?: number;
-  currency?: string;
 };
 
 export type WebSearchConfiguration = {
@@ -790,14 +784,11 @@ export type LLMUsageTrace = {
   totalTokens?: number;
   estimated: boolean;
   usageSource?: string;
-  estimatedCost?: number;
-  costEstimated: boolean;
-  costSource?: string;
-  currency?: string;
   requestBytes?: number;
   responseBytes?: number;
   streaming: boolean;
   contextBudget?: Record<string, unknown>;
+  cacheUsage?: Record<string, unknown>;
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -812,32 +803,29 @@ export type LLMUsageSummary = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  estimatedCost?: number;
-  currency?: string;
   estimatedEntries: number;
   providerNativeEntries: number;
-  costEstimatedEntries: number;
   failedEntries: number;
-  costBreakdown?: LLMUsageCostBreakdown[];
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cacheCreationTokens?: number;
+  cacheableInputTokens?: number;
+  nonCacheableInputTokens?: number;
+  cacheEstimatedEntries?: number;
+  cacheProviderEntries?: number;
   providerModelBreakdown?: LLMUsageProviderModelBreakdown[];
-};
-
-export type LLMUsageCostBreakdown = {
-  currency: string;
-  estimatedCost: number;
-  entryTotal: number;
 };
 
 export type LLMUsageProviderModelBreakdown = {
   providerId?: string;
   provider?: string;
   model?: string;
-  currency?: string;
   entryTotal: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  estimatedCost?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   estimatedEntries: number;
   failedEntries: number;
 };

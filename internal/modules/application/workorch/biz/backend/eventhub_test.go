@@ -198,7 +198,7 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	for _, envelope := range publishedHub.Published() {
 		switch envelope.Topic {
 		case events.TopicGoalDefined:
-			if envelope.SubjectID == string(goal.ID) && envelope.WorkspaceID == string(ws.ID) && envelope.Payload[events.PayloadKeyText] == "updated goal" {
+			if envelope.SubjectID == string(goal.ID) && envelope.WorkspaceID == string(ws.ID) && envelope.Payload[events.PayloadKeyText] == "- updated goal" {
 				sawUpdatedGoal = true
 			}
 		case events.TopicDoDDefined:

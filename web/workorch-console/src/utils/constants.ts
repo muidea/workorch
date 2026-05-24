@@ -124,6 +124,6 @@ export const modelLabels = {
   validationResult: '校验结果（Validation Result）',
   runtimeCheckpoint: '运行检查点（Runtime Checkpoint）',
   llmProvider: 'LLM 服务商（Provider）',
-  llmUsage: 'LLM 使用量 / 费用',
+  llmUsage: 'LLM 使用量',
   metrics: '运行指标（Metrics）'
 };

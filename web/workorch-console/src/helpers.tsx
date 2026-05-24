@@ -749,33 +749,8 @@ export function numberText(value?: number) {
   return new Intl.NumberFormat('zh-CN').format(value ?? 0);
 }
 
-export function costText(value?: number, currency?: string) {
-  if (!value || value <= 0) {
-    return '-';
-  }
-  const formatted = new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: value < 0.01 ? 8 : 4
-  }).format(value);
-  return currency ? `${formatted} ${currency}` : formatted;
-}
-
-export function llmUsageCostSummary(summary?: LLMUsageSummary) {
-  if (!summary || summary.entryTotal === 0) {
-    return '-';
-  }
-  if (summary.currency && summary.estimatedCost) {
-    return costText(summary.estimatedCost, summary.currency);
-  }
-  const breakdown = summary.costBreakdown ?? [];
-  if (breakdown.length === 0) {
-    return '-';
-  }
-  return breakdown.map((item) => costText(item.estimatedCost, item.currency)).join(' / ');
-}
-
 export function llmUsageProviderModelKey(item: LLMUsageProviderModelBreakdown, index?: number) {
-  return [item.providerId, item.provider, item.model, item.currency, index].filter(Boolean).join('|');
+  return [item.providerId, item.provider, item.model, index].filter(Boolean).join('|');
 }
 
 export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]) {
@@ -786,7 +761,6 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
     totalTokens: 0,
     estimatedEntries: 0,
     providerNativeEntries: 0,
-    costEstimatedEntries: 0,
     failedEntries: 0
   };
   const usageTraces = traces ?? [];
@@ -800,7 +774,8 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
         { key: 'tokens', label: 'Token 总量', value: numberText(usageSummary.totalTokens), color: '#0958d9' },
         { key: 'input', label: '输入 Token', value: numberText(usageSummary.inputTokens) },
         { key: 'output', label: '输出 Token', value: numberText(usageSummary.outputTokens) },
-        { key: 'cost', label: '估算费用', value: llmUsageCostSummary(usageSummary), color: usageSummary.costEstimatedEntries ? '#d48806' : undefined },
+        { key: 'cacheRead', label: 'Cache Read Token', value: numberText(usageSummary.cacheReadTokens) },
+        { key: 'cacheWrite', label: 'Cache Write Token', value: numberText(usageSummary.cacheWriteTokens) },
         { key: 'failed', label: '失败调用', value: numberText(usageSummary.failedEntries), color: usageSummary.failedEntries ? '#cf1322' : undefined }
       ])}
       <Descriptions
@@ -809,9 +784,8 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
         items={[
           { key: 'native', label: 'Provider 原生 usage', children: numberText(usageSummary.providerNativeEntries) },
           { key: 'estimated', label: '估算 usage', children: numberText(usageSummary.estimatedEntries) },
-          { key: 'costEstimated', label: '估算费用条目', children: numberText(usageSummary.costEstimatedEntries) },
-          { key: 'costBreakdown', label: '币种拆分', children: (usageSummary.costBreakdown ?? []).length ? compactTags((usageSummary.costBreakdown ?? []).map((item) => `${costText(item.estimatedCost, item.currency)} (${item.entryTotal})`), 4) : '-' },
-          { key: 'costSource', label: '费用口径', children: usageSummary.costEstimatedEntries ? '基于本地 provider profile pricing 估算，不代表实际账单' : '未配置价格或未产生费用估算' },
+          { key: 'cacheable', label: 'Cacheable/Non-cacheable 输入', children: `${numberText(usageSummary.cacheableInputTokens)} / ${numberText(usageSummary.nonCacheableInputTokens)}` },
+          { key: 'cacheEntries', label: 'Cache 口径', children: `${numberText(usageSummary.cacheProviderEntries)} provider / ${numberText(usageSummary.cacheEstimatedEntries)} estimated` },
           { key: 'providerModels', label: 'Provider/Model', children: numberText(usageSummary.providerModelBreakdown?.length ?? 0) }
         ]}
       />
@@ -830,11 +804,10 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                 columns={[
                   { title: 'Provider', render: (_, item) => `${item.providerId || '-'} / ${item.provider || '-'}`, ellipsis: true },
                   { title: 'Model', dataIndex: 'model', ellipsis: true },
-                  { title: '币种', dataIndex: 'currency', width: 90, render: (_, item) => item.currency || '-' },
                   { title: '调用', dataIndex: 'entryTotal', width: 90, render: (_, item) => numberText(item.entryTotal) },
                   { title: '输入/输出', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)}` },
                   { title: 'Token', dataIndex: 'totalTokens', width: 120, render: (_, item) => numberText(item.totalTokens) },
-                  { title: '估算费用', width: 130, render: (_, item) => costText(item.estimatedCost, item.currency) },
+                  { title: 'Cache R/W', width: 130, render: (_, item) => `${numberText(item.cacheReadTokens)} / ${numberText(item.cacheWriteTokens)}` },
                   { title: '估算/失败', width: 120, render: (_, item) => `${numberText(item.estimatedEntries)} / ${numberText(item.failedEntries)}` }
                 ]}
                 dataSource={usageSummary.providerModelBreakdown ?? []}
@@ -858,7 +831,6 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                   { title: '状态', dataIndex: 'status', width: 110, render: (_, item) => stateTag(item.status || 'unknown') },
                   { title: 'usage 来源', dataIndex: 'usageSource', width: 140, render: (_, item) => item.usageSource || (item.estimated ? 'estimated' : 'provider_native') },
                   { title: 'Token', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)} / ${numberText(item.totalTokens)}` },
-                  { title: '估算费用', width: 130, render: (_, item) => costText(item.estimatedCost, item.currency) },
                   { title: '耗时', dataIndex: 'durationMs', width: 100, render: (_, item) => item.durationMs ? `${numberText(item.durationMs)} ms` : '-' },
                   { title: '流式', dataIndex: 'streaming', width: 80, render: (_, item) => item.streaming ? <Tag color="blue">stream</Tag> : '-' }
                 ]}
@@ -870,9 +842,9 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                       items={[
                         { key: 'step', label: '步骤', children: item.stepId ? boundedParagraph(item.stepId, { rows: 1, copyText: item.stepId }) : '-' },
                         { key: 'bytes', label: '请求/响应字节', children: `${numberText(item.requestBytes)} / ${numberText(item.responseBytes)}` },
-                        { key: 'cost', label: '费用语义', children: `${item.costEstimated ? '估算' : '未估算'} / ${item.costSource || '-'}` },
                         { key: 'failure', label: '失败分类', children: item.failureClass || '-' },
                         { key: 'time', label: '时间', children: [item.startedAt, item.completedAt || item.occurredAt].filter(Boolean).join(' → ') || '-' },
+                        { key: 'cacheUsage', label: 'Cache Usage', children: <pre className="json-panel">{compactJSON(item.cacheUsage)}</pre> },
                         { key: 'budget', label: 'Context Budget', children: <pre className="json-panel">{compactJSON(item.contextBudget)}</pre> }
                       ]}
                     />
@@ -2082,10 +2054,7 @@ export function cleanedContextProfile(item: UpdateLLMProviderConfiguration) {
           contextUtilizationRatio: profile.contextUtilizationRatio,
           bytesHardLimit: profile.bytesHardLimit,
           maxRequestBytes: profile.maxRequestBytes,
-          estimatedTokensPerByte: profile.estimatedTokensPerByte,
-          inputTokenPrice: profile.inputTokenPrice,
-          outputTokenPrice: profile.outputTokenPrice,
-          currency: profile.currency?.trim()
+          estimatedTokensPerByte: profile.estimatedTokensPerByte
         }
       : {})
   };

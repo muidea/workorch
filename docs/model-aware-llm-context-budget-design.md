@@ -10,7 +10,7 @@ WorkOrch 已有 LLM provider request 上下文保护、provider timeout 重试�
 - 分阶段、分优先级的上下文压缩。
 - provider failure 的自适应缩容与继续执行策略。
 - streaming 进度事件投影。
-- workspace 维度的 LLM usage / cost ledger。
+- workspace 维度的 LLM usage ledger。
 - 统一的 read model 投影与可观测性。
 
 自动模型能力解析与阶段感知预算的细化设计见：
@@ -31,7 +31,7 @@ WorkOrch 已有 LLM provider request 上下文保护、provider timeout 重试�
 - 保持 WorkOrch 基础能力中立，不在基础层硬编码具体业务场景。
 - 保持所有裁剪内容可追溯。
 - streaming 只作为进度与观测，不改变最终业务输入边界。
-- LLM usage / cost 必须可按 workspace / run / step 追溯。
+- LLM usage 必须可按 workspace / run / step 追溯，并可按 workspace 累积输入/输出/总 token 与 cache usage。
 
 ## 设计边界
 
@@ -47,7 +47,7 @@ WorkOrch 已有 LLM provider request 上下文保护、provider timeout 重试�
 ### 不做
 
 - 不把 streaming delta 直接作为业务状态流转依据。
-- 不把 usage/cost 逻辑硬编码进具体 workspaceTemplate。
+- 不把 usage 逻辑硬编码进具体 workspaceTemplate。
 - 不引入与 provider 无关的独立 context 规则分支。
 
 ## 总体架构
@@ -66,9 +66,6 @@ WorkOrch 已有 LLM provider request 上下文保护、provider timeout 重试�
 - `bytesHardLimit`
 - `maxRequestBytes`
 - `estimatedTokensPerByte`
-- `inputTokenPrice`
-- `outputTokenPrice`
-- `currency`
 
 profile 分层：
 
@@ -271,17 +268,18 @@ streaming 的价值是：
 - `status`
 - `summary`
 
-## Usage / Cost Ledger 设计
+## Usage Ledger 设计
 
 ### 目标
 
-按 workspace 维度记录 LLM 成本，支持：
+按 workspace 维度记录 LLM usage，支持：
 
 - workspace 聚合
 - run 追溯
 - step 明细
 - provider/model 分布
 - 估算与真实 usage 区分
+- cache usage 统计
 
 ### 记录字段
 
@@ -298,8 +296,8 @@ streaming 的价值是：
 - `outputTokens`
 - `totalTokens`
 - `estimated`
-- `estimatedCost`
-- `currency`
+- `usageSource`
+- `cacheUsage`
 - `requestBytes`
 - `responseBytes`
 - `streaming`
@@ -315,6 +313,9 @@ streaming 的价值是：
 - provider 返回真实 usage 时优先使用真实值。
 - provider 未返回 usage 时使用 profile 估算。
 - 估算结果必须标记 `estimated=true`。
+- provider 返回 cache usage 时优先使用原生 cache token 字段。
+- provider 未返回 cache usage 时，只能基于 provider-neutral cachePlan 估算 cacheable / non-cacheable input tokens。
+- `llmUsage` 不处理费用、账单或价格字段；费用治理不属于 runtime usage ledger。
 
 ## Read Model / UI
 
@@ -333,9 +334,9 @@ streaming 的价值是：
 
 应投影：
 
-- workspace 级 token / cost 汇总
+- workspace 级 token / cache 汇总
 - 最近 run 使用趋势
-- 失败请求与重试成本
+- 失败请求与重试次数
 
 ### UI 约束
 
@@ -350,7 +351,7 @@ streaming 的价值是：
 - 超过可承载预算时进入 continuation / decision。
 - streaming 开启后能看到 progress event。
 - streaming 完成后仍按完整 JSON 决策执行。
-- workspace 维度能查询 LLM usage/cost 聚合。
+- workspace 维度能查询 LLM usage 聚合，包括输入 token、输出 token、总 token 与 cache usage。
 - web / TUI 使用同一 read model。
 
 ## 与 TODO 的关系

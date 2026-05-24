@@ -358,9 +358,6 @@ func renderLLMUsageCompact(summary backend.LLMUsageSummaryInfo, width int) strin
 	if summary.ProviderNativeEntries > 0 || summary.EstimatedEntries > 0 {
 		parts = append(parts, fmt.Sprintf("native/estimated %d/%d", summary.ProviderNativeEntries, summary.EstimatedEntries))
 	}
-	if cost := llmUsageCostLabel(summary); cost != "" {
-		parts = append(parts, cost)
-	}
 	if summary.FailedEntries > 0 {
 		parts = append(parts, fmt.Sprintf("failed %d", summary.FailedEntries))
 	}
@@ -431,26 +428,6 @@ func llmUsageProgressText(payload map[string]any) string {
 		return fmt.Sprintf("LLM usage recorded: %s %d tokens", label, total)
 	}
 	return "LLM usage recorded: " + strings.TrimSpace(label+" "+status)
-}
-
-func llmUsageCostLabel(summary backend.LLMUsageSummaryInfo) string {
-	if summary.Currency != "" && summary.EstimatedCost > 0 {
-		return fmt.Sprintf("cost %.6g %s", summary.EstimatedCost, summary.Currency)
-	}
-	if len(summary.CostBreakdown) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(summary.CostBreakdown))
-	for _, item := range summary.CostBreakdown {
-		if item.EstimatedCost <= 0 || item.Currency == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%.6g %s", item.EstimatedCost, item.Currency))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "cost " + strings.Join(parts, ", ")
 }
 
 func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, width int, limit int) string {

@@ -1906,9 +1906,6 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 						"safetyRatio":            0.8,
 						"bytesHardLimit":         98304,
 						"estimatedTokensPerByte": 0.25,
-						"inputTokenPrice":        0.0,
-						"outputTokenPrice":       0.0,
-						"currency":               "USD",
 					},
 				},
 			},
@@ -1939,7 +1936,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		traces[0].TracePolicy != "summary_refs_only" ||
 		traces[0].PromptCaptured ||
 		readModelStringValue(traces[0].CachePlan["stablePrefixHash"]) != "sha256:c0" ||
-		traces[0].Profile["currency"] != "USD" {
+		readModelIntValue(traces[0].Profile["contextWindowTokens"]) != 200000 {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}
 	observability := mapRunObservability(RunSnapshot{
@@ -2276,8 +2273,6 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 			OutputTokens:  16,
 			TotalTokens:   144,
 			Estimated:     true,
-			EstimatedCost: 0.000288,
-			Currency:      "USD",
 			RequestBytes:  3000,
 			ResponseBytes: 400,
 			Streaming:     true,
@@ -2325,27 +2320,16 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 		t.Fatalf("llm usage traces/summary = %+v / %+v, want one usage trace and totalTokens=144", item.LLMUsageTraces, item.LLMUsageSummary)
 	}
 	if item.LLMUsageTraces[0].UsageSource != llmcommon.UsageSourceEstimated ||
-		!item.LLMUsageTraces[0].CostEstimated ||
-		item.LLMUsageTraces[0].CostSource != llmcommon.CostSourceProfilePricing {
-		t.Fatalf("llm usage trace = %+v, want normalized usage/cost semantics", item.LLMUsageTraces[0])
+		!item.LLMUsageTraces[0].Estimated {
+		t.Fatalf("llm usage trace = %+v, want normalized usage semantics", item.LLMUsageTraces[0])
 	}
 	if item.LLMUsageSummary.EstimatedEntries != 1 ||
-		item.LLMUsageSummary.ProviderNativeEntries != 0 ||
-		item.LLMUsageSummary.CostEstimatedEntries != 1 {
-		t.Fatalf("llm usage summary = %+v, want estimated=1 native=0 costEstimated=1", item.LLMUsageSummary)
-	}
-	if item.LLMUsageSummary.Currency != "USD" ||
-		item.LLMUsageSummary.EstimatedCost != 0.000288 ||
-		len(item.LLMUsageSummary.CostBreakdown) != 1 ||
-		item.LLMUsageSummary.CostBreakdown[0].Currency != "USD" ||
-		item.LLMUsageSummary.CostBreakdown[0].EstimatedCost != 0.000288 ||
-		item.LLMUsageSummary.CostBreakdown[0].EntryTotal != 1 {
-		t.Fatalf("llm usage summary = %+v, want single-currency estimated cost breakdown", item.LLMUsageSummary)
+		item.LLMUsageSummary.ProviderNativeEntries != 0 {
+		t.Fatalf("llm usage summary = %+v, want estimated=1 native=0", item.LLMUsageSummary)
 	}
 	if len(item.LLMUsageSummary.ProviderModelBreakdown) != 1 ||
 		item.LLMUsageSummary.ProviderModelBreakdown[0].ProviderID != "provider-a" ||
 		item.LLMUsageSummary.ProviderModelBreakdown[0].Model != "model-a" ||
-		item.LLMUsageSummary.ProviderModelBreakdown[0].Currency != "USD" ||
 		item.LLMUsageSummary.ProviderModelBreakdown[0].EntryTotal != 1 {
 		t.Fatalf("llm usage provider/model breakdown = %+v, want provider-a/model-a one entry", item.LLMUsageSummary.ProviderModelBreakdown)
 	}
@@ -2610,20 +2594,27 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
 			Payload: events.LLMUsagePayload(events.LLMUsagePayloadData{
-				WorkspaceID:   "ws-1",
-				RunID:         "run-1",
-				StepID:        "run-1/step-1",
-				ProviderID:    "provider-a",
-				Provider:      "compatible",
-				Model:         "model-a",
-				Operation:     "chat_completions",
-				InputTokens:   120,
-				OutputTokens:  30,
-				TotalTokens:   150,
-				Estimated:     true,
-				EstimatedCost: 0.0002,
-				Currency:      "USD",
-				Status:        "completed",
+				WorkspaceID:  "ws-1",
+				RunID:        "run-1",
+				StepID:       "run-1/step-1",
+				ProviderID:   "provider-a",
+				Provider:     "compatible",
+				Model:        "model-a",
+				Operation:    "chat_completions",
+				InputTokens:  120,
+				OutputTokens: 30,
+				TotalTokens:  150,
+				Estimated:    true,
+				CacheUsage: map[string]any{
+					"estimated":               true,
+					"source":                  "cache_plan_estimated",
+					"cacheReadTokens":         0,
+					"cacheWriteTokens":        0,
+					"cacheCreationTokens":     0,
+					"cacheableInputTokens":    90,
+					"nonCacheableInputTokens": 30,
+				},
+				Status: "completed",
 			}),
 		},
 		{
@@ -2644,7 +2635,14 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 				OutputTokens: 10,
 				TotalTokens:  70,
 				Estimated:    false,
-				Status:       "completed",
+				CacheUsage: map[string]any{
+					"estimated":           false,
+					"source":              llmcommon.UsageSourceProviderNative,
+					"cacheReadTokens":     20,
+					"cacheWriteTokens":    8,
+					"cacheCreationTokens": 8,
+				},
+				Status: "completed",
 			}),
 		},
 	}
@@ -2654,21 +2652,31 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		t.Fatalf("llm usage traces length = %d, want 2", len(traces))
 	}
 	if traces[0].UsageSource != llmcommon.UsageSourceEstimated ||
-		!traces[0].CostEstimated ||
-		traces[0].CostSource != llmcommon.CostSourceProfilePricing {
-		t.Fatalf("trace[0] = %+v, want normalized estimated usage/cost semantics", traces[0])
+		!traces[0].Estimated {
+		t.Fatalf("trace[0] = %+v, want normalized estimated usage semantics", traces[0])
 	}
 	if traces[1].UsageSource != llmcommon.UsageSourceProviderNative ||
-		traces[1].CostEstimated {
+		traces[1].Estimated {
 		t.Fatalf("trace[1] = %+v, want normalized provider_native usage semantics", traces[1])
+	}
+	if readModelIntValue(traces[1].CacheUsage["cacheReadTokens"]) != 20 {
+		t.Fatalf("trace[1].CacheUsage = %+v, want provider cache usage", traces[1].CacheUsage)
 	}
 
 	summary := summarizeLLMUsage(traces)
 	if summary.EntryTotal != 2 ||
 		summary.EstimatedEntries != 1 ||
-		summary.ProviderNativeEntries != 1 ||
-		summary.CostEstimatedEntries != 1 {
-		t.Fatalf("summary = %+v, want entry=2 estimated=1 native=1 costEstimated=1", summary)
+		summary.ProviderNativeEntries != 1 {
+		t.Fatalf("summary = %+v, want entry=2 estimated=1 native=1", summary)
+	}
+	if summary.CacheReadTokens != 20 ||
+		summary.CacheWriteTokens != 8 ||
+		summary.CacheCreationTokens != 8 ||
+		summary.CacheableInputTokens != 90 ||
+		summary.NonCacheableInputTokens != 30 ||
+		summary.CacheEstimatedEntries != 1 ||
+		summary.CacheProviderEntries != 1 {
+		t.Fatalf("summary = %+v, want aggregated cache usage", summary)
 	}
 	if len(summary.ProviderModelBreakdown) != 2 {
 		t.Fatalf("summary breakdown = %+v, want 2 provider/model entries", summary.ProviderModelBreakdown)
@@ -2678,7 +2686,9 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		summary.ProviderModelBreakdown[0].EntryTotal != 1 ||
 		summary.ProviderModelBreakdown[1].ProviderID != "provider-b" ||
 		summary.ProviderModelBreakdown[1].Model != "model-b" ||
-		summary.ProviderModelBreakdown[1].EntryTotal != 1 {
+		summary.ProviderModelBreakdown[1].EntryTotal != 1 ||
+		summary.ProviderModelBreakdown[1].CacheReadTokens != 20 ||
+		summary.ProviderModelBreakdown[1].CacheWriteTokens != 8 {
 		t.Fatalf("summary breakdown = %+v, want provider-a/model-a and provider-b/model-b", summary.ProviderModelBreakdown)
 	}
 }
@@ -2725,61 +2735,37 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 	}
 }
 
-func TestSummarizeLLMUsageKeepsCostCurrencyAware(t *testing.T) {
+func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) {
 	summary := summarizeLLMUsage([]LLMUsageTrace{
 		{
-			ProviderID:    "provider-a",
-			Provider:      "compatible",
-			Model:         "model-a",
-			InputTokens:   100,
-			OutputTokens:  10,
-			TotalTokens:   110,
-			EstimatedCost: 0.10,
-			CostEstimated: true,
-			CostSource:    llmcommon.CostSourceProfilePricing,
-			Currency:      "usd",
-			Status:        "completed",
-			UsageSource:   llmcommon.UsageSourceEstimated,
-			Estimated:     true,
+			ProviderID:   "provider-a",
+			Provider:     "compatible",
+			Model:        "model-a",
+			InputTokens:  100,
+			OutputTokens: 10,
+			TotalTokens:  110,
+			Status:       "completed",
+			UsageSource:  llmcommon.UsageSourceEstimated,
+			Estimated:    true,
 		},
 		{
-			ProviderID:    "provider-a",
-			Provider:      "compatible",
-			Model:         "model-a",
-			InputTokens:   200,
-			OutputTokens:  20,
-			TotalTokens:   220,
-			EstimatedCost: 0.20,
-			CostEstimated: true,
-			CostSource:    llmcommon.CostSourceProfilePricing,
-			Currency:      "CNY",
-			Status:        "completed",
-			UsageSource:   llmcommon.UsageSourceProviderNative,
+			ProviderID:   "provider-a",
+			Provider:     "compatible",
+			Model:        "model-a",
+			InputTokens:  200,
+			OutputTokens: 20,
+			TotalTokens:  220,
+			Status:       "completed",
+			UsageSource:  llmcommon.UsageSourceProviderNative,
 		},
 	})
 
-	if summary.EstimatedCost != 0 || summary.Currency != "" {
-		t.Fatalf("summary = %+v, want no top-level cross-currency estimated cost", summary)
+	if len(summary.ProviderModelBreakdown) != 1 {
+		t.Fatalf("provider/model breakdown = %+v, want merged provider/model entry", summary.ProviderModelBreakdown)
 	}
-	if len(summary.CostBreakdown) != 2 {
-		t.Fatalf("summary cost breakdown = %+v, want two currencies", summary.CostBreakdown)
-	}
-	if summary.CostBreakdown[0].Currency != "CNY" ||
-		summary.CostBreakdown[0].EstimatedCost != 0.20 ||
-		summary.CostBreakdown[0].EntryTotal != 1 ||
-		summary.CostBreakdown[1].Currency != "USD" ||
-		summary.CostBreakdown[1].EstimatedCost != 0.10 ||
-		summary.CostBreakdown[1].EntryTotal != 1 {
-		t.Fatalf("summary cost breakdown = %+v, want currency-separated costs", summary.CostBreakdown)
-	}
-	if len(summary.ProviderModelBreakdown) != 2 {
-		t.Fatalf("provider/model breakdown = %+v, want currency-separated entries", summary.ProviderModelBreakdown)
-	}
-	if summary.ProviderModelBreakdown[0].Currency != "CNY" ||
-		summary.ProviderModelBreakdown[0].EstimatedCost != 0.20 ||
-		summary.ProviderModelBreakdown[1].Currency != "USD" ||
-		summary.ProviderModelBreakdown[1].EstimatedCost != 0.10 {
-		t.Fatalf("provider/model breakdown = %+v, want same provider/model separated by currency", summary.ProviderModelBreakdown)
+	item := summary.ProviderModelBreakdown[0]
+	if item.EntryTotal != 2 || item.InputTokens != 300 || item.OutputTokens != 30 || item.TotalTokens != 330 || item.EstimatedEntries != 1 {
+		t.Fatalf("provider/model breakdown = %+v, want merged token counters", summary.ProviderModelBreakdown)
 	}
 }
 

@@ -150,9 +150,6 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 			SafetyRatio:            0.8,
 			BytesHardLimit:         64 * 1024,
 			EstimatedTokensPerByte: 0.25,
-			InputTokenPrice:        0.000001,
-			OutputTokenPrice:       0.000002,
-			Currency:               "usd",
 		},
 	}, provider)
 
@@ -196,8 +193,15 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	if !ok || totalTokens != inputTokens+outputTokens {
 		t.Fatalf("llmUsage = %+v, want totalTokens=inputTokens+outputTokens", usage)
 	}
-	if usage["estimatedCost"] == nil || usage["currency"] != "USD" || usage["costEstimated"] != true || usage["costSource"] != llmcommon.CostSourceProfilePricing {
-		t.Fatalf("llmUsage = %+v, want estimated cost with currency", usage)
+	cacheUsage, ok := usage["cacheUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %+v, want cacheUsage metadata", usage)
+	}
+	if cacheUsage["estimated"] != true ||
+		cacheUsage["source"] != "cache_plan_estimated" ||
+		cacheUsage["cacheableInputTokens"] == nil ||
+		cacheUsage["nonCacheableInputTokens"] == nil {
+		t.Fatalf("cacheUsage = %+v, want cache-plan estimated usage", cacheUsage)
 	}
 }
 
@@ -315,9 +319,12 @@ func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 			"shellCommands":[{"command":"echo","args":["ok"]}]
 		}`),
 		usage: &llmmodels.ProviderUsage{
-			InputTokens:  11,
-			OutputTokens: 7,
-			TotalTokens:  18,
+			InputTokens:         11,
+			OutputTokens:        7,
+			TotalTokens:         18,
+			CacheReadTokens:     4,
+			CacheWriteTokens:    2,
+			CacheCreationTokens: 2,
 		},
 	}
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
@@ -346,6 +353,17 @@ func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 	}
 	if usage["usageSource"] != llmcommon.UsageSourceProviderNative {
 		t.Fatalf("llmUsage = %+v, want provider native usage source", usage)
+	}
+	cacheUsage, ok := usage["cacheUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %+v, want cacheUsage metadata", usage)
+	}
+	if cacheUsage["estimated"] != false ||
+		cacheUsage["source"] != llmcommon.UsageSourceProviderNative ||
+		cacheUsage["cacheReadTokens"] != 4 ||
+		cacheUsage["cacheWriteTokens"] != 2 ||
+		cacheUsage["cacheCreationTokens"] != 2 {
+		t.Fatalf("cacheUsage = %+v, want provider-native cache usage", cacheUsage)
 	}
 }
 

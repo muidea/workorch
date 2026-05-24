@@ -183,14 +183,11 @@ type LLMUsageTraceInfo struct {
 	TotalTokens   int
 	Estimated     bool
 	UsageSource   string
-	EstimatedCost float64
-	CostEstimated bool
-	CostSource    string
-	Currency      string
 	RequestBytes  int
 	ResponseBytes int
 	Streaming     bool
 	ContextBudget map[string]any
+	CacheUsage    map[string]any
 	Status        string
 	FailureClass  string
 	OccurredAt    string
@@ -198,36 +195,33 @@ type LLMUsageTraceInfo struct {
 }
 
 type LLMUsageSummaryInfo struct {
-	EntryTotal             int
-	InputTokens            int
-	OutputTokens           int
-	TotalTokens            int
-	EstimatedCost          float64
-	Currency               string
-	EstimatedEntries       int
-	ProviderNativeEntries  int
-	CostEstimatedEntries   int
-	FailedEntries          int
-	CostBreakdown          []LLMUsageCostBreakdownInfo
-	ProviderModelBreakdown []LLMUsageProviderModelBreakdownInfo
-}
-
-type LLMUsageCostBreakdownInfo struct {
-	Currency      string
-	EstimatedCost float64
-	EntryTotal    int
+	EntryTotal              int
+	InputTokens             int
+	OutputTokens            int
+	TotalTokens             int
+	EstimatedEntries        int
+	ProviderNativeEntries   int
+	FailedEntries           int
+	CacheReadTokens         int
+	CacheWriteTokens        int
+	CacheCreationTokens     int
+	CacheableInputTokens    int
+	NonCacheableInputTokens int
+	CacheEstimatedEntries   int
+	CacheProviderEntries    int
+	ProviderModelBreakdown  []LLMUsageProviderModelBreakdownInfo
 }
 
 type LLMUsageProviderModelBreakdownInfo struct {
 	ProviderID       string
 	Provider         string
 	Model            string
-	Currency         string
 	EntryTotal       int
 	InputTokens      int
 	OutputTokens     int
 	TotalTokens      int
-	EstimatedCost    float64
+	CacheReadTokens  int
+	CacheWriteTokens int
 	EstimatedEntries int
 	FailedEntries    int
 }

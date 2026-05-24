@@ -30,7 +30,7 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 			"created":1,
 			"model":"test-model",
 			"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"openai sdk done\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}],
-			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"prompt_tokens_details":{"cached_tokens":1}}
 		}`))
 	}))
 	defer server.Close()
@@ -65,7 +65,11 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	if !strings.Contains(string(result.Payload), `"summary":"openai sdk done"`) {
 		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
 	}
-	if result.Usage == nil || result.Usage.InputTokens != 1 || result.Usage.OutputTokens != 1 || result.Usage.TotalTokens != 2 {
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 1 ||
+		result.Usage.OutputTokens != 1 ||
+		result.Usage.TotalTokens != 2 ||
+		result.Usage.CacheReadTokens != 1 {
 		t.Fatalf("usage = %+v, want native openai usage", result.Usage)
 	}
 }
@@ -130,7 +134,7 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"anthropic sdk done\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}],
 			"stop_reason":"end_turn",
 			"stop_sequence":null,
-			"usage":{"input_tokens":1,"output_tokens":1}
+			"usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":2,"cache_creation_input_tokens":3}
 		}`))
 	}))
 	defer server.Close()
@@ -168,7 +172,13 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 	if !strings.Contains(string(result.Payload), `"summary":"anthropic sdk done"`) {
 		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
 	}
-	if result.Usage == nil || result.Usage.InputTokens != 1 || result.Usage.OutputTokens != 1 || result.Usage.TotalTokens != 2 {
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 1 ||
+		result.Usage.OutputTokens != 1 ||
+		result.Usage.TotalTokens != 2 ||
+		result.Usage.CacheReadTokens != 2 ||
+		result.Usage.CacheWriteTokens != 3 ||
+		result.Usage.CacheCreationTokens != 3 {
 		t.Fatalf("usage = %+v, want native anthropic usage", result.Usage)
 	}
 }

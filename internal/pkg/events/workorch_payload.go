@@ -89,14 +89,11 @@ const (
 	PayloadKeyTotalTokens          = "totalTokens"
 	PayloadKeyEstimated            = "estimated"
 	PayloadKeyUsageSource          = "usageSource"
-	PayloadKeyEstimatedCost        = "estimatedCost"
-	PayloadKeyCostEstimated        = "costEstimated"
-	PayloadKeyCostSource           = "costSource"
-	PayloadKeyCurrency             = "currency"
 	PayloadKeyRequestBytes         = "requestBytes"
 	PayloadKeyResponseBytes        = "responseBytes"
 	PayloadKeyStreaming            = "streaming"
 	PayloadKeyContextBudget        = "contextBudget"
+	PayloadKeyCacheUsage           = "cacheUsage"
 	PayloadKeyStartedAt            = "startedAt"
 	PayloadKeyCompletedAt          = "completedAt"
 	PayloadKeyDurationMs           = "durationMs"
@@ -283,14 +280,11 @@ type LLMUsagePayloadData struct {
 	TotalTokens   int
 	Estimated     bool
 	UsageSource   string
-	EstimatedCost float64
-	CostEstimated bool
-	CostSource    string
-	Currency      string
 	RequestBytes  int
 	ResponseBytes int
 	Streaming     bool
 	ContextBudget map[string]any
+	CacheUsage    map[string]any
 	StartedAt     string
 	CompletedAt   string
 	DurationMs    int
@@ -1272,23 +1266,14 @@ func LLMUsagePayload(data LLMUsagePayloadData) map[string]any {
 		PayloadKeyDurationMs:    data.DurationMs,
 		PayloadKeyStatus:        data.Status,
 	}
-	if data.EstimatedCost > 0 {
-		payload[PayloadKeyEstimatedCost] = data.EstimatedCost
-	}
-	if data.CostEstimated {
-		payload[PayloadKeyCostEstimated] = true
-	}
-	if data.CostSource != "" {
-		payload[PayloadKeyCostSource] = data.CostSource
-	}
-	if data.Currency != "" {
-		payload[PayloadKeyCurrency] = data.Currency
-	}
 	if data.FailureClass != "" {
 		payload[PayloadKeyFailureClass] = data.FailureClass
 	}
 	if len(data.ContextBudget) > 0 {
 		payload[PayloadKeyContextBudget] = clonePayloadMap(data.ContextBudget)
+	}
+	if len(data.CacheUsage) > 0 {
+		payload[PayloadKeyCacheUsage] = clonePayloadMap(data.CacheUsage)
 	}
 	return payload
 }
@@ -1342,22 +1327,6 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 	if !ok {
 		return LLMUsagePayloadData{}, false
 	}
-	estimatedCost, ok := optionalFloatField(payload, PayloadKeyEstimatedCost)
-	if !ok {
-		return LLMUsagePayloadData{}, false
-	}
-	costEstimated, ok := optionalBoolField(payload, PayloadKeyCostEstimated)
-	if !ok {
-		return LLMUsagePayloadData{}, false
-	}
-	costSource, ok := optionalStringField(payload, PayloadKeyCostSource)
-	if !ok {
-		return LLMUsagePayloadData{}, false
-	}
-	currency, ok := optionalStringField(payload, PayloadKeyCurrency)
-	if !ok {
-		return LLMUsagePayloadData{}, false
-	}
 	requestBytes, ok := optionalIntField(payload, PayloadKeyRequestBytes)
 	if !ok {
 		return LLMUsagePayloadData{}, false
@@ -1371,6 +1340,10 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 		return LLMUsagePayloadData{}, false
 	}
 	contextBudget, ok := optionalMapField(payload, PayloadKeyContextBudget)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	cacheUsage, ok := optionalMapField(payload, PayloadKeyCacheUsage)
 	if !ok {
 		return LLMUsagePayloadData{}, false
 	}
@@ -1407,14 +1380,11 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 		TotalTokens:   totalTokens,
 		Estimated:     estimated,
 		UsageSource:   usageSource,
-		EstimatedCost: estimatedCost,
-		CostEstimated: costEstimated,
-		CostSource:    costSource,
-		Currency:      currency,
 		RequestBytes:  requestBytes,
 		ResponseBytes: responseBytes,
 		Streaming:     streaming,
 		ContextBudget: contextBudget,
+		CacheUsage:    cacheUsage,
 		StartedAt:     startedAt,
 		CompletedAt:   completedAt,
 		DurationMs:    durationMs,

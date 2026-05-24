@@ -118,18 +118,6 @@ export function numberText(value?: number): string {
   return value.toLocaleString();
 }
 
-// 费用格式化
-export function costText(value?: number, currency?: string): string {
-  if (value === undefined || value === null) {
-    return '-';
-  }
-  const formatted = value.toFixed(6);
-  if (currency) {
-    return `${formatted} ${currency}`;
-  }
-  return formatted;
-}
-
 // 按 ID 合并数组（用于分页追加）
 export function mergeById<T extends { id: string }>(current: T[], items: T[], append: boolean): T[] {
   if (!append) {

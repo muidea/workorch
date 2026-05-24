@@ -530,6 +530,11 @@ func (o *RuntimeOrchestrator) publishLLMUsageFromStep(ctx context.Context, run *
 	usagePayload[events.PayloadKeyWorkspaceID] = string(run.WorkspaceID)
 	usagePayload[events.PayloadKeyRunID] = string(run.ID)
 	usagePayload[events.PayloadKeyStepID] = string(step.ID)
+	if _, ok := usagePayload[events.PayloadKeyCacheUsage]; !ok {
+		if cacheUsage := mapFromValue(usagePayload["cacheUsage"]); len(cacheUsage) > 0 {
+			usagePayload[events.PayloadKeyCacheUsage] = cacheUsage
+		}
+	}
 	if stringFromAny(usagePayload[events.PayloadKeyStatus]) == "" {
 		usagePayload[events.PayloadKeyStatus] = string(step.State)
 	}

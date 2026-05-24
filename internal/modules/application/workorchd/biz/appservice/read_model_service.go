@@ -2000,15 +2000,6 @@ func mapLLMUsageTracesFromEventRecords(records []EventRecord, runID string) []LL
 				usageSource = llmcommon.UsageSourceProviderNative
 			}
 		}
-		estimatedCost := readModelFloatValue(payload[events.PayloadKeyEstimatedCost])
-		costEstimated := readModelBoolValue(payload[events.PayloadKeyCostEstimated])
-		if !costEstimated && estimatedCost > 0 {
-			costEstimated = true
-		}
-		costSource := readModelStringValue(payload[events.PayloadKeyCostSource])
-		if costEstimated && strings.TrimSpace(costSource) == "" {
-			costSource = llmcommon.CostSourceProfilePricing
-		}
 		trace := LLMUsageTrace{
 			ID:            item.ID,
 			WorkspaceID:   firstNonEmptyReadModel(item.WorkspaceID, readModelStringValue(payload[events.PayloadKeyWorkspaceID])),
@@ -2023,14 +2014,11 @@ func mapLLMUsageTracesFromEventRecords(records []EventRecord, runID string) []LL
 			TotalTokens:   readModelIntValue(payload[events.PayloadKeyTotalTokens]),
 			Estimated:     estimated,
 			UsageSource:   usageSource,
-			EstimatedCost: estimatedCost,
-			CostEstimated: costEstimated,
-			CostSource:    costSource,
-			Currency:      readModelStringValue(payload[events.PayloadKeyCurrency]),
 			RequestBytes:  readModelIntValue(payload[events.PayloadKeyRequestBytes]),
 			ResponseBytes: readModelIntValue(payload[events.PayloadKeyResponseBytes]),
 			Streaming:     readModelBoolValue(payload[events.PayloadKeyStreaming]),
 			ContextBudget: readModelMapValue(payload[events.PayloadKeyContextBudget]),
+			CacheUsage:    readModelMapValue(payload[events.PayloadKeyCacheUsage]),
 			StartedAt:     readModelStringValue(payload[events.PayloadKeyStartedAt]),
 			CompletedAt:   readModelStringValue(payload[events.PayloadKeyCompletedAt]),
 			DurationMs:    readModelIntValue(payload[events.PayloadKeyDurationMs]),
@@ -2056,7 +2044,6 @@ func mapLLMUsageTracesFromEventRecords(records []EventRecord, runID string) []LL
 func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
 	ret := LLMUsageSummary{}
 	breakdownByKey := map[string]*LLMUsageProviderModelBreakdown{}
-	costByCurrency := map[string]*LLMUsageCostBreakdown{}
 	for _, item := range items {
 		ret.EntryTotal++
 		ret.InputTokens += item.InputTokens
@@ -2068,31 +2055,34 @@ func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
 		if strings.TrimSpace(item.UsageSource) == llmcommon.UsageSourceProviderNative {
 			ret.ProviderNativeEntries++
 		}
-		if item.CostEstimated {
-			ret.CostEstimatedEntries++
-		}
 		if item.Status == "failed" {
 			ret.FailedEntries++
 		}
-		currency := normalizedLLMUsageCurrency(item.Currency, item.EstimatedCost)
-		if item.EstimatedCost > 0 && currency != "" {
-			costEntry, ok := costByCurrency[currency]
-			if !ok {
-				costEntry = &LLMUsageCostBreakdown{Currency: currency}
-				costByCurrency[currency] = costEntry
+		cacheReadTokens := readModelIntValue(item.CacheUsage["cacheReadTokens"])
+		cacheWriteTokens := readModelIntValue(item.CacheUsage["cacheWriteTokens"])
+		cacheCreationTokens := readModelIntValue(item.CacheUsage["cacheCreationTokens"])
+		cacheableInputTokens := readModelIntValue(item.CacheUsage["cacheableInputTokens"])
+		nonCacheableInputTokens := readModelIntValue(item.CacheUsage["nonCacheableInputTokens"])
+		ret.CacheReadTokens += cacheReadTokens
+		ret.CacheWriteTokens += cacheWriteTokens
+		ret.CacheCreationTokens += cacheCreationTokens
+		ret.CacheableInputTokens += cacheableInputTokens
+		ret.NonCacheableInputTokens += nonCacheableInputTokens
+		if len(item.CacheUsage) > 0 {
+			if readModelBoolValue(item.CacheUsage["estimated"]) {
+				ret.CacheEstimatedEntries++
 			}
-			costEntry.EstimatedCost += item.EstimatedCost
-			costEntry.EntryTotal++
+			if strings.TrimSpace(readModelStringValue(item.CacheUsage["source"])) == llmcommon.UsageSourceProviderNative {
+				ret.CacheProviderEntries++
+			}
 		}
-
-		key := strings.TrimSpace(item.ProviderID) + "|" + strings.TrimSpace(item.Provider) + "|" + strings.TrimSpace(item.Model) + "|" + currency
+		key := strings.TrimSpace(item.ProviderID) + "|" + strings.TrimSpace(item.Provider) + "|" + strings.TrimSpace(item.Model)
 		entry, ok := breakdownByKey[key]
 		if !ok {
 			entry = &LLMUsageProviderModelBreakdown{
 				ProviderID: strings.TrimSpace(item.ProviderID),
 				Provider:   strings.TrimSpace(item.Provider),
 				Model:      strings.TrimSpace(item.Model),
-				Currency:   currency,
 			}
 			breakdownByKey[key] = entry
 		}
@@ -2100,7 +2090,8 @@ func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
 		entry.InputTokens += item.InputTokens
 		entry.OutputTokens += item.OutputTokens
 		entry.TotalTokens += item.TotalTokens
-		entry.EstimatedCost += item.EstimatedCost
+		entry.CacheReadTokens += cacheReadTokens
+		entry.CacheWriteTokens += cacheWriteTokens
 		if item.Estimated {
 			entry.EstimatedEntries++
 		}
@@ -2125,31 +2116,10 @@ func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
 			if left.Model != right.Model {
 				return left.Model < right.Model
 			}
-			return left.Currency < right.Currency
+			return false
 		})
-	}
-	if len(costByCurrency) > 0 {
-		ret.CostBreakdown = make([]LLMUsageCostBreakdown, 0, len(costByCurrency))
-		for _, item := range costByCurrency {
-			ret.CostBreakdown = append(ret.CostBreakdown, *item)
-		}
-		sort.SliceStable(ret.CostBreakdown, func(i, j int) bool {
-			return ret.CostBreakdown[i].Currency < ret.CostBreakdown[j].Currency
-		})
-		if len(ret.CostBreakdown) == 1 {
-			ret.Currency = ret.CostBreakdown[0].Currency
-			ret.EstimatedCost = ret.CostBreakdown[0].EstimatedCost
-		}
 	}
 	return ret
-}
-
-func normalizedLLMUsageCurrency(currency string, estimatedCost float64) string {
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency == "" && estimatedCost > 0 {
-		return "USD"
-	}
-	return currency
 }
 
 func webSearchTrace(step presenter.StepView) WebSourceTrace {
@@ -4139,14 +4109,12 @@ func projectEventPayload(payload map[string]any) map[string]any {
 		events.PayloadKeyArtifactType:       {},
 		events.PayloadKeyBlockingApprovalID: {},
 		events.PayloadKeyBlockingTicketID:   {},
+		events.PayloadKeyCacheUsage:         {},
 		events.PayloadKeyChunkCount:         {},
 		events.PayloadKeyCompletedAt:        {},
 		events.PayloadKeyConfidenceScore:    {},
 		events.PayloadKeyContentHash:        {},
 		events.PayloadKeyContentType:        {},
-		events.PayloadKeyCostEstimated:      {},
-		events.PayloadKeyCostSource:         {},
-		events.PayloadKeyCurrency:           {},
 		events.PayloadKeyDeletedLines:       {},
 		events.PayloadKeyDiffHash:           {},
 		events.PayloadKeyDoDID:              {},
@@ -4154,7 +4122,6 @@ func projectEventPayload(payload map[string]any) map[string]any {
 		events.PayloadKeyElapsedMs:          {},
 		events.PayloadKeyError:              {},
 		events.PayloadKeyEstimated:          {},
-		events.PayloadKeyEstimatedCost:      {},
 		events.PayloadKeyEvidenceRefs:       {},
 		events.PayloadKeyFailureClass:       {},
 		events.PayloadKeyFailureReason:      {},

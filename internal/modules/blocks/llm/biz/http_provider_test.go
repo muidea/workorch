@@ -241,7 +241,7 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\",\\\"shellCommands\\\":[{\\\"command\\\":\\\"echo\\\",\\\"args\\\":[\\\"ok\\\"]}]}\"}}]}\n\n"))
-		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_cache_hit_tokens\":5,\"prompt_cache_miss_tokens\":6}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -270,7 +270,12 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	if !strings.Contains(string(result.Payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
 		t.Fatalf("payload=%s events=%+v, want streamed decision and done event", result.Payload, events)
 	}
-	if result.Usage == nil || result.Usage.InputTokens != 11 || result.Usage.OutputTokens != 7 || result.Usage.TotalTokens != 18 {
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 11 ||
+		result.Usage.OutputTokens != 7 ||
+		result.Usage.TotalTokens != 18 ||
+		result.Usage.CacheReadTokens != 5 ||
+		result.Usage.CacheWriteTokens != 6 {
 		t.Fatalf("usage = %+v, want stream usage", result.Usage)
 	}
 }

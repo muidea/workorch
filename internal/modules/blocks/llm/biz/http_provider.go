@@ -254,11 +254,21 @@ type chatCompletionStreamChunk struct {
 }
 
 type chatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
-	InputTokens      int `json:"input_tokens,omitempty"`
-	OutputTokens     int `json:"output_tokens,omitempty"`
+	PromptTokens             int `json:"prompt_tokens,omitempty"`
+	CompletionTokens         int `json:"completion_tokens,omitempty"`
+	TotalTokens              int `json:"total_tokens,omitempty"`
+	InputTokens              int `json:"input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+	PromptCacheHitTokens     int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens    int `json:"prompt_cache_miss_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CachedTokens             int `json:"cached_tokens,omitempty"`
+	InputCachedTokens        int `json:"input_cached_tokens,omitempty"`
+	InputCacheReadTokens     int `json:"input_cache_read_tokens,omitempty"`
+	InputCacheWriteTokens    int `json:"input_cache_write_tokens,omitempty"`
+	CacheableInputTokens     int `json:"cacheable_input_tokens,omitempty"`
+	NonCacheableInputTokens  int `json:"non_cacheable_input_tokens,omitempty"`
 }
 
 type chatCompletionStreamOptions struct {
@@ -392,10 +402,25 @@ func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {
 		return nil
 	}
 	return &llmmodels.ProviderUsage{
-		InputTokens:  input,
-		OutputTokens: output,
-		TotalTokens:  total,
+		InputTokens:             input,
+		OutputTokens:            output,
+		TotalTokens:             total,
+		CacheReadTokens:         maxPositiveInt(u.PromptCacheHitTokens, u.CacheReadInputTokens, u.CachedTokens, u.InputCachedTokens, u.InputCacheReadTokens),
+		CacheWriteTokens:        maxPositiveInt(u.PromptCacheMissTokens, u.CacheCreationInputTokens, u.InputCacheWriteTokens),
+		CacheCreationTokens:     max(0, u.CacheCreationInputTokens),
+		CacheableInputTokens:    max(0, u.CacheableInputTokens),
+		NonCacheableInputTokens: max(0, u.NonCacheableInputTokens),
 	}
+}
+
+func maxPositiveInt(values ...int) int {
+	ret := 0
+	for _, value := range values {
+		if value > ret {
+			ret = value
+		}
+	}
+	return ret
 }
 
 func trimmedJoin(basePath string, child string) string {

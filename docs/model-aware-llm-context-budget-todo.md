@@ -24,7 +24,7 @@
 - 保持 WorkOrch 基础能力中立，不在基础层硬编码具体业务场景。
 - 所有被裁剪内容必须保留摘要和 sourceRefs，确保可追溯。
 - LLM 流式调用只作为运行期进度和可观测事件，不改变最终业务决策输入边界。
-- 以 workspace 为单位记录 LLM usage/cost，支持 run/step 级追溯和成本治理。
+- 以 workspace 为单位记录 LLM usage，支持 run/step 级追溯、输入/输出/总 token 累积，以及 cache 使用统计。
 
 ## 本轮核对结果
 
@@ -80,23 +80,22 @@
   - orchestrator 在 LLM step 完成/失败后从 `streamEvents` 聚合 `chunkCount/receivedBytes/elapsedMs/status` 并发布 EventHub 事件
   - eventstream 持久化链路自动覆盖该主题，read-model timeline 新增 `llm_stream_progress_event` 投影
   - 保持 streaming 仅用于进度观测，不改变最终 `LLMExecutionDecision` 业务决策边界
-- `CTX-13 Workspace LLM Usage and Cost Ledger` 已收口基础版：
+- `CTX-13 Workspace LLM Usage Ledger` 已收口基础版：
   - 新增统一事件主题 `TopicRunLLMUsageRecorded`（`/run/llm_usage/recorded`）
   - LLM runtime 输出新增结构化 `llmUsage`（workspace/run/step/provider/model/operation/token/bytes/streaming/duration/status/failureClass/contextBudget）
   - orchestrator 在 step 状态变更后将 `llmUsage` 投影为 EventHub 事件并进入 eventstream 持久化
   - read-model 新增 `llmUsageTraces` + `llmUsageSummary`，支持 run/workspace 级追溯与汇总
-  - `llmUsageSummary` 已补充 `providerNativeEntries/costEstimatedEntries` 聚合指标
-  - `llmUsageSummary` 已补充 `providerModelBreakdown`（providerId/provider/model 维度 entry/token/cost 聚合）
-  - provider profile 已支持 `inputTokenPrice/outputTokenPrice/currency`，`llmUsage.estimatedCost` 按 usage token 自动计算
-  - `llmUsage` 新增 `usageSource/costEstimated/costSource` 语义字段，区分 token 统计来源与成本口径，避免 `estimated=false` 时误读成本语义
-  - read-model 已对缺失语义字段做统一归一（`usageSource` 与 `costEstimated/costSource` 推断），保障投影稳定
+  - `llmUsageSummary` 已补充 `providerNativeEntries/estimatedEntries` 聚合指标
+  - `llmUsageSummary` 已补充 `providerModelBreakdown`（providerId/provider/model 维度 entry/token/cache 聚合）
+  - `llmUsage` 保留 `usageSource` 语义字段，区分 token 来源为 provider 原生或本地估算
+  - read-model 已对缺失 `usageSource` 做统一归一，保障投影稳定
   - fallback usage 估算已改为使用实际请求/响应体量，不再将 `contextBudget.actualTokens` 或 `reservedOutputTokens` 等预算字段误计为实际 usage
-  - read-model 成本汇总已按 currency 分组，单币种时才投影顶层 `estimatedCost/currency`，多币种时只通过 `costBreakdown` 展示，避免跨币种直接相加
-  - configuration API 已透出并支持更新 `contextProfile`，确保价格字段可通过统一配置框架管理
+  - `cacheUsage` 已接入 provider 原生 cache token 字段；provider 未返回 cache usage 时按 cachePlan 估算 cacheable / non-cacheable input tokens
+  - workspace snapshot 摘要区展示 workspace 累积 LLM 调用次数、输入 token、输出 token、总 token，以及 cache read/write token
   - 部署 e2e 脚本 `verify-llm-workspace-execution.sh` 已补充 `llmUsageTraces/llmUsageSummary` 语义一致性断言
   - 部署 e2e mock 现已同时覆盖 `usageSource=estimated`（provider 无 usage 返回）与 `usageSource=provider_native`（provider 返回 usage）两条链路并逐 run 断言
   - 部署 e2e 进一步覆盖 streaming 场景：`verify-stream-native`（SSE usage 返回）与 `verify-stream-estimated`（SSE 无 usage 返回）已纳入逐 run 断言
-  - 部署 e2e 已新增 workspace 级 provider/model breakdown 与 costBreakdown 断言（需部署包含该 read-model 投影的新版本后执行）
+  - 部署 e2e 已新增 workspace 级 provider/model breakdown 断言
   - 已在本地新实例（`127.0.0.1:18081`）执行 `verify-llm-workspace-execution.sh` 验证通过
   - OpenAI/Anthropic/HTTP 非流式调用已接入 provider 原生 usage，runtime 优先写入 `estimated=false`
   - streaming 场景已接入 provider 原生 usage 优先链路（provider 返回 usage 时 `estimated=false`；未返回时回退估算）
@@ -113,7 +112,7 @@
 - provider failover 当前为基础一跳策略（单次切换），尚未支持多级策略、权重或健康度感知。
 - approval 语义归一当前已覆盖 TUI 与 batch approval；单条 approve/reject endpoint 仍为显式动作接口，尚未扩展语义 payload 追溯字段。
 - 当前 LLM streaming 已完成 eventhub/run progress 基础投影；stream 记录上限策略与 UI 细粒度展示仍待补齐。
-- 当前已具备 workspace 维度 LLM usage ledger、价格配置驱动估算成本、usage/cost 语义区分、以及非流式/流式 provider 原生 usage 优先链路；剩余项聚焦 provider 侧覆盖率与精度提升。
+- 当前已具备 workspace 维度 LLM usage ledger、usageSource 语义区分、cache usage 统计、以及非流式/流式 provider 原生 usage 优先链路；剩余项聚焦 provider 侧覆盖率与精度提升。
 
 ## 待办项
 
@@ -274,9 +273,9 @@
   - streaming 完成后仍按完整 JSON 决策执行。
   - streaming 中断时记录已收到的 progress，并进入统一 provider failure policy。
 
-### CTX-13 Workspace LLM Usage and Cost Ledger
+### CTX-13 Workspace LLM Usage Ledger
 
-状态：基础收口已完成并补齐估算成本与原生 usage 优先能力（runtime usage 输出 + EventHub 事件 + eventstream 持久化 + run/workspace read-model 投影 + profile 价格估算 + provider native usage 优先），高精度能力待补齐。
+状态：基础收口已完成并补齐原生 usage 优先能力与 cache usage 统计（runtime usage 输出 + EventHub 事件 + eventstream 持久化 + run/workspace read-model 投影 + provider native usage 优先），高精度能力待补齐。
 
 - 建立独立的 LLM usage ledger，按 workspace/run/step 记录每次 LLM 调用。
 - usage ledger 必须保持基础能力中立，不绑定具体 workspaceTemplate。
@@ -292,12 +291,12 @@
   - `outputTokens`
   - `totalTokens`
   - `estimated`
-  - `estimatedCost`
-  - `currency`
+  - `usageSource`
   - `requestBytes`
   - `responseBytes`
   - `streaming`
   - `contextBudget`
+  - `cacheUsage`
   - `startedAt`
   - `completedAt`
   - `durationMs`
@@ -305,18 +304,16 @@
   - `failureClass`
 - provider 返回 usage 时优先使用真实 usage。
 - provider 未返回 usage 时，使用 provider/model context profile 的估算规则，并标记 `estimated=true`。
-- provider/model 价格信息放在配置或 profile 中，不硬编码在业务逻辑里。
-- `estimatedCost` 表示基于本地 provider profile 价格配置计算出的估算成本，不代表 provider 实际账单。
-- `costEstimated=true` 表示成本口径为估算；即使 token usage 来自 provider native，成本仍可能因为使用本地 profile pricing 而保持估算口径。
-- 成本汇总必须按 `currency` 分组；只有单一币种时才允许在 summary 顶层展示 `estimatedCost/currency`，多币种必须使用 `costBreakdown`。
+- provider 返回 cache usage 时优先使用 provider 原生字段。
+- provider 未返回 cache usage 时，运行时只能基于 provider-neutral `cachePlan` 估算 cacheable / non-cacheable input tokens，并标记 `estimated=true`。
+- `llmUsage` 不处理费用、账单或价格字段；费用治理不是 runtime usage ledger 的职责。
 - 支持 workspace 维度聚合：
   - total input/output/total tokens
-  - estimated cost
-  - currency-aware cost breakdown
+  - cache read/write/creation tokens
+  - cacheable / non-cacheable input tokens
   - provider/model 分布
   - run/step 级明细
-  - failure cost and retry cost
-- web 侧展示 workspace 级成本汇总和明细追溯。
+- web 侧展示 workspace 级 token/cache 汇总和明细追溯。
 - TUI 侧只显示简化汇总，避免影响主交互。
 - e2e 覆盖：
   - 非流式请求记录 usage。

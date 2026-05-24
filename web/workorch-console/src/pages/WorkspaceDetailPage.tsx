@@ -21,7 +21,7 @@ const {
   dodAssessmentItems, errorMessage, eventRecordState, eventRecordSubject, eventRecordSummary,
   evidenceCount, executionSectionsCard, goalOutcomeState, goalOutcomeSummary,
   hasWorkspaceSetupDraftContent, hasWorkspaceSetupDraftInfoItems, isNotFoundError,
-  joinLines, llmContextBudgetCard, llmUsageCard, llmUsageCostSummary, memoryRecallCard,
+  joinLines, llmContextBudgetCard, llmUsageCard, memoryRecallCard,
   memoryRefIDs, mergeById, metricGrid, normalizeSoulBindingFormValues, numberText,
   numericRunPriority, outputText, pendingCount, primaryAcceptedResult, primaryResult,
   runOutcomeState, runPriority, runRawState, runStateSummary, runtimeArtifactPageLimit,
@@ -1139,8 +1139,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const runWebSources = runObservability?.webSources ?? runSnapshot?.webSources ?? snapshot?.webSources;
   const webSourceCount = webSourceRows(runWebSources).length;
   const runLLMContextBudgets = runObservability?.llmContextBudgets ?? runSnapshot?.llmContextBudgets ?? snapshot?.llmContextBudgets;
+  const workspaceLLMUsageSummary = snapshot?.llmUsageSummary;
   const runLLMUsageSummary = runObservability?.llmUsageSummary ?? runSnapshot?.llmUsageSummary ?? snapshot?.llmUsageSummary;
   const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
+  const summaryLLMUsage = workspaceLLMUsageSummary ?? runLLMUsageSummary;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -1260,9 +1262,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'validating', label: '验收中', value: runSummary.validating, color: '#08979c' },
                 { key: 'completed', label: '已完成', value: runSummary.completed, color: '#389e0d' },
                 { key: 'failed', label: '失败/终止', value: runSummary.failed, color: '#cf1322' },
+                { key: 'llmCalls', label: 'LLM 调用总数', value: summaryLLMUsage?.entryTotal ?? 0, color: summaryLLMUsage?.entryTotal ? '#d48806' : undefined },
+                { key: 'llmInputTokens', label: 'LLM 输入 Token', value: numberText(summaryLLMUsage?.inputTokens) },
+                { key: 'llmOutputTokens', label: 'LLM 输出 Token', value: numberText(summaryLLMUsage?.outputTokens) },
+                { key: 'llmTotalTokens', label: 'LLM Token 总量', value: numberText(summaryLLMUsage?.totalTokens), color: summaryLLMUsage?.totalTokens ? '#0958d9' : undefined },
+                { key: 'llmCacheReadTokens', label: 'LLM Cache Read Token', value: numberText(summaryLLMUsage?.cacheReadTokens) },
+                { key: 'llmCacheWriteTokens', label: 'LLM Cache Write Token', value: numberText(summaryLLMUsage?.cacheWriteTokens) },
                 { key: 'decisions', label: '待处理决策', value: pendingCount(snapshot.decisions), color: pendingCount(snapshot.decisions) ? '#d48806' : undefined },
-                { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined },
-                { key: 'llmCost', label: 'LLM 估算费用', value: llmUsageCostSummary(runLLMUsageSummary), color: runLLMUsageSummary?.costEstimatedEntries ? '#d48806' : undefined }
+                { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined }
               ])}
               <Descriptions
                 column={1}
@@ -1595,7 +1602,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? (runArtifactRecords.length || runSnapshot.artifacts?.length || 0) },
                     { key: 'webSources', label: 'Web 来源', children: webSourceCount },
                     { key: 'llmContextBudgets', label: 'LLM Context', children: runLLMContextBudgets?.length ?? 0 },
-                    { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.totalTokens)} tokens / ${llmUsageCostSummary(runLLMUsageSummary)}` },
+                    { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.inputTokens)} 输入 / ${numberText(runLLMUsageSummary?.outputTokens)} 输出 / ${numberText(runLLMUsageSummary?.totalTokens)} 总量` },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },

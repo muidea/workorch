@@ -94,9 +94,6 @@ type LLMProviderConfig struct {
 	BytesHardLimit          int      `json:"bytesHardLimit" toml:"bytesHardLimit,omitempty"`
 	MaxRequestBytes         int      `json:"maxRequestBytes" toml:"maxRequestBytes,omitempty"`
 	EstimatedTokensPerByte  float64  `json:"estimatedTokensPerByte" toml:"estimatedTokensPerByte,omitempty"`
-	InputTokenPrice         float64  `json:"inputTokenPrice" toml:"inputTokenPrice,omitempty"`
-	OutputTokenPrice        float64  `json:"outputTokenPrice" toml:"outputTokenPrice,omitempty"`
-	Currency                string   `json:"currency" toml:"currency,omitempty"`
 }
 
 type WebSearchConfig struct {
@@ -368,13 +365,6 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 			values["estimatedTokensPerByte"] = formatFloat(provider.EstimatedTokensPerByte)
 		}
 	}
-	if provider.InputTokenPrice > 0 {
-		values["inputTokenPrice"] = formatFloat(provider.InputTokenPrice)
-	}
-	if provider.OutputTokenPrice > 0 {
-		values["outputTokenPrice"] = formatFloat(provider.OutputTokenPrice)
-	}
-	set(values, "currency", provider.Currency)
 	if provider.Disabled != nil {
 		if *provider.Disabled {
 			values["disabled"] = "true"

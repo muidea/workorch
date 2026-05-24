@@ -45,6 +45,7 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 			Name:               section.Name,
 			Cacheability:       section.Cacheability,
 			Hash:               hash,
+			SizeBytes:          len(strings.TrimSpace(section.Content)),
 			SourceRefs:         append([]string(nil), section.SourceRefs...),
 			DefinitionRevision: section.DefinitionRevision,
 		})

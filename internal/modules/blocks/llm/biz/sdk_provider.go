@@ -377,9 +377,10 @@ func openAICompletionUsage(usage openai.CompletionUsage) *llmmodels.ProviderUsag
 		total = input + output
 	}
 	return &llmmodels.ProviderUsage{
-		InputTokens:  input,
-		OutputTokens: output,
-		TotalTokens:  total,
+		InputTokens:     input,
+		OutputTokens:    output,
+		TotalTokens:     total,
+		CacheReadTokens: int(usage.PromptTokensDetails.CachedTokens),
 	}
 }
 
@@ -394,9 +395,12 @@ func anthropicUsage(message *anthropic.Message) *llmmodels.ProviderUsage {
 		return nil
 	}
 	return &llmmodels.ProviderUsage{
-		InputTokens:  input,
-		OutputTokens: output,
-		TotalTokens:  total,
+		InputTokens:         input,
+		OutputTokens:        output,
+		TotalTokens:         total,
+		CacheReadTokens:     int(message.Usage.CacheReadInputTokens),
+		CacheCreationTokens: int(message.Usage.CacheCreationInputTokens),
+		CacheWriteTokens:    int(message.Usage.CacheCreationInputTokens),
 	}
 }
 

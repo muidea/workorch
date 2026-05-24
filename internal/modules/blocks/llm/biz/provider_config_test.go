@@ -155,9 +155,6 @@ func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
 		llmcommon.EnvBytesHardLimit:     "262144",
 		llmcommon.EnvMaxRequestBytes:    "524288",
 		llmcommon.EnvTokensPerByte:      "0.22",
-		llmcommon.EnvInputTokenPrice:    "0.000002",
-		llmcommon.EnvOutputTokenPrice:   "0.000008",
-		llmcommon.EnvCurrency:           "usd",
 	})
 	if err != nil {
 		t.Fatalf("load provider config: %v", err)
@@ -170,10 +167,7 @@ func TestLoadProviderConfigParsesContextProfile(t *testing.T) {
 		cfg.ContextProfile.ContextUtilizationRatio != 0.65 ||
 		cfg.ContextProfile.BytesHardLimit != 262144 ||
 		cfg.ContextProfile.MaxRequestBytes != 524288 ||
-		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 ||
-		cfg.ContextProfile.InputTokenPrice != 0.000002 ||
-		cfg.ContextProfile.OutputTokenPrice != 0.000008 ||
-		cfg.ContextProfile.Currency != "USD" {
+		cfg.ContextProfile.EstimatedTokensPerByte != 0.22 {
 		t.Fatalf("context profile = %+v, want parsed values", cfg.ContextProfile)
 	}
 }

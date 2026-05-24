@@ -282,15 +282,6 @@ func providerContextProfileFromValues(values map[string]string) (llmmodels.Provi
 	if err != nil {
 		return llmmodels.ProviderContextProfile{}, err
 	}
-	profile.InputTokenPrice, err = parseOptionalPositiveFloat(values[llmcommon.EnvInputTokenPrice], llmcommon.EnvInputTokenPrice)
-	if err != nil {
-		return llmmodels.ProviderContextProfile{}, err
-	}
-	profile.OutputTokenPrice, err = parseOptionalPositiveFloat(values[llmcommon.EnvOutputTokenPrice], llmcommon.EnvOutputTokenPrice)
-	if err != nil {
-		return llmmodels.ProviderContextProfile{}, err
-	}
-	profile.Currency = strings.TrimSpace(values[llmcommon.EnvCurrency])
 	profile.CapabilitySource = strings.TrimSpace(values[llmcommon.EnvContextCapabilitySource])
 	return resolveProviderContextProfile(profile, providerContextProfileExplicitFields(values)), nil
 }
@@ -409,7 +400,6 @@ func normalizedProviderContextProfile(profile llmmodels.ProviderContextProfile) 
 	if profile.EstimatedTokensPerByte <= 0 {
 		profile.EstimatedTokensPerByte = defaultEstimatedTokensPerByte
 	}
-	profile.Currency = strings.ToUpper(strings.TrimSpace(profile.Currency))
 	if strings.TrimSpace(profile.CapabilitySource) == "" {
 		profile.CapabilitySource = contextCapabilitySourceConservativeDefault
 	}
