@@ -93,7 +93,7 @@ export function ConfigurationPage() {
     try {
       const nextConfiguration = await workorchApi.updateLLMConfiguration({
         defaultProviderId,
-        defaultEmbeddingProviderId,
+        defaultEmbeddingProviderId: defaultEmbeddingProviderId?.trim() || '',
         modelCapabilities: modelCapabilityDrafts.map((item) => ({
           id: item.id.trim(),
           provider: item.provider?.trim() || undefined,

@@ -508,6 +508,45 @@ func TestUpdateLLMConfigurationRejectsEmbeddingProviderWithoutCapability(t *test
 	}
 }
 
+func TestUpdateLLMConfigurationCanClearInvalidDefaultEmbeddingProvider(t *testing.T) {
+	configDir := t.TempDir()
+	content := `
+endpointName = "workorch"
+
+[llm]
+defaultProvider = "local"
+defaultEmbeddingProvider = "missing"
+
+[llm.providers.local]
+provider = "compatible"
+baseURL = "http://127.0.0.1:11434/v1"
+model = "local-model"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
+	cfg, err := UpdateLLMConfiguration(UpdateLLMConfigurationCommand{
+		DefaultEmbeddingProviderID: stringPtr(""),
+	})
+	if err != nil {
+		t.Fatalf("clear default embedding provider: %v", err)
+	}
+	if cfg.LLM.DefaultEmbeddingProviderID != "" {
+		t.Fatalf("default embedding provider = %q, want cleared", cfg.LLM.DefaultEmbeddingProviderID)
+	}
+	current, err := workorchconfig.Current()
+	if err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	if current.LLM.DefaultEmbeddingProvider != "" {
+		t.Fatalf("persisted default embedding provider = %q, want cleared", current.LLM.DefaultEmbeddingProvider)
+	}
+}
+
 func TestUpdateLLMConfigurationRejectsUnavailableEmbeddingProvider(t *testing.T) {
 	configDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`endpointName = "workorch"`), 0o600); err != nil {
