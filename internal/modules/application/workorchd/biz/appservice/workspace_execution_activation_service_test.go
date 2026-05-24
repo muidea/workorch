@@ -836,7 +836,7 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 		t.Fatalf("activation run = %+v, want latest updated definition revision blocked on provider decision", item.Run)
 	}
 	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	if text, _ := goalContext["text"].(string); text != "first activation goal revised" {
+	if text, _ := goalContext["text"].(string); text != "- first activation goal revised" {
 		t.Fatalf("effective goal text = %q, want revised canonical goal only", text)
 	}
 	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)
@@ -956,7 +956,7 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		t.Fatalf("executionContext = %+v, want dialog language", executionContext)
 	}
 	goalContext, _ := executionContext["goal"].(map[string]any)
-	if goalContext["text"] != "activation context goal" {
+	if goalContext["text"] != "- activation context goal" {
 		t.Fatalf("goal context = %+v, want goal text", executionContext["goal"])
 	}
 	dodContext, _ := executionContext["dod"].(map[string]any)
@@ -3296,7 +3296,7 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 		t.Fatalf("activation run = %+v, want replacement run with updated canonical goal/dod", item.Run)
 	}
 	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
-	if text, _ := goalContext["text"].(string); text != "new activation goal" {
+	if text, _ := goalContext["text"].(string); text != "- new activation goal" {
 		t.Fatalf("replacement goal text = %q, want updated canonical goal", text)
 	}
 	dodContext, _ := item.Run.ExecutionContext["dod"].(map[string]any)

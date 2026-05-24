@@ -25,14 +25,14 @@ func TestUpdateGoalWithBackendUpdatesPersistedGoal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateGoalWithBackend: %v", err)
 	}
-	if updated.ID != goal.ID || updated.WorkspaceID != workspace.ID || updated.Text != "updated goal" {
+	if updated.ID != goal.ID || updated.WorkspaceID != workspace.ID || updated.Text != "- updated goal" {
 		t.Fatalf("updated goal = %+v, want updated goal in same workspace", updated)
 	}
 	read, err := ReadGoalWithBackend(context.Background(), "file", dataRoot, goal.ID)
 	if err != nil {
 		t.Fatalf("ReadGoalWithBackend: %v", err)
 	}
-	if read.Text != "updated goal" {
+	if read.Text != "- updated goal" {
 		t.Fatalf("read goal text = %q, want updated goal", read.Text)
 	}
 }
@@ -54,8 +54,8 @@ func TestDefineGoalWithBackendMergesWorkspaceGoalAndRemovesOlderDefinitions(t *t
 	if second.ID != first.ID {
 		t.Fatalf("merged goal id = %q, want existing id %q", second.ID, first.ID)
 	}
-	if second.Text != "initial goal\nadded goal" {
-		t.Fatalf("merged goal text = %q, want initial plus added", second.Text)
+	if second.Text != "- initial goal\n- added goal" {
+		t.Fatalf("merged goal text = %q, want initial plus structured added goal", second.Text)
 	}
 	list, err := ListGoalsWithBackend(context.Background(), "file", dataRoot, workspace.ID)
 	if err != nil {
@@ -63,6 +63,61 @@ func TestDefineGoalWithBackendMergesWorkspaceGoalAndRemovesOlderDefinitions(t *t
 	}
 	if len(list) != 1 || list[0].ID != first.ID {
 		t.Fatalf("goal list = %+v, want one canonical Goal", list)
+	}
+}
+
+func TestDefineGoalWithBackendFormatsAddedGoalAsIndependentItem(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-goal-format", "goal format workspace", "", "workspaces/goal-format")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	first, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "### Existing\n- keep current behavior")
+	if err != nil {
+		t.Fatalf("first DefineGoalWithBackend: %v", err)
+	}
+	second, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "preserve each new requirement as an independent coverage target")
+	if err != nil {
+		t.Fatalf("second DefineGoalWithBackend: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("merged goal id = %q, want existing id %q", second.ID, first.ID)
+	}
+	want := "### Existing\n- keep current behavior\n- preserve each new requirement as an independent coverage target"
+	if second.Text != want {
+		t.Fatalf("merged goal text = %q, want %q", second.Text, want)
+	}
+}
+
+func TestDefineGoalWithBackendFormatsPlainGoalText(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-goal-plain-format", "goal plain format workspace", "", "workspaces/goal-plain-format")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "first target；second target\nthird target")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	want := "- first target\n- second target\n- third target"
+	if goal.Text != want {
+		t.Fatalf("goal text = %q, want %q", goal.Text, want)
+	}
+}
+
+func TestDefineGoalWithBackendPreservesStructuredMarkdownGoalText(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-goal-md-format", "goal markdown format workspace", "", "workspaces/goal-md-format")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "### Goals  \n\n- first target  \n\n\n- second target")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	want := "### Goals\n\n- first target\n\n- second target"
+	if goal.Text != want {
+		t.Fatalf("goal text = %q, want %q", goal.Text, want)
 	}
 }
 

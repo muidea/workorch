@@ -51,7 +51,7 @@ func TestCreateRunWithBackendReturnsCreatedRun(t *testing.T) {
 	}
 	goalContext, _ := item.ExecutionContext["goal"].(map[string]any)
 	dodContext, _ := item.ExecutionContext["dod"].(map[string]any)
-	if goalContext["text"] != "created goal" {
+	if goalContext["text"] != "- created goal" {
 		t.Fatalf("execution goal context = %+v, want created goal", goalContext)
 	}
 	if dodContext["state"] != "ready" {

@@ -40,6 +40,10 @@ func DefineGoalWithSession(ctx context.Context, session *RuntimeSession, workspa
 	if text == "" {
 		return Goal{}, common.ErrInvalidArgument
 	}
+	text = formatGoalDefinitionText(text)
+	if text == "" {
+		return Goal{}, common.ErrInvalidArgument
+	}
 	existing, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return Goal{}, err
@@ -98,6 +102,10 @@ func UpdateGoalWithSession(ctx context.Context, session *RuntimeSession, goalID 
 
 	text = strings.TrimSpace(text)
 	if goalID == "" || text == "" {
+		return Goal{}, common.ErrInvalidArgument
+	}
+	text = formatGoalDefinitionText(text)
+	if text == "" {
 		return Goal{}, common.ErrInvalidArgument
 	}
 	if err := service.UpdateGoal(ctx, workspacemodule.UpdateGoalCommand{
@@ -415,7 +423,7 @@ func mergedGoalText(existing []*workspacemodel.Goal, appended string) string {
 		if item == nil {
 			continue
 		}
-		text := strings.TrimSpace(item.Text)
+		text := formatGoalDefinitionText(item.Text)
 		if text == "" {
 			continue
 		}
@@ -425,13 +433,99 @@ func mergedGoalText(existing []*workspacemodel.Goal, appended string) string {
 		seen[text] = struct{}{}
 		parts = append(parts, text)
 	}
-	appended = strings.TrimSpace(appended)
-	if appended != "" {
-		if _, ok := seen[appended]; !ok {
-			parts = append(parts, appended)
+	for _, entry := range normalizeGoalTextAdditionEntries(appended) {
+		if _, ok := seen[entry]; !ok {
+			seen[entry] = struct{}{}
+			parts = append(parts, entry)
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func formatGoalDefinitionText(text string) string {
+	entries := normalizeGoalTextEntries(text)
+	return strings.TrimSpace(strings.Join(entries, "\n"))
+}
+
+func normalizeGoalTextAdditionEntries(text string) []string {
+	return normalizeGoalTextEntries(text)
+}
+
+func normalizeGoalTextEntries(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	text = normalizeGoalNewlines(text)
+	lines := strings.Split(text, "\n")
+	hasStructure := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.HasPrefix(trimmed, "+ ") || strings.HasPrefix(trimmed, "• ") {
+			hasStructure = true
+			break
+		}
+	}
+	if hasStructure {
+		if formatted := formatStructuredGoalMarkdown(lines); formatted != "" {
+			return []string{formatted}
+		}
+		return nil
+	}
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for _, part := range strings.FieldsFunc(line, func(r rune) bool {
+			return r == ';' || r == '；'
+		}) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(parts))
+	for _, part := range parts {
+		ret = append(ret, "- "+part)
+	}
+	return ret
+}
+
+func normalizeGoalNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatStructuredGoalMarkdown(lines []string) string {
+	ret := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		trimmedRight := strings.TrimRight(line, " \t")
+		trimmed := strings.TrimSpace(trimmedRight)
+		if trimmed == "" {
+			if len(ret) > 0 {
+				blank = true
+			}
+			continue
+		}
+		if blank {
+			ret = append(ret, "")
+			blank = false
+		}
+		ret = append(ret, trimmedRight)
+	}
+	return strings.TrimSpace(strings.Join(ret, "\n"))
 }
 
 func consolidateWorkspaceGoal(

@@ -485,7 +485,7 @@ func validateDoDAssessmentCoversRunGoal(run *runModel.Run, assessment map[string
 				matched = true
 				break
 			}
-			if normalizedCoverageTextMatches(actual.normalized, required.normalized) {
+			if normalizedGoalCoverageTextMatches(actual.normalized, required.normalized) {
 				matched = true
 				break
 			}
@@ -1254,6 +1254,34 @@ func normalizedCoverageTextMatches(actual string, required string) bool {
 	if shorterLen < 24 || longerLen == 0 {
 		return false
 	}
+	if float64(shorterLen)/float64(longerLen) < 0.75 {
+		return false
+	}
+	lcs := longestCommonRuneSubsequenceLength(shorter, longer)
+	return float64(lcs)/float64(shorterLen) >= 0.9
+}
+
+func normalizedGoalCoverageTextMatches(actual string, required string) bool {
+	actual = strings.TrimSpace(actual)
+	required = strings.TrimSpace(required)
+	if actual == "" || required == "" {
+		return false
+	}
+	if actual == required {
+		return true
+	}
+	shorter, longer := actual, required
+	if len([]rune(shorter)) > len([]rune(longer)) {
+		shorter, longer = longer, shorter
+	}
+	shorterLen := len([]rune(shorter))
+	longerLen := len([]rune(longer))
+	if shorterLen < 24 || longerLen == 0 {
+		return false
+	}
+	// Goal coverage represents independent leaf requirements. A broad item that
+	// merely contains a newer leaf must not satisfy that leaf; otherwise a changed
+	// Goal can be accepted with stale evidence by merging multiple leaves.
 	if float64(shorterLen)/float64(longerLen) < 0.75 {
 		return false
 	}

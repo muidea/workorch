@@ -68,3 +68,51 @@ func TestDoDRequiredEvidenceHintStaysProfileNeutral(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateDoDAssessmentCoversRunGoal_RequiresIndependentChangedGoalLeaf(t *testing.T) {
+	run := &runModel.Run{
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "- 保持现有交付物的可用能力\n- 新增需求必须形成独立验收覆盖项",
+			},
+			"definitionChangeImpact": map[string]any{
+				"changed": true,
+			},
+		},
+	}
+	assessment := map[string]any{
+		"goalCoverage": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{
+				{
+					"item":         "保持现有交付物的可用能力，并新增需求必须形成独立验收覆盖项。",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001/old-config-test"},
+				},
+			},
+		},
+	}
+
+	err := validateDoDAssessmentCoversRunGoal(run, assessment)
+	if err == nil {
+		t.Fatalf("validateDoDAssessmentCoversRunGoal = nil, want missing changed Goal leaf")
+	}
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("errors.Is(err, common.ErrInvalidArgument) = false, err=%v", err)
+	}
+	var diag runtimeFailureDiagnosticError
+	if !errors.As(err, &diag) {
+		t.Fatalf("errors.As(err, runtimeFailureDiagnosticError) = false, err=%v", err)
+	}
+	missing := mapSliceFromValue(diag.RuntimeFailureDiagnostics()["missingGoalCoverage"])
+	found := false
+	for _, item := range missing {
+		if item["raw"] == "新增需求必须形成独立验收覆盖项" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missingGoalCoverage = %#v, want changed independent Goal leaf", missing)
+	}
+}

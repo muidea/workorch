@@ -338,13 +338,15 @@ Runtime 必须拒绝：
 当 acceptance / verification 需要对 Goal 与 DoD 做完成度判断时，runtime 必须把覆盖判断建模为中立 coverage 合同：
 
 - Goal / DoD definition 的“最新”必须按同一 workspace 内 definition event 的最后一次出现确定。同一 definition ID 被多次定义或更新时，累计 definition lineage 中只能保留该 ID 的最后一次事件位置，不能把重复事件展开成 `[old,new,old]` 这类误导性顺序。若同一 ID 发生更新，`definitionChangeImpact` 必须通过 `changedInPlace=true` 与 `definitionRevisions[]` 标记该修订；不能只按 ID 数量判断是否发生定义变化。
+- Goal / DoD definition 在新增或补充时必须保持结构化、可分辨。Goal 的自由文本补充必须被整理成独立段落或列表项；不得直接拼接到前一个 leaf 文本末尾。DoD 必须保持结构化 item 列表并去重。该整理只处理文本结构，不解释业务语义。
+- Goal definition 输入可以是 Markdown 或普通文本：已有 Markdown 标题、列表或段落结构时，runtime 应保留结构并清理空行、行尾空白；普通文本输入应按换行、英文分号和中文分号拆成独立 `- item` 列表项。作为新增补充追加到已有 Goal 时，即使只有一句普通文本，也必须写成独立列表项。
 - 当 `definitionChangeImpact.changed=true` 时，后续 planning / verification / acceptance 必须把最新 effective Goal / DoD 作为当前验收基准，并重新评估新增、删除、改写或同 ID 更新后的 requirement。已有历史 evidence 只能作为候选或 lineage；accepted result 必须明确映射最新 effective Goal / DoD，不能仅复用变更前 assessment。
 - Runtime core 不得从 Goal / DoD 文本中识别或内置任何具体业务对象、供应商、协议名称、接口名称、测试框架或字段语义。Core 只能要求 coverage item、acceptance dimension、deliverable expectation 和 evidence refs 的结构完整性；具体对象如何被解释、实现或验证，必须由当前 workspace 的 Goal / DoD、profile / template / soul / skill 和 LLM assessment 动态派生。
 - Goal 中被拆出的 leaf requirement 必须获得确定性、可复现的 `goalRequirementId`，ID 来源只能是 requirement 顺序与规范化文本，不得使用随机值或领域语义。
 - DoD 与 Goal coverage 必须分别表达；DoD item 通过不代表 Goal leaf 自动覆盖，除非 `dodAssessment.goalCoverage.items[]` 明确给出对应 Goal requirement、状态和 evidence refs。
 - profile 声明的 required `acceptanceDimensions` 与 required `deliverableExpectations` 必须分别通过 `dodAssessment.acceptanceDimensions.items[]` 与 `dodAssessment.deliverableCoverage.items[]` 表达；core 只校验声明的 `id`、状态和 evidenceRefs / artifactRefs，不得根据 id 名称推断业务含义。
 - coverage item 的中立标识允许来自稳定字段别名集合，而不能强绑定单一字段名：Goal coverage 可使用 `goal` / `goalItem` / `item` / `requirement`；acceptance dimension 可使用 `id` / `dimension` / `key` / `name`；deliverable coverage 可使用 `id` / `item` / `deliverable` / `name` / `path`。runtime 只能把这些字段视为“coverage 条目标识”的结构别名，不得据此推断业务语义。
-- `missingGoalCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.goalCoverage.items[]` 条目；不得把多个缺口合并成一个宽泛描述后宣称满足。
+- `missingGoalCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.goalCoverage.items[]` 条目；不得把多个缺口合并成一个宽泛描述后宣称满足。completion gate 校验 Goal coverage 时，稳定 `goalRequirementId` 可以直接匹配；没有 ID 时只允许精确或保守等价文本匹配，不允许用包含关系把多个 leaf 合并为一个满足项。
 - `missingDeliverableCoverage` 中的每个条目都必须在 assessment-only correction 中成为独立的 `dodAssessment.deliverableCoverage.items[]` 条目；满足项必须复制 required deliverable id，并引用具体 `evidenceRefs` 或 `artifactRefs`。
 - runtime 可以为 `missingGoalCoverage` 附加中立 `evidenceCandidates`，候选来源只能是当前 run 已完成或失败 step 的 step id、kind、state、output 文本与 requirement 文本的通用匹配。候选证据不是自动通过依据，LLM 必须判断其 output 是否真实支持该 Goal leaf，并在满足时引用具体 `evidenceRefs`。
 - assessment-only correction 输出缺少可由 `missingGoalCoverage` 唯一确定的 requirement 文本或 `goalRequirementId` 时，runtime 可以在 completion gate 前进行中立 schema normalization：按条目顺序或稳定 ID / 文本匹配补齐 requirement 元数据，并剔除非可追踪 `evidenceRefs`；若满足项仅给出不可追踪引用，可回填该缺口的中立候选 step id。该 normalization 只修复合同结构和证据引用形态，不代表 runtime 自动接受候选证据的业务含义。
@@ -704,7 +706,7 @@ Graph expansion limit assessment 是 assessment-only coverage correction 的一�
 
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
-为避免格式差异造成误判，runtime 可以对 Goal / DoD 覆盖文本做中立归一化后再比较，例如去除 Markdown 装饰、标点、空白，并对长文本做保守近似匹配；但不得把完全不同的需求机械合并为同一项，也不得用这种近似匹配替代真实 evidenceRefs。
+为避免格式差异造成误判，runtime 可以对 Goal / DoD 覆盖文本做中立归一化后再比较，例如去除 Markdown 装饰、标点、空白，并对长文本做保守近似匹配；但不得把完全不同的需求机械合并为同一项，也不得用这种近似匹配替代真实 evidenceRefs。DoD item coverage 可使用包含关系处理“完整原文 vs 归一化条目”的格式差异；Goal leaf coverage 不得使用包含关系接受宽泛合并条目。
 
 Repair 输入必须尽量包含足以定向修复的当前证据：
 

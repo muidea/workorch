@@ -2307,7 +2307,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             <Input value={workspaceForm.getFieldValue('title') || '待创建，最终确认提交后生成'} disabled />
           </Form.Item>
           <Form.Item name="text" label="目标" rules={[{ required: true }]}>
-            <Input.TextArea rows={4} placeholder="描述该工作空间要达成的业务结果" />
+            <Input.TextArea rows={5} placeholder="支持 Markdown 或普通文本；多条目标可换行或用分号分隔，提交后会规范化为独立目标项" />
           </Form.Item>
         </Form>
         <Form
@@ -2636,4 +2636,3 @@ export function displayMCPEndpoint(endpoint?: string) {
   const index = value.indexOf(marker);
   return index >= 0 ? value.slice(index) : value;
 }
-
