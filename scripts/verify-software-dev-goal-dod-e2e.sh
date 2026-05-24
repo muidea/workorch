@@ -496,7 +496,11 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "calculator.go",
-                                "content": BUGGY_SOURCE
+                                "content": BUGGY_SOURCE,
+                                "coverageTargets": [
+                                    "代码修改通过 Patch 证据可追溯",
+                                    "完成软件开发闭环"
+                                ]
                             }
                         },
                         {
@@ -526,7 +530,7 @@ def response_for(run_id, step_id, merged_content):
                     "goalCoverage": {
                         "satisfied": True,
                         "items": [
-                            {"goal": "完成软件开发闭环", "state": "satisfied", "evidenceRefs": ["fix-source", "run-tests-fixed"]}
+                            {"goal": f"[{e2e_marker}] 完成软件开发闭环：通过 executionGraph 修改代码并运行测试，失败时自动修复，最终基于证据输出 DoD 评估。", "state": "satisfied", "evidenceRefs": ["fix-source", "run-tests-fixed"]}
                         ]
                     },
                     "acceptanceDimensions": {
@@ -559,7 +563,12 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "unified_diff",
                                 "targetRef": "calculator.go",
-                                "diff": FIXED_DIFF
+                                "diff": FIXED_DIFF,
+                                "coverageTargets": [
+                                    "代码修改通过 Patch 证据可追溯",
+                                    "go test ./... 最终通过",
+                                    "完成软件开发闭环"
+                                ]
                             }
                         },
                         {
@@ -640,33 +649,33 @@ def response_for(run_id, step_id, merged_content):
                     "implementationSummary": "Generated go.mod, feature.go, feature_test.go, and README.md.",
                     "verificationSummary": "go test ./... passed with an effective assertion.",
                     "items": [
-                        {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source"]},
-                        {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests"]},
-                        {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]},
-                        {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": ["write-readme"]},
-                        {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [step_id]},
-                        {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [step_id]}
+                        {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source"]},
+                        {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests"]},
+                        {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                        {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/004-write-readme"]},
+                        {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                        {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]}
                     ],
                     "goalCoverage": {
                         "satisfied": True,
                     "items": [
-                        {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": ["write-go-mod", "write-source", "write-tests", "run-empty-project-tests"]},
-                        {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": ["write-readme"]}
+                        {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                        {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/004-write-readme"]}
                         ]
                     },
                     "acceptanceDimensions": {
                         "satisfied": True,
                         "items": [
-                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": ["run-empty-project-tests"]}
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]}
                         ]
                     },
                     "deliverableCoverage": {
                         "satisfied": True,
                         "items": [
-                            {"id": "source_change", "state": "satisfied", "artifactRefs": ["write-go-mod", "write-source", "write-tests", "write-readme"]},
-                            {"id": "validation_report", "state": "satisfied", "artifactRefs": ["run-empty-project-tests"]},
-                            {"id": "coverage_map", "state": "satisfied", "artifactRefs": [step_id]},
-                            {"id": "user_deliverable", "state": "satisfied", "artifactRefs": ["write-source", "write-readme"]}
+                            {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/004-write-readme"], "artifactRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/004-write-readme"]},
+                            {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                            {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"], "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/004-write-readme"], "artifactRefs": [f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/004-write-readme"]}
                         ]
                     }
                 }
@@ -900,7 +909,12 @@ def response_for(run_id, step_id, merged_content):
                             "input": {
                                 "patchType": "file_write",
                                 "targetRef": "calculator.go",
-                                "content": FIXED_SOURCE
+                                "content": FIXED_SOURCE,
+                                "coverageTargets": [
+                                    "代码修改通过 Patch 证据可追溯",
+                                    "go test ./... 最终通过",
+                                    "完成软件开发闭环"
+                                ]
                             }
                         },
                         {
@@ -951,6 +965,106 @@ def response_for(run_id, step_id, merged_content):
             }
         }
     if scenario == 7:
+        if step_id.endswith("/step-1") or is_repair_step(step_id):
+            return {
+                "completionState": "continue",
+                "thoughtSummary": "Re-run bounded current-run evidence for the latest cumulative empty-workspace definition.",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "write-go-mod",
+                            "kind": "patch/apply",
+                            "input": {
+                                "patchType": "file_write",
+                                "targetRef": "go.mod",
+                                "content": "module example.com/targetproject\n\ngo 1.22\n",
+                                "coverageTargets": ["生成最小可运行 Go 项目"]
+                            }
+                        },
+                        {
+                            "id": "write-source",
+                            "kind": "patch/apply",
+                            "dependsOn": ["write-go-mod"],
+                            "input": {
+                                "patchType": "file_write",
+                                "targetRef": "feature.go",
+                                "content": NEW_PROJECT_SOURCE,
+                                "coverageTargets": ["生成最小可运行 Go 项目", f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。"]
+                            }
+                        },
+                        {
+                            "id": "write-tests",
+                            "kind": "patch/apply",
+                            "dependsOn": ["write-source"],
+                            "input": {
+                                "patchType": "file_write",
+                                "targetRef": "feature_test.go",
+                                "content": NEW_PROJECT_TEST,
+                                "coverageTargets": ["go test ./... 必须包含有效断言并通过"]
+                            }
+                        },
+                        {
+                            "id": "write-readme",
+                            "kind": "patch/apply",
+                            "dependsOn": ["write-tests"],
+                            "input": {
+                                "patchType": "file_write",
+                                "targetRef": "README.md",
+                                "content": NEW_PROJECT_README,
+                                "coverageTargets": ["README.md 必须作为交付物证据可追溯", f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"]
+                            }
+                        },
+                        {
+                            "id": "run-empty-project-tests",
+                            "kind": "shell/command",
+                            "dependsOn": ["write-readme"],
+                            "input": {"command": "go", "args": ["test", "./..."]}
+                        }
+                    ]
+                }
+            }
+        if is_after_graph_step(step_id):
+            return {
+                "completionState": "completed",
+                "thoughtSummary": "Weak-evidence replan continuation closed with current-run delivery and verification evidence.",
+                "dodAssessment": {
+                    "satisfied": True,
+                    "summary": "Continuation after weak-evidence repair exhaustion completed with current-run DoD coverage.",
+                    "goalOutcome": "The cumulative empty-workspace goals are satisfied with fresh current-run evidence.",
+                    "implementationSummary": "Regenerated the minimal project files and README in the current run.",
+                    "verificationSummary": "The current run re-executed go test ./... with effective assertions.",
+                    "items": [
+                        {"item": "空 workspace 不要求用户提供源码来源", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source"]},
+                        {"item": "生成最小可运行 Go 项目", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests"]},
+                        {"item": "go test ./... 必须包含有效断言并通过", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                        {"item": "README.md 必须作为交付物证据可追溯", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/004-write-readme"]},
+                        {"item": "目标项目外部依赖配置必须按 target_workspace/external_dependency 作用域处理", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                        {"item": "敏感认证信息不得进入 snapshot、observability、event 或 LLM context", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]}
+                    ],
+                    "goalCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"goal": f"[{e2e_marker}] 从空 workspace 初始化一个最小 Go 项目，并完成可追溯的开发、测试和交付。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                            {"goal": f"[{e2e_marker}] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/004-write-readme"]}
+                        ]
+                    },
+                    "acceptanceDimensions": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "functional_behavior", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]}
+                        ]
+                    },
+                    "deliverableCoverage": {
+                        "satisfied": True,
+                        "items": [
+                            {"id": "source_change", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/004-write-readme"], "artifactRefs": [f"{run_id}/graph-001/001-write-go-mod", f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/003-write-tests", f"{run_id}/graph-001/004-write-readme"]},
+                            {"id": "validation_report", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"], "artifactRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"]},
+                            {"id": "coverage_map", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/005-run-empty-project-tests"], "artifactRefs": [step_id]},
+                            {"id": "user_deliverable", "state": "satisfied", "evidenceRefs": [f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/004-write-readme"], "artifactRefs": [f"{run_id}/graph-001/002-write-source", f"{run_id}/graph-001/004-write-readme"]}
+                        ]
+                    }
+                }
+            }
         return {
             "completionState": "completed",
             "thoughtSummary": "Weak-evidence replan continuation closed with complete DoD assessment.",

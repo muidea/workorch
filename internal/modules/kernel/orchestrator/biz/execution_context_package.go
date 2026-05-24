@@ -138,7 +138,11 @@ func currentFailureFromProgressDigest(digest map[string]any) map[string]any {
 	add("failedStepKind", stringFromMap(failure, "kind"))
 	add("failureClass", stringFromMap(failure, "failureClass"))
 	add("failureSignature", stringFromMap(failure, "failureSignature"))
-	add("reason", firstNonEmptyString(stringFromMap(failure, "failureReason"), stringFromMap(digest, "currentGap")))
+	add("reason", firstNonEmptyString(
+		stringFromMap(failure, "concreteFailureDiagnostic"),
+		stringFromMap(failure, "failureReason"),
+		stringFromMap(digest, "currentGap"),
+	))
 	add("source", stringFromMap(failure, "source"))
 	add("evidenceValidity", stringFromMap(failure, "evidenceValidity"))
 	add("targetRef", stringFromMap(failure, "targetRef"))
@@ -305,6 +309,9 @@ func currentProgressDigestFromCurrentExecutionProgress(input map[string]any, pre
 	}
 	for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
 		for _, item := range mapSliceFromValue(progress[key]) {
+			if !progressEvidenceItemCanPromoteCurrentFailure(item) {
+				continue
+			}
 			output := mapFromValue(item["outputSummary"])
 			if len(output) == 0 {
 				output = mapFromValue(item["output"])
@@ -353,6 +360,41 @@ func currentProgressDigestFromCurrentExecutionProgress(input map[string]any, pre
 		}
 	}
 	return nil
+}
+
+func progressEvidenceItemCanPromoteCurrentFailure(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(item, "source")) == "latest_successful_action_evidence" {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(item, "state")) {
+	case string(common.StepStateFailed):
+		return true
+	case string(common.StepStateCompleted):
+		if strings.TrimSpace(stringFromMap(item, "evidenceValidity")) == "actionable_failure" {
+			return true
+		}
+		output := mapFromValue(item["outputSummary"])
+		if len(output) == 0 {
+			output = mapFromValue(item["output"])
+		}
+		return completedProgressEvidenceOutputHasFailureSignal(output)
+	default:
+		return false
+	}
+}
+
+func completedProgressEvidenceOutputHasFailureSignal(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	return completedShellCommandOutputHasFailureSignal(&runModel.Step{
+		Kind:   "shell/command",
+		State:  common.StepStateCompleted,
+		Output: output,
+	})
 }
 
 func removeExcludedSelectedContextMemories(selected map[string]any, retrieval map[string]any) map[string]any {

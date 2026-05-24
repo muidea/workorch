@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -149,6 +151,11 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "patch_current_snapshot_only")
 	assertSoulContains(t, execution.SoulMD, "exact_replacement_against_current_snapshot")
 	assertSoulContains(t, execution.SoulMD, "currentTargetAlreadySatisfiesFailedPatch")
+	assertSoulContains(t, execution.SoulMD, "LSP 使用约束")
+	assertSoulContains(t, execution.SoulMD, "首次使用 LSP 前必须先执行 lsp_initialize")
+	assertSoulContains(t, execution.SoulMD, "lsp_sync")
+	assertSoulContains(t, execution.SoulMD, "lsp_diagnostics")
+	assertSoulContains(t, execution.SoulMD, "不能替代对真实生产入口")
 	assertSoulContains(t, execution.SoulMD, "真实交付入口")
 	assertSoulContains(t, execution.SoulMD, "测试文件内临时实现")
 	assertSoulContains(t, execution.SoulMD, "不得绕过生产实现")
@@ -315,6 +322,82 @@ func findEmbeddedSoulByID(items []embeddedSoul, id string) *embeddedSoul {
 		}
 	}
 	return nil
+}
+
+func TestEmbeddedSoulMarkdownRefsAreTemplateScoped(t *testing.T) {
+	data, err := os.ReadFile("defaults/souls.json")
+	if err != nil {
+		t.Fatalf("read souls.json: %v", err)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal souls.json: %v", err)
+	}
+	for _, item := range raw {
+		id := strings.TrimSpace(testStringFromAny(item["id"]))
+		if id == "" {
+			t.Fatalf("soul item missing id: %+v", item)
+		}
+		if _, ok := item["soulMD"]; ok {
+			t.Fatalf("%s still has inline soulMD", id)
+		}
+		ref := strings.TrimSpace(testStringFromAny(item["soulMDRef"]))
+		if err := validateEmbeddedSoulMDRef(ref); err != nil {
+			t.Fatalf("%s soulMDRef %q invalid: %v", id, ref, err)
+		}
+		wantRef := expectedSoulMDRefFromID(id)
+		if ref != wantRef {
+			t.Fatalf("%s soulMDRef = %q, want %q", id, ref, wantRef)
+		}
+	}
+
+	souls, err := loadEmbeddedSouls()
+	if err != nil {
+		t.Fatalf("loadEmbeddedSouls: %v", err)
+	}
+	for _, soul := range souls {
+		if strings.TrimSpace(soul.SoulMD) == "" {
+			t.Fatalf("%s loaded empty SoulMD", soul.ID)
+		}
+	}
+}
+
+func TestValidateEmbeddedSoulMDRefRejectsInvalidRefs(t *testing.T) {
+	for _, ref := range []string{
+		"",
+		"/souls/software-dev/execution.md",
+		"../souls/software-dev/execution.md",
+		"soul-software-dev-execution.md",
+		"souls/software-dev-execution.md",
+		"souls/software-dev/execution.txt",
+		"souls/software-dev/../execution.md",
+		"souls/software-dev//execution.md",
+	} {
+		if err := validateEmbeddedSoulMDRef(ref); err == nil {
+			t.Fatalf("validateEmbeddedSoulMDRef(%q) = nil, want error", ref)
+		}
+	}
+	if err := validateEmbeddedSoulMDRef("souls/software-dev/execution.md"); err != nil {
+		t.Fatalf("validateEmbeddedSoulMDRef(valid): %v", err)
+	}
+}
+
+func expectedSoulMDRefFromID(id string) string {
+	const prefix = "soul-"
+	trimmed := strings.TrimPrefix(id, prefix)
+	for _, stage := range []string{"planning", "execution", "decision", "approval", "validation", "artifact"} {
+		suffix := "-" + stage
+		if strings.HasSuffix(trimmed, suffix) {
+			template := strings.TrimSuffix(trimmed, suffix)
+			return "souls/" + template + "/" + stage + ".md"
+		}
+	}
+	return ""
+}
+
+func testStringFromAny(value any) string {
+	typed, _ := value.(string)
+	return typed
 }
 
 func assertContainsAnyDoDItem(t *testing.T, items []string, want string) {

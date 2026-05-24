@@ -118,6 +118,58 @@ func TestProcessEvidenceTimelineTreatsCompletedShellWithFailureMarkersAsActionab
 	}
 }
 
+func TestCurrentProgressDigestPrefersConcreteDiagnosticsOverGenericExitStatus(t *testing.T) {
+	runID := common.RunID("run-concrete-diagnostic")
+	step := &runModel.Step{
+		ID:    common.StepID(runID + "/graph-003/002-verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass: failureClassShellCommand,
+			"error":               "exit status 1",
+			"stderr": "proxy/proxy_test.go:32:10: undefined: detectProvider\n" +
+				"proxy/proxy_test.go:47:3: unknown field APIKeys in struct literal of type config.Config\n",
+		},
+	}
+	run := &runModel.Run{ID: runID, WorkspaceID: "ws-concrete-diagnostic"}
+
+	item := processEvidenceTimelineItem(run, step, 1)
+	if !strings.Contains(stringFromMap(item, "failureReason"), "undefined: detectProvider") {
+		t.Fatalf("failureReason = %v, want concrete stderr diagnostic", item["failureReason"])
+	}
+
+	digest := currentProgressDigestFromProcessEvidenceTimeline([]map[string]any{item})
+	if !strings.Contains(stringFromMap(digest, "currentGap"), "proxy/proxy_test.go:32:10") {
+		t.Fatalf("currentGap = %v, want concrete target diagnostic", digest["currentGap"])
+	}
+	failure := currentFailureFromProgressDigest(digest)
+	if !strings.Contains(stringFromMap(failure, "reason"), "unknown field APIKeys") {
+		t.Fatalf("currentFailure = %+v, want concrete diagnostic reason", failure)
+	}
+}
+
+func TestCurrentProgressDigestDoesNotPromoteSuccessfulActionEvidenceToFailure(t *testing.T) {
+	input := map[string]any{
+		"currentExecutionProgress": map[string]any{
+			"failureClass": failureClassShellCommand,
+			"latestActionEvidence": []map[string]any{{
+				"stepId": "run-001/graph-001/002-test",
+				"kind":   "shell/command",
+				"state":  string(common.StepStateCompleted),
+				"source": "latest_successful_action_evidence",
+				"output": map[string]any{
+					"stdout": "=== RUN   TestProxy\n--- PASS: TestProxy (0.00s)\nPASS\nok  \tmodule/proxy\t0.028s",
+				},
+			}},
+		},
+	}
+
+	if digest := currentProgressDigestFromCurrentExecutionProgress(input, nil); len(digest) > 0 {
+		t.Fatalf("currentProgressDigest = %+v, want successful action evidence to remain non-failure context", digest)
+	}
+}
+
 func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 	runID := common.RunID("run-evidence-follow-up-current-failure")
 	source := &runModel.Step{

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -13,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-//go:embed defaults/templates.json defaults/souls.json defaults/mcp_servers.json defaults/mcp_capabilities.json
+//go:embed defaults/templates.json defaults/souls.json defaults/souls/*/*.md defaults/mcp_servers.json defaults/mcp_capabilities.json
 var embeddedDefaults embed.FS
 
 type embeddedTemplate struct {
@@ -38,7 +39,8 @@ type embeddedSoul struct {
 	AllowedCapabilityRefs       []string `json:"allowedCapabilityRefs,omitempty"`
 	AllowedCapabilityCategories []string `json:"allowedCapabilityCategories,omitempty"`
 	AllowedToolKinds            []string `json:"allowedToolKinds,omitempty"`
-	SoulMD                      string   `json:"soulMD"`
+	SoulMDRef                   string   `json:"soulMDRef"`
+	SoulMD                      string   `json:"-"`
 }
 
 type embeddedMCPServer struct {
@@ -91,6 +93,51 @@ func loadEmbeddedTemplates() ([]embeddedTemplate, error) {
 	return items, nil
 }
 
+func loadEmbeddedSoulMD(item embeddedSoul) (string, error) {
+	ref := strings.TrimSpace(item.SoulMDRef)
+	if ref == "" {
+		return "", fmt.Errorf("%w: embedded soul %q soulMDRef is required", common.ErrInvalidArgument, item.ID)
+	}
+	if err := validateEmbeddedSoulMDRef(ref); err != nil {
+		return "", fmt.Errorf("%w: embedded soul %q has invalid soulMDRef %q: %v", common.ErrInvalidArgument, item.ID, ref, err)
+	}
+	data, err := embeddedDefaults.ReadFile("defaults/" + ref)
+	if err != nil {
+		return "", err
+	}
+	body := strings.TrimSpace(string(data))
+	if body == "" {
+		return "", fmt.Errorf("%w: embedded soul %q soul markdown is empty", common.ErrInvalidArgument, item.ID)
+	}
+	return body, nil
+}
+
+func validateEmbeddedSoulMDRef(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return fmt.Errorf("empty ref")
+	}
+	if strings.HasPrefix(ref, "/") {
+		return fmt.Errorf("absolute path is not allowed")
+	}
+	if !strings.HasPrefix(ref, "souls/") {
+		return fmt.Errorf("must be under souls/")
+	}
+	if !strings.HasSuffix(ref, ".md") {
+		return fmt.Errorf("must use .md extension")
+	}
+	parts := strings.Split(ref, "/")
+	if len(parts) != 3 {
+		return fmt.Errorf("must use souls/<template>/<stage>.md")
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("invalid path segment %q", part)
+		}
+	}
+	return nil
+}
+
 func loadEmbeddedSouls() ([]embeddedSoul, error) {
 	data, err := embeddedDefaults.ReadFile("defaults/souls.json")
 	if err != nil {
@@ -99,6 +146,13 @@ func loadEmbeddedSouls() ([]embeddedSoul, error) {
 	var items []embeddedSoul
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, err
+	}
+	for idx := range items {
+		body, err := loadEmbeddedSoulMD(items[idx])
+		if err != nil {
+			return nil, err
+		}
+		items[idx].SoulMD = body
 	}
 	return items, nil
 }

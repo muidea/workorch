@@ -176,11 +176,14 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 - 若合同状态是 `need_validation`，输入必须说明最近 state-changing artifact、目标 scope、bounded verification 条件和禁止的 read-only/self-inspection-only 输出。
 - `currentProgressDigest`、`processEvidenceTimeline`、`repairActionPackage`、`structuredFailureSignals`、`latestClosureEvidence` 的当前事实必须一致；历史 wrapper/schema/provider 失败只能作为历史诊断摘要。
 - 当最新 concrete failure 被包裹在 follow-up / wrapper LLM failure 后面时，runtime 必须从 `currentExecutionProgress.latestActionEvidence` / `completedGraphEvidence` 的 stdout、stderr、error、targetRef、line refs 或 failure signature 中提取中立 target evidence。若可机械提取出 target refs / line refs / failure target scope，则该 evidence 必须提升为当前 `currentGap` 与 `repairActionPackage.structuredFailureSignals`，并恢复 `need_state_change`；不得因为 wrapper failure 本身是 read-only graph、schema invalid 或 dodAssessment failed，就退回 `need_evidence`。
+- `latest_successful_action_evidence` 只能作为已完成动作或候选证据引用，不得被提升为 `currentFailure`、`lastObservedFailure` 或 failure target scope。只有 step 自身失败，或 completed action evidence 被明确标记为 `evidenceValidity=actionable_failure` / 输出中存在可机械识别的失败标记时，才允许覆盖旧失败成为当前失败。
 - `repairActionPackage.currentFailure` 与 `repairActionPackage.currentExecutionProgress` 是 canonical repair context 的组成部分。若顶层 `currentFailure` / `currentExecutionProgress` 缺失但 package 内存在有效字段，runtime 在 provider context gate 前必须提升或等价识别这些字段；不得误报 `runtime_repair_current_failure_missing`。
 - `shell/command` 的可行动失败不能只依赖进程退出码。若命令因管道、截断、wrapper 或 shell 组合返回 `exitCode=0`，但 stdout / stderr 中存在明确失败标记、断言失败、文件行号或测试失败摘要，`processEvidenceTimeline` 与 `currentProgressDigest` 必须把它记录为 actionable validation failure，并作为下一轮 repair 的当前 gap。
 - `repairActionPackage` 是唯一 primary actionable contract；不得让 `governanceHistory`、memory、旧 `executionGraph`、旧 rejected patch 或旧 decision question 与其竞争。
 
 `ShouldCreateDecisionTicket` 必须作为所有 decision ticket 写入前的统一门禁。若当前合同状态是 `need_state_change`，并且已经具备 concrete target evidence、required output 允许 state-changing artifact、缺口不涉及外部权限/凭证/部署/审批/破坏性变更/无法读取的业务信息，则 LLM 返回的 `blocked_on_decision` 必须被转换为 continuable repair contract violation，而不是直接创建人工 ticket。Runtime 应记录 converted decision 摘要，并继续派发 repair 或 bounded validation。只有合同状态为 `need_governance`，或证据门禁明确缺少 runtime 无法自行获得的信息时，才允许创建 ticket。
+
+若 validation / completion follow-up 已输出 failed `dodAssessment`，并且 assessment 中存在可机械映射的 DoD / Goal / deliverable coverage gap、nextActions、evidence candidates 或 coverage target set，则该输出属于 `need_validation` / `need_state_change` 的可继续收口合同。即使 LLM 同时返回 `llm_decision_required` / `blocked_on_decision`，runtime 也必须先转换为 runtime repair follow-up；只有缺口明确需要外部信息、权限、凭证、配置、审批或无法自动读取的业务事实时，才允许创建 decision ticket。
 
 `patch/apply`、`file/edit` 或等价 state-changing artifact 失败的 repair-of-repair 必须遵守以下收敛规则：
 
@@ -687,6 +690,8 @@ Follow-up、repair、provider retry、replan successor 和 validation 输入必�
 
 `lastFailureDiagnostics` 是当前可行动失败的必要诊断摘要，不是历史噪点。若最新失败来自 `shell/command`、`mcp/tool_call`、`patch/apply`、`file/edit` 或等价 action/validation step，runtime 必须把失败的 `error`、`reason`、`failureClass`、`failureSignature`、`command`、`args`、`exitCode` 以及必要的 `stdoutPreview` / `stderrPreview` 写入 `repairActionPackage.lastFailureDiagnostics`；若这些诊断中包含路径、line ref 或目标引用，也应同步进入 `currentFailure` 或 `structuredFailureSignals`。Provider context budget、prompt normalization 和 outbound redaction 必须把该字段作为 protected repair contract 字段保留。不得只把 `exit status` 这类抽象标签传给 LLM 后再要求 LLM 判断修复目标。
 
+`currentProgressDigest.currentGap`、`processEvidenceTimeline.failureReason` 与 `currentFailure.reason` 必须遵守同一优先级：当 `stdout` / `stderr` / `stdoutPreview` / `stderrPreview` 中存在可机械识别的 target ref、line ref 或等价资源形状诊断时，优先使用该具体诊断文本；`exit status`、`command failed`、`runtime failed` 这类通用状态只能作为没有具体诊断时的兜底。该规则只依据中立的路径、行号、targetRef、identifier-shaped token 和 failure signature，不得根据语言、测试框架、业务对象或供应商语义推断修复方案。
+
 `structuredFailureSignals` 只能通过中立机械方式抽取：target refs、line refs、identifier-shaped tokens、field-shaped tokens、bounded diagnostic lines、failure class / signature。这些信号只表达“失败文本中出现了可追踪形态”，不表达业务语义。LLM 在 repair 中引用这些 token 时，必须先与当前 target snapshot、workspace manifest 或同一 patch 中新增的资源对齐；不得仅因为失败文本出现某个 token 就凭空发明资源、字段、入口或目标结构。
 
 当失败 evidence 已经包含中立的资源形状冲突诊断时，repair 需要遵守“首要阻塞优先”合同。这里的中立诊断包括但不限于：line-ref 执行/验证错误、unresolved identifier、invalid attribute、shape mismatch、missing method、schema mismatch，以及其他明确指向当前目标资源无法通过基本执行或验证的结构性错误。runtime core 只能表达以下中立约束，不得写入具体语言框架、业务模型或供应商细节：
@@ -814,6 +819,8 @@ Repair exhausted 后必须二选一：
 
 当 `shell/command` 通过 `sh -c` 执行的脚本显式依赖 `pipefail` 等 bash-only 语义时，runtime 可以在不改变步骤语义的前提下切换到兼容的 shell 执行器；该兼容必须是通用执行策略，不得以业务命令名或业务目录名做条件分支，并且应在 step output 中记录实际执行器以便追踪。
 
+`shell/command` 的工作目录属于 runtime capability contract，而不是业务语义。若 capability 已声明其工作目录由 runtime 绑定到 workspace 交付目录，则 LLM 不得再硬编码 `cd /home/user/workspace`、`.workorch-workspaces/...` 或等价的绝对 workspace 路径；core 可以把这类输出视为 capability-boundary violation 并拒绝，因为它破坏的是通用执行能力合同，而不是某个具体业务规则。
+
 默认预算用于避免普通长流程任务被过短固定值误杀；单步覆盖用于让 LLM 在严格收敛阶段为明确长耗时操作申请有限执行窗口。无论默认值还是单步覆盖，都必须是有界的，并在 step output 中记录实际 `timeoutMillis`，作为后续 repair / verification 的中立证据。
 
 当非 LLM 执行因为 timeout 失败时，runtime repair 只能基于“执行超时”这一中立失败形态选择重试、缩小动作、调整有界预算、返回 failed assessment 或 blocker，不得依赖具体命令名推断业务策略。
@@ -822,6 +829,19 @@ Repair exhausted 后必须二选一：
 
 Provider retry 始终只处理 provider transient failure，与 stage 语义无关。
 Provider retry 预算必须来自 runtime 配置，默认 `maxProviderRetryAttempts=10`；不得在 core runtime 分支中写死固定业务场景次数。
+
+## Approval Auto-Governance Boundary
+
+Approval auto-governance 只能依赖中立风险信号、当前 Goal / DoD 边界和可追踪的 workspace scope，不得因为具体语言、包管理器、框架或业务场景写死审批规则。
+
+当 approval 请求满足以下中立条件时，core 可以将其归类为 `L2 / workspace_low_risk_write` 并走自动治理，而不是强制人工审批：
+
+- 动作是当前 workspace 交付目录内的最小状态变更。
+- 变更目标属于 dependency / manifest / metadata / lock / checksum / requirements 或等价依赖声明配套资源。
+- 目的仅是恢复当前 Goal / DoD 所需的本地构建、验证或交付一致性。
+- 未出现 remote / ssh / external / network write / production / deploy / publish / destructive 等更高风险信号。
+
+该边界只表达“工作区内低风险配套元数据修复”的中立风险分类，不允许 core 根据具体生态名字、依赖源、语言栈或业务模板推断更多领域语义。只要信号升级到远端写入、生产操作、供应链风险扩大、凭证访问或破坏性变更，runtime 仍必须进入人工审批。
 
 Provider retry / config blocker 的边界必须基于中立失败形态：
 
@@ -1323,6 +1343,10 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - 边界核对：本批新增/修改的 convergence 代码未引入软件开发、语言、测试框架或具体业务特判；全仓边界搜索仍存在历史测试、配置与 MCP/server 中立字段命中，未作为本批新增规则依据。
 - 2026-05-22：
   - 已完成 CVC-01 第二批恢复入口收口。
+- 2026-05-24：
+  - 已收口 verification failed assessment 的 continuable decision 偏差：当 failed `dodAssessment` 已给出 coverage gap / nextActions / evidence candidates / coverage target set 时，runtime 不再升级为 `blocked_on_decision` ticket，而是直接转为 runtime repair follow-up。
+  - 已收口 `currentProgressDigest` / `currentFailure` 污染：`latest_successful_action_evidence` 不再被提升为当前失败；只有真实 failed step 或带明确失败标记的 completed evidence 才能覆盖旧失败。
+  - 已补回归测试覆盖“successful action evidence 不污染 currentFailure”和“failed assessment decision 自动转 repair”；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过。
   - `decisionResolutionInput` 已接入 `ConvergenceContract`，resolved decision 只作为治理恢复信号；若 ticket context 仍携带 state-changing repairActionPackage / target evidence，恢复输入会回到 `need_state_change` 而不是停留在普通 `decision`。
   - Replan successor 的初始 step input 已通过统一合同应用；当 `replanContinuation` 明确携带 predecessor repairActionPackage / target snapshots 且 run contract 要求 state change 时，首个 LLM step 进入 `runtimeStage=repair` 与 `need_state_change`。
   - `replanContinuation.repairActionPackage` 已纳入 successor 首步合同来源；successor execution context 也记录 compact `convergenceContract`，用于后续审计当前唯一 `need_*` 状态。

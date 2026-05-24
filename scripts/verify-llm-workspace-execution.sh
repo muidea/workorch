@@ -940,7 +940,9 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | grep "\"id\": \"$goal_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | grep '"verify LLM driven workspace execution"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" >"$TMP_DIR/goal-read.json"
+goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"
+[[ "$goal_text" == *"verify LLM driven workspace execution"* ]]
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
   -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","multi gate decision then approval can complete","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"

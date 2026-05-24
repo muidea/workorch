@@ -1841,6 +1841,9 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		if reason := processEvidenceFailureReason(step.Output); reason != "" {
 			item["failureReason"] = reason
 		}
+		if diagnostic := processEvidenceConcreteFailureDiagnostic(step.Output); diagnostic != "" {
+			item["concreteFailureDiagnostic"] = diagnostic
+		}
 		if validity := processEvidenceValidity(step); validity != "" {
 			item["evidenceValidity"] = validity
 		}
@@ -2044,12 +2047,43 @@ func processEvidenceFailureReason(output map[string]any) string {
 	if len(output) == 0 {
 		return ""
 	}
+	if reason := processEvidenceConcreteFailureDiagnostic(output); reason != "" {
+		return reason
+	}
 	return truncateLLMContextString(firstNonEmptyString(
 		stringFromMap(output, "error"),
 		stringFromMap(output, "reason"),
 		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderrPreview"),
+		stringFromMap(output, "stdoutPreview"),
 		stringFromMap(output, failureOutputKeySignature),
 	))
+}
+
+func processEvidenceConcreteFailureDiagnostic(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	for _, candidate := range []string{
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderrPreview"),
+		stringFromMap(output, "stdoutPreview"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, "error"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if structuredFailureSignalsHaveConcreteTargetEvidence(structuredFailureSignalsFromFailureOutput(map[string]any{
+			"stderr": candidate,
+		}, nil, "", "")) {
+			return truncateLLMContextString(candidate)
+		}
+	}
+	return ""
 }
 
 func processEvidenceRefs(step *runModel.Step) []string {
@@ -2125,6 +2159,7 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 	if len(lastFailure) > 0 {
 		digest["lastObservedFailure"] = processEvidenceDigestStep(lastFailure)
 		digest["currentGap"] = firstNonEmptyString(
+			stringFromMap(lastFailure, "concreteFailureDiagnostic"),
 			stringFromMap(lastFailure, "failureReason"),
 			stringFromMap(lastFailure, "summary"),
 			stringFromMap(lastFailure, "failureClass"),
@@ -2161,7 +2196,7 @@ func processEvidenceDigestStep(item map[string]any) map[string]any {
 		return nil
 	}
 	ret := map[string]any{}
-	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "failureClass", "failureSignature", "failureReason", "evidenceValidity", "rejectedOutputSummaryOmitted", "omittedContentReason"} {
+	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "failureClass", "failureSignature", "failureReason", "concreteFailureDiagnostic", "evidenceValidity", "rejectedOutputSummaryOmitted", "omittedContentReason"} {
 		if value, ok := item[key]; ok && value != nil {
 			ret[key] = value
 		}

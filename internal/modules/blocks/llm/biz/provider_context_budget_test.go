@@ -197,6 +197,70 @@ func TestEnforceProviderRequestBudgetAppliesStageAwareBudget(t *testing.T) {
 	}
 }
 
+func TestEnforceProviderRequestBudgetPreservesAssessmentOnlyRuntimeContract(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-assessment-budget",
+		RunID:       "run-assessment-budget",
+		StepID:      "run-assessment-budget/assessment-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"workspaceId":                   "ws-assessment-budget",
+			"goalId":                        "goal-assessment-budget",
+			"doDId":                         "dod-assessment-budget",
+			"previousStepId":                "run-assessment-budget/follow-up-graph-3",
+			"assessmentOnly":                true,
+			"assessmentOnlyReason":          "graph_follow_up_expansion_limit_exceeded",
+			"graphExpansionLimitFollowUp":   true,
+			"graphFollowUpExpansionCount":   3,
+			"graphFollowUpExpansionLimit":   2,
+			"runtimeStage":                  "verification",
+			"runtimeStageMode":              "strict_convergence",
+			"currentSoulStage":              "validation",
+			"processEvidenceTimeline":       repeatedBudgetItems(200),
+			"workspaceFileManifest":         repeatedBudgetItems(200),
+			"runEvidenceSummary":            repeatedBudgetItems(200),
+			"currentProgressDigest":         map[string]any{"currentGap": "none_observed_in_recent_process_evidence"},
+			"executionContextPackage":       map[string]any{"goal": map[string]any{"text": "goal"}, "dod": map[string]any{"items": []any{"dod"}}},
+			"executionContext":              map[string]any{"goal": map[string]any{"text": "goal"}, "dod": map[string]any{"items": []any{"dod"}}},
+			"largeTransportOnlyNoiseMarker": strings.Repeat("noise ", 4000),
+		},
+		RuntimeCapabilities: declaredRuntimeCapabilities(),
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         1024,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         10 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudgetLimit(req, 10*1024)
+
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 3 {
+		t.Fatalf("contextBudget = %+v, want aggressive compaction", got.ContextBudget)
+	}
+	if got.Input["assessmentOnly"] != true ||
+		got.Input["assessmentOnlyReason"] != "graph_follow_up_expansion_limit_exceeded" ||
+		got.Input["graphExpansionLimitFollowUp"] != true ||
+		intValue(got.Input["graphFollowUpExpansionCount"]) != 3 ||
+		intValue(got.Input["graphFollowUpExpansionLimit"]) != 2 ||
+		got.Input["runtimeStage"] != "verification" ||
+		got.Input["runtimeStageMode"] != "strict_convergence" ||
+		got.Input["currentSoulStage"] != "validation" {
+		t.Fatalf("input = %+v, want assessment-only runtime contract preserved after compaction", got.Input)
+	}
+	if !stringSliceContains(got.ContextBudget.ProtectedFields, "input.assessmentOnly") ||
+		!stringSliceContains(got.ContextBudget.ProtectedFields, "input.graphExpansionLimitFollowUp") ||
+		!stringSliceContains(got.ContextBudget.ProtectedFields, "input.runtimeStage") {
+		t.Fatalf("protectedFields = %+v, want runtime contract controls recorded", got.ContextBudget.ProtectedFields)
+	}
+}
+
 func TestEnforceProviderRequestBudgetCompactsWhenTokenBudgetExceeded(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-token",

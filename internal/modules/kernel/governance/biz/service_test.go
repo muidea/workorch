@@ -1092,6 +1092,116 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 	}
 }
 
+func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runRepo := memory.NewRunRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	traceRepo := memory.NewAutoGovernanceTraceRepository()
+
+	workspaceID := common.WorkspaceID("ws-dependency-metadata")
+	runID := common.RunID("run-dependency-metadata")
+	goalID := common.GoalID("goal-dependency-metadata")
+	dodID := common.DoDID("dod-dependency-metadata")
+	approvalID := common.ApprovalID("approval-dependency-metadata")
+
+	mustNoErr(t, goalRepo.Create(ctx, &workspacemodel.Goal{ID: goalID, WorkspaceID: workspaceID, Text: "produce a buildable workspace deliverable"}))
+	mustNoErr(t, dodRepo.Create(ctx, &workspacemodel.DoD{ID: dodID, WorkspaceID: workspaceID, Items: []string{"workspace deliverable builds"}, State: common.DoDStateReady}))
+	mustNoErr(t, runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: goalID, DoDID: dodID, State: common.RunStateRunning}))
+	mustNoErr(t, approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          approvalID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID("run-dependency-metadata/repair-1"),
+		Reason:      "workspace build failed because dependency metadata is missing",
+		Action:      "update manifest and checksum files inside the workspace to add the missing dependency metadata, then rerun bounded verification",
+		Context: map[string]any{
+			"affectedFiles": []any{"manifest", "checksum"},
+			"risk":          "low_risk_workspace_dependency_metadata",
+		},
+		State: common.ApprovalStatePending,
+	}))
+
+	var resolveCount atomic.Int64
+	var resumeCount atomic.Int64
+	svc := NewService(Dependencies{
+		Tickets:              ticketRepo,
+		Resolutions:          resolutionRepo,
+		Approvals:            approvalRepo,
+		Runs:                 runRepo,
+		Goals:                goalRepo,
+		DoDs:                 dodRepo,
+		MemoryItems:          memoryRepo,
+		AutoGovernanceTraces: traceRepo,
+		EventHub:             hub,
+		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveApproval: func(_ context.Context, id common.ApprovalID) error {
+			resolveCount.Add(1)
+			item, err := approvalRepo.Get(ctx, id)
+			if err != nil {
+				return err
+			}
+			item.State = common.ApprovalStateApproved
+			return approvalRepo.Update(ctx, item)
+		},
+		ResumeRun: func(context.Context, common.RunID) error {
+			resumeCount.Add(1)
+			return nil
+		},
+		LoadConfig: testGovernanceConfig(true, 0.82, 5),
+	})
+	mustNoErr(t, svc.Start())
+	defer svc.Stop()
+
+	mustNoErr(t, hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicApprovalCreated,
+		SubjectType: "approval",
+		SubjectID:   string(approvalID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+	}))
+
+	if resolveCount.Load() != 1 {
+		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
+	}
+	if resumeCount.Load() != 1 {
+		t.Fatalf("resume count = %d, want 1", resumeCount.Load())
+	}
+	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if trace.Status != "resolved" || trace.Action != "approve" {
+		t.Fatalf("trace = %+v, want resolved approve", trace)
+	}
+	if trace.RiskLevel != "L2" || trace.PolicyMatched != "workspace_low_risk_write" {
+		t.Fatalf("trace risk/policy = %s/%s, want L2/workspace_low_risk_write", trace.RiskLevel, trace.PolicyMatched)
+	}
+}
+
+func TestClassifyApprovalRiskTreatsRuntimeDependencyGovernanceAsL2(t *testing.T) {
+	approval := &approvalmodel.Approval{
+		Action: "update workspace dependency metadata and manifest files to satisfy runtime dependency governance before rerunning bounded validation",
+		Reason: "workspace build failed because dependency metadata is missing",
+		Context: map[string]any{
+			"risk": "low_risk_workspace_dependency_metadata",
+			"kind": "patch_approval_required",
+		},
+	}
+	riskLevel, signals := classifyApprovalRisk(approval)
+	if riskLevel != "L2" {
+		t.Fatalf("riskLevel = %s, want L2; signals=%v", riskLevel, signals)
+	}
+	if !containsAnyToken(signals, []string{"workspace_dependency_metadata", "low_risk_workspace_dependency_metadata"}) {
+		t.Fatalf("signals = %v, want dependency metadata low-risk signal", signals)
+	}
+}
+
 func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

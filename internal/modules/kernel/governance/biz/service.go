@@ -1473,7 +1473,13 @@ func classifyApprovalRisk(approval *approvalmodel.Approval) (string, []string) {
 	if containsAnyToken(signals, []string{"ssh_write", "external_write", "remote_operation", "network_write", "large_change"}) {
 		return "L3", signals
 	}
-	if containsAnyToken(signals, []string{"workspace_write", "patch_apply", "patch_revert"}) {
+	if containsAnyToken(signals, []string{
+		"workspace_write",
+		"patch_apply",
+		"patch_revert",
+		"workspace_dependency_metadata",
+		"low_risk_workspace_dependency_metadata",
+	}) {
 		return "L2", signals
 	}
 	if containsAnyToken(signals, []string{"read_only", "query", "list", "search"}) {
@@ -1485,6 +1491,7 @@ func classifyApprovalRisk(approval *approvalmodel.Approval) (string, []string) {
 func collectApprovalSignals(approval *approvalmodel.Approval) []string {
 	signals := make([]string, 0, 8)
 	actionText := normalize(approval.Action + " " + approval.Reason)
+	contextText := normalize(flattenApprovalContextText(approval.Context))
 	if actionText != "" {
 		if containsAnyText(actionText, []string{"read", "list", "query", "search", "fetch", "inspect", "describe", "show"}) {
 			signals = append(signals, "read_only")
@@ -1501,6 +1508,9 @@ func collectApprovalSignals(approval *approvalmodel.Approval) []string {
 		if containsAnyText(actionText, []string{"deploy", "publish", "release", "prod", "production"}) {
 			signals = append(signals, "production_operation")
 		}
+	}
+	if declaresLowRiskWorkspaceDependencyMetadata(approval, actionText, contextText) {
+		signals = append(signals, "workspace_dependency_metadata")
 	}
 	contextRisk := normalize(stringFromMap(approval.Context, "risk"))
 	if contextRisk != "" {
@@ -1529,6 +1539,63 @@ func collectApprovalSignals(approval *approvalmodel.Approval) []string {
 		signals = append(signals, "secret_access")
 	}
 	return compactUniqueStrings(signals)
+}
+
+func declaresLowRiskWorkspaceDependencyMetadata(approval *approvalmodel.Approval, actionText string, contextText string) bool {
+	if approval == nil {
+		return false
+	}
+	if actionText == "" && contextText == "" {
+		return false
+	}
+	combined := strings.TrimSpace(actionText + "\n" + contextText)
+	if combined == "" {
+		return false
+	}
+	if containsAnyText(combined, []string{"deploy", "publish", "release", "prod", "production", "remote", "ssh", "external", "network"}) {
+		return false
+	}
+	hasWorkspaceWrite := containsAnyText(combined, []string{"write", "edit", "apply", "patch", "create", "update", "tidy", "append"}) ||
+		containsAnyText(normalize(stringFromMap(approval.Context, "kind")), []string{"patch_approval_required"})
+	if !hasWorkspaceWrite {
+		return false
+	}
+	return containsAnyText(combined, []string{"dependency", "dependencies", "manifest", "metadata", "lockfile", "lock file", "lock", "checksum", "checksums", "module", "modules", "package", "packages", "requirements"})
+}
+
+func flattenApprovalContextText(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, value := range input {
+		appendApprovalContextValue(&b, value)
+	}
+	return b.String()
+}
+
+func appendApprovalContextValue(b *strings.Builder, value any) {
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(text)
+		}
+	case []string:
+		for _, item := range typed {
+			appendApprovalContextValue(b, item)
+		}
+	case []any:
+		for _, item := range typed {
+			appendApprovalContextValue(b, item)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			appendApprovalContextValue(b, item)
+		}
+	}
 }
 
 func containsRemoteOperationSignal(actionText string, contextMap map[string]any) bool {

@@ -110,7 +110,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def decision_payload(user_content):
     if '"runId": "probe"' in user_content:
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    if re.search(r'"assessmentOnly"\s*:\s*true', user_content) or re.search(r'"graphFollowUp"\s*:\s*true', user_content) or re.search(r'"previousStepOutput"\s*:', user_content):
+    if (
+        re.search(r'"assessmentOnly"\s*:\s*true', user_content)
+        or re.search(r'"graphExpansionLimitFollowUp"\s*:\s*true', user_content)
+        or re.search(r'"graphFollowUp"\s*:\s*true', user_content)
+        or re.search(r'"assessmentOnlyContractCorrection"\s*:\s*true', user_content)
+        or re.search(r'"type"\s*:\s*"assess_only"', user_content)
+        or re.search(r'"previousStepOutput"\s*:', user_content)
+    ):
         previous = re.search(r'"previousStepId": "([^"]+)"', user_content)
         evidence = previous.group(1) if previous else "mcp-stdio-call"
         return {

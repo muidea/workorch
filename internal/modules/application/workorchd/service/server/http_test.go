@@ -2239,8 +2239,8 @@ func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
 	if err := json.Unmarshal(goalRec.Body.Bytes(), &goalBody); err != nil {
 		t.Fatalf("unmarshal goal response: %v", err)
 	}
-	if goalBody.Goal.ID != goalID || goalBody.Goal.Text != "updated goal text" {
-		t.Fatalf("goal response = %+v, want updated text", goalBody.Goal)
+	if goalBody.Goal.ID != goalID || goalBody.Goal.Text != "- updated goal text" {
+		t.Fatalf("goal response = %+v, want normalized updated text", goalBody.Goal)
 	}
 
 	dodReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/dods/"+dodID, strings.NewReader(`{"items":["updated dod","second dod"]}`))

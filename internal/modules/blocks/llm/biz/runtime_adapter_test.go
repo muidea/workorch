@@ -663,6 +663,69 @@ func TestRuntimeAdapterKeepsCapabilityCatalogStableForAssessmentOnlyRequest(t *t
 	}
 }
 
+func TestRuntimeAdapterKeepsAssessmentOnlyPromptAfterBudgetCompaction(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"failed",
+		"dodAssessment":{
+			"satisfied":false,
+			"summary":"current evidence is insufficient",
+			"goalOutcome":"incomplete",
+			"items":[{"item":"done","state":"failed","reason":"missing evidence"}]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			ContextWindowTokens:    200000,
+			MaxInputTokens:         100000,
+			ReservedOutputTokens:   1024,
+			SafetyRatio:            0.8,
+			BytesHardLimit:         128 * 1024,
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+	request := llmStepRequest()
+	request.Input["assessmentOnly"] = true
+	request.Input["assessmentOnlyReason"] = "graph_follow_up_expansion_limit_exceeded"
+	request.Input["graphExpansionLimitFollowUp"] = true
+	request.Input["graphFollowUpExpansionCount"] = 3
+	request.Input["graphFollowUpExpansionLimit"] = 2
+	request.Input["runtimeStage"] = "verification"
+	request.Input["runtimeStageMode"] = "strict_convergence"
+	request.Input["currentSoulStage"] = "validation"
+	request.Input["executionContextPackage"] = map[string]any{
+		"goal": map[string]any{"text": "goal text"},
+		"dod":  map[string]any{"items": []any{"dod item"}},
+	}
+	request.Input["processEvidenceTimeline"] = repeatedBudgetItems(200)
+	request.Input["runEvidenceSummary"] = repeatedBudgetItems(200)
+	request.Input["workspaceFileManifest"] = repeatedBudgetItems(200)
+	request.Input["largeTransportOnlyNoiseMarker"] = strings.Repeat("noise ", 12000)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	if result.Output["stage"] != "llm_dod_assessment" {
+		t.Fatalf("output = %+v, want DoD assessment output", result.Output)
+	}
+	if provider.request.ContextBudget == nil || provider.request.ContextBudget.ShrinkLevel == 0 {
+		t.Fatalf("contextBudget = %+v, want budget compaction before provider call", provider.request.ContextBudget)
+	}
+	if provider.request.Input["assessmentOnly"] != true ||
+		provider.request.Input["graphExpansionLimitFollowUp"] != true ||
+		provider.request.Input["runtimeStage"] != "verification" {
+		t.Fatalf("provider input = %+v, want assessment-only runtime contract preserved", provider.request.Input)
+	}
+	currentAction := currentActionPromptContent(provider.request.PromptContext)
+	if !strings.Contains(currentAction, `"type":"assess_only"`) ||
+		strings.Contains(currentAction, `"type":"plan_next_step"`) {
+		t.Fatalf("current action = %q, want assessment-only after compaction", currentAction)
+	}
+}
+
 func TestRuntimeAdapterToleratesPatchOperationProviderDrift(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"completionState":"continue",
@@ -2172,6 +2235,21 @@ func TestParseLLMExecutionDecisionRejectsUnavailableWorkorchCLI(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "unavailable runtime command") {
 			t.Fatalf("parse err = %v, want unavailable runtime command", err)
+		}
+	}
+}
+
+func TestParseLLMExecutionDecisionRejectsAbsoluteWorkspaceCD(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"build","kind":"shell/command","input":{"command":"sh","args":["-c","cd /home/user/workspace && go test ./..."]}}]}}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"build","kind":"shell/command","input":{"command":"sh","args":["-c","cd /tmp/.workorch-workspaces/ws-123 && go test ./..."]}}]}}`,
+	} {
+		_, err := ParseLLMExecutionDecision([]byte(payload))
+		if !errors.Is(err, common.ErrInvalidArgument) {
+			t.Fatalf("parse err = %v, want invalid argument for payload %s", err, payload)
+		}
+		if !strings.Contains(err.Error(), "must not hard-code workspace directory change") {
+			t.Fatalf("parse err = %v, want hard-coded workspace cd validation", err)
 		}
 	}
 }

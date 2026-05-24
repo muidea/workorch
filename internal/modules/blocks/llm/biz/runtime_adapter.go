@@ -2237,6 +2237,9 @@ func validateShellCommandBoundary(command string, args []string, field string) e
 		return fmt.Errorf("%w: %s command must be an executable name or path only; %s; use args, sh -c, or patchRequests for shell syntax", common.ErrInvalidArgument, field, reason)
 	}
 	commandLine := shellCommandLine(command, args)
+	if absoluteWorkspaceCD := absoluteWorkspaceCDReference(commandLine); absoluteWorkspaceCD != "" {
+		return fmt.Errorf("%w: %s must not hard-code workspace directory change %q; shell/command already runs in the workspace deliverable directory", common.ErrInvalidArgument, field, absoluteWorkspaceCD)
+	}
 	for _, unavailable := range unavailableRuntimeCommands() {
 		if commandReferencesShellCommand(command, commandLine, unavailable) {
 			return fmt.Errorf("%w: %s references unavailable runtime command %q", common.ErrInvalidArgument, field, unavailable)
@@ -2291,6 +2294,24 @@ func shellCommandLine(command string, args []string) string {
 	parts = append(parts, strings.TrimSpace(command))
 	parts = append(parts, args...)
 	return strings.Join(parts, " ")
+}
+
+func absoluteWorkspaceCDReference(commandLine string) string {
+	commandLine = strings.TrimSpace(commandLine)
+	if commandLine == "" {
+		return ""
+	}
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?:^|[\s;&|()])cd\s+(/home/user/workspace)(?:$|[\s;&|()])`),
+		regexp.MustCompile(`(?:^|[\s;&|()])cd\s+(/[^\s;&|()]*\.workorch-workspaces/[^\s;&|()]+)(?:$|[\s;&|()])`),
+	}
+	for _, pattern := range patterns {
+		match := pattern.FindStringSubmatch(commandLine)
+		if len(match) > 1 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
 }
 
 func stringSliceValue(input any) []string {

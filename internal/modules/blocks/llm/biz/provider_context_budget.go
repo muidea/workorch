@@ -31,6 +31,10 @@ const (
 var providerP0InputKeys = []string{
 	"workspaceId", "goalId", "doDId", "previousStepId", "currentSoulStage",
 	"runtimeRepairFollowUp", "runtimeRepairAttempt", "providerRetryFollowUp", "providerRetryAttempt",
+	"assessmentOnly", "assessmentOnlyReason", "assessmentOnlyContractCorrection",
+	"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
+	"providerRetryAssessmentOnly",
+	"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode",
 	"completionFollowUp", "graphFollowUp", "failureReason", "failureClass", "failureSignature",
 	"repairObjective", "stateChangingOutputRequired", "stateChangingRecoveryMode",
 	"providerTimeoutStateChangingRetry", "forbiddenRecoveryOutputs", "requiredRecoveryOutputs",
@@ -72,11 +76,13 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	shrinkLevel := 0
 	protected := captureProtectedGoalDoD(request.Input)
 	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
+	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input)
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		rules = append(rules, "adaptive shrink based on provider retry")
 		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
@@ -86,6 +92,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = budgetProviderInput(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		rules = append(rules, "compact provider input")
 		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
@@ -95,6 +102,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = compactProviderExecutionContext(request.Input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		rules = append(rules, "summarize execution context transport fields")
 		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
@@ -104,6 +112,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = prioritizedProviderInput(request.Input, true)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
@@ -113,6 +122,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = minimalProviderInput(request.Input)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
+		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -627,6 +637,16 @@ func providerProtectedContextFields(input map[string]any) []string {
 			fields = append(fields, "input."+key)
 		}
 	}
+	for _, key := range []string{
+		"assessmentOnly", "assessmentOnlyReason", "assessmentOnlyContractCorrection",
+		"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
+		"providerRetryAssessmentOnly",
+		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
+	} {
+		if _, ok := input[key]; ok {
+			fields = append(fields, "input."+key)
+		}
+	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		for _, key := range []string{"coverageTargetSet", "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "requiredOutput", "targetSnapshots"} {
 			if _, ok := pkg[key]; ok {
@@ -864,6 +884,10 @@ type protectedProviderRepairTargets struct {
 	RepairActionTargetSnapshots any
 }
 
+type protectedProviderRuntimeContract struct {
+	TopLevel map[string]any
+}
+
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	ret := protectedGoalDoD{
 		TopLevel:         map[string]any{},
@@ -925,6 +949,26 @@ func captureProtectedProviderRepairTargets(input map[string]any) protectedProvid
 	return ret
 }
 
+func captureProtectedProviderRuntimeContract(input map[string]any) protectedProviderRuntimeContract {
+	ret := protectedProviderRuntimeContract{TopLevel: map[string]any{}}
+	if len(input) == 0 {
+		return ret
+	}
+	for _, key := range []string{
+		"assessmentOnly", "assessmentOnlyReason", "assessmentOnlyContractCorrection",
+		"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
+		"providerRetryAssessmentOnly",
+		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
+	} {
+		if value, ok := input[key]; ok {
+			if cloned, success := cloneAny(value); success {
+				ret.TopLevel[key] = cloned
+			}
+		}
+	}
+	return ret
+}
+
 func restoreProtectedProviderRepairTargets(input map[string]any, protected protectedProviderRepairTargets) map[string]any {
 	if len(input) == 0 {
 		input = map[string]any{}
@@ -937,6 +981,16 @@ func restoreProtectedProviderRepairTargets(input map[string]any, protected prote
 	}
 	if protected.RepairActionPackage != nil {
 		input["repairActionPackage"] = protected.RepairActionPackage
+	}
+	return input
+}
+
+func restoreProtectedProviderRuntimeContract(input map[string]any, protected protectedProviderRuntimeContract) map[string]any {
+	if len(input) == 0 {
+		input = map[string]any{}
+	}
+	for key, value := range protected.TopLevel {
+		input[key] = value
 	}
 	return input
 }

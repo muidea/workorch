@@ -1475,9 +1475,14 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 		decisionOutput := decisionOutputFromSpec(decisionSpec)
 		convergenceContract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": decisionOutput})
-		if assessmentOnlyDecisionShouldRepair(step, decisionSpec) || continuableDecisionShouldRepair(step, decisionSpec) || !ShouldCreateDecisionTicket(step.Input, decisionOutput, convergenceContract) {
+		if failedAssessmentDecisionShouldRepair(step, output, decisionSpec) ||
+			assessmentOnlyDecisionShouldRepair(step, decisionSpec) ||
+			continuableDecisionShouldRepair(step, decisionSpec) ||
+			!ShouldCreateDecisionTicket(step.Input, decisionOutput, convergenceContract) {
 			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
 				output["assessmentOnlyDecisionConvertedToRepair"] = true
+			} else if failedAssessmentDecisionShouldRepair(step, output, decisionSpec) {
+				output["actionableFailedAssessmentDecisionConvertedToRepair"] = true
 			} else {
 				output["continuableDecisionConvertedToRepair"] = true
 			}
@@ -4645,6 +4650,22 @@ func currentFailureFromContextGateTicket(ticketContext map[string]any) map[strin
 		return nil
 	}
 	return compactLLMContextMap(ret, 1)
+}
+
+func failedAssessmentDecisionShouldRepair(step *runModel.Step, output map[string]any, decisionSpec runtimeDecisionBlockSpec) bool {
+	if step == nil || output == nil {
+		return false
+	}
+	if runtimeStageFromStepInput(step.Input) != runtimeStageVerification {
+		return false
+	}
+	if !failedAssessmentHasActionableCoverageGap(output) {
+		return false
+	}
+	if strings.TrimSpace(decisionSpec.Reason) == "" {
+		return false
+	}
+	return true
 }
 
 func currentExecutionProgressFromContextGateTicket(step *runModel.Step, ticketContext map[string]any) map[string]any {
