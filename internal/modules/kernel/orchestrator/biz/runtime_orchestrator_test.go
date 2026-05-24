@@ -20254,6 +20254,104 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsUntraceableDirectEvidence(t 
 	}
 }
 
+func TestDoDAssessmentClaimEvidenceRequirementRejectsGenericValidationEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-claim-generic")
+	stepID := common.StepID("run-dod-claim-generic/graph-001/001-go-test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"command": "go", "args": []string{"test", "-race", "./..."}},
+		Output: map[string]any{
+			"stdout": "ok  \texample.com/project\t(cached)",
+		},
+	}); err != nil {
+		t.Fatalf("seed shell step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "*",
+							"scope":                 "dodItem",
+							"requireDirectEvidence": true,
+							"requireClaimEvidence":  true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand, "patch/apply"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "streaming response emits incremental chunks",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want claim evidence alignment rejection", err)
+	}
+}
+
+func TestDoDAssessmentClaimEvidenceRequirementAcceptsAlignedCoverageTarget(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-claim-aligned")
+	stepID := common.StepID("run-dod-claim-aligned/graph-001/001-implement-stream")
+	claim := "streaming response emits incremental chunks"
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"targetRef":       "internal/proxy/proxy.go",
+			"coverageTargets": []string{claim},
+		},
+		Output: map[string]any{"status": "applied"},
+	}); err != nil {
+		t.Fatalf("seed patch step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "*",
+							"scope":                 "dodItem",
+							"requireDirectEvidence": true,
+							"requireClaimEvidence":  true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand, "patch/apply"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         claim,
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
 func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()

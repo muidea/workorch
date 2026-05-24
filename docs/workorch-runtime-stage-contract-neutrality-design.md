@@ -82,6 +82,20 @@ Acceptance 阶段允许 runtime 做领域中立的结构归一化：当 LLM 已�
 
 聚合命令的 evidence quality 判定必须支持正反两类 profile 配置：`zeroWorkMarkers` 表示弱证据信号，`workEvidenceMarkers` 表示同一输出中已经存在真实工作证据。当两类标记同时出现时，runtime 只能按通用优先级判定为非 zero-work，不能因为某个子目标或子包输出局部 zero-work 标记而否定整条聚合命令的有效工作证据。具体 marker 内容仍属于 profile/template 数据，core 不内置语言、测试框架或业务领域规则。
 
+### Claim-To-Evidence Alignment
+
+当 profile 声明 `requireClaimEvidence` / `requireClaimEvidenceAlignment` 时，runtime 必须对 satisfied 的 DoD item、Goal coverage item、acceptance dimension 或 deliverable coverage item 执行中立的 claim-to-evidence alignment 门禁。
+
+该门禁只比较“被声明 satisfied 的条目文本”与“引用 evidence step 的中立证据文本”，不得理解业务领域含义。可接受的对齐信号包括：
+
+- evidence step 的 `coverageTargets` / `coverageTarget` / `targetCoverage` 直接包含该 claim 或与其规范化文本匹配。
+- evidence step 的输入、输出、step id、step kind 或 validation 摘要中包含足够的 claim 关键词。
+- profile 明确声明的其他中立 evidence 字段。
+
+该门禁用于阻止“泛化 build/test 通过”替代细粒度行为证据。例如某个 DoD 声称流式行为、错误路径、配置路径、持久化副作用或并发行为 satisfied，但 evidence 只引用一个没有对应测试名、输出、coverage target 或断言说明的总体验证命令时，runtime 必须拒绝该 satisfied assessment，并生成可 repair 的 evidence gap。是否把这条规则启用、应用到哪些 scope、接受哪些 step kind，必须由 profile/template 配置；core 只执行结构化对齐，不内置软件开发、测试框架、协议或具体业务规则。
+
+若 claim 只是短标题、章节名或缺少足够可匹配信号，runtime 可以跳过 alignment 门禁，但仍必须执行 evidenceRefs、step kind、evidence quality 和 current-run evidence 等基础门禁。该例外只能防止标题型文本误伤，不能让具体行为 claim 绕过直接证据要求。
+
 ## 阶段转换合同
 
 ### 标准路径

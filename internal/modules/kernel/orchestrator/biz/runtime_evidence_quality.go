@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -22,12 +24,13 @@ type doDAssessmentEvidenceQualityError struct {
 }
 
 type profileEvidenceKindRequirement struct {
-	Scope             string
-	ID                string
-	AcceptedStepKinds []string
-	RejectedStepKinds []string
-	Description       string
-	RequireDirect     bool
+	Scope                string
+	ID                   string
+	AcceptedStepKinds    []string
+	RejectedStepKinds    []string
+	Description          string
+	RequireDirect        bool
+	RequireClaimEvidence bool
 }
 
 func (e *doDAssessmentEvidenceQualityError) Error() string {
@@ -268,14 +271,15 @@ func profileEvidenceKindRequirements(run *runModel.Run) []profileEvidenceKindReq
 				continue
 			}
 			req := profileEvidenceKindRequirement{
-				Scope:             scope,
-				ID:                id,
-				AcceptedStepKinds: stringSliceFromValue(raw["acceptedStepKinds"]),
-				RejectedStepKinds: stringSliceFromValue(raw["rejectedStepKinds"]),
-				Description:       strings.TrimSpace(stringFromMap(raw, "description")),
-				RequireDirect:     boolValue(raw["requireDirectEvidence"]),
+				Scope:                scope,
+				ID:                   id,
+				AcceptedStepKinds:    stringSliceFromValue(raw["acceptedStepKinds"]),
+				RejectedStepKinds:    stringSliceFromValue(raw["rejectedStepKinds"]),
+				Description:          strings.TrimSpace(stringFromMap(raw, "description")),
+				RequireDirect:        boolValue(raw["requireDirectEvidence"]),
+				RequireClaimEvidence: boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
 			}
-			if len(req.AcceptedStepKinds) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect {
+			if len(req.AcceptedStepKinds) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence {
 				continue
 			}
 			ret = append(ret, req)
@@ -316,9 +320,9 @@ func normalizeEvidenceKindRequirementScope(scope string) string {
 		return "acceptance_dimension"
 	case "deliverable", "deliverables", "deliverable_coverage", "produced_artifacts":
 		return "deliverable"
-	case "goal", "goal_coverage", "goal_outcome_coverage":
+	case "goal", "goal_coverage", "goalcoverage", "goal_outcome_coverage", "goaloutcomecoverage":
 		return "goal_coverage"
-	case "dod", "dod_item", "items", "assessment_item":
+	case "dod", "dod_item", "doditem", "items", "assessment_item", "assessmentitem":
 		return "dod_item"
 	default:
 		return scope
@@ -329,6 +333,9 @@ func evidenceKindRequirementMatchesItem(requirement profileEvidenceKindRequireme
 	want := strings.TrimSpace(requirement.ID)
 	if want == "" {
 		return false
+	}
+	if want == "*" || strings.EqualFold(want, "all") {
+		return true
 	}
 	for _, key := range []string{"id", "dimension", "key", "name", "deliverable", "path", "goal", "goalItem", "item", "requirement"} {
 		if strings.TrimSpace(stringFromMap(item, key)) == want {
@@ -354,15 +361,17 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 	knownEvidenceRefs := 0
 	rejectedRefs := make([]string, 0)
 	rejectedKind := ""
+	acceptedSteps := make([]*runModel.Step, 0)
 	itemName := evidenceKindRequirementItemName(requirement, item)
 	for _, ref := range refs {
-		kind, ok, err := o.evidenceRefStepKind(ctx, ref)
+		step, ok, err := o.evidenceRefStep(ctx, ref)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			continue
 		}
+		kind := strings.TrimSpace(step.Kind)
 		knownEvidenceRefs++
 		if rejected[kind] {
 			rejectedRefs = append(rejectedRefs, ref)
@@ -372,61 +381,77 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		}
 		if accepted[kind] {
 			hasAcceptedEvidence = true
+			acceptedSteps = append(acceptedSteps, step)
 		}
 	}
 	if requirement.RequireDirect && knownEvidenceRefs == 0 {
 		return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", "requires at least one traceable direct evidenceRef")
 	}
-	if hasAcceptedRequirement && hasAcceptedEvidence {
-		return nil
-	}
-	if len(rejectedRefs) > 0 {
-		reason := fmt.Sprintf("step kind %q is not sufficient for this evidence requirement", rejectedKind)
-		if hasAcceptedRequirement {
-			reason = fmt.Sprintf("step kind %q is not sufficient by itself for this evidence requirement", rejectedKind)
+	if !(hasAcceptedRequirement && hasAcceptedEvidence) {
+		if len(rejectedRefs) > 0 {
+			reason := fmt.Sprintf("step kind %q is not sufficient for this evidence requirement", rejectedKind)
+			if hasAcceptedRequirement {
+				reason = fmt.Sprintf("step kind %q is not sufficient by itself for this evidence requirement", rejectedKind)
+			}
+			return evidenceKindRequirementError(requirement, itemName, strings.Join(rejectedRefs, ", "), rejectedKind, reason)
 		}
-		return evidenceKindRequirementError(requirement, itemName, strings.Join(rejectedRefs, ", "), rejectedKind, reason)
+		if hasAcceptedRequirement && knownEvidenceRefs > 0 && !hasAcceptedEvidence {
+			return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", fmt.Sprintf("requires evidence from step kinds: %s", strings.Join(requirement.AcceptedStepKinds, ", ")))
+		}
 	}
-	if hasAcceptedRequirement && knownEvidenceRefs > 0 && !hasAcceptedEvidence {
-		return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", fmt.Sprintf("requires evidence from step kinds: %s", strings.Join(requirement.AcceptedStepKinds, ", ")))
+	if requirement.RequireClaimEvidence && claimEvidenceRequiresAlignment(itemName) {
+		steps := acceptedSteps
+		if !hasAcceptedRequirement {
+			for _, ref := range refs {
+				step, ok, err := o.evidenceRefStep(ctx, ref)
+				if err != nil {
+					return err
+				}
+				if ok {
+					steps = append(steps, step)
+				}
+			}
+		}
+		if !stepsContainClaimAlignedEvidence(itemName, steps) {
+			return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", "requires evidence text or coverageTargets aligned with the satisfied claim")
+		}
 	}
 	return nil
 }
 
 func (o *RuntimeOrchestrator) evidenceRefStepKind(ctx context.Context, ref string) (string, bool, error) {
+	step, ok, err := o.evidenceRefStep(ctx, ref)
+	if step == nil {
+		return "", ok, err
+	}
+	return strings.TrimSpace(step.Kind), ok, err
+}
+
+func (o *RuntimeOrchestrator) evidenceRefStep(ctx context.Context, ref string) (*runModel.Step, bool, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" || o == nil || o.steps == nil {
-		return "", false, nil
+		return nil, false, nil
 	}
 	if step, ok, err := o.stepKindByRef(ctx, ref); err != nil || ok {
-		if step == nil {
-			return "", ok, err
-		}
-		return strings.TrimSpace(step.Kind), true, nil
+		return step, ok, err
 	}
 	if o.evidence.ValidationResults != nil {
 		if item, err := o.evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil {
 			if step, ok, err := o.stepKindByRef(ctx, string(item.StepID)); err != nil || ok {
-				if step == nil {
-					return "", ok, err
-				}
-				return strings.TrimSpace(step.Kind), true, nil
+				return step, ok, err
 			}
 		} else if err != common.ErrNotFound {
-			return "", false, err
+			return nil, false, err
 		}
 	}
 	for _, marker := range []string{"/validation/", "/tool-call/"} {
 		if idx := strings.Index(ref, marker); idx > 0 {
 			if step, ok, err := o.stepKindByRef(ctx, ref[:idx]); err != nil || ok {
-				if step == nil {
-					return "", ok, err
-				}
-				return strings.TrimSpace(step.Kind), true, nil
+				return step, ok, err
 			}
 		}
 	}
-	return "", false, nil
+	return nil, false, nil
 }
 
 func (o *RuntimeOrchestrator) stepKindByRef(ctx context.Context, ref string) (*runModel.Step, bool, error) {
@@ -489,6 +514,199 @@ func mapStringSet(values []string) map[string]bool {
 		ret[value] = true
 	}
 	return ret
+}
+
+func claimEvidenceRequiresAlignment(claim string) bool {
+	normalized := normalizeClaimEvidenceText(claim)
+	if len([]rune(normalized)) >= 12 {
+		return true
+	}
+	return len(claimEvidenceTokens(claim)) >= 2
+}
+
+func stepsContainClaimAlignedEvidence(claim string, steps []*runModel.Step) bool {
+	for _, step := range steps {
+		if step == nil {
+			continue
+		}
+		if coverageTargetsContainClaim(claim, step.Input) || coverageTargetsContainClaim(claim, step.Output) {
+			return true
+		}
+		if claimTextAligned(claim, runtimeStepClaimEvidenceText(step)) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageTargetsContainClaim(claim string, payload map[string]any) bool {
+	for _, target := range collectCoverageTargetTexts(payload) {
+		if claimTextAligned(claim, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectCoverageTargetTexts(value any) []string {
+	ret := make([]string, 0)
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			for key, value := range typed {
+				normalizedKey := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", ""))
+				if normalizedKey == "coveragetargets" || normalizedKey == "coveragetarget" || normalizedKey == "targetcoverage" {
+					ret = append(ret, textualValues(value)...)
+					continue
+				}
+				walk(value)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case []map[string]any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(value)
+	return ret
+}
+
+func textualValues(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" {
+			return []string{text}
+		}
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, textualValues(item)...)
+		}
+		return ret
+	case map[string]any:
+		ret := make([]string, 0, len(typed))
+		for _, key := range []string{"id", "item", "goal", "goalItem", "requirement", "target", "text", "summary", "description"} {
+			if text := strings.TrimSpace(stringFromMap(typed, key)); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	}
+	return nil
+}
+
+func runtimeStepClaimEvidenceText(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	parts := []string{string(step.ID), strings.TrimSpace(step.Kind)}
+	if len(step.Input) > 0 {
+		if encoded, err := json.Marshal(step.Input); err == nil {
+			parts = append(parts, string(encoded))
+		}
+	}
+	if len(step.Output) > 0 {
+		if encoded, err := json.Marshal(step.Output); err == nil {
+			parts = append(parts, string(encoded))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func claimTextAligned(claim, evidence string) bool {
+	claimNorm := normalizeClaimEvidenceText(claim)
+	evidenceNorm := normalizeClaimEvidenceText(evidence)
+	if claimNorm == "" || evidenceNorm == "" {
+		return false
+	}
+	if len([]rune(claimNorm)) >= 12 && strings.Contains(evidenceNorm, claimNorm) {
+		return true
+	}
+	if len([]rune(evidenceNorm)) >= 12 && strings.Contains(claimNorm, evidenceNorm) {
+		return true
+	}
+	tokens := claimEvidenceTokens(claim)
+	if len(tokens) == 0 {
+		return false
+	}
+	required := len(tokens)
+	if required > 3 {
+		required = 3
+	}
+	matched := 0
+	seen := map[string]bool{}
+	for _, token := range tokens {
+		if seen[token] {
+			continue
+		}
+		seen[token] = true
+		if strings.Contains(evidenceNorm, token) {
+			matched++
+		}
+	}
+	return matched >= required
+}
+
+func normalizeClaimEvidenceText(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	var b strings.Builder
+	lastSpace := false
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+func claimEvidenceTokens(text string) []string {
+	normalized := normalizeClaimEvidenceText(text)
+	if normalized == "" {
+		return nil
+	}
+	stop := map[string]bool{
+		"functional": true, "technical": true, "data": true, "logging": true,
+		"must": true, "should": true, "with": true, "and": true, "the": true,
+	}
+	ret := make([]string, 0)
+	for _, token := range strings.Fields(normalized) {
+		if len([]rune(token)) < 3 || stop[token] {
+			continue
+		}
+		if containsNonASCII(token) {
+			continue
+		}
+		ret = append(ret, token)
+	}
+	return ret
+}
+
+func containsNonASCII(text string) bool {
+	for _, r := range text {
+		if r > unicode.MaxASCII {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) evidenceRefQualityVerdict(ctx context.Context, ref string) (runtimeEvidenceQuality, bool, error) {

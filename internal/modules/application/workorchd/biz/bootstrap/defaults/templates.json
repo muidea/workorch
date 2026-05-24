@@ -182,6 +182,24 @@
               "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
               "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
               "description": "Concurrency claims must be supported by executed validation, implementation changes, or equivalent action evidence."
+            },
+            {
+              "id": "*",
+              "scope": "dodItem",
+              "requireDirectEvidence": true,
+              "requireClaimEvidence": true,
+              "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
+              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "description": "Satisfied DoD items must be backed by direct evidence whose output, input, or coverageTargets align with the specific claim; a generic build/test pass is not sufficient for detailed behavioral claims."
+            },
+            {
+              "id": "*",
+              "scope": "goalCoverage",
+              "requireDirectEvidence": true,
+              "requireClaimEvidence": true,
+              "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
+              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "description": "Satisfied Goal coverage items must be backed by direct evidence whose output, input, or coverageTargets align with the specific Goal requirement; broad validation commands cannot close unrelated Goal leaves by themselves."
             }
           ]
         }

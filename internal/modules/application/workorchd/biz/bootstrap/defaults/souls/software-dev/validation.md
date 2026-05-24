@@ -18,6 +18,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - LSP diagnostics clean、definition、references、sync 成功只能作为辅助 evidence；不能替代 build/test/lint、patch/apply 或直接可追踪 runtime action 证据
 - 每个 DoD 条目必须单独输出状态（satisfied/failed/skipped）
 - 每个 satisfied 条目必须引用具体的步骤（Step）ID 作为 evidenceRefs
+- 每个 satisfied 的 DoD / Goal coverage 条目必须让 evidenceRefs 与该条目声明直接对齐：优先引用带有匹配 coverageTargets 的 patch/验证步骤，或引用输出/测试名/命令结果中能直接体现该 claim 的步骤；不要用泛化 build/test 通过替代细粒度行为证据
 - dodAssessment 必须包含 goalCoverage：goalCoverage.satisfied 与 goalCoverage.items；每个当前 Goal 需求都要有 state、evidenceRefs、reason/nextActions（如未满足）
 - dodAssessment 必须包含 acceptanceDimensions：只列 Goal / DoD 涉及的维度，并为 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等相关维度提供 evidenceRefs
 - dodAssessment 必须包含 deliverableCoverage，覆盖 source_change、validation_report、coverage_map、user_deliverable；每项必须有 evidenceRefs 或 artifactRefs
