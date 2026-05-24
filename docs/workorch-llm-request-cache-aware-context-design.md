@@ -508,6 +508,10 @@ Provider-facing message 必须把 `C0/C1/C2` 组织为真实连续前缀，而�
 
 `C3.workspace-run`、`C3.stage-contract`、`C3.repair-action-package`、`C4.previous-decision`、`C4.process-evidence-timeline`、`C4.validation-signal` 等包含 runId、stepId、当前失败、当前进展、历史决策或验证证据的 section 必须位于连续可缓存前缀之后。`C2.runtime-capability-summary` 属于 capability contract，只要内容来源是声明式 capability catalog 而不是当前执行状态，就应放入 C2 前缀；若某个能力摘要被上下文预算压缩或替换，必须导致 `capabilityContractHash` 变化，并在 usage audit 中可见。
 
+Assessment-only、repair、follow-up、provider retry、validation 等当前路径模式不得改写 C0 stable runtime prefix，也不得把 C2 声明式 capability catalog 替换为另一套当前路径专用能力目录。它们只能通过 C3 stage contract、C4 current-action、C4 validation/failure signal 表达“本轮是否允许 executable output”。Runtime 执行层仍必须拒绝 assessment-only 响应中的 executionGraph、patch、shell、MCP、memory write 等 executable output。
+
+同一 run 内 `stablePrefixHash` 必须保持不变；如果它因为当前路径模式、临时能力过滤、provider retry 或 assessment-only 而变化，说明 request rendering 将动态信息放入了稳定前缀。`workspaceDefinitionHash` 只应随 Goal / DoD revision 变化；`capabilityContractHash` 只应随声明式 capability catalog / governance policy 变化。若同一 run 内 cacheKey 分裂过多，必须用 request-log audit 定位是 C1 definition churn、C2 capability/governance churn，还是 C4 体积膨胀造成 provider 实际缓存收益下降。
+
 同级 section 内固定顺序：
 
 ```text
@@ -899,6 +903,7 @@ LCAC-08 至 LCAC-11 已落地：
 - C4 `memory-recall` 只展开当前 retrieval 选中、未被排除、非 stale / superseded / diagnostic-only、非低置信或低重要度的 memory；retrieval 审计摘要仍保留。
 - `cachePlan.adapterHint` 提供 provider-neutral prefix hint，core 不写任何 provider 私有 cache-control 字段。
 - 新增 `scripts/verify-llm-cache-aware-request-log.sh`，可离线核对 workspace request.json 的 C0/C1/C4 section、section hash、cachePlan 和 cacheBreakers。
+- `scripts/verify-llm-cache-aware-request-log.sh` 已扩展跨轮缓存质量审计：支持按 workspace / run 过滤，检查同一 run 内 `stablePrefixHash` 变化，提示 C4 section / tail 体积膨胀、non-cacheable 输入占比过高、cacheKey 过度分裂和 C2 capability hash churn。
 - read model 与 Web `LLMContextBudgetCard` 已投影并展示 cachePlan hash 简写和 cacheBreakers，不展示 prompt 明文。
 
 验证：

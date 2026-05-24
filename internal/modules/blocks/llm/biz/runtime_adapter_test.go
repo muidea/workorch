@@ -623,7 +623,7 @@ writeEnabled = false
 	}
 }
 
-func TestRuntimeAdapterHidesExecutableCapabilitiesForAssessmentOnlyRequest(t *testing.T) {
+func TestRuntimeAdapterKeepsCapabilityCatalogStableForAssessmentOnlyRequest(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"completionState":"failed",
 		"dodAssessment":{
@@ -645,11 +645,18 @@ func TestRuntimeAdapterHidesExecutableCapabilitiesForAssessmentOnlyRequest(t *te
 	if err != nil {
 		t.Fatalf("execute runtime step: %v", err)
 	}
-	if len(provider.request.RuntimeCapabilities.BlockKinds) != 0 || len(provider.request.RuntimeCapabilities.ServiceAPIs) != 0 {
-		t.Fatalf("runtime capabilities = %+v, assessment-only request must hide executable capabilities", provider.request.RuntimeCapabilities)
+	if !runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.StepKindWorkspaceExecution) ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, "file/read") ||
+		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) {
+		t.Fatalf("runtime capabilities = %+v, want declared capability catalog retained for cache-stable C2", provider.request.RuntimeCapabilities)
 	}
 	if !provider.request.RuntimeCapabilities.ShellPolicy.Enabled {
 		t.Fatalf("runtime capabilities = %+v, want shell policy evidence retained", provider.request.RuntimeCapabilities)
+	}
+	currentAction := currentActionPromptContent(provider.request.PromptContext)
+	if !strings.Contains(currentAction, `"type":"assess_only"`) ||
+		!strings.Contains(currentAction, "Do not return executionGraph") {
+		t.Fatalf("current action = %q, want assessment-only restriction outside C2 capability catalog", currentAction)
 	}
 	if result.Output["stage"] != "llm_dod_assessment" {
 		t.Fatalf("output = %+v, want DoD assessment output", result.Output)
@@ -1375,6 +1382,65 @@ func TestProviderCachePlanKeepsStablePrefixWhenGoalDoDChanges(t *testing.T) {
 	}
 	if !providerCacheBreakersContain(changed.ContextBudget.CachePlan.CacheBreakers, "C1", "definition_change_impact") {
 		t.Fatalf("cacheBreakers = %+v, want definition change breaker", changed.ContextBudget.CachePlan.CacheBreakers)
+	}
+}
+
+func TestProviderCachePlanKeepsStablePrefixForAssessmentOnlyMode(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "goal text"},
+			"dod":                map[string]any{"items": []any{"dod item"}},
+			"definitionRevision": "definition-001",
+		},
+		"currentRuntimeStage":     "verification",
+		"currentRuntimeStageMode": "strict_convergence",
+	}
+	assessmentInput := cloneMap(baseInput)
+	assessmentInput["assessmentOnly"] = true
+	assessmentInput["assessmentOnlyReason"] = "coverage_check"
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-assessment",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{
+				{Kind: llmcommon.StepKindWorkspaceExecution, Description: "plan next step"},
+				{Kind: "file/read", Description: "read file"},
+				{Kind: llmcommon.RuntimeBlockKindPatchApply, Description: "apply patch"},
+			},
+			ServiceAPIs: []llmmodels.ServiceAPICapability{
+				{Method: "GET", PathTemplate: "/api/v1/workorch/runs/{runId}/snapshot", ReadOnly: true},
+			},
+			ShellPolicy: llmmodels.ShellRuntimePolicy{Enabled: true},
+		},
+		Input: baseInput,
+	}
+	assessment := base
+	assessment.Input = assessmentInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	assessment.PromptContext = buildPromptContextFromRequest(assessment)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&assessment)
+
+	if base.ContextBudget == nil || base.ContextBudget.CachePlan == nil ||
+		assessment.ContextBudget == nil || assessment.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan missing: base=%+v assessment=%+v", base.ContextBudget, assessment.ContextBudget)
+	}
+	if base.ContextBudget.CachePlan.StablePrefixHash != assessment.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatalf("stablePrefixHash base=%q assessment=%q, want C0 unchanged by assessment-only mode", base.ContextBudget.CachePlan.StablePrefixHash, assessment.ContextBudget.CachePlan.StablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.WorkspaceDefinitionHash != assessment.ContextBudget.CachePlan.WorkspaceDefinitionHash {
+		t.Fatalf("workspaceDefinitionHash base=%q assessment=%q, want C1 unchanged by assessment-only mode", base.ContextBudget.CachePlan.WorkspaceDefinitionHash, assessment.ContextBudget.CachePlan.WorkspaceDefinitionHash)
+	}
+	if base.ContextBudget.CachePlan.CapabilityContractHash != assessment.ContextBudget.CachePlan.CapabilityContractHash {
+		t.Fatalf("capabilityContractHash base=%q assessment=%q, want C2 unchanged by assessment-only mode", base.ContextBudget.CachePlan.CapabilityContractHash, assessment.ContextBudget.CachePlan.CapabilityContractHash)
+	}
+	if base.ContextBudget.CachePlan.VolatileTailHash == assessment.ContextBudget.CachePlan.VolatileTailHash {
+		t.Fatalf("volatileTailHash base=%q assessment=%q, want C4 to carry assessment-only mode difference", base.ContextBudget.CachePlan.VolatileTailHash, assessment.ContextBudget.CachePlan.VolatileTailHash)
 	}
 }
 

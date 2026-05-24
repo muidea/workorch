@@ -456,6 +456,8 @@ func stageContractPromptSection(input map[string]any) string {
 		"runtimeStage",
 		"runtimeStageMode",
 		"currentSoulStage",
+		"currentSoul",
+		"currentSoulBinding",
 		"stateChangingOutputRequired",
 		"repairObjective",
 		"stateChangingRecoveryMode",
@@ -516,9 +518,6 @@ func repairActionPackagePromptSection(input map[string]any) string {
 func governanceSoulPolicyPromptSection(input map[string]any) string {
 	executionContext := recordFromAny(input["executionContext"])
 	section := map[string]any{}
-	copyMapValue(section, "currentSoulStage", input["currentSoulStage"])
-	copyMapValue(section, "currentSoul", input["currentSoul"])
-	copyMapValue(section, "currentSoulBinding", input["currentSoulBinding"])
 	routing := recordFromAny(executionContext["soulRouting"])
 	bindings := recordFromAny(routing["bindings"])
 	if len(bindings) > 0 {
@@ -981,15 +980,16 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		return marshalPromptSection("Current Requested Action", map[string]any{
 			"type": "assess_only",
 			"requirements": []string{
+				"Assessment-only mode is active",
 				"Assess the current evidence against the effective Goal and DoD",
 				"Return completed or failed with dodAssessment, or a real requiredDecision/requiredApproval",
 				"When Goal requirements are not textually identical to DoD items, include dodAssessment.goalCoverage with item-level evidenceRefs",
 				"When executionContract.profileContracts declares required acceptanceDimensions or deliverableExpectations, include dodAssessment.acceptanceDimensions and dodAssessment.deliverableCoverage with item-level evidenceRefs or artifactRefs for every required id",
 				"dodAssessment.goalCoverage, dodAssessment.acceptanceDimensions, and dodAssessment.deliverableCoverage must be objects shaped as {\"satisfied\":boolean,\"items\":[...]}; never return these coverage fields as bare arrays",
 				"Treat runtimeStage=verification or acceptance as strict convergence stages; do not reopen exploration or broad planning in these stages",
-				"Before returning blocked_on_decision, reconcile the question with the current, decision, planning, and execution Soul policies; do not ask for information that those policies explicitly say is not required",
+				"Before returning blocked_on_decision, reconcile the question with input.currentSoul, input.currentSoulBinding, and the decision/planning/execution/validation bindings in input.executionContext.soulRouting; do not ask for information that those policies explicitly say is not required",
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",
-				"Do not include executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
+				"Do not return executionGraph; do not include shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
 			},
 		})
 	}

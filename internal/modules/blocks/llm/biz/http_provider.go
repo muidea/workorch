@@ -499,7 +499,7 @@ func systemPrompt(assessmentOnly bool) string {
 
 func systemPromptForRequest(request llmmodels.ProviderRequest) string {
 	if isDecisionSchemaRequest(request) {
-		return systemPrompt(isAssessmentOnlyDecisionRequest(request))
+		return systemPrompt(false)
 	}
 	return strings.Join([]string{
 		"You are a WorkOrch structured JSON generation assistant.",
@@ -567,36 +567,12 @@ func dialogLanguageInstruction(request llmmodels.ProviderRequest) string {
 }
 
 func decisionContractPrompt(request llmmodels.ProviderRequest) string {
-	if isAssessmentOnlyDecisionRequest(request) {
-		return strings.Join([]string{
-			"Required output JSON fields use the LLMExecutionDecision assessment-only contract:",
-			"- completionState must be one of: completed, failed, blocked_on_decision, blocked_on_approval.",
-			"- Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or any other executable work.",
-			"- Return completed with dodAssessment only when current evidence satisfies the effective DoD.",
-			"- Return failed with dodAssessment when evidence is insufficient or DoD items remain unmet and no immediate governance blocker exists.",
-			"- Before returning blocked_on_decision, reconcile the question with input.currentSoul, input.currentSoulBinding, and the decision/planning/execution/validation bindings in input.executionContext.soulRouting. If those policies say the information must not be requested or can be handled automatically, return failed with dodAssessment and concrete nextActions instead.",
-			"- In provider retry, completion follow-up, and graph follow-up assessment-only paths, do not ask the user to choose an execution target when the current evidence only shows missing work that a later runtime repair or replan can perform.",
-			"- For blocked_on_decision, include requiredDecision.context whenever known values, missing fields, or safe candidate values exist. Use requiresHumanFields for unresolved human input. Set context.runtimeCanContinue=true only when the runtime can proceed safely without human input.",
-			"- For blocked_on_approval, include requiredApproval only for a real high-risk action that cannot proceed automatically.",
-			"- If input.assessmentOnlyContractCorrection is true, the previous response violated assessment-only mode by returning executable work. Do not repeat executable fields; summarize the violation in dodAssessment.residualRisks or nextActions if useful.",
-			"- dodAssessment.items must cover every current effective DoD item from input.executionContextPackage.dod/items or input.executionContext.dod/items. Do not omit DoD items that are not yet satisfied; mark them failed/skipped with reason, impact, residualRisks, and nextActions.",
-			"- When the effective Goal contains requirements that are not textually identical to DoD items, include dodAssessment.goalCoverage with satisfied items mapping those Goal requirements to concrete evidenceRefs. Goal coverage is assessment data only; do not add executable work in assessment-only mode.",
-			"- dodAssessment.goalCoverage, dodAssessment.acceptanceDimensions, and dodAssessment.deliverableCoverage must be objects shaped as {\"satisfied\":boolean,\"items\":[...]}; never return these coverage fields as bare arrays.",
-			"- Satisfied dodAssessment items must include evidenceRefs. Failed or skipped items should include evidenceRefs when available.",
-			"- Include dodAssessment.summary and dodAssessment.goalOutcome as non-empty user-facing text. When known include implementationSummary as a state-change summary, plus verificationSummary, knownLimitations, residualRisks, and nextActions.",
-			"- Do not include workspaceId, runId, stepId, schema, traceRefs, config, or any unknown top-level field in the decision JSON.",
-			"Minimal assessment-only examples:",
-			`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"The DoD is satisfied by the collected evidence.","goalOutcome":"The requested work is complete.","items":[{"item":"required outcome is evidenced","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
-			`{"completionState":"failed","dodAssessment":{"satisfied":false,"summary":"The DoD is not satisfied by the current evidence.","goalOutcome":"The requested work is incomplete.","items":[{"item":"required outcome is evidenced","state":"failed","evidenceRefs":["run-1/step-2"],"reason":"No concrete evidence was produced for the required outcome.","impact":"The acceptance reviewer cannot verify the outcome."}],"residualRisks":["Required outcome remains unverified."],"nextActions":["Produce targeted state-changing or verification evidence in a repair step."]}}`,
-			`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing target context","decisionKind":"provide_missing_info","question":"Please provide the target context or destination.","context":{"missingFields":["targetContext"],"requiresHumanFields":["targetContext"]}}}`,
-		}, "\n")
-	}
 	lines := []string{
 		"Required output JSON fields use the LLMExecutionDecision contract:",
 		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
 		"- Allowed top-level JSON fields are only: completionState, thoughtSummary, plan, executionGraph, nextAction, requiredDecision, requiredApproval, patchRequests, mcpToolCalls, shellCommands, memoryWrites, dodAssessment.",
 		"- Do not return unknown top-level fields such as validationPlan, testPlan, implementationPlan, verificationPlan, workspaceId, runId, stepId, schema, traceRefs, or config. Put advisory planning text into plan or thoughtSummary; put executable validation/check work into executionGraph or shellCommands when executable work is allowed.",
-		"- Use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
+		"- When executable work is allowed, use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",
 		"- executionGraph.nodes kind values must be selected from runtimeCapabilities.blockKinds only.",
 		"- Sensitive paths and large patches require Approval before apply. After approval is granted, include the approved approvalId in patch/apply or patchRequests.",
@@ -671,9 +647,6 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 }
 
 func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
-	if isAssessmentOnlyDecisionRequest(request) {
-		return "Assessment-only capability contract: executable runtime block kinds and service APIs are intentionally unavailable. Use only current evidence, dodAssessment, requiredDecision, or requiredApproval."
-	}
 	lines := []string{"Runtime capability contract:"}
 	if requestHasBlockKind(request, "file/list") || requestHasBlockKind(request, "file/read") || requestHasBlockKind(request, "file/edit") {
 		lines = append(lines, "- Prefer file/list and file/read for workspace file discovery and bounded file inspection. Probe unknown or optional files with file/list first, or set file/read optional:true so a missing file returns exists:false instead of becoming a repair failure. Use file/edit only to generate a non-mutating exact-text replacement patch preview; it does not write files.")

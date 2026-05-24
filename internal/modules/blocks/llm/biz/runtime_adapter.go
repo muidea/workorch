@@ -2500,9 +2500,6 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		},
 		Config: RedactedProviderConfig(config),
 	}
-	if isAssessmentOnlyDecisionRequest(providerReq) {
-		providerReq.RuntimeCapabilities = assessmentOnlyRuntimeCapabilities(providerReq.RuntimeCapabilities)
-	}
 	providerReq = enforceProviderRequestBudget(providerReq)
 	providerReq = redactProviderRequestForLLM(providerReq)
 	providerReq.PromptContext = buildPromptContextFromRequest(providerReq)
@@ -2591,12 +2588,6 @@ func boolFromProviderInput(input map[string]any, key string) bool {
 		return strings.EqualFold(strings.TrimSpace(typed), "true")
 	default:
 		return false
-	}
-}
-
-func assessmentOnlyRuntimeCapabilities(caps llmmodels.RuntimeCapabilities) llmmodels.RuntimeCapabilities {
-	return llmmodels.RuntimeCapabilities{
-		ShellPolicy: caps.ShellPolicy,
 	}
 }
 

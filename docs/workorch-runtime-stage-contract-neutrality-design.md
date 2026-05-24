@@ -424,6 +424,7 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
 Runtime 必须按中立规则处理：
 
 - 不得要求用户粘贴已知可读资源的内容。
+- 当 LLM 请求 `blocked_on_decision/provide_missing_info`，但 `missingFields` 与 `requiresHumanFields` 均为空，且 decision context 已提供可执行目标、候选动作、目标资源、计划摘要或等价 `knownValues` 时，该请求不是人工信息缺失。若上下文没有声明外部依赖、WorkOrch runtime 配置依赖、provider 配置依赖、审批风险或 rejected result policy，runtime 必须把它转换为继续执行 / repair / replan 的中立恢复路径，不得创建人工 ticket。类似“是否批准切换阶段继续自动实现/验证”的请求属于阶段合同恢复，不属于用户决策。
 - 不得把“已知资源内容未进入当前 prompt”误判为人工缺失信息。
 - 应将该 decision 转换为 runtime repair / continuation，并把对应资源的当前快照或可读取引用放入 repair 输入。
 - `workspaceFiles`、`existingFiles`、`readableResources`、`knownResources`、`workspaceFileManifest` 等字段都只能作为“资源是否已知”的中立证据；若这些字段不完整，runtime 仍应以当前 workspace 工作目录中真实可读资源为准做兜底核对。
@@ -938,12 +939,15 @@ LLM request 的组织方式还必须兼顾 provider prompt / context cache 的�
 
 - request 必须按稳定性分区组织：stable runtime prefix、workspace definition、capability contract、current stage bundle、volatile execution tail、large refs / trace。
 - stable runtime prefix 不得包含 workspaceId、runId、stepId、timestamp、provider/model/baseURL、memory recall、当前失败或当前执行进展。
+- C0 stable runtime prefix 只能表达全局 schema / runtime 输出合同，不能随 assessment-only、repair、follow-up、validation、provider retry 等当前路径变化。当前路径的模式限制必须进入 C3 stage contract 或 C4 current-action。
 - Goal / DoD 必须完整位于 workspace definition block，并通过 revision / hash 被后续 stage bundle 引用；不得为了缓存复用裁剪、摘要或移入易变 memory。
 - workspace definition block 只在同一 definition revision 内稳定。Goal / DoD 允许在运行期补充、澄清和修订；每次变更都必须生成新的 definition revision / hash，并使后续 stage bundle、coverage baseline、repair / validation / acceptance request 显式引用最新 revision。
 - Goal / DoD 运行期变更后，旧 revision 只能作为 lineage / historical evidence 使用，不能继续作为当前目标或验收基准。Runtime 必须在 request 中提供 definitionChangeImpact，说明已有 plan / output / evidence 是否仍覆盖最新 definition，以及下一步应 replan、repair、revalidate、acceptance 还是进入 decision。
 - 当前失败、当前进展、timeline tail、target snapshot、latest validation、memory recall 等高频变化信息必须位于易变尾部，不能污染 stable prefix。
+- C2 capability contract 必须表达声明式能力目录和通用能力使用规则，不能因为 assessment-only 或当前阶段临时禁用可执行输出而改写为另一套能力目录。当前步骤是否允许调用可执行 block 属于 C3/C4 当前动作约束；runtime 仍必须在执行层拒绝违反 assessment-only 的 executable output。
 - section 顺序、字段顺序、source refs 顺序、空字段策略必须 canonical 化，避免语义相同但文本不同导致缓存失效。
 - 每次 request audit 应记录 stablePrefixHash、workspaceDefinitionHash、capabilityContractHash、stageBundleHash、volatileTailHash 和 cacheBreakers；这些字段用于观测，不作为业务恢复状态。
+- 同一 run 内 `stablePrefixHash` 不应变化；若变化，视为 request rendering 缺陷。`cacheKey` 可以因 Goal / DoD revision 或 capability revision 变化而变化，但若同一 run 内无定义变更却出现过度分裂，必须通过 request-log 校验提示 C1/C2/C4 churn。
 - provider 私有 cache-control 只能由 adapter 基于中立 `cachePlan` 转换，core runtime 不直接绑定具体 provider cache API。
 - `promptContext.sections` 必须表达 C0-C5 语义分区、cacheability、hash 和 source refs；`turn-01` 这类顺序 ID 只能作为 display order，不能替代 section identity。`promptContext.turns` 作为 provider-facing 渲染结果时必须引用 `sectionId`。
 - 易变尾部不能继续膨胀为一个无语义标签的大 user turn。Current failure、latest validation、tool call/result、artifact event、definition change、context gate、memory recall、requested action 等必须按中立 typed event tape 组织，并按 sequence 保序、按 event 粒度摘要 / 引用 / 裁剪。
@@ -951,6 +955,7 @@ LLM request 的组织方式还必须兼顾 provider prompt / context cache 的�
 - Provider cache hint 必须保持 provider-neutral：core 只能输出 `cachePlan.adapterHint` 这类可选映射建议，具体 provider 私有 cache-control 只能由 provider adapter 自行消费，且不得写入业务恢复状态。
 - cache-aware canonical rendering 只能稳定 section 顺序、map key 顺序、无顺序语义 refs / capability ids 顺序；不得重排 Goal / DoD definition events、processEvidenceTimeline、typed event tape、tool calls、validations、steps、memory recall priority 等具备语义顺序的数据。
 - 实现落点必须优先集中在 LLM block 的 request / prompt 构造层：`PromptContext` / `PromptSection` / `PromptTurn` / `ProviderContextBudget` 模型、`prompt_messages` section builder、provider budget audit、provider request redaction 和 runtime adapter request 落盘。Orchestrator 侧只复用已有 `executionContextPackage`、`processEvidenceTimeline`、`currentProgressDigest`、`definitionChangeImpact` 与 `runtime_context_order`，不得为缓存优化另造与运行态 evidence path 不一致的排序规则。
+- `scripts/verify-llm-cache-aware-request-log.sh` 必须能离线发现结构缺失、同一 run 内 stable prefix 变化、C4 体积膨胀、non-cacheable 输入占比过高、cacheKey / capability hash 过度分裂等缓存质量问题；这些检查只作为 request 质量审计，不参与业务状态恢复。
 
 ### Stage Input Bundle 合同
 

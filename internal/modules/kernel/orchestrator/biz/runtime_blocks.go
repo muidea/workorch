@@ -132,6 +132,7 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 	}
 	return continuableCandidateContext(spec.Context) ||
 		knownReadableWorkspaceResourceDecisionSpec(spec) ||
+		knownActionableDecisionSpec(spec) ||
 		mechanicallyRepairableDecisionShouldRepair(step, spec)
 }
 
@@ -139,6 +140,75 @@ func continuableCandidateContext(context map[string]any) bool {
 	for _, key := range []string{"runtimeCanContinue", "continuableByRuntime", "workspaceActionable"} {
 		if boolValue(context[key]) {
 			return true
+		}
+	}
+	return false
+}
+
+func knownActionableDecisionSpec(spec runtimeDecisionBlockSpec) bool {
+	if decisionBlockDeclaresExternalOrRuntimeDependency(spec.Context) {
+		return false
+	}
+	if len(nonEmptyDecisionHumanFields(spec.Context)) > 0 {
+		return false
+	}
+	context := cloneStepPayload(spec.Context)
+	if context == nil {
+		context = map[string]any{}
+	}
+	if strings.TrimSpace(spec.Question) != "" {
+		context[decisionContextKeyQuestion] = spec.Question
+	}
+	if strings.TrimSpace(spec.Reason) != "" {
+		context[decisionContextKeyReason] = spec.Reason
+	}
+	return contextHasKnownActionableTarget(context)
+}
+
+func nonEmptyDecisionHumanFields(context map[string]any) []string {
+	ret := make([]string, 0)
+	for _, key := range []string{"missingFields", "requiresHumanFields", "requiredFields", "humanFields"} {
+		ret = append(ret, stringListFromValue(context[key])...)
+	}
+	return ret
+}
+
+func contextHasKnownActionableTarget(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	for _, source := range []map[string]any{context, mapFromValue(context["knownValues"])} {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{
+			"targetFiles",
+			"targetRefs",
+			"affectedFiles",
+			"resources",
+			"actions",
+			"nextActions",
+			"proposedActions",
+			"candidateActions",
+		} {
+			if len(stringListFromValue(source[key])) > 0 || len(mapSliceFromValue(source[key])) > 0 {
+				return true
+			}
+		}
+		for _, key := range []string{
+			"proposedChanges",
+			"implementationPlan",
+			"verificationPlan",
+			"repairPlan",
+			"currentGoal",
+			"target",
+			"targetRef",
+			"action",
+			"nextAction",
+		} {
+			if strings.TrimSpace(stringFromMap(source, key)) != "" {
+				return true
+			}
 		}
 	}
 	return false

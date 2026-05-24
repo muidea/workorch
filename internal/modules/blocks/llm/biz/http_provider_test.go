@@ -128,7 +128,6 @@ func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.
 	})
 	request := llmProviderRequest()
 	request.Input["assessmentOnly"] = true
-	request.RuntimeCapabilities = assessmentOnlyRuntimeCapabilities(request.RuntimeCapabilities)
 
 	_, err := provider.Complete(context.Background(), request)
 	if err != nil {
@@ -146,11 +145,9 @@ func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.
 		!strings.Contains(joined, `"type":"assess_only"`) {
 		t.Fatalf("messages = %+v, want assessment-only contract", gotPayload.Messages)
 	}
-	if strings.Contains(joined, "Use executionGraph when") ||
-		strings.Contains(joined, `"executionGraph":{"nodes"`) ||
-		strings.Contains(joined, `"blockKinds":[`) ||
-		strings.Contains(joined, `"serviceAPIs":[`) {
-		t.Fatalf("messages = %+v, assessment-only prompt must not expose executable graph contract", gotPayload.Messages)
+	if !strings.Contains(joined, "When input.assessmentOnly is true") ||
+		!strings.Contains(joined, "Do not return executionGraph; do not include shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work") {
+		t.Fatalf("messages = %+v, assessment-only prompt must carry mode restriction in volatile action context", gotPayload.Messages)
 	}
 }
 

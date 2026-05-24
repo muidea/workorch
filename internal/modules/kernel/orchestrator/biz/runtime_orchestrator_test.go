@@ -16014,6 +16014,123 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_KnownActionableDecisionRoutesToRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	call := 0
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		call++
+		if call == 1 {
+			return map[string]any{
+				"status":                           "completed",
+				"stage":                            "llm_decision_required",
+				stepOutputKeyBlockDecisionReason:   "current stage does not allow state-changing output",
+				stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
+				stepOutputKeyBlockDecisionQuestion: "Approve switching to execution stage to continue the known work?",
+				stepOutputKeyBlockDecisionContext: map[string]any{
+					"runtimeCanContinue":  false,
+					"missingFields":       []any{},
+					"requiresHumanFields": []any{},
+					"knownValues": map[string]any{
+						"currentGoal":     "new requirement",
+						"targetFiles":     []any{"config.yaml", "config.go", "proxy.go", "proxy_test.go"},
+						"proposedChanges": "update config, runtime selection, and tests",
+					},
+				},
+				"nextStep": "run-known-actionable-decision/llm-after-decision",
+				"nextKind": llmcommon.StepKindWorkspaceExecution,
+			}, nil
+		}
+		if !boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			t.Fatalf("repair input = %+v, want runtime repair follow-up", request.Input)
+		}
+		return map[string]any{
+			"status": "completed",
+			"stage":  "llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied":   true,
+				"summary":     "known actionable work continued through repair",
+				"goalOutcome": "state-changing continuation evidence is available",
+				"items": []map[string]any{{
+					"item":         "produce implementation",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(request.StepID)},
+				}},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-known-actionable-decision")
+	runID := common.RunID("run-known-actionable-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-known-actionable-decision"),
+		DoDID:           common.DoDID("dod-known-actionable-decision"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []any{"produce implementation"}},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStep(ctx, run, "run-known-actionable-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		stepInputKeySoulStage:        soulStageValidation,
+	}); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %+v, want no decision ticket for known actionable stage switch", tickets)
+	}
+	failed, err := stepRepo.Get(ctx, "run-known-actionable-decision/step-1")
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if failed.State != common.StepStateFailed || failed.Output["continuableDecisionConvertedToRepair"] != true {
+		t.Fatalf("step = %+v, want continuable decision converted to repair", failed)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if call != 2 || runItem.State != common.RunStateCompleted {
+		t.Fatalf("call=%d run=%+v, want completed after auto repair", call, runItem)
+	}
+}
+
 func TestProviderRetryStepInputUsesAssessmentOnlyModeForCompletionGateFollowUp(t *testing.T) {
 	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
 		{ID: "verify", Kind: "graph/mock"},
