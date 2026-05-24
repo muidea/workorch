@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
-import { PageContainer, ProCard } from '@ant-design/pro-components';
+import { PageContainer, ProCard } from '../components/proCompat';
 import type {
   LLMModelCapabilityConfiguration,
   ServiceConfiguration,

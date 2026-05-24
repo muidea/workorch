@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty, Tag, Typography, Descriptions } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { WebSourceTrace } from '../../types';
 import { BoundedParagraph, CompactTags, MetricGrid } from '../common';
 import { modelLabels } from '../../utils/constants';

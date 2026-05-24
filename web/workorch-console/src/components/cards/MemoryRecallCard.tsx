@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty, Tag } from 'antd';
-import { ProTable, ProCard } from '@ant-design/pro-components';
+import { ProTable, ProCard } from '../proCompat';
 import type { MemoryRecallTrace } from '../../types';
 import { compactJSON } from '../../utils';
 import { StateTag, BoundedParagraph, CompactTags, MetricGrid } from '../common';

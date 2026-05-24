@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Tag } from 'antd';
-import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
-import type { ProColumns } from '@ant-design/pro-components';
+import { PageContainer, ProCard, ProTable } from '../components/proCompat';
+import type { ProColumns } from '../components/proCompat';
 import type { MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool } from '../types';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';

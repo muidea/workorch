@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Steps, Descriptions, Empty } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { TaskProgress, RepairLoop, ProgressBlocker, ProgressItem } from '../../types';
 import {
   stateLabel,

@@ -8,14 +8,14 @@ import {
   ProfileOutlined,
   SettingOutlined
 } from '@ant-design/icons';
-import { ProLayout } from '@ant-design/pro-components';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { ServicePage } from './pages/ServicePage';
-import { GovernanceQueuePage } from './pages/GovernanceQueuePage';
-import { WorkspaceBoardPage } from './pages/WorkspaceBoardPage';
+import { ProLayout } from './components/proCompat';
 import './styles.css';
 
+const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage').then(m => ({ default: m.WorkspaceBoardPage })));
+const GovernanceQueuePage = lazy(() => import('./pages/GovernanceQueuePage').then(m => ({ default: m.GovernanceQueuePage })));
+const ServicePage = lazy(() => import('./pages/ServicePage').then(m => ({ default: m.ServicePage })));
 const RuntimeControlPage = lazy(() => import('./pages/RuntimeControlPage').then(m => ({ default: m.RuntimeControlPage })));
 const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(m => ({ default: m.ConfigurationPage })));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage').then(m => ({ default: m.WorkspaceDetailPage })));

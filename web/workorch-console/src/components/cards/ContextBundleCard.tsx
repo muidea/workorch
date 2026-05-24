@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty, Descriptions, Tabs } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { ContextBundle, ContextSection, ContextEvidence, ContextCompressionCandidate } from '../../types';
 import { compactJSON } from '../../utils';
 import { StateTag, BoundedParagraph, CompactTags } from '../common';

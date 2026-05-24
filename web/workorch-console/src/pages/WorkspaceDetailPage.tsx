@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
-import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
-import type { ProColumns } from '@ant-design/pro-components';
+import { PageContainer, ProCard, ProTable } from '../components/proCompat';
+import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { createWorkorchEventStream, workorchApi } from '../api';

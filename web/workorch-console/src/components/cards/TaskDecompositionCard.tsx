@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Descriptions, Empty, Tabs } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { TaskDecomposition, TaskDecompositionNode } from '../../types';
 import { stateLabel, compactJSON } from '../../utils';
 import { StateTag, BoundedParagraph, CompactTags, MetricGrid } from '../common';

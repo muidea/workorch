@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty, Descriptions } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { LLMContextBudgetTrace } from '../../types';
 import { numberText, compactJSON } from '../../utils';
 import { MetricGrid, CompactTags } from '../common';

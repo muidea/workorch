@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Space } from 'antd';
-import { PageContainer, ProCard } from '@ant-design/pro-components';
+import { PageContainer, ProCard } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { errorMessage } from '../utils';

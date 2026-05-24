@@ -1,4 +1,4 @@
-import { PageContainer } from '@ant-design/pro-components';
+import { PageContainer } from '../components/proCompat';
 import { Tabs } from 'antd';
 import { modelLabels } from '../utils/constants';
 import { DecisionQueuePage } from './DecisionQueuePage';

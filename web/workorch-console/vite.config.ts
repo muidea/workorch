@@ -11,10 +11,35 @@ export default defineConfig({
         entryFileNames: 'assets/workorch-console.js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/workorch-console[extname]',
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-antd': ['antd', '@ant-design/pro-components', '@ant-design/icons'],
-          'vendor-state': ['zustand']
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined;
+          }
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
+            return 'vendor-react';
+          }
+          if (
+            id.includes('/antd/') ||
+            id.includes('/@ant-design/icons/') ||
+            id.includes('/@ant-design/icons-svg/') ||
+            id.includes('/@ant-design/cssinjs/') ||
+            id.includes('/@ant-design/colors/') ||
+            id.includes('/@ant-design/fast-color/') ||
+            id.includes('/classnames/') ||
+            id.includes('/copy-to-clipboard/') ||
+            id.includes('/dayjs/') ||
+            id.includes('/rc-') ||
+            id.includes('/react-is/') ||
+            id.includes('/resize-observer-polyfill/') ||
+            id.includes('/scroll-into-view-if-needed/') ||
+            id.includes('/throttle-debounce/')
+          ) {
+            return 'vendor-antd-runtime';
+          }
+          if (id.includes('/zustand/')) {
+            return 'vendor-state';
+          }
+          return undefined;
         }
       }
     }

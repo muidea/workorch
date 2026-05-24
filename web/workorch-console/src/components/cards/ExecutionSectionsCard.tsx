@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty } from 'antd';
-import { ProTable } from '@ant-design/pro-components';
+import { ProTable } from '../proCompat';
 import type { ExecutionSection } from '../../types';
 import { StateTag, BoundedParagraph, CompactTags, MetricGrid } from '../common';
 import { modelLabels } from '../../utils/constants';
