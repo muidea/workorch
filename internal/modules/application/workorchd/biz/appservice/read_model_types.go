@@ -689,6 +689,7 @@ type LLMContextBudgetTrace struct {
 	PromptCaptured        bool           `json:"promptCaptured"`
 	Estimator             string         `json:"estimator,omitempty"`
 	Profile               map[string]any `json:"profile,omitempty"`
+	CachePlan             map[string]any `json:"cachePlan,omitempty"`
 }
 
 type LLMUsageTrace struct {

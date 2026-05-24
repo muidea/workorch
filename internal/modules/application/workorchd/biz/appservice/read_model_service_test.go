@@ -1891,6 +1891,14 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 					"tracePolicy":           "summary_refs_only",
 					"promptCaptured":        false,
 					"estimator":             "bytes_ratio",
+					"cachePlan": map[string]any{
+						"stablePrefixHash":        "sha256:c0",
+						"workspaceDefinitionHash": "sha256:c1",
+						"volatileTailHash":        "sha256:c4",
+						"cacheBreakers": []map[string]any{
+							{"sectionId": "C4.current-progress", "reason": "volatile_execution_tail"},
+						},
+					},
 					"profile": map[string]any{
 						"contextWindowTokens":    200000,
 						"maxInputTokens":         160000,
@@ -1930,6 +1938,7 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 		!traces[0].P0Overflow ||
 		traces[0].TracePolicy != "summary_refs_only" ||
 		traces[0].PromptCaptured ||
+		readModelStringValue(traces[0].CachePlan["stablePrefixHash"]) != "sha256:c0" ||
 		traces[0].Profile["currency"] != "USD" {
 		t.Fatalf("trace = %+v, want projected context budget fields", traces[0])
 	}

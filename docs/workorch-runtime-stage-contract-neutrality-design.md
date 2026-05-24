@@ -906,6 +906,28 @@ LLM 输入中的 step / event / evidence 顺序必须稳定：
 
 `contextBudget` 是上下文可靠性证据，不是业务状态。provider/model/base URL 等动态绑定不得作为后续 repair / memory / recovery 的持久依据。
 
+### Cache-Aware Request Organization
+
+LLM request 的组织方式还必须兼顾 provider prompt / context cache 的复用机会。缓存友好组织的详细设计见 `workorch-llm-request-cache-aware-context-design.md`，但该优化只能作为上下文完整性合同之下的 request rendering 规则，不能改变 stage contract、context gate 或 Goal / DoD 完整性要求。
+
+核心约束：
+
+- request 必须按稳定性分区组织：stable runtime prefix、workspace definition、capability contract、current stage bundle、volatile execution tail、large refs / trace。
+- stable runtime prefix 不得包含 workspaceId、runId、stepId、timestamp、provider/model/baseURL、memory recall、当前失败或当前执行进展。
+- Goal / DoD 必须完整位于 workspace definition block，并通过 revision / hash 被后续 stage bundle 引用；不得为了缓存复用裁剪、摘要或移入易变 memory。
+- workspace definition block 只在同一 definition revision 内稳定。Goal / DoD 允许在运行期补充、澄清和修订；每次变更都必须生成新的 definition revision / hash，并使后续 stage bundle、coverage baseline、repair / validation / acceptance request 显式引用最新 revision。
+- Goal / DoD 运行期变更后，旧 revision 只能作为 lineage / historical evidence 使用，不能继续作为当前目标或验收基准。Runtime 必须在 request 中提供 definitionChangeImpact，说明已有 plan / output / evidence 是否仍覆盖最新 definition，以及下一步应 replan、repair、revalidate、acceptance 还是进入 decision。
+- 当前失败、当前进展、timeline tail、target snapshot、latest validation、memory recall 等高频变化信息必须位于易变尾部，不能污染 stable prefix。
+- section 顺序、字段顺序、source refs 顺序、空字段策略必须 canonical 化，避免语义相同但文本不同导致缓存失效。
+- 每次 request audit 应记录 stablePrefixHash、workspaceDefinitionHash、capabilityContractHash、stageBundleHash、volatileTailHash 和 cacheBreakers；这些字段用于观测，不作为业务恢复状态。
+- provider 私有 cache-control 只能由 adapter 基于中立 `cachePlan` 转换，core runtime 不直接绑定具体 provider cache API。
+- `promptContext.sections` 必须表达 C0-C5 语义分区、cacheability、hash 和 source refs；`turn-01` 这类顺序 ID 只能作为 display order，不能替代 section identity。`promptContext.turns` 作为 provider-facing 渲染结果时必须引用 `sectionId`。
+- 易变尾部不能继续膨胀为一个无语义标签的大 user turn。Current failure、latest validation、tool call/result、artifact event、definition change、context gate、memory recall、requested action 等必须按中立 typed event tape 组织，并按 sequence 保序、按 event 粒度摘要 / 引用 / 裁剪。
+- Memory recall 只能作为当前决策参考进入易变尾部；未被当前 retrieval 选中、已被 excluded、stale / superseded / diagnostic-only、低置信或低重要度的 memory 不得默认进入 C4。Retrieval 审计摘要可以保留，但不能让无效 memory 正文影响 LLM。
+- Provider cache hint 必须保持 provider-neutral：core 只能输出 `cachePlan.adapterHint` 这类可选映射建议，具体 provider 私有 cache-control 只能由 provider adapter 自行消费，且不得写入业务恢复状态。
+- cache-aware canonical rendering 只能稳定 section 顺序、map key 顺序、无顺序语义 refs / capability ids 顺序；不得重排 Goal / DoD definition events、processEvidenceTimeline、typed event tape、tool calls、validations、steps、memory recall priority 等具备语义顺序的数据。
+- 实现落点必须优先集中在 LLM block 的 request / prompt 构造层：`PromptContext` / `PromptSection` / `PromptTurn` / `ProviderContextBudget` 模型、`prompt_messages` section builder、provider budget audit、provider request redaction 和 runtime adapter request 落盘。Orchestrator 侧只复用已有 `executionContextPackage`、`processEvidenceTimeline`、`currentProgressDigest`、`definitionChangeImpact` 与 `runtime_context_order`，不得为缓存优化另造与运行态 evidence path 不一致的排序规则。
+
 ### Stage Input Bundle 合同
 
 为避免 memory、soul、skill、tool、mcp、prompt 分散注入，后续 runtime 应为每个 stage 形成中立的 input bundle。Core 只负责 bundle 的结构与引用，profile 负责选择具体能力。

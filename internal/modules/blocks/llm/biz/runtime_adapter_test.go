@@ -1276,6 +1276,90 @@ func TestRuntimeAdapterBuildsPromptContextFromGovernanceAndGoalDoDHistory(t *tes
 	if provider.request.ContextBudget.GoalDoDCompressed {
 		t.Fatalf("contextBudget = %+v, want goal/dod protected", provider.request.ContextBudget)
 	}
+	if provider.request.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan = nil, want provider-neutral cache audit")
+	}
+	if provider.request.ContextBudget.CachePlan.StablePrefixHash == "" ||
+		provider.request.ContextBudget.CachePlan.WorkspaceDefinitionHash == "" ||
+		provider.request.ContextBudget.CachePlan.VolatileTailHash == "" {
+		t.Fatalf("cachePlan = %+v, want stable, definition and volatile hashes", provider.request.ContextBudget.CachePlan)
+	}
+	if !provider.request.ContextBudget.CachePlan.ObservedRequestShape.TurnsHaveSectionIDs {
+		t.Fatalf("observedRequestShape = %+v, want turns section ids", provider.request.ContextBudget.CachePlan.ObservedRequestShape)
+	}
+	if len(provider.request.ContextBudget.CachePlan.Canonicalization.SectionOrder) != len(provider.request.PromptContext.Sections) {
+		t.Fatalf("cachePlan section order=%+v sections=%+v, want one entry per section", provider.request.ContextBudget.CachePlan.Canonicalization.SectionOrder, provider.request.PromptContext.Sections)
+	}
+	if !provider.request.ContextBudget.CachePlan.AdapterHint.Enabled ||
+		provider.request.ContextBudget.CachePlan.AdapterHint.ProviderMapping != "adapter_optional_no_core_private_fields" ||
+		len(provider.request.ContextBudget.CachePlan.AdapterHint.CacheablePrefix) == 0 {
+		t.Fatalf("adapterHint = %+v, want provider-neutral optional cache hint", provider.request.ContextBudget.CachePlan.AdapterHint)
+	}
+}
+
+func TestProviderCachePlanKeepsStablePrefixWhenGoalDoDChanges(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "first goal"},
+			"dod":                map[string]any{"items": []any{"first dod"}},
+			"definitionRevision": "definition-001",
+		},
+		"currentRuntimeStage":     "execution",
+		"currentRuntimeStageMode": "strict_convergence",
+	}
+	changedInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "second goal"},
+			"dod":                map[string]any{"items": []any{"second dod"}},
+			"definitionRevision": "definition-002",
+			"definitionChangeImpact": map[string]any{
+				"changed": true,
+			},
+		},
+		"currentRuntimeStage":     "execution",
+		"currentRuntimeStageMode": "strict_convergence",
+	}
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-stability",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input:          baseInput,
+	}
+	changed := base
+	changed.Input = changedInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	changed.PromptContext = buildPromptContextFromRequest(changed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&changed)
+
+	if base.ContextBudget == nil || base.ContextBudget.CachePlan == nil ||
+		changed.ContextBudget == nil || changed.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
+	}
+	if base.ContextBudget.CachePlan.StablePrefixHash == "" ||
+		base.ContextBudget.CachePlan.StablePrefixHash != changed.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatalf("stablePrefixHash base=%q changed=%q, want unchanged C0", base.ContextBudget.CachePlan.StablePrefixHash, changed.ContextBudget.CachePlan.StablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.WorkspaceDefinitionHash == "" ||
+		base.ContextBudget.CachePlan.WorkspaceDefinitionHash == changed.ContextBudget.CachePlan.WorkspaceDefinitionHash {
+		t.Fatalf("workspaceDefinitionHash base=%q changed=%q, want changed C1", base.ContextBudget.CachePlan.WorkspaceDefinitionHash, changed.ContextBudget.CachePlan.WorkspaceDefinitionHash)
+	}
+	if !providerCacheBreakersContain(changed.ContextBudget.CachePlan.CacheBreakers, "C1", "definition_change_impact") {
+		t.Fatalf("cacheBreakers = %+v, want definition change breaker", changed.ContextBudget.CachePlan.CacheBreakers)
+	}
+}
+
+func providerCacheBreakersContain(items []llmmodels.ProviderCacheBreaker, sectionID, reason string) bool {
+	for _, item := range items {
+		if item.SectionID == sectionID && item.Reason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeAdapterRedactsOutboundProviderRequest(t *testing.T) {

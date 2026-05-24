@@ -773,6 +773,7 @@ export type LLMContextBudgetTrace = {
   promptCaptured: boolean;
   estimator?: string;
   profile?: Record<string, unknown>;
+  cachePlan?: Record<string, unknown>;
 };
 
 export type LLMUsageTrace = {

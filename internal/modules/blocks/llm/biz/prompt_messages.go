@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -10,8 +12,14 @@ import (
 )
 
 type providerPromptMessage struct {
-	Role    string
-	Content string
+	Role               string
+	Content            string
+	SectionID          string
+	SectionName        string
+	Policy             string
+	Cacheability       string
+	SourceRefs         []string
+	DefinitionRevision string
 }
 
 type providerPromptMessageBuildResult struct {
@@ -37,20 +45,24 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 			if content == "" {
 				continue
 			}
-			ret.Messages = append(ret.Messages, providerPromptMessage{Role: role, Content: content})
+			ret.Messages = append(ret.Messages, providerPromptMessage{
+				Role:      role,
+				Content:   content,
+				SectionID: strings.TrimSpace(turn.SectionID),
+			})
 		}
 		if len(ret.Messages) == 0 || normalizedPromptRole(ret.Messages[0].Role) != "system" {
-			ret.Messages = append([]providerPromptMessage{{Role: "system", Content: systemPromptForRequest(request)}}, ret.Messages...)
+			ret.Messages = append([]providerPromptMessage{promptMessageForSection(request, "C0.system", "system", "normalize_allowed", systemPromptForRequest(request))}, ret.Messages...)
 		}
 		if len(ret.Messages) == 1 {
-			ret.Messages = append(ret.Messages, providerPromptMessage{Role: "user", Content: userPrompt(request)})
+			ret.Messages = append(ret.Messages, promptMessageForSection(request, "C4.fallback-user-prompt", "user", "normalize_allowed", userPrompt(request)))
 		}
 		return ret
 	}
 
 	build := providerPromptMessageBuildResult{
 		Messages: []providerPromptMessage{
-			{Role: "system", Content: systemPromptForRequest(request)},
+			promptMessageForSection(request, "C0.system", "system", "normalize_allowed", systemPromptForRequest(request)),
 		},
 	}
 	appendSection := func(id, role, policy, content string) {
@@ -72,15 +84,13 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 		} else {
 			build.ProtectedSections = append(build.ProtectedSections, id)
 		}
-		build.Messages = append(build.Messages, providerPromptMessage{
-			Role:    normalizedPromptRole(role),
-			Content: normalizedContent,
-		})
+		build.Messages = append(build.Messages, promptMessageForSection(request, id, role, policy, normalizedContent))
 	}
 
-	appendSection("request-intent", "user", "normalize_allowed", requestIntentPrompt(request))
-	appendSection("language-and-contract", "user", "normalize_allowed", languageAndContractPrompt(request))
-	appendSection("workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
+	appendSection("C0.request-intent", "user", "normalize_allowed", requestIntentPrompt(request))
+	appendSection("C0.language-and-contract", "user", "normalize_allowed", languageAndContractPrompt(request))
+	appendSection("C2.capability-contract", "user", "normalize_allowed", capabilityPromptSection(request))
+	appendSection("C3.workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
 		"workspaceId": request.WorkspaceID,
 		"runId":       request.RunID,
 		"stepId":      request.StepID,
@@ -88,18 +98,20 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 		"model":       request.Model,
 		"schema":      request.Schema,
 	}))
-	appendSection("goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
-	appendSection("dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
-	appendSection("effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
-	appendSection("stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input))
-	appendSection("repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input))
-	appendSection("governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
-	appendSection("previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
-	appendSection("execution-signals", "user", "normalize_allowed", executionSignalsPromptSection(request))
-	appendSection("current-action", "user", "normalize_allowed", currentActionPromptSection(request))
+	appendSection("C1.goal-contract-original", "user", "raw_required", goalPromptSection(request.Input))
+	appendSection("C1.dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
+	appendSection("C1.effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
+	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input))
+	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input))
+	appendSection("C2.governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
+	appendSection("C4.previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
+	for _, event := range executionSignalPromptEvents(request) {
+		appendSection(event.SectionID, event.Role, "normalize_allowed", event.Content)
+	}
+	appendSection("C4.current-action", "user", "normalize_allowed", currentActionPromptSection(request))
 
 	if len(build.Messages) == 1 {
-		build.Messages = append(build.Messages, providerPromptMessage{Role: "user", Content: userPrompt(request)})
+		build.Messages = append(build.Messages, promptMessageForSection(request, "C4.fallback-user-prompt", "user", "normalize_allowed", userPrompt(request)))
 	}
 	return build
 }
@@ -111,30 +123,49 @@ func buildPromptContextFromRequest(request llmmodels.ProviderRequest) *llmmodels
 	}
 	turns := make([]llmmodels.PromptTurn, 0, len(build.Messages))
 	sections := make([]llmmodels.PromptSection, 0, len(build.Messages))
+	usedSectionIDs := map[string]int{}
 	for idx, item := range build.Messages {
 		content := strings.TrimSpace(item.Content)
 		if content == "" {
 			continue
 		}
-		sectionID := fmt.Sprintf("turn-%02d", idx+1)
+		sectionID := normalizedPromptSectionID(item.SectionID, idx)
+		if seen := usedSectionIDs[sectionID]; seen > 0 {
+			usedSectionIDs[sectionID] = seen + 1
+			sectionID = fmt.Sprintf("%s.%02d", sectionID, seen+1)
+		} else {
+			usedSectionIDs[sectionID] = 1
+		}
+		policy := strings.TrimSpace(item.Policy)
+		if policy == "" {
+			policy = "normalize_allowed"
+		}
 		turns = append(turns, llmmodels.PromptTurn{
 			Role:      normalizedPromptRole(item.Role),
 			Content:   content,
 			SectionID: sectionID,
 		})
 		sections = append(sections, llmmodels.PromptSection{
-			ID:      sectionID,
-			Role:    normalizedPromptRole(item.Role),
-			Policy:  "normalize_allowed",
-			Content: content,
+			ID:                 sectionID,
+			Name:               item.SectionName,
+			Role:               normalizedPromptRole(item.Role),
+			Policy:             policy,
+			Cacheability:       item.Cacheability,
+			Hash:               promptSectionHash(sectionID, content),
+			SourceRefs:         append([]string(nil), item.SourceRefs...),
+			DefinitionRevision: item.DefinitionRevision,
+			DisplayOrder:       len(sections) + 1,
+			Content:            content,
+			Protected:          policy == "raw_required",
 		})
 	}
 	if len(turns) == 0 {
 		return nil
 	}
 	return &llmmodels.PromptContext{
-		Sections: sections,
-		Turns:    turns,
+		SchemaVersion: "workorch.promptContext.cacheAware.v1",
+		Sections:      sections,
+		Turns:         turns,
 		Normalization: &llmmodels.NormalizationManifest{
 			NormalizedSections:   uniqueStrings(build.NormalizedSections),
 			ProtectedSections:    uniqueStrings(build.ProtectedSections),
@@ -142,6 +173,131 @@ func buildPromptContextFromRequest(request llmmodels.ProviderRequest) *llmmodels
 			SemanticLoss:         false,
 		},
 	}
+}
+
+func promptMessageForSection(request llmmodels.ProviderRequest, sectionID, role, policy, content string) providerPromptMessage {
+	meta := promptSectionMetadata(request, sectionID)
+	if policy = strings.TrimSpace(policy); policy != "" {
+		meta.Policy = policy
+	}
+	return providerPromptMessage{
+		Role:               normalizedPromptRole(role),
+		Content:            content,
+		SectionID:          meta.ID,
+		SectionName:        meta.Name,
+		Policy:             meta.Policy,
+		Cacheability:       meta.Cacheability,
+		SourceRefs:         append([]string(nil), meta.SourceRefs...),
+		DefinitionRevision: meta.DefinitionRevision,
+	}
+}
+
+func promptSectionMetadata(request llmmodels.ProviderRequest, sectionID string) llmmodels.PromptSection {
+	sectionID = strings.TrimSpace(sectionID)
+	if sectionID == "" {
+		sectionID = "C4.unknown"
+	}
+	meta := llmmodels.PromptSection{
+		ID:           sectionID,
+		Name:         sectionNameFromID(sectionID),
+		Policy:       "normalize_allowed",
+		Cacheability: "volatile",
+		SourceRefs:   []string{"providerRequest"},
+	}
+	switch promptSectionGroup(sectionID) {
+	case "C0":
+		meta.Cacheability = "stable"
+		meta.SourceRefs = []string{"runtimeContract", "schemaContract"}
+	case "C1":
+		meta.Cacheability = "workspace_definition"
+		meta.SourceRefs = []string{"executionContextPackage", "executionContext"}
+		meta.DefinitionRevision = promptDefinitionRevision(request.Input)
+	case "C2":
+		meta.Cacheability = "capability_contract"
+		meta.SourceRefs = []string{"runtimeCapabilities", "governancePolicy"}
+	case "C3":
+		meta.Cacheability = "stage_bundle"
+		meta.SourceRefs = []string{"runtimeStage", "workspaceRun"}
+	case "C4":
+		meta.Cacheability = "volatile_tail"
+		meta.SourceRefs = []string{"executionContext", "processEvidenceTimeline", "currentAction"}
+	case "C5":
+		meta.Cacheability = "large_refs"
+		meta.SourceRefs = []string{"traceRefs"}
+	}
+	return meta
+}
+
+func normalizedPromptSectionID(sectionID string, idx int) string {
+	sectionID = strings.TrimSpace(sectionID)
+	if sectionID != "" {
+		return sectionID
+	}
+	return fmt.Sprintf("C4.turn-%02d", idx+1)
+}
+
+func sectionNameFromID(sectionID string) string {
+	parts := strings.Split(strings.TrimSpace(sectionID), ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts[1:], ".")
+}
+
+func promptSectionGroup(sectionID string) string {
+	sectionID = strings.TrimSpace(sectionID)
+	if len(sectionID) < 2 {
+		return ""
+	}
+	if strings.HasPrefix(sectionID, "C0") {
+		return "C0"
+	}
+	if strings.HasPrefix(sectionID, "C1") {
+		return "C1"
+	}
+	if strings.HasPrefix(sectionID, "C2") {
+		return "C2"
+	}
+	if strings.HasPrefix(sectionID, "C3") {
+		return "C3"
+	}
+	if strings.HasPrefix(sectionID, "C4") {
+		return "C4"
+	}
+	if strings.HasPrefix(sectionID, "C5") {
+		return "C5"
+	}
+	return ""
+}
+
+func promptDefinitionRevision(input map[string]any) string {
+	for _, source := range []map[string]any{
+		recordFromAny(input["executionContextPackage"]),
+		recordFromAny(input["executionContext"]),
+		input,
+	} {
+		for _, key := range []string{"definitionRevision", "goalDoDRevision", "goalRevision", "doDRevision"} {
+			if revision := strings.TrimSpace(stringValue(source[key])); revision != "" {
+				return revision
+			}
+		}
+		if impact := recordFromAny(source["definitionChangeImpact"]); len(impact) > 0 {
+			for _, key := range []string{"definitionRevision", "currentRevision", "revision"} {
+				if revision := strings.TrimSpace(stringValue(impact[key])); revision != "" {
+					return revision
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func promptSectionHash(sectionID, content string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(sectionID) + "\n" + strings.TrimSpace(content)))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func requestPromptContextTurns(request llmmodels.ProviderRequest) []llmmodels.PromptTurn {
@@ -182,13 +338,16 @@ func languageAndContractPrompt(request llmmodels.ProviderRequest) string {
 		return strings.Join([]string{
 			dialogLanguageInstruction(request),
 			decisionContractPrompt(request),
-			capabilityContractPrompt(request),
 		}, "\n\n")
 	}
 	return strings.Join([]string{
 		structuredJSONLanguageInstruction(request),
 		structuredJSONContractPrompt(request),
 	}, "\n\n")
+}
+
+func capabilityPromptSection(request llmmodels.ProviderRequest) string {
+	return capabilityContractPrompt(request)
 }
 
 func isDecisionSchemaRequest(request llmmodels.ProviderRequest) bool {
@@ -303,6 +462,10 @@ func stageContractPromptSection(input map[string]any) string {
 	} {
 		copyMapValue(section, key, input[key])
 	}
+	if revision := promptDefinitionRevision(input); revision != "" {
+		section["definitionRevision"] = revision
+	}
+	copyMapValue(section, "definitionChangeImpact", definitionChangeImpactPayload(input))
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		copyMapValue(section, "requiredOutput", pkg["requiredOutput"])
 		copyMapValue(section, "forbiddenActions", pkg["forbiddenActions"])
@@ -382,7 +545,75 @@ func previousDecisionPromptSection(input map[string]any) string {
 	return marshalPromptSection("Previous Decision Output", value)
 }
 
+type executionSignalPromptEvent struct {
+	SectionID string
+	Role      string
+	Content   string
+}
+
+func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionSignalPromptEvent {
+	events := make([]executionSignalPromptEvent, 0, 8)
+	appendEvent := func(sectionID, title string, value any) {
+		content := marshalPromptSection(title, value)
+		if strings.TrimSpace(content) == "" {
+			return
+		}
+		events = append(events, executionSignalPromptEvent{
+			SectionID: sectionID,
+			Role:      "user",
+			Content:   content,
+		})
+	}
+	if stage := executionStageSignalPayload(request); len(stage) > 0 {
+		appendEvent("C4.runtime-stage", "Runtime Stage Signal", stage)
+	}
+	if currentFailure := currentFailureSignalPayload(request.Input); len(currentFailure) > 0 {
+		appendEvent("C4.current-failure", "Current Failure Signal", currentFailure)
+	}
+	if progress := currentProgressSignalPayload(request.Input); len(progress) > 0 {
+		appendEvent("C4.current-progress", "Current Progress Signal", progress)
+	}
+	if timeline := processEvidenceTimelineSignalPayload(request.Input); len(timeline) > 0 {
+		appendEvent("C4.process-evidence-timeline", "Process Evidence Timeline", timeline)
+	}
+	if impact := definitionChangeImpactSignalPayload(request.Input); len(impact) > 0 {
+		appendEvent("C4.definition-change-impact", "Definition Change Impact Signal", impact)
+	}
+	if validation := validationSignalPayload(request.Input); len(validation) > 0 {
+		appendEvent("C4.validation-signal", "Validation Signal", validation)
+	}
+	if governance := governanceDecisionSignalPayload(request.Input); len(governance) > 0 {
+		appendEvent("C4.governance-resolution", "Governance Resolution Signal", governance)
+	}
+	if memory := memorySignalPayload(request.Input); len(memory) > 0 {
+		appendEvent("C4.memory-recall", "Memory Recall Signal", memory)
+	}
+	if len(request.RuntimeCapabilities.BlockKinds) > 0 ||
+		len(request.RuntimeCapabilities.ServiceAPIs) > 0 ||
+		request.RuntimeCapabilities.ShellPolicy.Enabled ||
+		len(request.RuntimeCapabilities.ShellPolicy.UnavailableCommands) > 0 {
+		appendEvent("C2.runtime-capability-summary", "Runtime Capability Summary", request.RuntimeCapabilities)
+	}
+	if len(request.TraceRefs) > 0 {
+		appendEvent("C5.trace-refs", "Trace References", request.TraceRefs)
+	}
+	if request.ContextBudget != nil {
+		appendEvent("C5.context-budget", "Context Budget Audit", request.ContextBudget)
+	}
+	if request.Repair != nil {
+		appendEvent("C4.repair-json-output", "Structured JSON Repair Signal", request.Repair)
+	}
+	if len(events) == 0 {
+		appendEvent("C4.execution-signals", "Execution Context and Evidence Signals", executionSignalsPayload(request))
+	}
+	return events
+}
+
 func executionSignalsPromptSection(request llmmodels.ProviderRequest) string {
+	return marshalPromptSection("Execution Context and Evidence Signals", executionSignalsPayload(request))
+}
+
+func executionSignalsPayload(request llmmodels.ProviderRequest) map[string]any {
 	payload := map[string]any{
 		"input":               request.Input,
 		"runtimeCapabilities": request.RuntimeCapabilities,
@@ -400,7 +631,312 @@ func executionSignalsPromptSection(request llmmodels.ProviderRequest) string {
 	if request.Repair != nil {
 		payload["repair"] = request.Repair
 	}
-	return marshalPromptSection("Execution Context and Evidence Signals", payload)
+	return payload
+}
+
+func executionStageSignalPayload(request llmmodels.ProviderRequest) map[string]any {
+	payload := map[string]any{}
+	for _, key := range []string{
+		"currentRuntimeStage",
+		"currentRuntimeStageMode",
+		"runtimeStage",
+		"runtimeStageMode",
+		"currentSoulStage",
+		"stateChangingOutputRequired",
+		"repairObjective",
+		"stateChangingRecoveryMode",
+		"providerTimeoutStateChangingRetry",
+	} {
+		copyMapValue(payload, key, request.Input[key])
+	}
+	if stage := strings.TrimSpace(stringValue(request.Input["currentRuntimeStage"])); stage != "" {
+		payload["runtimeStage"] = stage
+	}
+	if mode := strings.TrimSpace(stringValue(request.Input["currentRuntimeStageMode"])); mode != "" {
+		payload["runtimeStageMode"] = mode
+	}
+	return payload
+}
+
+func currentFailureSignalPayload(input map[string]any) map[string]any {
+	payload := map[string]any{}
+	copyMapValue(payload, "currentFailure", input["currentFailure"])
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		copyMapValue(payload, "packagedCurrentFailure", pkg["currentFailure"])
+		copyMapValue(payload, "lastFailureDiagnostics", pkg["lastFailureDiagnostics"])
+		copyMapValue(payload, "structuredFailureSignals", pkg["structuredFailureSignals"])
+		copyMapValue(payload, "previousRejectedOutputSummary", pkg["previousRejectedOutputSummary"])
+	}
+	if digest := recordFromAny(firstNonNilValue(input["currentProgressDigest"], recordFromAny(input["executionContextPackage"])["currentProgressDigest"])); len(digest) > 0 {
+		copyMapValue(payload, "lastObservedFailure", digest["lastObservedFailure"])
+		copyMapValue(payload, "currentGap", digest["currentGap"])
+		copyMapValue(payload, "nextRequiredAction", digest["nextRequiredAction"])
+	}
+	return payload
+}
+
+func currentProgressSignalPayload(input map[string]any) map[string]any {
+	payload := map[string]any{}
+	copyMapValue(payload, "currentExecutionProgress", input["currentExecutionProgress"])
+	copyMapValue(payload, "currentProgressDigest", input["currentProgressDigest"])
+	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		copyMapValue(payload, "packagedCurrentProgressDigest", pkg["currentProgressDigest"])
+		copyMapValue(payload, "currentDeliverables", pkg["currentDeliverables"])
+		copyMapValue(payload, "latestAcceptedResult", pkg["latestAcceptedResult"])
+	}
+	if repairPkg := recordFromAny(input["repairActionPackage"]); len(repairPkg) > 0 {
+		copyMapValue(payload, "packagedCurrentExecutionProgress", repairPkg["currentExecutionProgress"])
+		copyMapValue(payload, "coverageTargetSet", repairPkg["coverageTargetSet"])
+		copyMapValue(payload, "requiredOutput", repairPkg["requiredOutput"])
+		copyMapValue(payload, "exitCriteria", repairPkg["exitCriteria"])
+	}
+	return payload
+}
+
+func definitionChangeImpactSignalPayload(input map[string]any) map[string]any {
+	impact := definitionChangeImpactPayload(input)
+	if len(impact) == 0 {
+		return nil
+	}
+	payload := map[string]any{"definitionChangeImpact": impact}
+	if revision := promptDefinitionRevision(input); revision != "" {
+		payload["definitionRevision"] = revision
+	}
+	copyMapValue(payload, "currentRuntimeStage", input["currentRuntimeStage"])
+	copyMapValue(payload, "currentRuntimeStageMode", input["currentRuntimeStageMode"])
+	copyMapValue(payload, "repairObjective", input["repairObjective"])
+	return payload
+}
+
+func definitionChangeImpactPayload(input map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		input,
+		recordFromAny(input["executionContext"]),
+		recordFromAny(input["executionContextPackage"]),
+	} {
+		if impact := recordFromAny(source["definitionChangeImpact"]); len(impact) > 0 {
+			return impact
+		}
+	}
+	return nil
+}
+
+func processEvidenceTimelineSignalPayload(input map[string]any) []map[string]any {
+	if timeline := mapSliceFromAny(input["processEvidenceTimeline"]); len(timeline) > 0 {
+		return timeline
+	}
+	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		return mapSliceFromAny(pkg["processEvidenceTimeline"])
+	}
+	return nil
+}
+
+func validationSignalPayload(input map[string]any) map[string]any {
+	payload := map[string]any{}
+	for _, key := range []string{"failedStepInput", "failedStepOutput", "failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "previousResults"} {
+		copyMapValue(payload, key, input[key])
+	}
+	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
+		copyMapValue(payload, "targetSnapshots", pkg["targetSnapshots"])
+		copyMapValue(payload, "workspaceFileManifest", pkg["workspaceFileManifest"])
+		copyMapValue(payload, "recentRepairAttempts", pkg["recentRepairAttempts"])
+	}
+	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		copyMapValue(payload, "recentFailureSummary", pkg["recentFailureSummary"])
+		copyMapValue(payload, "workspaceFileManifest", pkg["workspaceFileManifest"])
+	}
+	return payload
+}
+
+func governanceDecisionSignalPayload(input map[string]any) map[string]any {
+	payload := map[string]any{}
+	copyMapValue(payload, "decisionResolution", input["decisionResolution"])
+	copyMapValue(payload, "approvalResolution", input["approvalResolution"])
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		copyMapValue(payload, "governanceHistory", executionContext["governanceHistory"])
+	}
+	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		copyMapValue(payload, "packagedGovernanceHistory", pkg["governanceHistory"])
+		copyMapValue(payload, "currentGovernance", pkg["currentGovernance"])
+	}
+	return payload
+}
+
+func memorySignalPayload(input map[string]any) map[string]any {
+	payload := map[string]any{}
+	if retrieval := cacheAwareMemoryRetrievalSummary(recordFromAny(input["memoryRetrieval"])); len(retrieval) > 0 {
+		payload["memoryRetrieval"] = retrieval
+	}
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		if retrieval := cacheAwareMemoryRetrievalSummary(recordFromAny(executionContext["memoryRetrieval"])); len(retrieval) > 0 {
+			payload["executionContextMemoryRetrieval"] = retrieval
+		}
+	}
+	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		if retrieval := cacheAwareMemoryRetrievalSummary(recordFromAny(pkg["memoryRetrieval"])); len(retrieval) > 0 {
+			payload["packagedMemoryRetrieval"] = retrieval
+		}
+		if selected := cacheAwareSelectedContextMemorySignal(recordFromAny(pkg["selectedContext"])); len(selected) > 0 {
+			payload["selectedContext"] = selected
+		}
+	}
+	return payload
+}
+
+func cacheAwareSelectedContextMemorySignal(selected map[string]any) map[string]any {
+	if len(selected) == 0 {
+		return nil
+	}
+	retrieval := recordFromAny(selected["memoryRetrieval"])
+	summary := map[string]any{}
+	if retrievalSummary := cacheAwareMemoryRetrievalSummary(retrieval); len(retrievalSummary) > 0 {
+		summary["memoryRetrieval"] = retrievalSummary
+	}
+	memories := cacheAwareSelectedMemories(mapSliceFromAny(selected["memories"]), retrieval)
+	if len(memories) > 0 {
+		summary["memories"] = memories
+	}
+	if len(summary) == 0 {
+		return nil
+	}
+	summary["cacheability"] = "current_decision_reference"
+	return summary
+}
+
+func cacheAwareMemoryRetrievalSummary(retrieval map[string]any) map[string]any {
+	if len(retrieval) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"policy",
+		"selectionPolicyVersion",
+		"status",
+		"refreshSource",
+		"limit",
+		"selectedMemoryIds",
+		"excludedMemoryIds",
+		"retrievedMemoryIds",
+		"queryTextSha256",
+		"providerId",
+		"operation",
+		"reason",
+	} {
+		copyMapValue(out, key, retrieval[key])
+	}
+	if scores := cacheAwareMemorySelectionScores(mapSliceFromAny(retrieval["selectionScores"])); len(scores) > 0 {
+		out["selectionScores"] = scores
+	}
+	return out
+}
+
+func cacheAwareMemorySelectionScores(scores []map[string]any) []map[string]any {
+	if len(scores) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(scores))
+	for _, score := range scores {
+		item := map[string]any{}
+		copyMapValue(item, "id", score["id"])
+		copyMapValue(item, "score", score["score"])
+		copyMapValue(item, "reason", score["reason"])
+		if len(item) > 0 {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func cacheAwareSelectedMemories(memories []map[string]any, retrieval map[string]any) []map[string]any {
+	if len(memories) == 0 {
+		return nil
+	}
+	selectedIDs := stringSetFromProviderValue(retrieval["selectedMemoryIds"])
+	excludedIDs := stringSetFromProviderValue(retrieval["excludedMemoryIds"])
+	ret := make([]map[string]any, 0, len(memories))
+	for _, memory := range memories {
+		if !cacheAwareMemoryAllowed(memory, selectedIDs, excludedIDs) {
+			continue
+		}
+		item := map[string]any{}
+		for _, key := range []string{"id", "memoryType", "summary", "content", "tags", "importance", "confidence", "visibility", "provenance", "vectorScore"} {
+			copyMapValue(item, key, memory[key])
+		}
+		item["cacheability"] = cacheAwareMemoryCacheability(memory)
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func cacheAwareMemoryAllowed(memory map[string]any, selectedIDs map[string]bool, excludedIDs map[string]bool) bool {
+	id := strings.TrimSpace(firstProviderString(memory["id"], memory["ID"]))
+	if id == "" {
+		return false
+	}
+	if excludedIDs[id] || (len(selectedIDs) > 0 && !selectedIDs[id]) {
+		return false
+	}
+	if memoryMarkedStale(memory) || memoryLowValue(memory) {
+		return false
+	}
+	return strings.TrimSpace(stringValue(memory["summary"])) != "" || strings.TrimSpace(stringValue(memory["content"])) != ""
+}
+
+func memoryMarkedStale(memory map[string]any) bool {
+	for _, key := range []string{"status", "state", "evidenceValidity", "validity"} {
+		switch strings.TrimSpace(strings.ToLower(stringValue(memory[key]))) {
+		case "stale", "stale_or_rejected", "rejected", "superseded", "obsolete", "expired", "diagnostic_only":
+			return true
+		}
+	}
+	for _, tag := range stringSliceFromValue(memory["tags"]) {
+		switch strings.TrimSpace(strings.ToLower(tag)) {
+		case "stale", "superseded", "obsolete", "expired", "diagnostic_only", "provider_retry_noise":
+			return true
+		}
+	}
+	return false
+}
+
+func memoryLowValue(memory map[string]any) bool {
+	confidence := numericValue(memory["confidence"])
+	importance := numericValue(memory["importance"])
+	if confidence > 0 && confidence < 0.2 {
+		return true
+	}
+	if importance > 0 && importance < 0.2 {
+		return true
+	}
+	return false
+}
+
+func cacheAwareMemoryCacheability(memory map[string]any) string {
+	switch strings.TrimSpace(stringValue(memory["provenance"])) {
+	case "current_run":
+		return "volatile_current_run_memory"
+	case "historical_run":
+		return "historical_reference_memory"
+	default:
+		return "workspace_reference_memory"
+	}
+}
+
+func numericValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		ret, _ := typed.Float64()
+		return ret
+	default:
+		return 0
+	}
 }
 
 func currentActionPromptSection(request llmmodels.ProviderRequest) string {

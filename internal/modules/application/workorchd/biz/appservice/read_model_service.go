@@ -1966,6 +1966,7 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 			PromptCaptured:        readModelBoolValue(budget["promptCaptured"]),
 			Estimator:             readModelStringValue(budget["estimator"]),
 			Profile:               readModelMapValue(budget["profile"]),
+			CachePlan:             readModelMapValue(budget["cachePlan"]),
 		})
 	}
 	if len(ret) == 0 {

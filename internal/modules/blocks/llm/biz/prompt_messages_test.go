@@ -106,6 +106,155 @@ func TestBuildProviderPromptMessagesProtectsGoalAndNormalizesOtherSections(t *te
 	}
 }
 
+func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache",
+		RunID:          "run-003",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal":               map[string]any{"text": "goal text"},
+				"dod":                map[string]any{"items": []any{"dod item"}},
+				"definitionRevision": "definition-004",
+				"definitionChangeImpact": map[string]any{
+					"changed": true,
+					"policy":  "workspace_goal_dod_cumulative_latest_refines_previous",
+				},
+			},
+			"currentRuntimeStage":     "execution",
+			"currentRuntimeStageMode": "strict_convergence",
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "missing verification evidence",
+				"nextRequiredAction": "run validation",
+				"lastObservedFailure": map[string]any{
+					"sourceRef":    "run-003/steps/step-002",
+					"failureClass": "validation_failed",
+				},
+			},
+			"processEvidenceTimeline": []any{
+				map[string]any{"order": 1, "sourceRef": "run-003/steps/step-001", "eventType": "tool_result"},
+				map[string]any{"order": 2, "sourceRef": "run-003/steps/step-002", "eventType": "validation_result"},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	if context == nil {
+		t.Fatalf("promptContext = nil")
+	}
+	if context.SchemaVersion != "workorch.promptContext.cacheAware.v1" {
+		t.Fatalf("schemaVersion = %q, want cache-aware schema", context.SchemaVersion)
+	}
+	if len(context.Sections) != len(context.Turns) {
+		t.Fatalf("sections=%d turns=%d, want one section per turn", len(context.Sections), len(context.Turns))
+	}
+	for idx, turn := range context.Turns {
+		if turn.SectionID == "" {
+			t.Fatalf("turn %d missing sectionId", idx)
+		}
+		if turn.SectionID != context.Sections[idx].ID {
+			t.Fatalf("turn %d sectionId=%q section=%q, want preserved order mapping", idx, turn.SectionID, context.Sections[idx].ID)
+		}
+	}
+	required := map[string]string{
+		"C0.system":                    "stable",
+		"C1.goal-contract-original":    "workspace_definition",
+		"C1.dod-contract-original":     "workspace_definition",
+		"C2.capability-contract":       "capability_contract",
+		"C3.stage-contract":            "stage_bundle",
+		"C4.runtime-stage":             "volatile_tail",
+		"C4.current-failure":           "volatile_tail",
+		"C4.current-progress":          "volatile_tail",
+		"C4.process-evidence-timeline": "volatile_tail",
+		"C4.definition-change-impact":  "volatile_tail",
+		"C4.current-action":            "volatile_tail",
+	}
+	for sectionID, cacheability := range required {
+		section, ok := promptContextSectionByID(context, sectionID)
+		if !ok {
+			t.Fatalf("missing section %s; sections=%+v", sectionID, context.Sections)
+		}
+		if section.Cacheability != cacheability {
+			t.Fatalf("section %s cacheability=%q, want %q", sectionID, section.Cacheability, cacheability)
+		}
+		if section.Hash == "" || !strings.HasPrefix(section.Hash, "sha256:") {
+			t.Fatalf("section %s hash=%q, want sha256 hash", sectionID, section.Hash)
+		}
+	}
+	goalSection, _ := promptContextSectionByID(context, "C1.goal-contract-original")
+	if goalSection.DefinitionRevision != "definition-004" {
+		t.Fatalf("goal definition revision=%q, want definition-004", goalSection.DefinitionRevision)
+	}
+	if !goalSection.Protected || goalSection.Policy != "raw_required" {
+		t.Fatalf("goal section protection = protected:%v policy:%q, want raw_required protected", goalSection.Protected, goalSection.Policy)
+	}
+	stageSection, _ := promptContextSectionByID(context, "C3.stage-contract")
+	if !strings.Contains(stageSection.Content, "definition-004") || !strings.Contains(stageSection.Content, "definitionChangeImpact") {
+		t.Fatalf("stage section missing definition revision/impact: %s", stageSection.Content)
+	}
+	impactSection, _ := promptContextSectionByID(context, "C4.definition-change-impact")
+	if !strings.Contains(impactSection.Content, "workspace_goal_dod_cumulative_latest_refines_previous") {
+		t.Fatalf("definition impact section missing policy: %s", impactSection.Content)
+	}
+}
+
+func promptContextSectionByID(context *llmmodels.PromptContext, sectionID string) (llmmodels.PromptSection, bool) {
+	if context == nil {
+		return llmmodels.PromptSection{}, false
+	}
+	for _, section := range context.Sections {
+		if section.ID == sectionID {
+			return section, true
+		}
+	}
+	return llmmodels.PromptSection{}, false
+}
+
+func TestMemorySignalPayloadFiltersNonReferenceMemoryNoise(t *testing.T) {
+	payload := memorySignalPayload(map[string]any{
+		"executionContextPackage": map[string]any{
+			"selectedContext": map[string]any{
+				"memoryRetrieval": map[string]any{
+					"policy":            "step_input_dynamic_workspace_memory",
+					"status":            "selected",
+					"selectedMemoryIds": []string{"memory-keep", "memory-stale", "memory-low"},
+					"excludedMemoryIds": []string{"memory-excluded"},
+					"selectionScores": []map[string]any{
+						{"id": "memory-keep", "score": 100, "reason": "current decision"},
+					},
+				},
+				"memories": []map[string]any{
+					{"id": "memory-keep", "summary": "usable summary", "content": "usable content", "confidence": 0.8, "importance": 0.7, "provenance": "current_run"},
+					{"id": "memory-excluded", "summary": "excluded summary", "confidence": 0.9, "importance": 0.9},
+					{"id": "memory-stale", "summary": "stale summary", "confidence": 0.9, "importance": 0.9, "tags": []string{"stale"}},
+					{"id": "memory-low", "summary": "low summary", "confidence": 0.1, "importance": 0.9},
+				},
+			},
+		},
+	})
+	selected := recordFromAny(recordFromAny(payload["selectedContext"])["memoryRetrieval"])
+	if selected["status"] != "selected" {
+		t.Fatalf("memory retrieval summary = %+v, want selected status retained", selected)
+	}
+	memories := mapSliceFromAny(recordFromAny(payload["selectedContext"])["memories"])
+	if len(memories) != 1 {
+		t.Fatalf("memories = %+v, want only high-value selected memory", memories)
+	}
+	if memories[0]["id"] != "memory-keep" || memories[0]["cacheability"] != "volatile_current_run_memory" {
+		t.Fatalf("memory = %+v, want kept current-run memory with cacheability", memories[0])
+	}
+	encoded := marshalPromptSection("Memory Recall Signal", payload)
+	for _, forbidden := range []string{"excluded summary", "stale summary", "low summary"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("memory payload leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestNormalizePromptTextPreservesCodeOperatorsInStructuredEvidence(t *testing.T) {
 	input := `Execution Context and Evidence Signals
 {"input":{"failedStepOutput":{"diff":"func TestAlpha(t *testing.T) {\n\t_ = handler(func(w http.ResponseWriter, r *http.Request) {})\n\tif a < b && c > d { return }\n}"}}}`

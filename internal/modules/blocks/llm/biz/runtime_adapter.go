@@ -977,7 +977,67 @@ func providerContextBudgetOutput(budget *llmmodels.ProviderContextBudget, provid
 		"contextGateAction":       budget.ContextGateAction,
 		"contextGateReason":       budget.ContextGateReason,
 	}
+	if budget.CachePlan != nil {
+		item["cachePlan"] = providerCachePlanOutput(budget.CachePlan)
+	}
 	return item
+}
+
+func providerCachePlanOutput(plan *llmmodels.ProviderCachePlan) map[string]any {
+	if plan == nil {
+		return nil
+	}
+	sectionHashes := make([]map[string]any, 0, len(plan.SectionHashes))
+	for _, item := range plan.SectionHashes {
+		sectionHashes = append(sectionHashes, map[string]any{
+			"sectionId":          item.SectionID,
+			"name":               item.Name,
+			"cacheability":       item.Cacheability,
+			"hash":               item.Hash,
+			"sourceRefs":         append([]string(nil), item.SourceRefs...),
+			"definitionRevision": item.DefinitionRevision,
+		})
+	}
+	breakers := make([]map[string]any, 0, len(plan.CacheBreakers))
+	for _, item := range plan.CacheBreakers {
+		breakers = append(breakers, map[string]any{
+			"sectionId": item.SectionID,
+			"reason":    item.Reason,
+		})
+	}
+	return map[string]any{
+		"schemaVersion":           plan.SchemaVersion,
+		"strategy":                plan.Strategy,
+		"cacheKey":                plan.CacheKey,
+		"stablePrefixHash":        plan.StablePrefixHash,
+		"workspaceDefinitionHash": plan.WorkspaceDefinitionHash,
+		"capabilityContractHash":  plan.CapabilityContractHash,
+		"stageBundleHash":         plan.StageBundleHash,
+		"volatileTailHash":        plan.VolatileTailHash,
+		"largeRefsHash":           plan.LargeRefsHash,
+		"sectionHashes":           sectionHashes,
+		"cacheBreakers":           breakers,
+		"canonicalization": map[string]any{
+			"sectionOrderPolicy": plan.Canonicalization.SectionOrderPolicy,
+			"sectionOrder":       append([]string(nil), plan.Canonicalization.SectionOrder...),
+			"orderedDataPolicy":  plan.Canonicalization.OrderedDataPolicy,
+			"mapKeyPolicy":       plan.Canonicalization.MapKeyPolicy,
+			"providerMapping":    plan.Canonicalization.ProviderMapping,
+		},
+		"observedRequestShape": map[string]any{
+			"providerFacingMode":  plan.ObservedRequestShape.ProviderFacingMode,
+			"turnsHaveSectionIds": plan.ObservedRequestShape.TurnsHaveSectionIDs,
+			"typedEventTape":      plan.ObservedRequestShape.TypedEventTape,
+		},
+		"adapterHint": map[string]any{
+			"enabled":          plan.AdapterHint.Enabled,
+			"mode":             plan.AdapterHint.Mode,
+			"providerMapping":  plan.AdapterHint.ProviderMapping,
+			"cacheablePrefix":  append([]string(nil), plan.AdapterHint.CacheablePrefix...),
+			"volatileSections": append([]string(nil), plan.AdapterHint.VolatileSections...),
+			"cacheBreakers":    append([]string(nil), plan.AdapterHint.CacheBreakers...),
+		},
+	}
 }
 
 func attachFailoverMetadata(output map[string]any, metadata map[string]any) {
@@ -2369,6 +2429,7 @@ func providerRequest(request runtimemodel.StepExecutionRequest, config llmmodels
 		providerReq.ContextBudget.NormalizedSections = uniqueStrings(append(providerReq.ContextBudget.NormalizedSections, providerReq.PromptContext.Normalization.NormalizedSections...))
 		providerReq.ContextBudget.IncludedSections = uniqueStrings(append(providerReq.ContextBudget.IncludedSections, promptContextSectionIDs(providerReq.PromptContext)...))
 	}
+	attachProviderCachePlan(&providerReq)
 	providerReq = applyProviderPromptContractGate(providerReq)
 	return providerReq
 }

@@ -9,6 +9,31 @@ interface LLMContextBudgetCardProps {
   traces?: LLMContextBudgetTrace[];
 }
 
+const shortHash = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '-';
+  return text.startsWith('sha256:') ? `sha256:${text.slice(7, 19)}` : text.slice(0, 18);
+};
+
+const cachePlanTags = (plan?: Record<string, unknown>) => {
+  if (!plan) return [];
+  return [
+    `C0:${shortHash(plan.stablePrefixHash)}`,
+    `C1:${shortHash(plan.workspaceDefinitionHash)}`,
+    `C2:${shortHash(plan.capabilityContractHash)}`,
+    `C3:${shortHash(plan.stageBundleHash)}`,
+    `C4:${shortHash(plan.volatileTailHash)}`
+  ];
+};
+
+const cacheBreakerTags = (plan?: Record<string, unknown>) => {
+  const breakers = Array.isArray(plan?.cacheBreakers) ? plan.cacheBreakers : [];
+  return breakers.map((item) => {
+    const value = item as Record<string, unknown>;
+    return `${value.sectionId ?? '-'}:${value.reason ?? '-'}`;
+  });
+};
+
 export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ traces }: LLMContextBudgetCardProps) {
   const items = traces ?? [];
 
@@ -53,6 +78,8 @@ export const LLMContextBudgetCard = React.memo(function LLMContextBudgetCard({ t
                 { key: 'rules', label: '预算规则', children: <CompactTags tags={item.rules ?? []} maxVisible={8} /> },
                 { key: 'sections', label: '分区处理', children: <CompactTags tags={[`included:${(item.includedSections ?? []).join('|') || '-'}`, `normalized:${(item.normalizedSections ?? []).join('|') || '-'}`, `compressed:${(item.compressedSections ?? []).join('|') || '-'}`, `omitted:${(item.omittedSections ?? []).join('|') || '-'}`]} maxVisible={8} /> },
                 { key: 'refs', label: '来源引用', children: <CompactTags tags={item.sourceRefs ?? []} maxVisible={8} /> },
+                { key: 'cachePlan', label: 'Cache Plan', children: <CompactTags tags={cachePlanTags(item.cachePlan)} maxVisible={8} /> },
+                { key: 'cacheBreakers', label: 'Cache Breakers', children: <CompactTags tags={cacheBreakerTags(item.cachePlan)} maxVisible={8} /> },
                 { key: 'policy', label: 'trace 策略', children: `${item.tracePolicy || '-'} / estimator: ${item.estimator || '-'}` },
                 { key: 'profile', label: 'Profile', children: <pre className="json-panel">{compactJSON(item.profile)}</pre> }
               ]}
