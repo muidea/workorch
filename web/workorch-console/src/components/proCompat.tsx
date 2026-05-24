@@ -67,6 +67,22 @@ export function PageContainer({ title, subTitle, extra, children }: PageContaine
   );
 }
 
+type CardGridProps = {
+  children?: React.ReactNode;
+  className?: string;
+  gap?: number;
+  loading?: boolean;
+};
+
+export function CardGrid({ children, className, gap = 16, loading }: CardGridProps) {
+  const body = (
+    <div className={['workorch-card-grid-layout', className].filter(Boolean).join(' ')} style={{ gap }}>
+      {children}
+    </div>
+  );
+  return loading ? <Spin>{body}</Spin> : body;
+}
+
 type ProCardColSpan = string | number | Record<string, string | number>;
 
 type ProCardProps = Omit<CardProps, 'children'> & {
@@ -100,6 +116,8 @@ function flexBasisFromColSpan(colSpan?: ProCardColSpan) {
 }
 
 export function ProCard({ children, colSpan, gutter, wrap, ghost, split, className, style, loading, title, subTitle, ...props }: ProCardProps) {
+  const hasCardChrome = Boolean(title || subTitle || props.extra || props.actions);
+  const isLayoutOnly = (Boolean(gutter || split || wrap) || props.bordered === false) && !hasCardChrome;
   const itemStyle: React.CSSProperties = {
     ...style,
     flex: colSpan ? `1 1 ${flexBasisFromColSpan(colSpan) ?? 'auto'}` : style?.flex,
@@ -118,9 +136,9 @@ export function ProCard({ children, colSpan, gutter, wrap, ghost, split, classNa
     </div>
   ) : children;
 
-  if (ghost) {
+  if (ghost || isLayoutOnly) {
     return (
-      <div className={['workorch-pro-card-ghost', className].filter(Boolean).join(' ')} style={itemStyle}>
+      <div className={['workorch-pro-card-layout', ghost ? 'workorch-pro-card-ghost' : '', className].filter(Boolean).join(' ')} style={itemStyle}>
         {loading ? <Spin>{body}</Spin> : body}
       </div>
     );

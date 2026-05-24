@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Tag } from 'antd';
-import { PageContainer, ProCard, ProTable } from '../components/proCompat';
+import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import type { MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool } from '../types';
 import { workorchApi } from '../api';
@@ -349,7 +349,7 @@ export function RuntimeControlPage() {
       subTitle={`管理${modelLabels.mcpCapability}，并观察本地运行队列与并发压力`}
       extra={<Button onClick={() => void loadRuntime()} loading={loading}>刷新</Button>}
     >
-      <ProCard gutter={16} wrap loading={loading}>
+      <CardGrid loading={loading}>
         <ProCard title="运行调度" colSpan={{ xs: 24, lg: 8 }}>
           <Descriptions
             column={1}
@@ -371,7 +371,7 @@ export function RuntimeControlPage() {
             <Tag color="purple">{servers.filter((item) => item.sessionPolicy === 'long_lived').length} 个长会话</Tag>
           </Space>
         </ProCard>
-      </ProCard>
+      </CardGrid>
 
       <ProCard
         title="MCP 能力目录"
@@ -483,7 +483,7 @@ export function RuntimeControlPage() {
         />
       </ProCard>
 
-      <ProCard gutter={16} wrap className="workorch-section">
+      <CardGrid className="workorch-section">
         <ProCard title="已选 MCP 服务" colSpan={{ xs: 24, lg: 12 }}>
           {selectedServer ? (
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -624,7 +624,7 @@ export function RuntimeControlPage() {
             <Button type="primary" htmlType="submit" loading={saving}>保存 MCP 服务</Button>
           </Form>
         </ProCard>
-      </ProCard>
+      </CardGrid>
       <Modal
         title="编辑 MCP 能力"
         open={capabilityModalOpen}

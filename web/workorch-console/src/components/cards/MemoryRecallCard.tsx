@@ -1,6 +1,6 @@
 import React from 'react';
 import { Space, Empty, Tag } from 'antd';
-import { ProTable, ProCard } from '../proCompat';
+import { CardGrid, ProTable, ProCard } from '../proCompat';
 import type { MemoryRecallTrace } from '../../types';
 import { compactJSON } from '../../utils';
 import { StateTag, BoundedParagraph, CompactTags, MetricGrid } from '../common';
@@ -106,14 +106,14 @@ export const MemoryRecallCard = React.memo(function MemoryRecallCard({ items }: 
               dataSource={group.traces}
               expandable={{
                 expandedRowRender: (item) => (
-                  <ProCard gutter={16} wrap ghost>
+                  <CardGrid>
                     <ProCard title="召回查询" colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{memoryRecallQueryPanel(item)}</pre>
                     </ProCard>
                     <ProCard title={`命中${modelLabels.memory}详情`} colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{compactJSON(item.retrievedMemoryHits ?? [])}</pre>
                     </ProCard>
-                  </ProCard>
+                  </CardGrid>
                 )
               }}
             />

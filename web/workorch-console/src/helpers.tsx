@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
-import { ProCard, ProTable } from './components/proCompat';
+import { CardGrid, ProCard, ProTable } from './components/proCompat';
 import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels } from './utils/constants';
@@ -620,14 +620,14 @@ export function memoryRecallCard(items?: MemoryRecallTrace[]) {
               dataSource={group.traces}
               expandable={{
                 expandedRowRender: (item) => (
-                  <ProCard gutter={16} wrap ghost>
+                  <CardGrid>
                     <ProCard title="召回查询" colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{memoryRecallQueryPanel(item)}</pre>
                     </ProCard>
                     <ProCard title={`命中${modelLabels.memory}详情`} colSpan={{ xs: 24, lg: 12 }}>
                       <pre className="json-panel json-panel-large">{compactJSON(item.retrievedMemoryHits ?? [])}</pre>
                     </ProCard>
-                  </ProCard>
+                  </CardGrid>
                 )
               }}
             />
@@ -2255,7 +2255,7 @@ export function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[];
         <Typography.Text type="secondary">
           执行人格（Soul）是系统级执行配置，定义人格、阶段策略和输出契约；技能（Skill）、MCP 服务和工具（Tool）权限必须通过结构化字段显式维护。
         </Typography.Text>
-        <ProCard split="vertical" bordered={false}>
+        <CardGrid>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
             <List
               size="small"
@@ -2316,7 +2316,7 @@ export function SoulDefinitionManager({ souls, onSoulsChange }: { souls: Soul[];
               </Space>
             </Form>
           </ProCard>
-        </ProCard>
+        </CardGrid>
       </Space>
     </ProCard>
   );
@@ -2404,7 +2404,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
         <Typography.Text type="secondary">
           模板用于复用新建工作空间时的目标（Goal）、验收标准（DoD）、默认执行人格（Soul）与阶段执行人格绑定；实际工作空间仍通过正式业务 API 创建和写入定义。
         </Typography.Text>
-        <ProCard split="vertical" bordered={false}>
+        <CardGrid>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
             <List
               size="small"
@@ -2472,7 +2472,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
               </Space>
             </Form>
           </ProCard>
-        </ProCard>
+        </CardGrid>
       </Space>
     </ProCard>
   );
@@ -2520,4 +2520,3 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
 }
-

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
-import { PageContainer, ProCard } from '../components/proCompat';
+import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import type {
   LLMModelCapabilityConfiguration,
   ServiceConfiguration,
@@ -366,7 +366,7 @@ export function ConfigurationPage() {
             key: 'service',
             label: '基础服务',
             children: (
-              <ProCard gutter={16} wrap loading={loading}>
+              <CardGrid loading={loading}>
         <ProCard title="服务参数" colSpan="50%">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Descriptions
@@ -408,7 +408,7 @@ export function ConfigurationPage() {
             ]}
           />
         </ProCard>
-              </ProCard>
+              </CardGrid>
             )
           },
           {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
-import { PageContainer, ProCard, ProTable } from '../components/proCompat';
+import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
@@ -1274,7 +1274,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               />
             </Space>
           </ProCard>
-          <ProCard gutter={16} wrap className="workorch-section">
+          <CardGrid className="workorch-section">
             <ProCard title="目标定义（Goal）" colSpan={{ xs: 24, lg: 9 }} extra={<Tag>{goals.length} 项</Tag>}>
               {goals.length ? (
                 <List
@@ -1332,7 +1332,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 />
               </Space>
             </ProCard>
-          </ProCard>
+          </CardGrid>
           <ProCard
             title="目标成果"
             className="workorch-section"
@@ -1357,7 +1357,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'evidence', label: '结果证据', children: outcomeResult?.evidenceRefs?.length ? compactTags(outcomeResult.evidenceRefs) : '-' }
                   ]}
                 />
-                <ProCard gutter={16} wrap>
+                <CardGrid>
                   <ProCard title={modelLabels.doDAssessment} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeDoDItems.length ? (
                       <ProTable
@@ -1408,8 +1408,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}尚未形成${modelLabels.artifact}`} />
                     )}
                   </ProCard>
-                </ProCard>
-                <ProCard gutter={16} wrap>
+                </CardGrid>
+                <CardGrid>
                   <ProCard title={modelLabels.toolCall} colSpan={{ xs: 24, lg: 12 }}>
                     {runToolCallRecords.length > 0 ? (
                       <ProTable<ToolCall>
@@ -1463,7 +1463,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   <ProCard title={modelLabels.llmUsage} colSpan={{ xs: 24, lg: 12 }}>
                     {llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)}
                   </ProCard>
-                </ProCard>
+                </CardGrid>
               </Space>
             ) : (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先启动或选择一个运行（Run）查看目标成果" />
@@ -1503,7 +1503,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           >
             {contextBundleCard(contextBundle)}
           </ProCard>
-          <ProCard gutter={16} wrap className="workorch-section">
+          <CardGrid className="workorch-section">
             <ProCard title="决策工单（Decision）" colSpan="50%">
               <ProTable<Decision>
                 rowKey="id"
@@ -1522,7 +1522,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 dataSource={snapshot.decisions ?? []}
                 expandable={{
                   expandedRowRender: (item) => (
-                    <ProCard gutter={16} wrap ghost>
+                    <CardGrid>
                       <ProCard title="上下文" colSpan={{ xs: 24, lg: 12 }}>
                         <pre className="json-panel json-panel-large">{compactJSON(item.context)}</pre>
                       </ProCard>
@@ -1532,7 +1532,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                       <ProCard title="自动治理摘要" colSpan={{ xs: 24, lg: 12 }}>
                         <pre className="json-panel json-panel-large">{compactJSON(item.autoGovernance)}</pre>
                       </ProCard>
-                    </ProCard>
+                    </CardGrid>
                   )
                 }}
               />
@@ -1554,7 +1554,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 dataSource={snapshot.approvals ?? []}
               />
             </ProCard>
-          </ProCard>
+          </CardGrid>
           <ProCard title="运行过程与证据" className="workorch-section" extra={runSnapshot ? <Tag>{evidenceCount(runSnapshot)} 条证据</Tag> : null}>
             {runSnapshot ? (
               <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -1602,14 +1602,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'context', label: '执行上下文', children: <pre className="json-panel">{compactJSON(runSnapshot.run.executionContext)}</pre> }
                   ]}
                 />
-                <ProCard gutter={16} wrap>
+                <CardGrid>
                   <ProCard title="已选择 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
                     {runtimeCapabilityTable(runObservability?.selectedCapabilities ?? runSnapshot.selectedCapabilities, `当前${modelLabels.run}未显式选择${modelLabels.mcpCapability}`)}
                   </ProCard>
                   <ProCard title="实际使用 MCP 能力" colSpan={{ xs: 24, lg: 12 }}>
                     {runtimeCapabilityTable(runObservability?.usedCapabilities ?? runSnapshot.usedCapabilities, `当前${modelLabels.run}未产生${modelLabels.mcpCapability}使用证据`)}
                   </ProCard>
-                </ProCard>
+                </CardGrid>
                 <ProCard
                   size="small"
                   title="最新检查点"

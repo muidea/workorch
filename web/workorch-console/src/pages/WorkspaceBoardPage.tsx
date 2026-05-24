@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntApp, Badge, Button, Descriptions, Empty, Space, Steps, Typography } from 'antd';
-import { PageContainer, ProCard } from '../components/proCompat';
+import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
@@ -79,7 +79,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       {boardItems.length === 0 && !loading ? (
         <Empty description="暂无工作空间" />
       ) : (
-        <ProCard className="workspace-board-grid" gutter={16} wrap loading={loading}>
+        <CardGrid className="workspace-board-grid" loading={loading}>
           {boardItems.map((item) => {
             const { snapshot, goals, dods } = item;
             const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
@@ -139,7 +139,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
               </ProCard>
             );
           })}
-        </ProCard>
+        </CardGrid>
       )}
     </PageContainer>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Form, Input, Modal, Space, Typography } from 'antd';
-import { PageContainer, ProCard, ProTable } from '../components/proCompat';
+import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
@@ -158,7 +158,7 @@ export function DecisionQueuePage() {
         dataSource={decisionRecords}
         expandable={{
           expandedRowRender: (item) => (
-            <ProCard gutter={16} wrap ghost>
+            <CardGrid>
               <ProCard title="决策上下文" colSpan={{ xs: 24, lg: 12 }}>
                 <pre className="json-panel json-panel-large">{item.context ? compactJSON(item.context) : '列表投影未加载上下文，请进入处理弹窗查看完整详情'}</pre>
               </ProCard>
@@ -168,7 +168,7 @@ export function DecisionQueuePage() {
               <ProCard title="自动治理摘要" colSpan={{ xs: 24, lg: 12 }}>
                 <pre className="json-panel json-panel-large">{compactJSON(item.autoGovernance)}</pre>
               </ProCard>
-            </ProCard>
+            </CardGrid>
           )
         }}
       />
