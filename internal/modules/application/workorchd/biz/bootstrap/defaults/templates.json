@@ -89,6 +89,39 @@
           "empty semantic results are inconclusive"
         ]
       },
+      "capabilityUsagePolicies": [
+        {
+          "id": "software-dev-code-semantics-guidance",
+          "scope": "workspace_profile",
+          "appliesToCategory": "code_semantics",
+          "evidenceStrength": "auxiliary",
+          "usageMode": "prefer_when_triggered",
+          "triggerStages": ["planning", "execution", "repair", "validation"],
+          "triggerSignals": [
+            "cross_file_impact_unclear",
+            "symbol_resolution_needed",
+            "undefined_identifier",
+            "unknown_field",
+            "missing_method",
+            "interface_or_constructor_mismatch",
+            "compile_or_vet_diagnostics_need_semantic_confirmation"
+          ],
+          "preferredTools": [
+            "lsp_initialize",
+            "lsp_definition",
+            "lsp_hover",
+            "lsp_references",
+            "lsp_diagnostics"
+          ],
+          "requiredAfterKinds": ["patch/apply"],
+          "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking",
+          "notes": [
+            "use semantic capabilities to reduce ambiguity before broad patching when local textual evidence is insufficient",
+            "after a relevant patch, sync current file content before relying on semantic diagnostics",
+            "semantic outputs can support localization and impact analysis but cannot replace direct validation evidence"
+          ]
+        }
+      ],
       "managedWorkspaceConfigs": [
         {
           "path": "lsp-bridge/mcp-config.json",

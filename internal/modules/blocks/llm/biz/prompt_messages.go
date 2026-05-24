@@ -93,6 +93,7 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 	appendSection("C1.dod-contract-original", "user", "raw_required", dodPromptSection(request.Input))
 	appendSection("C1.effective-goal-dod", "user", "normalize_allowed", effectiveGoalDoDPromptSection(request.Input))
 	appendSection("C2.capability-contract", "user", "normalize_allowed", capabilityPromptSection(request))
+	appendSection("C2.capability-usage-guidance", "user", "normalize_allowed", capabilityUsageGuidancePromptSection(request.Input))
 	appendSection("C2.governance-soul-policy", "user", "normalize_allowed", governanceSoulPolicyPromptSection(request.Input))
 	appendSection("C2.runtime-capability-summary", "user", "normalize_allowed", runtimeCapabilitySummaryPromptSection(request))
 	appendSection("C3.workspace-run", "user", "normalize_allowed", marshalPromptSection("Workspace and run context", map[string]any{
@@ -349,6 +350,14 @@ func languageAndContractPrompt(request llmmodels.ProviderRequest) string {
 
 func capabilityPromptSection(request llmmodels.ProviderRequest) string {
 	return capabilityContractPrompt(request)
+}
+
+func capabilityUsageGuidancePromptSection(input map[string]any) string {
+	payload := capabilityUsageGuidancePayload(input)
+	if len(payload) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Capability Usage Guidance", payload)
 }
 
 func isDecisionSchemaRequest(request llmmodels.ProviderRequest) bool {
@@ -636,6 +645,116 @@ func executionSignalsPayload(request llmmodels.ProviderRequest) map[string]any {
 		payload["repair"] = request.Repair
 	}
 	return payload
+}
+
+func capabilityUsageGuidancePayload(input map[string]any) map[string]any {
+	pkg := recordFromAny(input["executionContextPackage"])
+	if len(pkg) == 0 {
+		return nil
+	}
+	selected := recordFromAny(pkg["selectedContext"])
+	if len(selected) == 0 {
+		return nil
+	}
+	servers := mapSliceFromAny(selected["mcpServers"])
+	capabilities := mapSliceFromAny(selected["mcpCapabilities"])
+	if len(servers) == 0 && len(capabilities) == 0 {
+		return nil
+	}
+	payload := map[string]any{}
+	if summarized := summarizedPromptMCPServers(servers); len(summarized) > 0 {
+		payload["selectedMCPServers"] = summarized
+	}
+	if summarized := summarizedPromptMCPCapabilities(capabilities); len(summarized) > 0 {
+		payload["selectedCapabilities"] = summarized
+	}
+	if policies := capabilityUsagePoliciesFromExecutionContextPackage(pkg); len(policies) > 0 {
+		payload["usagePolicies"] = policies
+	}
+	return payload
+}
+
+func capabilityUsagePoliciesFromExecutionContextPackage(pkg map[string]any) []map[string]any {
+	contract := recordFromAny(pkg["executionContract"])
+	if len(contract) == 0 {
+		return nil
+	}
+	items := mapSliceFromAny(contract["capabilityUsagePolicies"])
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(items), 8))
+	for _, item := range items {
+		next := map[string]any{}
+		for _, key := range []string{
+			"id",
+			"scope",
+			"appliesToCategory",
+			"evidenceStrength",
+			"usageMode",
+			"fallbackPolicy",
+			"notes",
+		} {
+			copyMapValue(next, key, item[key])
+		}
+		for _, key := range []string{"triggerStages", "triggerSignals", "preferredTools", "requiredAfterKinds"} {
+			if values := stringSliceFromAny(item[key]); len(values) > 0 {
+				next[key] = values
+			}
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
+}
+
+func summarizedPromptMCPServers(items []map[string]any) []map[string]any {
+	ret := make([]map[string]any, 0, min(len(items), 8))
+	for _, item := range items {
+		next := map[string]any{}
+		for _, key := range []string{"id", "name", "transport", "command", "defaultApprovalPolicy", "timeoutMillis"} {
+			copyMapValue(next, key, item[key])
+		}
+		if values := stringSliceFromAny(item["allowedTools"]); len(values) > 0 {
+			next["allowedTools"] = values
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
+}
+
+func summarizedPromptMCPCapabilities(items []map[string]any) []map[string]any {
+	ret := make([]map[string]any, 0, min(len(items), 16))
+	for _, item := range items {
+		next := map[string]any{}
+		for _, key := range []string{
+			"id", "serverId", "kind", "name", "displayName", "category", "usageHint", "riskLevel", "status",
+		} {
+			copyMapValue(next, key, item[key])
+		}
+		if values := stringSliceFromAny(item["stageHints"]); len(values) > 0 {
+			next["stageHints"] = values
+		}
+		if values := stringSliceFromAny(item["tags"]); len(values) > 0 {
+			next["tags"] = values
+		}
+		if len(next) > 0 {
+			ret = append(ret, next)
+		}
+		if len(ret) >= 16 {
+			break
+		}
+	}
+	return ret
 }
 
 func executionStageSignalPayload(request llmmodels.ProviderRequest) map[string]any {

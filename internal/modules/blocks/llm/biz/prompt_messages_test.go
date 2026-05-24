@@ -243,6 +243,84 @@ func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T
 	}
 }
 
+func TestBuildPromptContextIncludesSelectedCapabilityUsageGuidance(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-capability",
+		RunID:          "run-capability",
+		StepID:         "step-capability",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"currentRuntimeStage":     "repair",
+			"currentRuntimeStageMode": "strict_convergence",
+			"executionContextPackage": map[string]any{
+				"stage":     "repair",
+				"stageMode": "strict_convergence",
+				"executionContract": map[string]any{
+					"capabilityUsagePolicies": []any{
+						map[string]any{
+							"id":                "code-semantics-guidance",
+							"appliesToCategory": "code_semantics",
+							"usageMode":         "prefer_when_triggered",
+							"triggerStages":     []any{"planning", "repair"},
+							"triggerSignals":    []any{"symbol_resolution_needed"},
+							"fallbackPolicy":    "fallback_without_blocking",
+						},
+					},
+				},
+				"selectedContext": map[string]any{
+					"mcpServers": []any{
+						map[string]any{
+							"id":           "semantic-server",
+							"name":         "Semantic Server",
+							"transport":    "stdio",
+							"allowedTools": []any{"semantic.lookup"},
+						},
+					},
+					"mcpCapabilities": []any{
+						map[string]any{
+							"id":         "semantic-server:tool:semantic.lookup",
+							"serverId":   "semantic-server",
+							"kind":       "tool",
+							"name":       "semantic.lookup",
+							"category":   "code_semantics",
+							"usageHint":  "Use when symbol resolution is needed.",
+							"stageHints": []any{"planning", "repair"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	section, ok := promptContextSectionByID(context, "C2.capability-usage-guidance")
+	if !ok {
+		t.Fatalf("missing capability usage guidance; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"Capability Usage Guidance",
+		"semantic-server",
+		"semantic.lookup",
+		"code_semantics",
+		"code-semantics-guidance",
+		"symbol_resolution_needed",
+		"fallback_without_blocking",
+	} {
+		if !strings.Contains(section.Content, want) {
+			t.Fatalf("capability guidance missing %q: %s", want, section.Content)
+		}
+	}
+	if strings.Contains(section.Content, "\"stage\"") || strings.Contains(section.Content, "\"stageMode\"") {
+		t.Fatalf("capability guidance should stay stage-independent: %s", section.Content)
+	}
+	if section.Cacheability != "capability_contract" {
+		t.Fatalf("capability guidance cacheability=%q, want capability_contract", section.Cacheability)
+	}
+}
+
 func promptContextSectionByID(context *llmmodels.PromptContext, sectionID string) (llmmodels.PromptSection, bool) {
 	if context == nil {
 		return llmmodels.PromptSection{}, false

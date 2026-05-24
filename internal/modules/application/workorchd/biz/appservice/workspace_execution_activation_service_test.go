@@ -2263,6 +2263,13 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 					},
 				},
 			},
+			"capabilityUsagePolicies": []any{
+				map[string]any{
+					"id":                "software-dev-code-semantics-guidance",
+					"appliesToCategory": "code_semantics",
+					"usageMode":         "prefer_when_triggered",
+				},
+			},
 		},
 	}); err != nil {
 		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
@@ -2293,6 +2300,10 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	contract := contextMapFromValue(t, item.Run.ExecutionContext["executionContract"])
 	if contract["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("executionContract = %+v, want must_produce_state_change", contract)
+	}
+	policies := contextMapSliceFromValue(t, contract["capabilityUsagePolicies"])
+	if len(policies) != 1 || policies[0]["id"] != "software-dev-code-semantics-guidance" {
+		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev code semantics policy", contract["capabilityUsagePolicies"])
 	}
 	profileContracts := contextMapFromValue(t, contract["profileContracts"])
 	softwareDev := contextMapFromValue(t, profileContracts["software-dev"])

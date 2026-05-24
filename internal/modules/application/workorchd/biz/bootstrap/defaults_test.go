@@ -59,6 +59,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertStringListContains(t, semanticNavigation["defaultMCPServerIds"].([]any), "mcp-lsp-bridge")
 	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_diagnostics")
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
+	assertSoftwareDevCapabilityUsagePolicies(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
@@ -283,6 +284,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
 	assertSoftwareDevAcceptanceDimensions(t, template.ContextHints)
+	assertSoftwareDevCapabilityUsagePolicies(t, template.ContextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
 	if len(template.EvidencePolicies) == 0 {
 		t.Fatalf("software-dev evidence policies were not refreshed: %+v", template)
@@ -541,6 +543,33 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if !seen {
 			t.Fatalf("software-dev evidenceRequirements missing %q in %+v", id, requirements)
 		}
+	}
+}
+
+func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any) {
+	t.Helper()
+	rawPolicies, ok := hints["capabilityUsagePolicies"].([]any)
+	if !ok || len(rawPolicies) == 0 {
+		t.Fatalf("contextHints.capabilityUsagePolicies = %+v, want non-empty policies", hints["capabilityUsagePolicies"])
+	}
+	var found bool
+	for _, raw := range rawPolicies {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("capability usage policy item = %+v, want map", raw)
+		}
+		if item["id"] == "software-dev-code-semantics-guidance" {
+			found = true
+			if item["appliesToCategory"] != "code_semantics" {
+				t.Fatalf("capability usage policy = %+v, want code_semantics category", item)
+			}
+			if item["usageMode"] != "prefer_when_triggered" {
+				t.Fatalf("capability usage policy = %+v, want prefer_when_triggered usageMode", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("capabilityUsagePolicies = %+v, want software-dev-code-semantics-guidance", rawPolicies)
 	}
 }
 
