@@ -413,10 +413,15 @@ func TestModelInputRendersAtBottom(t *testing.T) {
 	m = asModel(next)
 	m.width = 80
 	m.height = 12
+	m.progress = progressRunning
+	m.progressText = "runtime status"
 	view := stripANSI(m.View())
 	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
-	if len(lines) < 2 {
+	if len(lines) < 3 {
 		t.Fatalf("view too short:\n%s", view)
+	}
+	if !strings.HasPrefix(lines[len(lines)-3], "Running - runtime status") {
+		t.Fatalf("expected runtime status immediately above input, got %q in:\n%s", lines[len(lines)-3], view)
 	}
 	if !strings.HasPrefix(lines[len(lines)-2], "ws-1 >") {
 		t.Fatalf("expected bottom input above help, got %q in:\n%s", lines[len(lines)-2], view)

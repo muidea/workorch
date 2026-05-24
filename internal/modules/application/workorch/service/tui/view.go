@@ -20,14 +20,15 @@ func (m AppModel) View() string {
 		return m.renderHelpOverlay(width, height)
 	}
 
+	status := m.renderRuntimeStatusBar(width)
 	input := m.renderInput(width)
 	help := m.renderHelp(width)
-	contentHeight := height - lineCount(input) - lineCount(help) - 1
+	contentHeight := height - lineCount(status) - lineCount(input) - lineCount(help) - 2
 	if contentHeight < 8 {
 		contentHeight = 8
 	}
 	content := m.renderContent(width, contentHeight)
-	return padLines(content, contentHeight) + "\n" + input + "\n" + help
+	return padLines(content, contentHeight) + "\n" + status + "\n" + input + "\n" + help
 }
 
 func (m AppModel) viewSize() (int, int) {
@@ -44,9 +45,10 @@ func (m AppModel) viewSize() (int, int) {
 
 func (m AppModel) contentDimensions() (int, int) {
 	width, height := m.viewSize()
+	status := m.renderRuntimeStatusBar(width)
 	input := m.renderInput(width)
 	help := m.renderHelp(width)
-	contentHeight := height - lineCount(input) - lineCount(help) - 1
+	contentHeight := height - lineCount(status) - lineCount(input) - lineCount(help) - 2
 	if contentHeight < 8 {
 		contentHeight = 8
 	}
@@ -148,8 +150,6 @@ func (m AppModel) renderMain(width, height int) string {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	b.WriteString(m.renderProgress(width))
-	b.WriteString("\n")
 	if len(m.transcript) > 0 {
 		b.WriteString(renderTranscript(m.transcript, width-2, 5))
 	}
@@ -508,6 +508,10 @@ func (m AppModel) renderProgress(width int) string {
 	default:
 		return Info.Render(label)
 	}
+}
+
+func (m AppModel) renderRuntimeStatusBar(width int) string {
+	return m.renderProgress(width)
 }
 
 func (m AppModel) renderWorkspacePanel(width, height int) string {
