@@ -1640,11 +1640,24 @@ func missingDeliverableCoverageFromFailureOutput(output map[string]any) []map[st
 	return ret
 }
 
+func missingDeliverableCoverageFromStep(step *runModel.Step) []map[string]any {
+	if step == nil {
+		return nil
+	}
+	if missing := missingDeliverableCoverageFromFailureOutput(step.Output); len(missing) > 0 {
+		return missing
+	}
+	return missingDeliverableCoverageFromDoDAssessment(doDAssessmentFromOutput(step.Output))
+}
+
 func missingGoalCoverageFromStep(step *runModel.Step) []map[string]any {
 	if step == nil {
 		return nil
 	}
 	if missing := missingGoalCoverageFromFailureOutput(step.Output); len(missing) > 0 {
+		return mergeMissingGoalCoverageInputCandidates(missing, step.Input)
+	}
+	if missing := missingGoalCoverageFromDoDAssessment(doDAssessmentFromOutput(step.Output)); len(missing) > 0 {
 		return mergeMissingGoalCoverageInputCandidates(missing, step.Input)
 	}
 	return missingGoalCoverageFromInput(step.Input)
@@ -2479,7 +2492,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
 		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
 	}
-	if missingDeliverableCoverage := missingDeliverableCoverageFromFailureOutput(failedStep.Output); len(missingDeliverableCoverage) > 0 &&
+	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
 		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
 		input["missingDeliverableCoverage"] = missingDeliverableCoverage
 	}
@@ -2504,7 +2517,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"failedStepKind":     string(failedStep.Kind),
 			"missingDoD":         missingDoDItemsFromFailureOutput(failedStep.Output),
 			"missingGoal":        missingGoalCoverageFromStep(failedStep),
-			"missingDeliverable": missingDeliverableCoverageFromFailureOutput(failedStep.Output),
+			"missingDeliverable": missingDeliverableCoverageFromStep(failedStep),
 		}
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
@@ -2534,7 +2547,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 				input["supersededFailureEvidence"] = superseded
 			}
 		}
-		if missingDeliverableCoverage := missingDeliverableCoverageFromFailureOutput(failedStep.Output); len(missingDeliverableCoverage) > 0 {
+		if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 {
 			input["missingDeliverableCoverage"] = missingDeliverableCoverage
 		}
 		if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
@@ -5107,8 +5120,8 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 		return false
 	}
 	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 &&
-		len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 &&
-		len(missingDeliverableCoverageFromFailureOutput(failedStep.Output)) == 0 {
+		len(missingGoalCoverageFromStep(failedStep)) == 0 &&
+		len(missingDeliverableCoverageFromStep(failedStep)) == 0 {
 		return false
 	}
 	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])

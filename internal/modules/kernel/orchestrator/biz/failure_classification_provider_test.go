@@ -74,6 +74,9 @@ func TestClassifyRuntimeFailureStrategyReassessmentContractIsNotAuthOrConfig(t *
 	if isProviderFailureClass(classification.Class) {
 		t.Fatalf("runtime contract failure classified as provider failure: classification=%+v", classification)
 	}
+	if !runtimeFailureIsLLMContractLoop(step) {
+		t.Fatalf("strategy reassessment contract failure should be treated as LLM/runtime contract loop")
+	}
 }
 
 func TestClassifyRuntimeFailureProviderStreamIncomplete(t *testing.T) {

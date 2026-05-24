@@ -13523,6 +13523,75 @@ func TestRuntimeOrchestrator_DispatchesValidationFollowUpForContinueWithoutActio
 	}
 }
 
+func TestNoActionableContinuationFailedAssessmentBuildsCoverageRepairInput(t *testing.T) {
+	runID := common.RunID("run-failed-assessment-coverage-follow-up")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-001/004-assess"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{},
+		Output: map[string]any{
+			"status": "completed",
+			stepOutputKeyLLMDecision: map[string]any{
+				"completionState": "failed",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": false,
+					"summary":   "coverage gaps remain",
+					"items": []map[string]any{{
+						"item":  "primary acceptance dimension",
+						"state": "satisfied",
+					}},
+					"goalCoverage": map[string]any{
+						"satisfied": false,
+						"items": []map[string]any{{
+							"goalRequirementId": "goal-req-001-target",
+							"item":              "target requirement is not covered",
+							"state":             "failed",
+							"reason":            "no direct evidence closes the requirement",
+							"nextActions":       []string{"collect bounded evidence for target requirement"},
+						}},
+					},
+					"deliverableCoverage": map[string]any{
+						"satisfied": false,
+						"items": []map[string]any{{
+							"id":          "deliverable-target",
+							"state":       "failed",
+							"reason":      "deliverable evidence is missing",
+							"nextActions": []string{"produce deliverable evidence"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-failed-assessment-coverage-follow-up", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+
+	if !shouldDispatchNoActionableContinuationFollowUp(run, step, step.Output) {
+		t.Fatalf("failed assessment with actionable coverage gaps should dispatch continuation follow-up")
+	}
+	input := noActionableContinuationFollowUpStepInput(run, step)
+	if !boolValue(input["actionableFailedAssessmentContinuation"]) || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("input = %+v, want concrete evidence repair for actionable failed assessment", input)
+	}
+	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["goalRequirementId"] != "goal-req-001-target" {
+		t.Fatalf("missingGoalCoverage = %+v, want goal coverage from failed assessment", input["missingGoalCoverage"])
+	}
+	if missing := mapSliceFromValue(input["missingDeliverableCoverage"]); len(missing) != 1 || missing[0]["item"] != "deliverable-target" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want deliverable coverage from failed assessment", input["missingDeliverableCoverage"])
+	}
+	targets := mapSliceFromValue(input["coverageTargetSet"])
+	if len(targets) != 2 {
+		t.Fatalf("coverageTargetSet = %+v, want goal and deliverable targets", input["coverageTargetSet"])
+	}
+	if targets[0]["kind"] != "goal" || targets[0]["goalRequirementId"] != "goal-req-001-target" {
+		t.Fatalf("coverageTargetSet[0] = %+v, want goal target", targets[0])
+	}
+	if targets[1]["kind"] != "deliverable" || targets[1]["targetText"] != "deliverable-target" {
+		t.Fatalf("coverageTargetSet[1] = %+v, want deliverable target", targets[1])
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

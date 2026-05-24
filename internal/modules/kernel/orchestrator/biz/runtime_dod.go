@@ -1112,6 +1112,47 @@ func missingGoalCoverageFromDoDAssessment(assessment map[string]any) []map[strin
 	return ret
 }
 
+func missingDeliverableCoverageFromDoDAssessment(assessment map[string]any) []map[string]any {
+	if len(assessment) == 0 {
+		return nil
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state == "" || state == "satisfied" {
+			continue
+		}
+		name := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "id"),
+			stringFromMap(item, "expectationId"),
+			stringFromMap(item, "requirement"),
+		))
+		if name == "" {
+			continue
+		}
+		missing := map[string]any{
+			"kind":         "deliverable",
+			"item":         name,
+			"state":        state,
+			"source":       "deliverableCoverage",
+			"evidenceRefs": evidenceRefsFromValue(item["evidenceRefs"]),
+		}
+		if reason := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "reason"), stringFromMap(item, "summary"))); reason != "" {
+			missing["reason"] = reason
+		}
+		if actions := stringSliceFromValue(item["nextActions"]); len(actions) > 0 {
+			missing["suggestedNextActions"] = actions
+		}
+		ret = append(ret, missing)
+	}
+	return ret
+}
+
 func missingDoDItemDiagnostics(items []normalizedDoDItem) []map[string]any {
 	if len(items) == 0 {
 		return nil

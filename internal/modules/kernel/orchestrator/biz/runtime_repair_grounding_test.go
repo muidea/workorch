@@ -183,6 +183,81 @@ func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTarget
 	}
 }
 
+func TestRuntimeRepairActionPackagePreservesTargetContextAcrossStrategyContractFailure(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"runtimeRepairAttempt":        4,
+		"maxRuntimeRepairAttempts":    10,
+		"targetRepairAttempts":        3,
+		"failedStepId":                "run/repair-003",
+		"failedStepKind":              llmWorkspaceExecutionStepKind,
+		"failureClass":                failureClassRuntime,
+		"failureReason":               "invalid argument: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/repairMode/forbiddenRepair/verificationPlan aligned with current failed surface",
+		"failureTargetScope":          "failureTargets=target.go",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"strategyReassessment": map[string]any{
+			"required":      true,
+			"failedSurface": "failureTargets=target.go",
+			"requiredDecisionFields": []string{
+				"failedSurface",
+				"rootCauseTarget",
+				"repairTargetDecision",
+				"repairMode",
+				"forbiddenRepair",
+				"verificationPlan",
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.go",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"content":          "package target\n",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+			"repairTargetSet": []string{"target.go"},
+		},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"strategyReassessment.required"},
+			"identifiers": []string{
+				"strategyReassessment",
+				"failedSurface",
+				"rootCauseTarget",
+				"repairTargetDecision",
+				"repairMode",
+				"forbiddenRepair",
+				"verificationPlan",
+			},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_execution_graph_plan",
+		"error":               input["failureReason"],
+		failureOutputKeyClass: failureClassRuntime,
+	})
+
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || required["mustDeclareStrategyReassessmentFields"] != true {
+		t.Fatalf("requiredOutput = %#v, want state-changing strategy reassessment contract preserved", required)
+	}
+	if targetSet := stringSliceFromValue(actionPackage["repairTargetSet"]); !stringSliceContains(targetSet, "target.go") {
+		t.Fatalf("repairTargetSet = %#v, want inherited target.go preserved", targetSet)
+	}
+	if targetSet := stringSliceFromValue(actionPackage["repairTargetSet"]); stringSliceContains(targetSet, "strategyReassessment.required") {
+		t.Fatalf("repairTargetSet = %#v, want contract marker excluded", targetSet)
+	}
+	snapshots := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(snapshots) != 1 || snapshots[0]["targetRef"] != "target.go" {
+		t.Fatalf("targetSnapshots = %#v, want inherited target snapshot", snapshots)
+	}
+	reassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if reassessment["failedSurface"] != "failureTargets=target.go" {
+		t.Fatalf("strategyReassessment = %#v, want inherited failed surface", reassessment)
+	}
+}
+
 func TestRuntimeRepairActionPackageUsesEvidenceAcquisitionWithoutConcreteTarget(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

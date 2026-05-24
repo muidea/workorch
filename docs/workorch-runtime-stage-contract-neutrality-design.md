@@ -652,6 +652,15 @@ Coverage contract 必须贯穿 planning -> execution -> follow-up -> repair -> v
 
 该规则仍是中立的：core 不判断具体业务实现方案，只要求“当缺口和修复目标已经结构化存在时，follow-up 输出优先给出可执行 continuation，而不是停在纯描述性失败”。
 
+Runtime 在处理 `completionState=failed|continue|incomplete` 且输出包含 failed `dodAssessment` / `goalCoverage` / `deliverableCoverage` 时，必须先把该 assessment 视为可行动 coverage gap 候选，而不是直接报 `completionState <state> has no actionable continuation`。若 assessment 中存在 failed item、reason、nextActions、evidenceCandidates、coverage target、可解析资源引用或仍未满足的 Goal / DoD / deliverable 维度，runtime 必须构造 continuation：
+
+- 若缺口只有证据不足，进入 `need_validation` 或 concrete validation evidence repair。
+- 若缺口需要状态变更但尚无 target snapshot，进入 `need_evidence`，要求有界读取/取证。
+- 若已存在 `coverageTargetSet`、target refs、target snapshots 或等价当前证据，进入 `need_state_change`。
+- 只有 assessment 明确声明无法自动推进，或缺少 runtime 无法获取的人工信息/权限/外部配置，才允许 `need_governance` / blocker。
+
+该转换只依据中立 assessment 结构、coverage gap、evidence refs/candidates、manifest、target refs、nextActions 和当前 evidence，不得按软件开发、具体文件名、供应商、语言或测试框架做 core 特判。连续多次相同 coverage target 的 failed assessment 必须消耗同一 coverage repair budget；step ID 或 follow-up 包装变化不得重置预算。
+
 所有 state-changing artifact 的合同校验必须发生在副作用执行之前。`patchRequests`、`patch/apply` graph node、`nextStep=patch/apply` 和 runtime patch output 在写入 workspace、创建 applied patch evidence、记录 completed step evidence 之前，都必须先通过适用的 coverage target、target relevance、state-changing graph、bounded verification 等中立合同校验。只有 coverage-bound 输入缺少或不匹配 `coverageTargets` 时，runtime 才应 fail-fast 并进入 repair/provider retry/schema recovery；普通诊断修复不得被提升为 coverage target violation。`coverageTargets` 属于 patch 的中立治理元数据，必须从 LLM decision schema、top-level `patchRequests`、`executionGraph.nodes[].input`、patch evidence、runtime validator 与后续 `repairActionPackage` 全链路保留；任何 schema normalization、decision mapping、evidence compaction 或 provider retry 都不得静默丢弃该字段。
 
 Runtime 必须维护中立 coverage ledger 或等价的 coverage 状态视图。每个 coverage target 至少包含 `kind`、`targetText`、可选 `goalRequirementId` / `coverageTargetToken`、`state`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs` 与 `reason`。Core 只记录结构关系和证据质量，不判断业务正确性。证据质量至少分为 `direct`、`indirect`、`smoke`、`unrelated`、`invalid`：只有 `direct` / 合理 `indirect` evidence 可以进入相应 coverage target 的 `evidenceCandidates` 或关闭 evidence 链；`smoke` evidence 只能证明基础可执行或环境可用，不得进入功能 Goal / DoD / deliverable coverage candidates；`unrelated` / `invalid` 必须记录 rejected reason 并从后续候选中过滤。
@@ -746,6 +755,16 @@ Replan continuation 不得只因为 predecessor run 的 execution contract 要�
 当 repair-of-repair 的当前失败是 `llm_schema_invalid` / `llm_decision_invalid`，runtime 必须把该失败作为 LLM decision contract failure 处理，而不是 provider failure。repair input 应包含中立的 schema invalid recovery contract：只能基于 `repairActionPackage`、当前 target snapshot 和 schema 约束重建一个合法 JSON decision；禁止复用 rejected raw content / preview，禁止 markdown 包裹、注释、重复 JSON object、尾随多余括号和局部数组。该规则只治理输出形态和 lineage，不引入任何业务领域判断。
 
 当 repair-of-repair 的失败来自 runtime 输出合同或准入合同，例如 `strategyReassessment.required=true`、`executionGraph patch/apply input invalid`、`scoped state-changing runtime repair requires bounded verification` 或等价中立合同错误，failure class 必须保持 `runtime_failed` 或 `llm_decision_invalid`，不得因为错误文本中包含 `forbiddenRepair`、`API Key`、`auth` 等业务/合同词而误归类为 `auth_or_config_error`。Provider auth/config 只适用于 `llm_provider_*` 阶段或明确 provider auth/config stage；runtime 合同失败后续 repair 必须继续继承原始 failure surface、repairActionPackage、target context 和 strategy reassessment。
+
+Runtime contract correction failure 是一类独立的中立 repair-of-repair 信号。若失败文本命中 `strategyReassessment.required=true`、state-changing repair contract、patch/apply input contract、bounded verification contract、primary diagnostic contract 或等价输出准入合同，runtime 必须把它识别为 LLM/runtime contract loop，而不是新的业务失败面。该类失败的下一轮输入必须满足：
+
+- `repairActionPackage` 继续作为 primary actionable contract，继承上一轮的 `currentFailure`、`failureTargetScope`、`targetSnapshots`、`repairTargetSet`、`coverageTargetSet`、`primaryDiagnosticRepair`、`rootCauseCandidateContext` 和 `strategyReassessment`。
+- 若上一轮已有 concrete target evidence，下一轮不得降级成泛化 exploration / planning / verification，也不得把合同字段名当作 workspace repair target；应继续 `need_state_change`，并把 rejection reason 作为 `previousRejectedOutputSummary` / `contractCorrectionFailure`。
+- 若上一轮没有 concrete target evidence，下一轮进入 `acquire_concrete_failure_evidence`，但仍保留原 contract violation 摘要，避免让 LLM 把合同字段名、schema 字段或错误类别当作业务资源。
+- 同一 `failure class + target scope + contract marker` 的重复合同失败必须消耗同一 repair budget。step ID、run graph 编号、repair 编号或 follow-up wrapper 改变不得重置预算；达到预算后必须进入 bounded replan、failed assessment、rejected result 或真实治理阻塞。
+- `currentProgressDigest` 与 `processEvidenceTimeline` 中的最新缺口必须仍指向原始未关闭 failure target 或 coverage target；runtime contract wrapper 只能作为 latest rejected output，不得覆盖当前目标。
+
+上述规则只依赖中立合同 marker、target scope、lineage、evidence 和 budget，不得解释代码语言、测试框架、业务领域或具体 Goal 语义。
 
 当 `strategyReassessment.required=true` 且 repair 输出需要 state-changing patch 时，`repairActionPackage.requiredOutput` 必须显式包含 `mustDeclareStrategyReassessmentFields=true` 与 `strategyReassessmentRequiredFields`，默认字段为 `failedSurface`、`rootCauseTarget`、`repairTargetDecision`、`repairMode`、`forbiddenRepair`、`verificationPlan`。这些字段是中立 runtime 合同，不表达任何具体业务含义；LLM patch/apply 节点必须在自身 `input` 对象中直接声明这些字段并与当前 failed surface 对齐。不得输出 top-level `strategyReassessment`，也不得把 `strategyReassessment` 放在 executionGraph node 的 `input` 兄弟字段上；否则属于 JSON / execution contract violation。为避免可机械修复的决策因字段位置偏差被直接拒绝，parser 可以在存在 `executionGraph.patch/apply.input` 时把 top-level `strategyReassessment` 的字段下沉到每个 patch/apply node input 并移除顶层字段；该归一化只修正 JSON 形态，不放宽 strategy reassessment 的字段完整性、failed surface 对齐、repairMode 和 bounded verification 校验。
 

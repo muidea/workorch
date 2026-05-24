@@ -531,6 +531,10 @@ func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
 		"patch diff contains redacted runtime markers",
 		"patch content contains redacted runtime markers",
 		"invalid llm decision json",
+		"strategyreassessment.required=true",
+		"state-changing repair contract",
+		"scoped state-changing runtime repair requires bounded verification",
+		"primary diagnostic",
 		"state-changing llm repair step returned",
 		"execution-stage llm graph node returned executiongraph without concrete output",
 	} {

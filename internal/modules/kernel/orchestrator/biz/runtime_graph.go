@@ -843,11 +843,74 @@ func shouldDispatchNoActionableContinuationFollowUp(run *runModel.Run, step *run
 	if boolValue(step.Input[stepInputKeyNoActionableFollowUp]) {
 		return false
 	}
-	if doDAssessmentFromOutput(output) != nil {
+	completionState := llmDecisionCompletionStateFromOutput(output)
+	if completionState == "" || completionState == "completed" {
 		return false
 	}
-	completionState := llmDecisionCompletionStateFromOutput(output)
-	return completionState != "" && completionState != "completed"
+	if doDAssessmentFromOutput(output) == nil {
+		return true
+	}
+	return failedAssessmentHasActionableCoverageGap(output)
+}
+
+func failedAssessmentHasActionableCoverageGap(output map[string]any) bool {
+	assessment := doDAssessmentFromOutput(output)
+	if len(assessment) == 0 {
+		return false
+	}
+	if satisfied, ok := assessment["satisfied"].(bool); ok && satisfied {
+		return false
+	}
+	if len(missingDoDItemsFromDoDAssessment(assessment)) > 0 ||
+		len(missingGoalCoverageFromDoDAssessment(assessment)) > 0 ||
+		len(missingDeliverableCoverageFromDoDAssessment(assessment)) > 0 ||
+		len(missingDoDItemsFromFailureOutput(output)) > 0 ||
+		len(missingGoalCoverageFromFailureOutput(output)) > 0 ||
+		len(missingDeliverableCoverageFromFailureOutput(output)) > 0 {
+		return true
+	}
+	if assessmentItemHasActionableFailure(assessment) {
+		return true
+	}
+	if coverage := mapFromValue(assessment["goalCoverage"]); assessmentItemHasActionableFailure(coverage) {
+		return true
+	}
+	if coverage := mapFromValue(assessment["deliverableCoverage"]); assessmentItemHasActionableFailure(coverage) {
+		return true
+	}
+	if coverage := mapFromValue(assessment["acceptanceDimensions"]); assessmentItemHasActionableFailure(coverage) {
+		return true
+	}
+	return false
+}
+
+func assessmentItemHasActionableFailure(container map[string]any) bool {
+	items, ok := doDAssessmentItemMaps(container["items"])
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		if state == "" || state == "satisfied" {
+			continue
+		}
+		if strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "requirement"),
+			stringFromMap(item, "reason"),
+			stringFromMap(item, "summary"),
+		)) != "" {
+			return true
+		}
+		if len(stringSliceFromValue(item["nextActions"])) > 0 ||
+			len(mapSliceFromValue(item["evidenceCandidates"])) > 0 ||
+			len(evidenceRefsFromValue(item["evidenceRefs"])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func graphFollowUpExpansionStep(step *runModel.Step) bool {
@@ -987,6 +1050,25 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 	if completionState := llmDecisionCompletionStateFromOutput(step.Output); completionState != "" {
 		input["previousCompletionState"] = completionState
 		input["continuationFailureReason"] = fmt.Sprintf("completionState %s has no actionable continuation", completionState)
+	}
+	if failedAssessmentHasActionableCoverageGap(step.Output) {
+		input["actionableFailedAssessmentContinuation"] = true
+		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+		input["evidenceRepairRequired"] = true
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Previous output returned a failed assessment with actionable coverage gaps; convert the gaps into bounded validation evidence or targeted repair instead of repeating a descriptive failed assessment.",
+			"Preserve missing DoD, Goal, and deliverable coverage targets and cite concrete evidenceRefs when a target is closed.",
+		)
+		if missing := missingDoDItemsFromStep(step); len(missing) > 0 {
+			input["missingDoDItems"] = missing
+		}
+		if missing := missingGoalCoverageFromStep(step); len(missing) > 0 {
+			input["missingGoalCoverage"] = missing
+		}
+		if missing := missingDeliverableCoverageFromStep(step); len(missing) > 0 {
+			input["missingDeliverableCoverage"] = missing
+		}
+		ensureCoverageRepairTargetSet(input)
 	}
 	return input
 }
