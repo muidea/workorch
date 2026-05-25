@@ -13714,6 +13714,73 @@ func TestNoActionableContinuationFailedAssessmentBuildsCoverageRepairInput(t *te
 	}
 }
 
+func TestNoActionableContinuationPreservesConcreteValidationRepairContract(t *testing.T) {
+	runID := common.RunID("run-validation-contract-continuation")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "verify accepted behavior",
+			}},
+			"convergenceContract": map[string]any{
+				"state":           convergenceStateNeedValidation,
+				"repairObjective": repairObjectiveConcreteValidationEvidence,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"forbiddenKinds":                        []string{"patch/apply"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"status": "completed",
+			stepOutputKeyLLMDecision: map[string]any{
+				"completionState": "failed",
+				stepOutputKeyDoDAssessment: map[string]any{
+					"satisfied": false,
+					"summary":   "verification evidence is still missing",
+					"items": []map[string]any{{
+						"item":  "verify accepted behavior",
+						"state": "failed",
+					}},
+				},
+			},
+		},
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-validation-contract-continuation", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+
+	input := noActionableContinuationFollowUpStepInput(run, step)
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
+		input["evidenceRepairRequired"] != true {
+		t.Fatalf("input = %+v, want concrete validation repair contract preserved", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation evidence contract only", required)
+	}
+	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 1 || targets[0]["targetText"] != "verify accepted behavior" {
+		t.Fatalf("coverageTargetSet = %+v, want inherited coverage target", input["coverageTargetSet"])
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -18488,6 +18555,47 @@ func TestValidateLLMExecutionOutputContractAllowsEvidenceRepairShellGraph(t *tes
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want evidence repair shell graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationRepairAssessmentOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-assessment-only",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-assessment-only/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "verification evidence is still missing",
+			"items": []map[string]any{{
+				"item":  "verify accepted behavior",
+				"state": "failed",
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "concrete validation evidence repair must return bounded") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want concrete validation evidence contract rejection", err)
 	}
 }
 

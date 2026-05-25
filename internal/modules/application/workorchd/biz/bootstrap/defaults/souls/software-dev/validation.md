@@ -29,6 +29,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 计量、费用、审计、流水账、状态文件或其他副作用必须用测试或命令证据证明写入/追加行为；file/read 只能证明文件当前存在或可读，不能单独支撑 persistence_or_side_effect satisfied
 - 对 runtime_entrypoint、external_contract、streaming_or_long_running、error_behavior、persistence_or_side_effect、concurrency 等高风险维度，satisfied 项必须给出直接 evidenceRefs，并且这些 evidenceRefs 必须命中可执行、可验证、可追踪的 runtime action；不能只引用 build/race/coverage_map、只读 file/read/file/list、mcp/resource_read、mcp/prompt_get 或总体 artifact 摘要
 - fake/mock/helper 可以作为外部依赖替身或验证辅助，但高风险维度的 satisfied 证据必须绑定真实交付入口或生产实现；不能把测试文件内 fake/mock/helper 作为唯一被测对象或唯一直接证据
+- 对外部 API、协议、流式、错误透传、token 统计、持久化或副作用类验收，缺少真实凭证、网络或第三方服务时，优先用本地 deterministic fake/stub server 或 fixture 通过真实交付入口验证；只有 Goal/DoD 明确要求真实外部服务且本地替身无法覆盖合同，才可标记 blocker / skipped
 - 若 acceptanceDimensions 中声称上述高风险维度 satisfied，但 evidenceRefs 不能直接追踪到对应验证动作、状态变更动作或等价执行证据，应标记 failed/skipped，并说明缺失的入口验证、行为验证或副作用验证
 - 结果声明必须做 claim-to-evidence consistency check：summary、goalOutcome、implementationSummary、verificationSummary、knownLimitations 中不得声称未由代码、测试、构建、patch 或 artifact 证据支撑的库、协议、平台、外部目标、性能、并发或安全能力
 - skipped 条目必须说明原因、影响和残余风险

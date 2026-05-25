@@ -59,6 +59,7 @@
 - 针对外部依赖、目标适配行为或副作用补验证时，优先使用本地 deterministic/offline fake、stub 或 fixture；除非 Goal/DoD 明确要求真实外部依赖，不要把在线服务作为唯一证据
 - fake、stub、helper 或 mock 可以隔离外部依赖，但高风险维度的测试主体必须调用真实交付入口或生产实现；不要只验证测试文件内临时实现后声称 Goal/DoD 已满足
 - 测试必须验证生产实现产生的行为和副作用；不得绕过生产实现直接写入状态文件、日志文件、统计文件、输出文件或测试夹具来模拟副作用后声称满足 DoD
+- 对外部 API、协议、流式、错误透传、token 统计、持久化或副作用类能力，若缺少真实凭证、网络或第三方服务，必须优先构造本地 deterministic fake/stub server 或 fixture，并通过真实交付入口 / 生产实现触发验证；只有 Goal/DoD 明确要求真实外部服务且本地替身无法覆盖合同，才允许输出治理 blocker
 
 ## 编译与接口形状修复
 - 当 build/test 失败直接报告 undefined、unknown field、cannot use、missing method、constructor/schema/interface mismatch、入口函数缺失或其他 API 形状不匹配时，必须先修复这些首要阻塞，再处理断言增强、格式整理或其他次要改进

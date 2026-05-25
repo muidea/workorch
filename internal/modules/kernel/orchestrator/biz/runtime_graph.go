@@ -1047,6 +1047,7 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 	input["completionFollowUp"] = false
 	input["continuationFollowUp"] = true
 	setRuntimeStage(input, runtimeStageVerification)
+	inheritConcreteValidationRepairContract(input, step)
 	if completionState := llmDecisionCompletionStateFromOutput(step.Output); completionState != "" {
 		input["previousCompletionState"] = completionState
 		input["continuationFailureReason"] = fmt.Sprintf("completionState %s has no actionable continuation", completionState)
@@ -1071,6 +1072,72 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 		ensureCoverageRepairTargetSet(input)
 	}
 	return input
+}
+
+func inheritConcreteValidationRepairContract(input map[string]any, previousStep *runModel.Step) bool {
+	if len(input) == 0 || previousStep == nil || !inputRequiresConcreteValidationEvidence(previousStep.Input) {
+		return false
+	}
+	for _, key := range []string{
+		"repairObjective",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"coverageRepairRequired",
+		"coverageTargetSet",
+		"missingDoDItems",
+		"missingGoalCoverage",
+		"missingDeliverableCoverage",
+		"verificationEvidenceGap",
+		"currentExecutionProgress",
+		"processEvidenceTimeline",
+		"convergenceContract",
+	} {
+		if value, ok := previousStep.Input[key]; ok && value != nil {
+			input[key] = cloneStepInputValue(value)
+		}
+	}
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairRequired"] = true
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	if pkg := mapFromValue(previousStep.Input["repairActionPackage"]); len(pkg) > 0 {
+		next := cloneStepPayload(pkg)
+		required := concreteValidationEvidenceRequiredOutput(mapFromValue(next["requiredOutput"]))
+		next["requiredOutput"] = required
+		next["evidenceRepairRequired"] = true
+		input["repairActionPackage"] = next
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Previous step was governed by a concrete validation evidence contract; preserve repairObjective, convergenceContract, requiredOutput, and coverage targets.",
+		"Do not downgrade this continuation to assessment-only or repeat a plain failed dodAssessment; return bounded shell/command or mcp/tool_call validation evidence, or a real governance blocker.",
+	)
+	ensureCoverageRepairTargetSet(input)
+	return true
+}
+
+func inputRequiresConcreteValidationEvidence(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+		boolValue(input["boundedValidationRequired"]) ||
+		boolValue(input["evidenceRepairRequired"]) {
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	return boolValue(required["mustProduceConcreteValidationEvidence"])
+}
+
+func cloneStepInputValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneStepPayload(typed)
+	case []map[string]any:
+		return cloneMapSlice(typed)
+	default:
+		return typed
+	}
 }
 
 func noActionableContinuationFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {

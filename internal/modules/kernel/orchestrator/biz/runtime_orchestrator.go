@@ -1701,6 +1701,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateRuntimeRepairFailureDiagnosticsContract(step); err != nil {
 		return err
 	}
+	if err := validateConcreteValidationEvidenceOutputContract(step, output); err != nil {
+		return err
+	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
 		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
@@ -1744,6 +1747,28 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+}
+
+func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || step.Input == nil || output == nil || !inputRequiresConcreteValidationEvidence(step.Input) {
+		return nil
+	}
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok && graphIsConcreteValidationEvidenceGraph(graph) {
+		return nil
+	}
+	if spec := decisionBlockSpec(output); spec.Reason != "" {
+		return nil
+	}
+	if spec := approvalBlockSpec(output); spec.Reason != "" {
+		return nil
+	}
+	if assessment := doDAssessmentFromOutput(output); assessment != nil {
+		if boolValue(assessment["satisfied"]) {
+			return nil
+		}
+		return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput", common.ErrInvalidArgument)
+	}
+	return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs", common.ErrInvalidArgument)
 }
 
 func validateRuntimeStateChangingOutputBeforeSideEffects(run *runModel.Run, step *runModel.Step, output map[string]any) error {
