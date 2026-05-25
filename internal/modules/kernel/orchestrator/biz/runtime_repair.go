@@ -2607,6 +2607,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Unresolved Goal/DoD/deliverable coverage is currently a validation evidence gap because no concrete implementation target evidence is available.",
 			"Produce bounded shell/tool/MCP validation evidence that maps to the coverageTargetSet before attempting another assessment.",
+			"When an external dependency, credential, service, network endpoint, port, clock, filesystem path, or equivalent runtime prerequisite is unavailable, first try a neutral controlled substitute such as a temporary fixture, local stub/mock, alternate temporary config, isolated working directory, or available ephemeral port through the allowed validation tools; do not mark the item skipped or request a decision until such bounded substitute validation is impossible or would violate the Goal/DoD.",
 			"Do not return patch/apply unless a later validation failure provides concrete target refs, line refs, diagnostics, or current target snapshots.",
 		)
 	}
@@ -3337,6 +3338,7 @@ func concreteValidationEvidenceRepairGuidance() []string {
 		"Do not repeat assessment-only validation.",
 		"Produce concrete verification evidence for the failed Goal/DoD coverage before attempting state-changing repair.",
 		"Return a bounded executionGraph that runs available verification capabilities, or return a failed dodAssessment/blocker if concrete evidence cannot be produced.",
+		"If a dependency or environment prerequisite is unavailable, prefer a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port when that can validate the same contract without changing deliverables.",
 		"Do not use read-only inspection, self-inspection, run snapshot, observability, or context rehydration graphs as evidence repair.",
 		"If a verification command or tool later fails with concrete diagnostics, that failure may drive a separate state-changing repair.",
 	}
@@ -3631,6 +3633,11 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	}
 	out["mustIncludeStateChangingNode"] = false
 	out["mustProduceConcreteValidationEvidence"] = true
+	out["mustPreferExecutableBehaviorValidation"] = true
+	out["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"] = true
+	out["mustAttemptControlledSubstituteWhenPrerequisiteUnavailable"] = true
+	out["mustDeclareValidationEvidenceMode"] = true
+	out["mustDeclareValidationEvidenceObservation"] = true
 	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
@@ -3642,6 +3649,9 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 		"observability_only_graph",
 	))
 	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears"
+	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; static inspection alone does not close runtime-behavior coverage"
+	out["validationEvidenceModeRule"] = "each shell/command or mcp/tool_call node intended to close runtime-behavior coverage must declare input.validationEvidence.mode as runtime_behavior, controlled_substitute, executable_contract, or dynamic_execution; static_inspection/source_inspection metadata cannot close runtime-behavior coverage"
+	out["validationEvidenceObservationRule"] = "each concrete validation node must also declare input.validationEvidence.observationType as runtime_observation, controlled_substitute_observation, executable_contract_observation, or dynamic_execution_observation; controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute"
 	return out
 }
 

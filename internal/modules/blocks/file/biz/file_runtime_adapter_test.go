@@ -100,6 +100,35 @@ func TestRuntimeAdapterListSkipsGeneratedDirectories(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterListNonRecursiveSkipsIgnoredDirectoriesWithoutFailing(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("seed .git file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("seed main.go: %v", err)
+	}
+
+	result, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		Kind:                          "file/list",
+		Input:                         map[string]any{"path": "."},
+	})
+	if err != nil {
+		t.Fatalf("list files: %v", err)
+	}
+	entries, ok := result.Output["entries"].([]map[string]any)
+	if !ok {
+		t.Fatalf("entries = %T, want []map[string]any", result.Output["entries"])
+	}
+	if len(entries) != 1 || entries[0]["path"] != "main.go" {
+		t.Fatalf("entries = %+v, want only main.go", entries)
+	}
+}
+
 func TestRuntimeAdapterRejectsPathEscape(t *testing.T) {
 	workspace := t.TempDir()
 	_, err := NewRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{

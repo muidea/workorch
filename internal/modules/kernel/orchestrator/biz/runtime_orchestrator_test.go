@@ -3228,6 +3228,11 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedFailedPatc
 	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteValidationEvidence"] != true {
 		t.Fatalf("repairActionPackage.requiredOutput = %#v, want validation evidence package", required)
 	}
+	if required["mustPreferExecutableBehaviorValidation"] != true ||
+		required["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"] != true ||
+		required["mustAttemptControlledSubstituteWhenPrerequisiteUnavailable"] != true {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want executable controlled validation contract", required)
+	}
 	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
 		t.Fatalf("repairActionPackage.requiredOutput.acceptedKinds = %#v, want shell/command", required["acceptedKinds"])
 	}
@@ -18796,6 +18801,96 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationRepairAssess
 	if !errors.Is(err, common.ErrInvalidArgument) ||
 		!strings.Contains(err.Error(), "concrete validation evidence repair must return bounded") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want concrete validation evidence contract rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithoutEvidenceMode(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-static-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-static-graph/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":            true,
+					"mustDeclareValidationEvidenceMode":                true,
+					"mustDeclareValidationEvidenceObservation":         true,
+					"staticInspectionOnlyMayNotSatisfyRuntimeBehavior": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "inspect",
+				"kind":  shellcommon.StepKindCommand,
+				"input": map[string]any{"command": "verify-static"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "validationEvidence contract") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want neutral evidence-mode rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvidenceMode(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-mode-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-mode-graph/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "verify-contract",
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "unavailable runtime prerequisite",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared concrete evidence mode allowed", err)
 	}
 }
 

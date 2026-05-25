@@ -2129,6 +2129,69 @@ func TestParseLLMExecutionDecisionNormalizesTopLevelCoverageFields(t *testing.T)
 	}
 }
 
+func TestParseLLMExecutionDecisionNormalizesTopLevelAssessmentSummaryFields(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"thoughtSummary":"assessed",
+		"dodAssessment":{
+			"satisfied":false,
+			"summary":"partial",
+			"items":[{"item":"runtime check","state":"skipped","reason":"environment unavailable"}]
+		},
+		"goalOutcome":"goal partially verified",
+		"implementationSummary":"implementation exists",
+		"verificationSummary":"bounded evidence collected",
+		"knownLimitations":["environment unavailable"],
+		"residualRisks":["runtime behavior unverified"],
+		"nextActions":["run in target environment"]
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil {
+		t.Fatalf("dodAssessment = nil, want assessment")
+	}
+	if decision.DoDAssessment.GoalOutcome != "goal partially verified" ||
+		decision.DoDAssessment.ImplementationSummary != "implementation exists" ||
+		decision.DoDAssessment.VerificationSummary != "bounded evidence collected" {
+		t.Fatalf("assessment summaries = %+v, want top-level summaries moved under dodAssessment", decision.DoDAssessment)
+	}
+	if !reflect.DeepEqual(decision.DoDAssessment.KnownLimitations, []string{"environment unavailable"}) ||
+		!reflect.DeepEqual(decision.DoDAssessment.ResidualRisks, []string{"runtime behavior unverified"}) ||
+		!reflect.DeepEqual(decision.DoDAssessment.NextActions, []string{"run in target environment"}) {
+		t.Fatalf("assessment list summaries = %+v, want moved summary lists", decision.DoDAssessment)
+	}
+}
+
+func TestParseLLMExecutionDecisionNormalizesAssessmentRefScalars(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"thoughtSummary":"assessed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"done",
+			"items":[{"item":"runtime check","state":"satisfied","evidenceRefs":101}],
+			"goalCoverage":{"satisfied":true,"items":[{"requirement":"goal","state":"satisfied","evidenceRefs":[102,"run-1/step-2"]}]},
+			"deliverableCoverage":{"satisfied":true,"items":[{"id":"artifact","state":"satisfied","artifactRefs":303}]}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil {
+		t.Fatalf("dodAssessment = nil, want assessment")
+	}
+	if !reflect.DeepEqual(decision.DoDAssessment.Items[0].EvidenceRefs, []string{"101"}) {
+		t.Fatalf("evidenceRefs = %+v, want scalar converted to string list", decision.DoDAssessment.Items[0].EvidenceRefs)
+	}
+	if !reflect.DeepEqual(decision.DoDAssessment.GoalCoverage.Items[0].EvidenceRefs, []string{"102", "run-1/step-2"}) {
+		t.Fatalf("goal evidenceRefs = %+v, want numeric list items converted", decision.DoDAssessment.GoalCoverage.Items[0].EvidenceRefs)
+	}
+	if !reflect.DeepEqual(decision.DoDAssessment.DeliverableCoverage.Items[0].ArtifactRefs, []string{"303"}) {
+		t.Fatalf("artifactRefs = %+v, want scalar converted to string list", decision.DoDAssessment.DeliverableCoverage.Items[0].ArtifactRefs)
+	}
+}
+
 func TestParseLLMExecutionDecisionRepairsKnownMalformedKeysAndNestedCoverageItems(t *testing.T) {
 	decision, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"failed",

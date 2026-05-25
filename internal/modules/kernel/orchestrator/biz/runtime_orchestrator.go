@@ -1753,7 +1753,13 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	if step == nil || step.Input == nil || output == nil || !inputRequiresConcreteValidationEvidence(step.Input) {
 		return nil
 	}
-	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok && graphIsConcreteValidationEvidenceGraph(graph) {
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		if !graphIsConcreteValidationEvidenceGraph(graph) {
+			return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs", common.ErrInvalidArgument)
+		}
+		if err := validateConcreteValidationBehaviorEvidenceGraph(step, graph); err != nil {
+			return err
+		}
 		return nil
 	}
 	if spec := decisionBlockSpec(output); spec.Reason != "" {
@@ -1769,6 +1775,81 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 		return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput", common.ErrInvalidArgument)
 	}
 	return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs", common.ErrInvalidArgument)
+}
+
+func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustPreferExecutableBehaviorValidation"]) &&
+		!boolValue(required["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"]) &&
+		!boolValue(required["mustDeclareValidationEvidenceMode"]) &&
+		!boolValue(required["mustDeclareValidationEvidenceObservation"]) {
+		return nil
+	}
+	if graphHasDeclaredConcreteValidationEvidenceNode(graph) {
+		return nil
+	}
+	return fmt.Errorf("%w: concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute", common.ErrInvalidArgument)
+}
+
+func graphHasDeclaredConcreteValidationEvidenceNode(graph runtimemodel.BlockExecutionGraph) bool {
+	for _, node := range graph.Nodes {
+		switch strings.TrimSpace(node.Kind) {
+		case "shell/command", "mcp/tool_call":
+			if nodeValidationEvidenceContractIsConcrete(node) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nodeValidationEvidenceContractIsConcrete(node runtimemodel.BlockExecutionNode) bool {
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	mode := strings.TrimSpace(stringFromMap(evidence, "mode"))
+	if mode := strings.TrimSpace(stringFromMap(node.Input, "validationEvidenceMode")); mode != "" {
+		evidence["mode"] = mode
+	}
+	if mode == "" {
+		mode = strings.TrimSpace(stringFromMap(node.Input, "evidenceMode"))
+	}
+	if !validationEvidenceModeIsConcrete(mode) {
+		return false
+	}
+	observationType := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(evidence, "observationType"),
+		stringFromMap(evidence, "observation"),
+		stringFromMap(node.Input, "validationObservationType"),
+	))
+	if !validationEvidenceObservationTypeIsConcrete(observationType) {
+		return false
+	}
+	if mode == "controlled_substitute" &&
+		len(mapFromValue(evidence["substitute"])) == 0 &&
+		strings.TrimSpace(stringFromMap(evidence, "substituteFor")) == "" {
+		return false
+	}
+	return true
+}
+
+func validationEvidenceModeIsConcrete(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case "runtime_behavior", "controlled_substitute", "executable_contract", "dynamic_execution":
+		return true
+	default:
+		return false
+	}
+}
+
+func validationEvidenceObservationTypeIsConcrete(observationType string) bool {
+	switch strings.TrimSpace(observationType) {
+	case "runtime_observation", "controlled_substitute_observation", "executable_contract_observation", "dynamic_execution_observation":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateRuntimeStateChangingOutputBeforeSideEffects(run *runModel.Run, step *runModel.Step, output map[string]any) error {

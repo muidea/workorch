@@ -1591,6 +1591,18 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 			changed = true
 		}
 	}
+	for _, key := range []string{"goalOutcome", "implementationSummary", "verificationSummary", "knownLimitations", "residualRisks", "nextActions"} {
+		if value, ok := doc[key]; ok {
+			if _, exists := assessment[key]; !exists {
+				assessment[key] = value
+			}
+			delete(doc, key)
+			changed = true
+		}
+	}
+	if normalizeDecisionAssessmentRefLists(assessment) {
+		changed = true
+	}
 	if !changed {
 		return payload, nil
 	}
@@ -1600,6 +1612,126 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	return normalized, nil
+}
+
+func normalizeDecisionAssessmentRefLists(assessment map[string]any) bool {
+	if len(assessment) == 0 {
+		return false
+	}
+	changed := false
+	if normalizeDecisionItemRefLists(assessment) {
+		changed = true
+	}
+	if items, ok := assessment["items"].([]any); ok {
+		for _, item := range items {
+			if itemMap, ok := item.(map[string]any); ok && normalizeDecisionItemRefLists(itemMap) {
+				changed = true
+			}
+		}
+	}
+	for _, key := range []string{"goalCoverage", "acceptanceDimensions", "deliverableCoverage"} {
+		coverage, ok := assessment[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if normalizeDecisionItemRefLists(coverage) {
+			changed = true
+		}
+		items, ok := coverage["items"].([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			if itemMap, ok := item.(map[string]any); ok && normalizeDecisionItemRefLists(itemMap) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func normalizeDecisionItemRefLists(item map[string]any) bool {
+	changed := false
+	for _, key := range []string{"evidenceRefs", "artifactRefs"} {
+		normalized, ok := normalizeDecisionStringListValue(item[key])
+		if !ok {
+			continue
+		}
+		item[key] = normalized
+		changed = true
+	}
+	return changed
+}
+
+func normalizeDecisionStringListValue(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case []string:
+		return typed, false
+	case []any:
+		ret := make([]string, 0, len(typed))
+		changed := false
+		for _, item := range typed {
+			ref, ok := normalizeDecisionStringScalar(item)
+			if !ok {
+				continue
+			}
+			if _, stringItem := item.(string); !stringItem {
+				changed = true
+			}
+			if ref != "" {
+				ret = append(ret, ref)
+			}
+		}
+		if len(ret) != len(typed) {
+			changed = true
+		}
+		return ret, changed
+	default:
+		ref, ok := normalizeDecisionStringScalar(typed)
+		if !ok {
+			return nil, false
+		}
+		if ref == "" {
+			return []string{}, true
+		}
+		return []string{ref}, true
+	}
+}
+
+func normalizeDecisionStringScalar(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed), true
+	case json.Number:
+		return strings.TrimSpace(typed.String()), true
+	case float64:
+		if math.Trunc(typed) == typed {
+			return strconv.FormatInt(int64(typed), 10), true
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64), true
+	case float32:
+		value64 := float64(typed)
+		if math.Trunc(value64) == value64 {
+			return strconv.FormatInt(int64(value64), 10), true
+		}
+		return strconv.FormatFloat(value64, 'f', -1, 32), true
+	case int:
+		return strconv.Itoa(typed), true
+	case int64:
+		return strconv.FormatInt(typed, 10), true
+	case int32:
+		return strconv.FormatInt(int64(typed), 10), true
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10), true
+	case uint64:
+		return strconv.FormatUint(typed, 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10), true
+	default:
+		return "", false
+	}
 }
 
 func normalizeDecisionCoverageValue(value any) (map[string]any, bool) {

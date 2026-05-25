@@ -121,6 +121,9 @@ func (a *RuntimeAdapter) list(request runtimemodel.StepExecutionRequest) (runtim
 					if addErr == filepath.SkipAll {
 						break
 					}
+					if addErr == filepath.SkipDir {
+						continue
+					}
 					err = addErr
 					break
 				}
