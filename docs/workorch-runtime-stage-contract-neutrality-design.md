@@ -96,6 +96,8 @@ Acceptance 阶段允许 runtime 做领域中立的结构归一化：当 LLM 已�
 
 若 claim 只是短标题、章节名或缺少足够可匹配信号，runtime 可以跳过 alignment 门禁，但仍必须执行 evidenceRefs、step kind、evidence quality 和 current-run evidence 等基础门禁。该例外只能防止标题型文本误伤，不能让具体行为 claim 绕过直接证据要求。
 
+Claim-to-evidence alignment 失败属于可恢复的 evidence quality gap，不是默认终态失败。只要 runtime repair budget 未耗尽，completion gate 必须把该失败归类为中立 `dod_evidence_quality_gap`，在 diagnostics 中保留 `claimAlignedEvidenceNeeded=true`、缺失 claim 文本、原 evidenceRefs 与 reason，并继续派发 concrete validation evidence repair 或等价的 profile 允许验证动作。只有预算耗尽、LLM 明确给出 unsatisfied assessment、或缺少权限/配置等真实治理 blocker 时，才允许进入 rejected / decision / failed 收口。
+
 ## 阶段转换合同
 
 ### 标准路径
@@ -383,6 +385,7 @@ Runtime 必须拒绝：
 - completion gate 在校验 `dodAssessment` 前必须基于 runtime evidence catalog 规范化 `evidenceRefs`：已完成 step、通过的 validation result、已应用 patch、tool call 等 runtime 已知证据可以作为 canonical evidence；LLM 输出的 graph node 别名、`runId/nodeId`、旧 `block/nodeId/patch/N`、`runId/<assessment-follow-up-step>-<node-id>` 等结构别名必须映射到 canonical step / validation / patch ref；别名匹配应支持 node id 的 `_` / `-` 等价与 graph step 顺序前缀剥离，但只能映射到同 run 内可追踪且可用的 runtime evidence。已知失败、无效、不可追踪或无法映射的引用必须从满足项中剔除。若剔除后某个 satisfied item 不再有有效 evidence，completion gate 必须拒绝该 assessment，而不能让历史失败 evidence 或 LLM 自造 ref 支撑 accepted result。
 - 若 LLM 将 `dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions` 或 `dodAssessment.deliverableCoverage` 误输出为 bare array，runtime 可以在解析前中立规范化为 `{ "satisfied": <由 items 状态推断>, "items": [...] }`。该容错只修复 schema 形态，不得改变 item 文本、证据引用、artifact 引用或业务判断。
 - completion gate 因 `goalCoverage`、`acceptanceDimensions` 或 `deliverableCoverage` 缺失、未满足或结构不完整失败时，runtime 必须保留对应 coverage 诊断，并在后续 repair 中进入 assessment-only coverage correction；不得把纯 assessment 合同缺口误升级为普通 execution repair。
+- completion gate 因 evidence quality、claim-to-evidence alignment、current-run evidence 或 profile evidenceRequirements 失败时，runtime 必须保留 `dod_evidence_quality_gap` 诊断，并在后续 repair 中进入 concrete validation evidence repair 或 profile 允许的等价验证路径；不得因为该失败发生在 runtime repair follow-up / assessment correction 之后就立即写 rejected result。repair 输入必须继承缺失 item、scope、claim-aligned evidence 标记、候选 evidence、最新成功/失败 evidence 摘要与原失败 reason，避免 LLM 在下一轮只看到泛化“证据不足”。
 - assessment-only correction 不得返回 executable work；只能返回 completed / failed `dodAssessment` 或真实治理 blocker。
 - assessment-only contract correction 的输入必须是 narrow assessment package：不得携带 `executionGraph`、patch/shell/tool/memory 可执行字段，也不得携带 `governanceHistory`、`replanContinuation`、历史 `convertedDecision/llmDecision`、state-changing repair action package、patch repair context 或 provider retry lineage。correction 只用于修正 assessment schema / coverage / evidence refs，不得被旧 replan 或 decision 语义诱导成新的执行规划。
 - 若 assessment-only correction 给出 failed assessment，但同一缺口仍存在候选证据或满足项矛盾，runtime 应在 repair budget 内再次派发 assessment-only correction，而不是立即写 rejected result。预算耗尽后才进入 rejected / blocked / replan 治理。
@@ -508,6 +511,7 @@ Core 可以按中立结构执行 profile 声明的 evidenceRequirements，但只
 - 当 `acceptedStepKinds` 已声明时，`rejectedStepKinds` 表示“不能单独支撑该声明”的证据类型；若同一 item 同时引用 accepted 证据，只读/辅助证据可以保留为上下文。
 - 当 profile 声明 `requireDirectEvidence=true` 时，对应 satisfied item 必须至少有一条可追踪 evidenceRef；若声明了 `acceptedStepKinds`，该直接证据还必须命中 accepted step kind。不可追踪 ref、只读 ref 或被 profile 拒绝的 ref 不能单独支撑 satisfied。
 - 失败时生成中立 `dod_evidence_quality_gap` diagnostic，驱动后续 repair / rejected assessment。
+- `dod_evidence_quality_gap` 至少应携带 `scope`、`missingDoDItems` 或对应 coverage 缺口、原 `evidenceRefs`、`reason`、`source`。当失败来自 claim alignment 时，必须携带 `claimAlignedEvidenceNeeded=true`，并在 repair 输入的 `verificationEvidenceGap` 中继续保留该标记，防止后续 concrete validation evidence repair 丢失关键约束。
 
 Core 不得根据 `id` 名称推断业务含义。例如 `persistence_or_side_effect`、`concurrency` 只是 profile 声明的字符串；core 不知道它们对应软件开发、数据写入、测试或任何具体领域。
 
@@ -750,6 +754,8 @@ No-actionable continuation、completion follow-up、provider retry、repair-of-r
 若 `dodAssessment.satisfied=true` 但 runtime 校验发现 DoD / Goal / acceptance dimension / deliverable coverage 字段缺失或不完整，该失败首先属于 assessment contract correction，而不是新的 state-changing implementation 缺口。runtime 必须先尝试以 `assessmentOnly` / `verification` 模式要求 LLM 补齐 `dodAssessment.items`、`dodAssessment.goalCoverage`、`dodAssessment.acceptanceDimensions`、`dodAssessment.deliverableCoverage` 与 evidenceRefs / artifactRefs；不得在没有新的实现缺口证据时强制重新生成 patch、shell 或其他 state-changing 工作。若补齐后的 coverage 缺口仍没有任何中立候选证据，也不能从已有 satisfied evidence 机械映射，runtime 应切换为 concrete validation evidence repair，要求 LLM 产生受限 verification evidence 或明确 failed assessment / blocker。
 
 如果 assessment-only coverage correction 仍返回 `dodAssessment.satisfied=true` 但继续缺失 DoD / Goal / acceptance dimension / deliverable coverage，runtime 不得立即把 run 终结为 rejected result；应在 runtime repair budget 内继续派发 assessment-only correction，并把最新 missingDoDItems / missingGoalCoverage / missingDeliverableCoverage 作为强约束输入。只有 coverage correction 预算耗尽、LLM 返回明确 unsatisfied assessment、或出现不可恢复 contract violation 时，才进入 rejected / decision / fail 路径。
+
+如果 runtime repair follow-up 返回的 `dodAssessment.satisfied=true` 仍因 evidence quality 或 claim alignment 被拒绝，runtime 同样不得直接终结为 rejected result。该情况说明“实现或通用验证可能已完成，但 accepted claim 尚缺少可追踪、对齐的证据表达”，必须在预算内继续派发 concrete validation evidence repair，要求 LLM 产出带 `coverageTargets`、明确验证 scope、可追踪 evidence text 或 profile 允许的等价证据。该规则只约束证据链质量，不要求 core 理解具体业务语义。
 
 Completion / assessment 必须遵守“最新非 superseded 证据优先”规则。对于同一中立 scope（例如同一 graph node label、同一 targetRef、同一 failure target scope 或同一可追踪步骤标签），如果较早失败 evidence 之后出现了成功完成的验证、patch 或执行证据，较早失败只能作为 lineage / 历史诊断保留，不能继续主导 accepted / rejected 判断。runtime 在 completion gate 中应把可机械匹配的旧失败 evidenceRef 归一化为后续成功 evidenceRef；在 assessment-only coverage correction 输入中应携带 `latestClosureEvidence` 与 `supersededFailureEvidence`，其中 `latestClosureEvidence` 至少应覆盖最新成功 step evidence、已应用 patch evidence 与已通过 validation evidence。LLM 必须对比最新成功证据后再判断；若最新成功证据仍不足，必须说明具体缺失的中立验收维度，而不是笼统复述旧失败。
 

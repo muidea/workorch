@@ -21,6 +21,7 @@ type runtimeEvidenceQuality struct {
 type doDAssessmentEvidenceQualityError struct {
 	cause error
 	items []map[string]any
+	scope string
 }
 
 type profileEvidenceKindRequirement struct {
@@ -52,9 +53,25 @@ func (e *doDAssessmentEvidenceQualityError) RuntimeFailureDiagnostics() map[stri
 		return nil
 	}
 	return map[string]any{
-		"kind":            "dod_evidence_quality_gap",
-		"missingDoDItems": e.items,
+		"kind":                       "dod_evidence_quality_gap",
+		"scope":                      firstNonEmptyString(e.scope, "dod_item"),
+		"missingDoDItems":            e.items,
+		"claimAlignedEvidenceNeeded": evidenceQualityGapRequiresClaimAlignedEvidence(e.items),
 	}
+}
+
+func evidenceQualityGapRequiresClaimAlignedEvidence(items []map[string]any) bool {
+	for _, item := range items {
+		source := strings.TrimSpace(stringFromMap(item, "source"))
+		reason := strings.ToLower(strings.TrimSpace(stringFromMap(item, "reason")))
+		if source == "claimEvidenceAlignment" ||
+			strings.Contains(reason, "coveragetargets") ||
+			strings.Contains(reason, "evidence text") ||
+			strings.Contains(reason, "aligned with the satisfied claim") {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeStepEvidenceQuality(run *runModel.Run, step *runModel.Step, state common.ValidationResultState, output map[string]any) runtimeEvidenceQuality {
@@ -485,20 +502,26 @@ func evidenceKindRequirementError(requirement profileEvidenceKindRequirement, it
 	if reason != "" {
 		message += ": " + reason
 	}
+	source := "evidenceKind"
+	if requirement.RequireClaimEvidence && strings.Contains(strings.ToLower(reason), "aligned with the satisfied claim") {
+		source = "claimEvidenceAlignment"
+	}
 	cause := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
 	return &doDAssessmentEvidenceQualityError{
+		scope: normalizeEvidenceKindRequirementScope(requirement.Scope),
 		cause: cause,
 		items: []map[string]any{{
 			"kind":         "leaf",
 			"item":         itemName,
 			"state":        "failed",
-			"source":       "evidenceKind",
+			"source":       source,
 			"evidenceRefs": []string{ref},
 			"reason":       firstNonEmptyString(reason, requirement.Description, "Referenced evidence step kind cannot satisfy this claim."),
 			"impact":       "This claim cannot be marked satisfied until it is supported by evidence of an appropriate runtime action.",
 			"suggestedNextActions": []string{
 				"Run or produce concrete evidence matching the required runtime action.",
 				"Replace read-only or unrelated evidence with a step that verifies the claimed behavior or side effect.",
+				"When the cited evidence is generic, add coverageTargets or evidence text aligned with this exact claim.",
 			},
 		}},
 	}

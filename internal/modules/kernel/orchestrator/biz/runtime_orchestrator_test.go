@@ -22430,6 +22430,72 @@ func TestCompletionGateAssessmentOnlyFailedCoverageCorrectionSwitchesToConcreteE
 	}
 }
 
+func TestCompletionGateEvidenceQualityGapRepairFollowUpContinuesToConcreteEvidenceRepair(t *testing.T) {
+	runID := common.RunID("run-dod-evidence-quality-repair-follow-up")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-002-of-graph-004-001-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+			"evidenceRepairRequired":          true,
+		},
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "All items are marked satisfied but cite generic evidence.",
+				"items": []map[string]any{{
+					"item":         "request forwarding returns the expected response",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(runID) + "/graph-005/003-verify-tests"},
+				}},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind":                       "dod_evidence_quality_gap",
+				"scope":                      "dod_item",
+				"claimAlignedEvidenceNeeded": true,
+				"missingDoDItems": []map[string]any{{
+					"kind":         "leaf",
+					"item":         "request forwarding returns the expected response",
+					"state":        "failed",
+					"source":       "claimEvidenceAlignment",
+					"evidenceRefs": []string{string(runID) + "/graph-005/003-verify-tests"},
+					"reason":       "requires evidence text or coverageTargets aligned with the satisfied claim",
+				}},
+			},
+		},
+	}
+
+	if shouldCloseCompletionGateFailureWithoutRepair("runtime completion gate failed", step, step.Output) {
+		t.Fatalf("evidence-quality repair follow-up should continue through bounded runtime repair")
+	}
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-dod-evidence-quality-repair-follow-up",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}, step, 3, errors.New("claim-aligned evidence missing"))
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || input["evidenceRepairRequired"] != true {
+		t.Fatalf("repair input = %+v, want concrete validation evidence repair", input)
+	}
+	if input[stepInputKeyAssessmentOnly] != nil {
+		t.Fatalf("repair input = %+v, want executable evidence repair, not assessment-only", input)
+	}
+	missing := mapSliceFromValue(input["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["source"] != "claimEvidenceAlignment" {
+		t.Fatalf("missingDoDItems = %+v, want claim-alignment evidence gap", missing)
+	}
+	if gap := mapFromValue(input["verificationEvidenceGap"]); !boolValue(gap["claimAlignedEvidenceNeeded"]) {
+		t.Fatalf("verificationEvidenceGap = %+v, want claim-aligned evidence signal", gap)
+	}
+}
+
 func TestCompletionGateConvertedDecisionFollowUpDoesNotCloseRun(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "run-converted-decision/repair-003",

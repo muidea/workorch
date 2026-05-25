@@ -155,6 +155,9 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 		if convertedDecisionGateFailure(output) {
 			return false
 		}
+		if doDEvidenceQualityRepairRequired(step) {
+			return false
+		}
 		if doDCoverageContractCorrectionRequired(step) {
 			return false
 		}
@@ -183,6 +186,14 @@ func convertedDecisionGateFailure(output map[string]any) bool {
 		}
 	}
 	return false
+}
+
+func doDEvidenceQualityRepairRequired(step *runModel.Step) bool {
+	if step == nil || step.Output == nil {
+		return false
+	}
+	diagnostics := mapFromValue(step.Output["runtimeDiagnostics"])
+	return strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap"
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
@@ -2536,15 +2547,20 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		!repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	if concreteEvidenceRepair {
+		claimAlignedEvidenceNeeded := false
+		if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			claimAlignedEvidenceNeeded = boolValue(diagnostics["claimAlignedEvidenceNeeded"])
+		}
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["evidenceRepairRequired"] = true
 		input["verificationEvidenceGap"] = map[string]any{
-			"kind":               "dod_verification_evidence_gap",
-			"failedStepId":       string(failedStep.ID),
-			"failedStepKind":     string(failedStep.Kind),
-			"missingDoD":         missingDoDItemsFromFailureOutput(failedStep.Output),
-			"missingGoal":        missingGoalCoverageFromStep(failedStep),
-			"missingDeliverable": missingDeliverableCoverageFromStep(failedStep),
+			"kind":                       "dod_verification_evidence_gap",
+			"failedStepId":               string(failedStep.ID),
+			"failedStepKind":             string(failedStep.Kind),
+			"missingDoD":                 missingDoDItemsFromFailureOutput(failedStep.Output),
+			"missingGoal":                missingGoalCoverageFromStep(failedStep),
+			"missingDeliverable":         missingDeliverableCoverageFromStep(failedStep),
+			"claimAlignedEvidenceNeeded": claimAlignedEvidenceNeeded,
 		}
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
