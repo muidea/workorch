@@ -153,8 +153,8 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 | State | 触发条件 | LLM 合同 |
 | --- | --- | --- |
 | `need_evidence` | 未关闭失败存在，但缺少 concrete target evidence | `runtimeStage=repair`，`repairObjective=acquire_concrete_failure_evidence`，`concreteFailureEvidenceRequired=true`，只允许有界 `file/list` / `file/read` / `shell/command` / `mcp/tool_call` 或等价取证能力 |
-| `need_state_change` | 未关闭失败存在，且已有 target refs / line refs / snapshots / patch repair context / coverage target 等 concrete evidence | `runtimeStage=repair`，`runtimeStageMode=strict_convergence`，`repairObjective=produce_state_changing_output`，`stateChangingOutputRequired=true`，`repairActionPackage.requiredOutput.acceptedKinds=["patch/apply"]` |
-| `need_validation` | 当前 state-changing artifact 已应用，下一步需要证明结果 | `runtimeStage=verification`，只允许 bounded validation evidence graph；不得返回新的 LLM 嵌套或只读自检 graph |
+| `need_state_change` | 未关闭失败存在，且已有 target refs / line refs / snapshots / patch repair context / failure target repair context / structured diagnostics 等 concrete implementation target evidence | `runtimeStage=repair`，`runtimeStageMode=strict_convergence`，`repairObjective=produce_state_changing_output`，`stateChangingOutputRequired=true`，`repairActionPackage.requiredOutput.acceptedKinds=["patch/apply"]` |
+| `need_validation` | 当前 state-changing artifact 已应用，下一步需要证明结果；或只存在 Goal / DoD / deliverable coverage gap，但尚无 concrete implementation target evidence | `runtimeStage=verification`，只允许 bounded validation evidence graph；不得返回新的 LLM 嵌套、只读自检 graph 或 `patch/apply` |
 | `need_assessment` | 验证证据足以进入 DoD / Goal 覆盖判断，或 assessment-only contract correction | `runtimeStage=validation` 或 assessment-only correction，只允许 `dodAssessment` / coverage correction |
 | `need_governance` | 真实缺少外部信息、权限、凭证、配置、审批、破坏性变更授权或无法自动获取的业务决策 | 创建 decision / approval ticket，并写明 missing field、source refs 与无法自动获取原因 |
 | `blocked` | 证据表明不可自动修复、取证失败且无可继续路径、预算耗尽或必须失败收口 | failed assessment / rejected result / blocker |
@@ -185,9 +185,9 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 `ApplyConvergenceContract` 必须保证发送给 LLM 的上下文自洽：
 
 - 若 `currentProgressDigest.currentGap` 是 patch/apply、file/edit、state-changing artifact 或 validation failure，则 `currentRuntimeStage` 不得被错误标记为普通 `verification` 或 `decision`，除非合同状态明确是 `need_validation` / `need_governance`。
-- 若合同状态是 `need_state_change`，输入必须包含 `repairActionPackage`，并至少包含一个通过准入的 concrete target evidence：`repairTargetSet`、`structuredFailureSignals.targetRefs` / `lineRefs`、`targetSnapshots`、`patchRepairContext`、`failureTargetRepairContext`、`coverageTargetSet` 或等价 capability evidence。
+- 若合同状态是 `need_state_change`，输入必须包含 `repairActionPackage`，并至少包含一个通过准入的 concrete implementation target evidence：`repairTargetSet`、`structuredFailureSignals.targetRefs` / `lineRefs`、`targetSnapshots`、`patchRepairContext`、`failureTargetRepairContext` 或等价 capability evidence。`coverageTargetSet` 只定义待关闭的验收范围，不能单独作为允许 `patch/apply` 的实现目标证据。
 - 若合同状态是 `need_evidence`，输入必须移除顶层 `stateChangingOutputRequired`，并把 `repairActionPackage.requiredOutput.acceptedKinds` 限定为 evidence acquisition 能力。
-- 若合同状态是 `need_validation`，输入必须说明最近 state-changing artifact、目标 scope、bounded verification 条件和禁止的 read-only/self-inspection-only 输出。
+- 若合同状态是 `need_validation`，输入必须说明最近 state-changing artifact 或 coverage target set、目标 scope、bounded verification 条件和禁止的 read-only/self-inspection-only 输出；`repairActionPackage.requiredOutput` 必须设置 `mustProduceConcreteValidationEvidence=true`，且不得继承旧的 patch-only `acceptedKinds=["patch/apply"]`。
 - `currentProgressDigest`、`processEvidenceTimeline`、`repairActionPackage`、`structuredFailureSignals`、`latestClosureEvidence` 的当前事实必须一致；历史 wrapper/schema/provider 失败只能作为历史诊断摘要。
 - 当最新 concrete failure 被包裹在 follow-up / wrapper LLM failure 后面时，runtime 必须从 `currentExecutionProgress.latestActionEvidence` / `completedGraphEvidence` 的 stdout、stderr、error、targetRef、line refs 或 failure signature 中提取中立 target evidence。若可机械提取出 target refs / line refs / failure target scope，则该 evidence 必须提升为当前 `currentGap` 与 `repairActionPackage.structuredFailureSignals`，并恢复 `need_state_change`；不得因为 wrapper failure 本身是 read-only graph、schema invalid 或 dodAssessment failed，就退回 `need_evidence`。
 - `latest_successful_action_evidence` 只能作为已完成动作或候选证据引用，不得被提升为 `currentFailure`、`lastObservedFailure` 或 failure target scope。只有 step 自身失败，或 completed action evidence 被明确标记为 `evidenceValidity=actionable_failure` / 输出中存在可机械识别的失败标记时，才允许覆盖旧失败成为当前失败。
@@ -418,7 +418,7 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
 交付目录；该操作只表达“为当前交付目录建立本地版本控制状态”，不得推导任何具体业务
 模板、Goal 语义、远程仓库或自动提交行为。已有同根仓库时必须返回幂等零工作结果。
 
-当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口或其他明确 contract failure 时才提升为 state-changing repair。
+当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口同时具备 concrete implementation target evidence，或其他明确 contract failure 指向实现目标时才提升为 state-changing repair。只有 coverageTargetSet / missing DoD / missing Goal 时，应进入 bounded validation evidence 或 assessment correction。
 
 若非 LLM 执行步骤失败原因是中立的瞬时执行超时（例如 runtime deadline / timeout，且尚未形成确定性失败证据），runtime repair 不应强制要求 state-changing 输出；应允许一次受预算约束的重试、缩小验证范围或返回 failed assessment / blocker。该规则只基于“执行超时”这一中立失败形态，不得写入特定命令、语言、测试框架或业务领域判断。
 
@@ -658,7 +658,7 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须先区分中立缺口类型：
 
 - `implementation_gap`：已有 evidence 表明实现缺失、实现错误、artifact 无法应用或非只读执行失败，repair 必须显式携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。后续 provider retry 也必须继承该约束，不能把实现缺口修复降级为只读 exploration graph。
-- `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，但尚未形成实现错误诊断时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
+- `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，或只恢复出 `coverageTargetSet` / missing DoD / missing Goal / missing deliverable，但尚未形成实现错误诊断、target refs、line refs、当前 target snapshot、patch repair context 或等价 implementation target evidence 时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据，且必须清除顶层 `stateChangingOutputRequired` 和旧的 patch-only required output；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
 - `hybrid_gap`：validation / completion 阶段已经具备明确 coverage gap，并且当前代码/graph evidence 已提示至少一部分缺口需要 state-changing implementation 或 state-changing test updates 才能关闭。此时 runtime 不应把 failed `dodAssessment` 仅视为纯 assessment 结果；应显式把 repair 目标提升为“优先输出 bounded state-changing repair graph，必要时附带对应 verification nodes”，避免先输出 failed assessment 再由 runtime 被动二次归约。
 
 当 state-changing repair 输入已经携带 `missingDoDItems`、`missingGoalCoverage` 或 `missingDeliverableCoverage` 时，返回的 `patch/apply` 至少必须有一个节点声明中立 `coverageTargets`，并且目标必须匹配对应缺口的原始 DoD item 文本、`goalRequirementId`、Goal coverage item 文本或 deliverable coverage 文本。该字段只表达“这个 state-changing artifact 试图关闭哪个 coverage gap”，不表示 runtime 认可其业务正确性；最终是否满足仍由后续 validation / acceptance evidence 判断。若 patch 不能绑定任何具体缺口，应返回 failed `dodAssessment` 或 blocker，而不是提交泛化骨架、marker、报告或只具备形式变更的 patch。
@@ -756,7 +756,7 @@ Repair 输入必须尽量包含足以定向修复的当前证据：
 - `patchRepairSuggestions` 或等价 capability repair suggestion：当 runtime 能从失败 artifact 与当前目标快照中机械抽取唯一 oldText / newText 替换时，提供可直接复用的最小修复证据；该 suggestion 不代表业务判断，只代表当前资源内容与失败 artifact 的中立匹配事实。
 - 近期 repair attempt 摘要：用于避免重复同一失败输出。
 
-State-changing repair 必须有 concrete repair target evidence 才能要求 LLM 输出 `patch/apply`。Runtime 在设置 `stateChangingOutputRequired=true`、`repairObjective=produce_state_changing_output`、`repairActionPackage.requiredOutput.mustIncludeStateChangingNode=true` 或 `acceptedKinds=["patch/apply"]` 之前，必须确认至少存在一个可追踪目标证据：`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots`、可解析到 workspace manifest 的 `repairTargetSet` / `structuredFailureSignals.targetRefs` / `lineRefs`、明确 `coverageTargetSet`，或带当前快照的 `rootCauseCandidateContext`。如果这些证据都不存在，runtime 不得把“必须修复状态”合同发送给 LLM；否则会诱导无关 marker、报告、README 或其他形式性 patch。
+State-changing repair 必须有 concrete implementation target evidence 才能要求 LLM 输出 `patch/apply`。Runtime 在设置 `stateChangingOutputRequired=true`、`repairObjective=produce_state_changing_output`、`repairActionPackage.requiredOutput.mustIncludeStateChangingNode=true` 或 `acceptedKinds=["patch/apply"]` 之前，必须确认至少存在一个可追踪实现目标证据：`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots`、可解析到 workspace manifest 的 `repairTargetSet` / `structuredFailureSignals.targetRefs` / `lineRefs`，或带当前快照的 `rootCauseCandidateContext`。`coverageTargetSet` 只能说明“哪些 Goal / DoD / deliverable 仍未关闭”，不能单独证明应该修改哪个 workspace 资源；只有当它与上述实现目标证据同时存在时，才可作为 `patch/apply.coverageTargets` 的匹配范围。如果这些实现目标证据都不存在，runtime 不得把“必须修复状态”合同发送给 LLM；否则会诱导无关 marker、报告、README 或其他形式性 patch。
 
 当 replan、repair-of-repair、schema invalid recovery 或 runtime contract recovery 缺少 concrete repair target evidence 时，runtime 必须进入中立 `acquire_concrete_failure_evidence` 模式。该模式允许有界 `file/list`、`file/read`、`shell/command`、`mcp/tool_call` 或等价能力来获取当前 workspace 的真实失败面、target refs、line refs、stdout/stderr、exit code 和当前快照；不得要求 `patch/apply`，不得接受无边界探索、自检、run snapshot、context rehydration 或新的 LLM 嵌套。若 evidence acquisition 产出确定性失败，再由该失败证据触发 target-scoped state-changing repair。
 
@@ -774,10 +774,10 @@ Replan continuation 不得只因为 predecessor run 的 execution contract 要�
 
 - Repair action package 统一由 required output contract 决定是否允许 state-changing output；当 `mustIncludeStateChangingNode=false`，任何后续证据门禁不得再把它提升回 patch，例如 `currentTargetAlreadySatisfiesFailedPatch` 必须保持 concrete validation evidence contract。
 - 缺少 concrete repair target evidence 时，runtime 必须移除顶层 `stateChangingOutputRequired`，设置 `repairObjective=acquire_concrete_failure_evidence` 与 `concreteFailureEvidenceRequired=true`，并把 `repairActionPackage.requiredOutput.acceptedKinds` 限定为 evidence acquisition 能力。
-- Replan continuation 必须把 predecessor failure context 中可机械解析的 `failureTargetScope`、`targetRef`、target snapshot 或 coverage target 写入 `repairActionPackage`；只有该 package 确认可追踪目标证据存在时，才能保持 state-changing repair。
+- Replan continuation 必须把 predecessor failure context 中可机械解析的 `failureTargetScope`、`targetRef`、target snapshot 写入 `repairActionPackage`，并把 coverage target 仅作为验收 scope 写入；只有该 package 确认可追踪实现目标证据存在时，才能保持 state-changing repair。
 - Runtime contract wrapper failure、schema invalid、`patch/apply targetRef is required`、`executionGraph without patch/apply` 等只描述输出合同的失败，不能单独作为 workspace repair target；若无法恢复原始 target context，必须先获取证据。
 - 无论进入 state-changing repair 还是 evidence acquisition，`repairActionPackage` 都是 primary actionable contract；runtime 应压缩重复的 `failedStepOutput`、`previousStepOutput`、`failedExecutionGraph` 等历史 payload，只保留被 package 摘要化后的中立事实，避免 LLM 上下文再次膨胀和冲突。
-- 测试必须同时覆盖“无目标证据进入 evidence acquisition”和“有 target refs / target snapshots / coverage target 时保持 patch contract”两类路径，避免后续修改重新回到按失败类别一刀切。
+- 测试必须同时覆盖“无实现目标证据进入 evidence acquisition / validation evidence”和“有 target refs / target snapshots / patch repair context 时保持 patch contract”两类路径；还必须覆盖“只有 coverageTargetSet 时不得保持 patch-only contract”，避免后续修改重新回到按失败类别一刀切。
 
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract、coverage gap context、current execution progress 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target、Goal/DoD coverage target、已完成证据或当前失败信息，也不得降级为泛化探索。若原始失败来自 graph node，后续 repair 的 ID、lineage label 与 scope 必须继续指向该 graph failure label；即使当前外壳是 `repair-...` 或 schema-invalid repair，也不得退回 planning root。
 
@@ -1370,7 +1370,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - `decisionResolutionInput` 已接入 `ConvergenceContract`，resolved decision 只作为治理恢复信号；若 ticket context 仍携带 state-changing repairActionPackage / target evidence，恢复输入会回到 `need_state_change` 而不是停留在普通 `decision`。
   - Replan successor 的初始 step input 已通过统一合同应用；当 `replanContinuation` 明确携带 predecessor repairActionPackage / target snapshots 且 run contract 要求 state change 时，首个 LLM step 进入 `runtimeStage=repair` 与 `need_state_change`。
   - `replanContinuation.repairActionPackage` 已纳入 successor 首步合同来源；successor execution context 也记录 compact `convergenceContract`，用于后续审计当前唯一 `need_*` 状态。
-  - schema invalid / LLM decision invalid repair-of-repair 已继承上一轮 `repairActionPackage`、target snapshots、repairTargetSet、coverageTargetSet、structuredFailureSignals 等中立 evidence，避免丢失 concrete target evidence 后误降级为 `need_evidence`。
+  - schema invalid / LLM decision invalid repair-of-repair 已继承上一轮 `repairActionPackage`、target snapshots、repairTargetSet、coverageTargetSet、structuredFailureSignals 等中立 evidence；其中 coverageTargetSet 只作为验收 scope，state-changing contract 仍必须依赖 target snapshots / repairTargetSet / structuredFailureSignals 等 implementation target evidence。
   - 已补回归测试覆盖 decision resolved 后恢复 `need_state_change`、replan successor 首步继承 `need_state_change`、failed patch 已由当前 target 满足时进入 `need_validation`、schema invalid repair-of-repair 保持 state-changing contract。
 - 2026-05-22：
   - 已完成 CVC-01 第三批收口。
@@ -1547,7 +1547,7 @@ Memory 是参考知识，不是运行流水。LLM 输入中的 memory 必须满�
 发送 LLM 前必须执行语义门禁。以下情况应 fail-fast、read-required 或转入 evidence acquisition，而不是继续调用 LLM：
 
 - Goal / DoD 缺失或与当前 activation 不匹配。
-- state-changing repair 要求 `patch/apply`，但没有通过准入的 concrete target snapshot、coverage target 或明确 root-cause target。
+- state-changing repair 要求 `patch/apply`，但没有通过准入的 concrete target snapshot、target refs、line refs、patch / failure target context 或明确 root-cause target。
 - `repairTargetSet` 包含绝对路径、目录、二进制、runtime 内部文件、运行态计划文件或未解析 workspace-relative 的目标。
 - `selectedMemoryIds` 与实际 `selectedContext.memories` 不一致。
 - `processEvidenceTimeline` 只有 rejected/invalid LLM wrapper 失败，没有当前可行动失败证据或下一步缺口。

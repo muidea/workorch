@@ -183,9 +183,25 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, "assessmentOnlyReason")
 		delete(input, "stateChangingOutputRequired")
 		delete(input, "concreteFailureEvidenceRequired")
-		if len(contract.RepairActionPackage) > 0 {
-			input["repairActionPackage"] = contract.RepairActionPackage
+		pkg := cloneStepPayload(contract.RepairActionPackage)
+		if len(pkg) == 0 {
+			pkg = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		}
+		if len(pkg) == 0 {
+			pkg = map[string]any{}
+		}
+		required := concreteValidationEvidenceRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+			pkg["coverageRepairRequired"] = true
+			pkg["coverageTargetSet"] = targets
+			required["mustDeclareCoverageTargets"] = true
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		}
+		if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
+			pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
+		}
+		pkg["requiredOutput"] = required
+		input["repairActionPackage"] = pkg
 	case convergenceStateNeedAssessment:
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeyAssessmentOnly] = true
@@ -234,6 +250,9 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence {
 		return true
 	}
+	if convergenceCoverageVerificationEvidenceGap(input, failedStep) {
+		return true
+	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
 		return true
@@ -247,6 +266,26 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 		return boolValue(required["mustProduceConcreteValidationEvidence"])
 	}
 	return false
+}
+
+func convergenceCoverageVerificationEvidenceGap(input map[string]any, failedStep *runModel.Step) bool {
+	if boolValue(input[stepInputKeyAssessmentOnly]) ||
+		strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
+		return false
+	}
+	if !coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	if !coverageValidationEvidenceRepairEligible(failedStep) {
+		return false
+	}
+	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
+		return false
+	}
+	if failedStep != nil && repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		return false
+	}
+	return true
 }
 
 func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) bool {

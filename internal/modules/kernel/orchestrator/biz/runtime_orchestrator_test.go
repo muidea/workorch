@@ -4392,7 +4392,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputHydratesRootCauseCandidatesFromIn
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForStateChangingResourceEvidence(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForCoverageValidationEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	deliverableDirectory := t.TempDir()
@@ -4445,15 +4445,12 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForStateChangingR
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 2, common.ErrInvalidArgument)
 
-	if input["stateChangingRecoveryMode"] != "direct_state_change" {
-		t.Fatalf("stateChangingRecoveryMode = %#v, want direct_state_change", input["stateChangingRecoveryMode"])
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation evidence repair until concrete implementation target evidence exists", input)
 	}
 	manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest])
 	if len(manifest) != 2 || manifest[0]["path"] != "resource-a.txt" || manifest[1]["path"] != "resource-b.txt" {
-		t.Fatalf("workspaceFileManifest = %#v, want manifest from current workspace", input[stepInputKeyWorkspaceFileManifest])
-	}
-	if _, ok := input[stepInputKeyGraphEvidence]; ok {
-		t.Fatalf("graphEvidence should stay narrowed out during direct recovery: %#v", input[stepInputKeyGraphEvidence])
+		t.Fatalf("workspaceFileManifest = %#v, want manifest retained as evidence context", input[stepInputKeyWorkspaceFileManifest])
 	}
 }
 
@@ -4543,7 +4540,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDoesNotPromotePlanningReadOnlyFai
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDWithStateChangePolicy(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputRequiresValidationEvidenceForMissingDoDWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -4576,11 +4573,16 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForMissingDoDW
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != "produce_state_changing_output" || !boolValue(input["stateChangingOutputRequired"]) {
-		t.Fatalf("repair input = %+v, want missing DoD repair to require state-changing output", input)
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want missing DoD repair without target evidence to require validation evidence", input)
 	}
 	if len(mapSliceFromValue(input["missingDoDItems"])) != 1 {
 		t.Fatalf("missingDoDItems = %+v, want missing DoD carried into repair input", input["missingDoDItems"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation evidence contract", required)
 	}
 }
 
@@ -4670,7 +4672,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesEvidenceObjectiveForVerificat
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForUnclassifiedDoDCoverageMissing(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverageGapWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
 		steps:      memory.NewStepRepository(),
@@ -4711,11 +4713,87 @@ func TestRuntimeOrchestrator_RuntimeRepairInputRequiresStateChangeForUnclassifie
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
 
-	if input["repairObjective"] != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
-		t.Fatalf("repair input = %+v, want state-changing objective for unclassified DoD coverage gap", input)
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want validation evidence objective without state-changing output for coverage gap without implementation target", input)
 	}
-	if input["evidenceRepairRequired"] != nil {
-		t.Fatalf("repair input = %+v, want no evidence repair without structured evidence-quality diagnostics", input)
+	if input["boundedValidationRequired"] != true || input["evidenceRepairRequired"] != true {
+		t.Fatalf("repair input = %+v, want bounded validation evidence repair", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false ||
+		required["mustProduceConcreteValidationEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want bounded validation evidence output only", required)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-inherited-coverage-patch-contract")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-002-of-follow-up"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"coverageTargetSet": []map[string]any{{
+					"type":  "dod",
+					"item":  "verify functional behavior",
+					"state": "skipped",
+				}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+			"missingDoDItems": []map[string]any{{
+				"item":  "verify functional behavior",
+				"state": "skipped",
+			}},
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "llm_execution_graph_plan",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=invalid argument: state-changing llm repair step returned executiongraph without patch/apply",
+			"error":                   "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-inherited-coverage-patch-contract",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want inherited coverage-only patch contract demoted to validation evidence", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false ||
+		required["mustProduceConcreteValidationEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want no patch/apply for coverage-only validation gap", required)
+	}
+	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 1 {
+		t.Fatalf("coverageTargetSet = %+v, want inherited coverage target", input["coverageTargetSet"])
 	}
 }
 

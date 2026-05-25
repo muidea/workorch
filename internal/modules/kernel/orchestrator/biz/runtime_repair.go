@@ -2507,7 +2507,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		Input:  input,
 		Output: failedStep.Output,
 	}) || assessmentOnlyFailedCoverageRepair)
-	concreteEvidenceRepair := coverageNeedsConcreteEvidence || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
+	coverageValidationEvidenceRepair := !assessmentOnlyCoverageRepair &&
+		coverageValidationEvidenceRepairEligible(failedStep) &&
+		coverageVerificationGapPresent(input, failedStep) &&
+		!repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) &&
+		!repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
+	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	if concreteEvidenceRepair {
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["evidenceRepairRequired"] = true
@@ -2572,6 +2577,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"At least one Goal/DoD/deliverable coverage gap still lacks acceptable concrete evidence; produce bounded verification evidence before another dodAssessment correction.",
 			"When latestClosureEvidence is present, prefer the latest successful evidence over older superseded failures in the same neutral scope.",
 			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
+		)
+	}
+	if coverageValidationEvidenceRepair {
+		input["boundedValidationRequired"] = true
+		input["evidenceRepairSource"] = "coverage_gap_without_implementation_target"
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Unresolved Goal/DoD/deliverable coverage is currently a validation evidence gap because no concrete implementation target evidence is available.",
+			"Produce bounded shell/tool/MCP validation evidence that maps to the coverageTargetSet before attempting another assessment.",
+			"Do not return patch/apply unless a later validation failure provides concrete target refs, line refs, diagnostics, or current target snapshots.",
 		)
 	}
 	ensureCoverageRepairTargetSet(input)
@@ -3483,6 +3497,30 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	return out
 }
 
+func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range existing {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON":
+			out[key] = value
+		}
+	}
+	out["mustIncludeStateChangingNode"] = false
+	out["mustProduceConcreteValidationEvidence"] = true
+	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
+		"patch/apply",
+		"read_only_graph",
+		"llm_gated_graph",
+		"self_inspection_graph",
+		"context_rehydration_graph",
+		"run_snapshot_graph",
+		"observability_only_graph",
+	))
+	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears"
+	return out
+}
+
 func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[string]any, requiredOutput map[string]any) {
 	if len(pkg) == 0 || len(requiredOutput) == 0 {
 		return
@@ -3511,6 +3549,10 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 }
 
 func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	return repairHasImplementationTargetEvidence(input, pkg)
+}
+
+func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {
 	requireCurrentSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
 		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"])
 	if len(input) > 0 {
@@ -3523,9 +3565,6 @@ func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[
 			return true
 		}
 		if !requireCurrentSnapshot {
-			if len(coverageTargetSetFromRepairInput(input)) > 0 {
-				return true
-			}
 			if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
 				return true
 			}
@@ -3539,8 +3578,7 @@ func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[
 			return true
 		}
 		if !requireCurrentSnapshot {
-			if len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 ||
-				len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+			if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
 				return true
 			}
 			if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
@@ -3981,7 +4019,13 @@ func ensureCoverageRepairTargetSet(input map[string]any) {
 			required = map[string]any{}
 		}
 		required["mustDeclareCoverageTargets"] = true
-		required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+			boolValue(input["boundedValidationRequired"]) ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) {
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		} else {
+			required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		}
 		pkg["requiredOutput"] = required
 		input["repairActionPackage"] = pkg
 	}
@@ -5126,6 +5170,56 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 	}
 	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
 	return strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap"
+}
+
+func coverageVerificationGapPresent(input map[string]any, failedStep *runModel.Step) bool {
+	if len(coverageTargetSetFromRepairInput(input)) > 0 ||
+		len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
+		len(missingGoalCoverageFromInput(input)) > 0 ||
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) > 0 {
+		return true
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		if boolValue(pkg["coverageRepairRequired"]) || len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 {
+			return true
+		}
+	}
+	if failedStep == nil {
+		return false
+	}
+	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
+	if strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap" {
+		return true
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+		stringFromMap(diagnostics, failureOutputKeyClass),
+	))
+	signature := strings.ToLower(strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature)))
+	if class != failureClassDoDCoverageMissing && !strings.Contains(signature, "class="+failureClassDoDCoverageMissing) {
+		return false
+	}
+	return len(missingDoDItemsFromFailureOutput(failedStep.Output)) > 0 ||
+		len(missingGoalCoverageFromStep(failedStep)) > 0 ||
+		len(missingDeliverableCoverageFromStep(failedStep)) > 0
+}
+
+func coverageValidationEvidenceRepairEligible(failedStep *runModel.Step) bool {
+	if failedStep == nil || strings.TrimSpace(failedStep.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	stage := strings.TrimSpace(stringFromMap(failedStep.Output, "stage"))
+	if stage == "llm_dod_assessment" {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	return stateChangingReadOnlyGraphFailureText(text) ||
+		strings.Contains(text, "without patch/apply") ||
+		strings.Contains(text, "coverage")
 }
 
 func runtimeRepairFailureIsTransientExecutionTimeout(step *runModel.Step, execErr error) bool {
