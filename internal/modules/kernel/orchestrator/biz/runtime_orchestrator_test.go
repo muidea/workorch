@@ -2019,6 +2019,33 @@ func TestApplyWorkspacePatchRejectsBaseHashMismatch(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspacePatchAppliesTextReplaceWithBaseHash(t *testing.T) {
+	deliverableDirectory := t.TempDir()
+	target := filepath.Join(deliverableDirectory, "main.go")
+	original := "package main\n\nfunc main() {\n\tprintln(\"old\")\n}\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	err := applyWorkspacePatch(deliverableDirectory, runtimePatchRequest{
+		TargetRef: "main.go",
+		PatchType: "text_replace",
+		BaseHash:  sha256HexBytes([]byte(original)),
+		OldText:   "\tprintln(\"old\")",
+		NewText:   "\tprintln(\"new\")",
+	})
+	if err != nil {
+		t.Fatalf("applyWorkspacePatch text_replace err = %v", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if got, want := string(content), "package main\n\nfunc main() {\n\tprintln(\"new\")\n}\n"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}
+
 func TestApplyWorkspacePatchRejectsRangeLessStandardUnifiedDiff(t *testing.T) {
 	deliverableDirectory := t.TempDir()
 	target := filepath.Join(deliverableDirectory, "docs", "sample.txt")
@@ -2512,6 +2539,23 @@ var response = map[string]interface{}{
 	})
 	if err != nil {
 		t.Fatalf("runtimePatchRequestFromMap err = %v, want Go composite literal braces allowed", err)
+	}
+}
+
+func TestRuntimePatchRequestAcceptsTextReplace(t *testing.T) {
+	request, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType":  "text_replace",
+		"targetRef":  "main.go",
+		"oldText":    "old",
+		"newText":    "new",
+		"baseHash":   "hash-main",
+		"occurrence": float64(2),
+	})
+	if err != nil {
+		t.Fatalf("runtimePatchRequestFromMap text_replace err = %v", err)
+	}
+	if request.PatchType != "text_replace" || request.OldText != "old" || request.NewText != "new" || request.Occurrence != 2 {
+		t.Fatalf("request = %+v, want text_replace fields", request)
 	}
 }
 
@@ -18616,6 +18660,63 @@ func TestValidateLLMExecutionOutputContractAllowsStrategyReassessmentDecisionFie
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want strategy reassessment-compliant patch accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStrategySurfaceByTargetRef(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-target-ref-surface",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-target-ref-surface/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "targetRef=main.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main.go",
+						"patchType":            "text_replace",
+						"oldText":              "old",
+						"newText":              "new",
+						"failedSurface":        "main.go current build failure",
+						"rootCauseTarget":      "main.go",
+						"repairTargetDecision": "patch main.go to address the current failed surface",
+						"repairMode":           "continue_same_target_repair",
+						"forbiddenRepair":      "do not edit unrelated files",
+						"verificationPlan":     "run bounded verification for targetRef=main.go",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want targetRef-aligned surface accepted", err)
 	}
 }
 

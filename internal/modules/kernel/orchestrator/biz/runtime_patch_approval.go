@@ -190,6 +190,9 @@ func runtimePatchRequestLineStats(request runtimePatchRequest) (int, int) {
 	if strings.TrimSpace(request.Content) != "" {
 		return countTextLines(request.Content), 0
 	}
+	if strings.TrimSpace(request.PatchType) == "text_replace" {
+		return countTextLines(request.NewText), countTextLines(request.OldText)
+	}
 	return 0, 0
 }
 
@@ -218,7 +221,10 @@ func patchApprovalContextRequest(request runtimePatchRequest, reasons []string) 
 		"summary":      request.Summary,
 		"content":      request.Content,
 		"diff":         request.Diff,
+		"oldText":      request.OldText,
+		"newText":      request.NewText,
 		"baseHash":     request.BaseHash,
+		"occurrence":   request.Occurrence,
 		"addedLines":   added,
 		"deletedLines": deleted,
 		"riskReasons":  append([]string(nil), reasons...),

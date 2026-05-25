@@ -2420,6 +2420,19 @@ func TestParseLLMExecutionDecisionNormalizesStringPlanField(t *testing.T) {
 	}
 }
 
+func TestParseLLMExecutionDecisionNormalizesStringNextActionField(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"nextAction":"continue_run"
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	if decision.NextAction == nil || decision.NextAction.Kind != "continue_run" {
+		t.Fatalf("nextAction = %+v, want string normalized into action object", decision.NextAction)
+	}
+}
+
 func TestParseLLMExecutionDecisionMovesTopLevelStrategyReassessmentIntoPatchNodeInput(t *testing.T) {
 	decision, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"continue",

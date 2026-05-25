@@ -1538,6 +1538,15 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 			changed = true
 		}
 	}
+	if value, ok := doc["nextAction"]; ok {
+		if normalized, keep := normalizedNextActionValue(value); keep {
+			doc["nextAction"] = normalized
+			changed = true
+		} else {
+			delete(doc, "nextAction")
+			changed = true
+		}
+	}
 	if value, ok := doc["validationPlan"]; ok {
 		if _, hasPlan := doc["plan"]; !hasPlan {
 			if plan := advisoryDecisionPlanValue(value); len(plan) > 0 {
@@ -1624,6 +1633,28 @@ func attachTopLevelStrategyReassessmentToPatchNodes(doc map[string]any, value an
 		doc["executionGraph"] = graph
 	}
 	return attached
+}
+
+func normalizedNextActionValue(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		kind := strings.TrimSpace(stringValue(typed["kind"]))
+		if kind == "" {
+			return nil, false
+		}
+		if typed["kind"] != kind {
+			typed["kind"] = kind
+		}
+		return typed, true
+	case string:
+		kind := strings.TrimSpace(typed)
+		if kind == "" {
+			return nil, false
+		}
+		return map[string]any{"kind": kind}, true
+	default:
+		return nil, false
+	}
 }
 
 func advisoryDecisionPlanValue(value any) []string {
@@ -2856,13 +2887,13 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 		},
 		{
 			Kind:        llmcommon.RuntimeBlockKindPatchApply,
-			Description: "Apply one file_write or unified_diff patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read when changing an existing file. When the runtime input carries missing coverage targets, include coverageTargets that cite the exact Goal, DoD, or deliverable coverage item this state change intends to close. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
-			Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "coverageTargets": "array of Goal/DoD/deliverable coverage target strings or objects", "approvalId": "approved approval id when required"},
+			Description: "Apply one file_write, unified_diff, or text_replace patch inside the workspace deliverable directory and record patch evidence. targetRef is a file path; an existing file path component cannot be used as a directory. Include baseHash from file/read or current repair snapshots when changing an existing file. Prefer text_replace with exact oldText/newText for stale diff/context mismatch repairs. When the runtime input carries missing coverage targets, include coverageTargets that cite the exact Goal, DoD, or deliverable coverage item this state change intends to close. Patch content, diffs, and exact replacements must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies. Governance/report files such as decision_record.md, approval_record.md, delivery_summary.md, result_summary.md, final_summary.md, deliverable_manifest.md, or evidence_chain.md are reserved for WorkOrch-managed Artifact records and must not be written through patch/apply.",
+			Input:       map[string]any{"patchType": "file_write|unified_diff|text_replace", "targetRef": "relative path", "content": "string for file_write", "diff": "string for unified_diff", "oldText": "exact text for text_replace", "newText": "replacement text for text_replace", "occurrence": "optional 1-based occurrence when oldText is not unique", "summary": "string", "baseHash": "sha256 content hash", "coverageTargets": "array of Goal/DoD/deliverable coverage target strings or objects", "approvalId": "approved approval id when required"},
 		},
 		{
 			Kind:        llmcommon.RuntimeBlockKindPatchPreview,
-			Description: "Validate and summarize one file_write or unified_diff patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview. Patch content and diffs must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies.",
-			Input:       map[string]any{"patchType": "file_write|unified_diff", "targetRef": "relative path", "content": "string", "diff": "string", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
+			Description: "Validate and summarize one file_write, unified_diff, or text_replace patch without writing files. Use this before high-risk edits when the user or approval flow needs a non-mutating diff preview. Patch content, diffs, and exact replacements must be complete, concrete, and directly applicable to the current workspace content; do not use omitted sections or placeholder bodies.",
+			Input:       map[string]any{"patchType": "file_write|unified_diff|text_replace", "targetRef": "relative path", "content": "string for file_write", "diff": "string for unified_diff", "oldText": "exact text for text_replace", "newText": "replacement text for text_replace", "occurrence": "optional 1-based occurrence when oldText is not unique", "summary": "string", "baseHash": "sha256 content hash", "approvalId": "approved approval id when required"},
 		},
 		{
 			Kind:        llmcommon.RuntimeBlockKindPatchRevert,

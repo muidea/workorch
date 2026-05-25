@@ -22,9 +22,12 @@ type runtimePatchRequest struct {
 	TargetRef       string
 	Content         string
 	Diff            string
+	OldText         string
+	NewText         string
 	Summary         string
 	PatchType       string
 	BaseHash        string
+	Occurrence      int
 	ApprovalID      common.ApprovalID
 	CoverageTargets any
 	Extra           map[string]any
@@ -370,11 +373,14 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	targetRef, _ := item["targetRef"].(string)
 	content, _ := item["content"].(string)
 	diff, _ := item["diff"].(string)
+	oldText, _ := item["oldText"].(string)
+	newText, _ := item["newText"].(string)
 	summary, _ := item["summary"].(string)
 	patchType, _ := item["patchType"].(string)
 	operation, _ := item["operation"].(string)
 	baseHash, _ := item["baseHash"].(string)
 	approvalID, _ := item["approvalId"].(string)
+	occurrence := intFromAny(item["occurrence"])
 	targetRef = strings.TrimSpace(targetRef)
 	if targetRef == "" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch targetRef is required", common.ErrInvalidArgument)
@@ -385,14 +391,19 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType == "" {
 		patchType = strings.TrimSpace(operation)
 	}
+	if patchType == "" && oldText != "" {
+		patchType = "text_replace"
+	}
 	if patchType == "" {
 		patchType = "file_write"
 	}
 	switch patchType {
 	case "create", "write", "replace", "file":
 		patchType = "file_write"
+	case "edit", "file_edit", "file/edit", "old_text_replace", "exact_replace":
+		patchType = "text_replace"
 	}
-	if patchType != "file_write" && patchType != "unified_diff" {
+	if patchType != "file_write" && patchType != "unified_diff" && patchType != "text_replace" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patchType %q is not supported", common.ErrInvalidArgument, patchType)
 	}
 	if patchType == "file_write" && strings.TrimSpace(content) == "" {
@@ -400,6 +411,9 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	}
 	if patchType == "unified_diff" && strings.TrimSpace(diff) == "" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff is required for unified_diff", common.ErrInvalidArgument)
+	}
+	if patchType == "text_replace" && oldText == "" {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch oldText is required for text_replace", common.ErrInvalidArgument)
 	}
 	if containsUnresolvedPatchBaseHash(baseHash) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch baseHash contains unresolved runtime template placeholders", common.ErrInvalidArgument)
@@ -410,25 +424,34 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	if patchType == "unified_diff" && containsUnresolvedRuntimeTemplate(diff) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff contains unresolved runtime template placeholders", common.ErrInvalidArgument)
 	}
+	if patchType == "text_replace" && (containsUnresolvedRuntimeTemplate(oldText) || containsUnresolvedRuntimeTemplate(newText)) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch text_replace contains unresolved runtime template placeholders", common.ErrInvalidArgument)
+	}
 	if patchType == "file_write" && containsRuntimeRedactionMarker(content) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch content contains redacted runtime markers", common.ErrInvalidArgument)
 	}
 	if patchType == "unified_diff" && containsRuntimeRedactionMarker(diff) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch diff contains redacted runtime markers", common.ErrInvalidArgument)
 	}
+	if patchType == "text_replace" && (containsRuntimeRedactionMarker(oldText) || containsRuntimeRedactionMarker(newText)) {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch text_replace contains redacted runtime markers", common.ErrInvalidArgument)
+	}
 	if summary == "" {
 		summary = "workspace patch apply"
 	}
-	if containsNonSubstantivePatchIntent(summary) || containsNonSubstantivePatchIntent(content) || containsNonSubstantivePatchIntent(diff) {
+	if containsNonSubstantivePatchIntent(summary) || containsNonSubstantivePatchIntent(content) || containsNonSubstantivePatchIntent(diff) || containsNonSubstantivePatchIntent(newText) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch describes a non-substantive state-change placeholder", common.ErrInvalidArgument)
 	}
 	return runtimePatchRequest{
 		TargetRef:       targetRef,
 		Content:         content,
 		Diff:            diff,
+		OldText:         oldText,
+		NewText:         newText,
 		Summary:         summary,
 		PatchType:       patchType,
 		BaseHash:        strings.TrimSpace(baseHash),
+		Occurrence:      occurrence,
 		ApprovalID:      common.ApprovalID(strings.TrimSpace(approvalID)),
 		CoverageTargets: patchCoverageTargetsValue(item["coverageTargets"]),
 		Extra:           cloneStepPayload(item),
@@ -582,6 +605,8 @@ func applyWorkspacePatch(deliverableDirectory string, request runtimePatchReques
 		return applyWorkspaceFileWrite(deliverableDirectory, request.TargetRef, request.Content, request.BaseHash)
 	case "unified_diff":
 		return applyWorkspaceUnifiedDiff(deliverableDirectory, request.TargetRef, request.Diff, request.BaseHash)
+	case "text_replace":
+		return applyWorkspaceTextReplace(deliverableDirectory, request)
 	default:
 		return common.ErrInvalidArgument
 	}
@@ -661,6 +686,60 @@ func applyWorkspaceFileWrite(deliverableDirectory string, targetRef string, cont
 		return err
 	}
 	return os.WriteFile(target, []byte(content), 0o644)
+}
+
+func applyWorkspaceTextReplace(deliverableDirectory string, request runtimePatchRequest) error {
+	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	if patchRepairLooksBinary(data) {
+		return fmt.Errorf("%w: patch text_replace target is binary", common.ErrInvalidArgument)
+	}
+	if err := verifyWorkspacePatchBaseHashBytes(target, data, request.BaseHash); err != nil {
+		return err
+	}
+	nextContent, _, err := applyExactTextReplacement(string(data), request.OldText, request.NewText, request.Occurrence)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, []byte(nextContent), 0o644)
+}
+
+func applyExactTextReplacement(content string, oldText string, newText string, occurrence int) (string, int, error) {
+	if oldText == "" {
+		return "", 0, fmt.Errorf("%w: patch oldText is required for text_replace", common.ErrInvalidArgument)
+	}
+	matchCount := strings.Count(content, oldText)
+	if matchCount == 0 {
+		return "", 0, fmt.Errorf("%w: patch text_replace oldText not found", common.ErrConflict)
+	}
+	if occurrence <= 0 && matchCount != 1 {
+		return "", 0, fmt.Errorf("%w: patch text_replace oldText matched %d occurrences", common.ErrConflict, matchCount)
+	}
+	if occurrence > matchCount {
+		return "", 0, fmt.Errorf("%w: patch text_replace occurrence %d exceeds %d matches", common.ErrConflict, occurrence, matchCount)
+	}
+	selected := occurrence
+	if selected <= 0 {
+		selected = 1
+	}
+	start := 0
+	for current := 1; ; current++ {
+		pos := strings.Index(content[start:], oldText)
+		if pos < 0 {
+			return "", 0, fmt.Errorf("%w: patch text_replace oldText not found", common.ErrConflict)
+		}
+		absolute := start + pos
+		if current == selected {
+			return content[:absolute] + newText + content[absolute+len(oldText):], matchCount, nil
+		}
+		start = absolute + len(oldText)
+	}
 }
 
 func ensureWorkspacePatchParentDirectory(deliverableDirectory string, targetRef string, target string, operation string) error {
@@ -922,6 +1001,29 @@ func previewWorkspacePatch(deliverableDirectory string, request runtimePatchRequ
 		preview["diffHash"] = hex.EncodeToString(sum[:])
 		preview["addedLines"] = added
 		preview["deletedLines"] = deleted
+	case "text_replace":
+		currentContent, err := os.ReadFile(target)
+		if err != nil {
+			return nil, err
+		}
+		if patchRepairLooksBinary(currentContent) {
+			return nil, fmt.Errorf("%w: patch text_replace target is binary", common.ErrInvalidArgument)
+		}
+		if err := verifyWorkspacePatchBaseHashBytes(target, currentContent, request.BaseHash); err != nil {
+			return nil, err
+		}
+		nextContent, matchCount, err := applyExactTextReplacement(string(currentContent), request.OldText, request.NewText, request.Occurrence)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256([]byte(nextContent))
+		preview["contentHash"] = hex.EncodeToString(sum[:])
+		preview["oldTextHash"] = sha256HexBytes([]byte(request.OldText))
+		preview["newTextHash"] = sha256HexBytes([]byte(request.NewText))
+		preview["matchCount"] = matchCount
+		preview["addedLines"] = countTextLines(request.NewText)
+		preview["deletedLines"] = countTextLines(request.OldText)
+		preview["bytes"] = len([]byte(request.NewText))
 	default:
 		return nil, common.ErrInvalidArgument
 	}

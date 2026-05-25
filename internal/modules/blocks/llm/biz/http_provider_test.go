@@ -80,6 +80,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(joined, "Conversation language: Chinese (Simplified)") ||
 		!strings.Contains(joined, "DoD summaries") ||
 		!strings.Contains(joined, "complete, concrete, and directly applicable") ||
+		!strings.Contains(joined, "text_replace") ||
 		!strings.Contains(joined, "Do not represent deletion as file_write with empty content") ||
 		!strings.Contains(joined, "patch/preview or patch/apply failure") ||
 		!strings.Contains(joined, "assessmentOnly") ||

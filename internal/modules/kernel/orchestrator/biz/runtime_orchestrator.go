@@ -2680,7 +2680,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		if !strategyCandidateHasRequiredFields(candidate, requiredFields) {
 			continue
 		}
-		if expectedSurface != "" && !strategyFailedSurfaceMatches(candidate, expectedSurface) {
+		if expectedSurface != "" && !strategyFailedSurfaceMatches(candidate, expectedSurface) && !strategyCandidateTargetsMatchFailedSurface(candidate, expectedSurface) {
 			continue
 		}
 		repairMode := strategyRepairModeFromCandidate(candidate)
@@ -2867,6 +2867,60 @@ func strategyFailedSurfaceTextMatches(got string, expected string) bool {
 		return false
 	}
 	return got == expected || strings.Contains(got, expected) || strings.Contains(expected, got)
+}
+
+func strategyCandidateTargetsMatchFailedSurface(candidate map[string]any, expectedSurface string) bool {
+	expectedRefs := strategySurfaceTargetRefs(expectedSurface)
+	if len(expectedRefs) == 0 {
+		return false
+	}
+	for _, key := range []string{"targetRef", "rootCauseTarget", "failedSurface"} {
+		for _, ref := range strategySurfaceTargetRefs(stringFromAny(candidate[key])) {
+			if strategyTargetRefSetContains(expectedRefs, ref) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func strategySurfaceTargetRefs(text string) []string {
+	var refs []string
+	seen := map[string]bool{}
+	add := func(ref string) {
+		ref = filepath.ToSlash(filepath.Clean(strings.TrimSpace(ref)))
+		if ref == "." || ref == "" || seen[ref] {
+			return
+		}
+		seen[ref] = true
+		refs = append(refs, ref)
+	}
+	for _, ref := range repairPatchTargetRefsFromScopeText(text) {
+		add(ref)
+	}
+	for _, ref := range extractStructuredFailureTargetRefs(text) {
+		add(ref)
+	}
+	for _, field := range strings.Fields(text) {
+		field = strings.Trim(field, "`'\"()[]{}<>;,：:")
+		if strings.Contains(field, ".") && !strings.Contains(field, "://") {
+			add(field)
+		}
+	}
+	return refs
+}
+
+func strategyTargetRefSetContains(refs []string, candidate string) bool {
+	candidate = filepath.ToSlash(filepath.Clean(strings.TrimSpace(candidate)))
+	if candidate == "" || candidate == "." {
+		return false
+	}
+	for _, ref := range refs {
+		if ref == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func strategyRootCauseDistinguishableFromFailedSurface(candidate map[string]any, expectedSurface string) bool {
