@@ -19800,6 +19800,92 @@ func TestValidateLLMExecutionOutputContractAllowsRepeatedFailedSurfaceWhenPatchT
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsDependencyPrerequisiteRootCauseRepair(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-dependency-prerequisite",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-dependency-prerequisite/repair-005",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureReason":                   "config.go:4:2: no required module provides package example.org/dependency",
+			"failureTargetScope":              "failureTargets=config.go",
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "repeated_repair_failure",
+				"targetRepairAttempts": 0,
+				"failedSurface":        "invalid argument: strategyReassessment.required=true requires state-changing patch output to declare fields aligned with current failed surface",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"failureTargetScope": "failureTargets=config.go",
+			},
+			"failedStepOutput": map[string]any{
+				"stderr": "config.go:4:2: no required module provides package example.org/dependency; to add it:\n\tadd dependency metadata",
+			},
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":       "module.manifest",
+				"exists":          true,
+				"contentHash":     "hash-module-manifest",
+				"contentComplete": true,
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "fix-dependency-metadata",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "module.manifest",
+						"patchType":            "text_replace",
+						"baseHash":             "hash-module-manifest",
+						"oldText":              "module example\n",
+						"newText":              "module example\nrequire example.org/dependency v1.0.0\n",
+						"failedSurface":        "config.go:4:2: no required module provides package example.org/dependency",
+						"rootCauseTarget":      "module.manifest",
+						"repairTargetDecision": "add the missing dependency declaration required by config.go",
+						"repairMode":           "continue_same_target_repair",
+						"forbiddenRepair":      "do not remove the import from config.go or patch unrelated resources",
+						"verificationPlan":     "run targeted build after updating module.manifest",
+						"coverageTargets": []string{
+							"configuration dependency metadata",
+						},
+					},
+				},
+				{
+					"id":        "verify-build",
+					"kind":      "shell/command",
+					"dependsOn": []string{"fix-dependency-metadata"},
+					"input": map[string]any{
+						"command": "build",
+						"args":    []string{"--target=config.go"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want dependency prerequisite root-cause repair accepted", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWhenRootCauseTargetDoesNotMatchPatchTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-root-cause-mismatch",

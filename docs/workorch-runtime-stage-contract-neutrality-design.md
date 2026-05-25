@@ -664,6 +664,10 @@ Scoped repair 允许在 state-changing artifact 后追加验证，但验证必�
 
 若失败证据本身明确指向依赖、manifest、metadata、checksum、lock 等配套资源缺失，state-changing repair 可以写入与失败目标同目录的中立配套元数据目标。该放宽只基于失败文本中的通用前置资源信号、目标路径关系和目标文件名的通用 metadata/manifest/lock/checksum 形态，不得硬编码语言、框架、包管理器或具体业务文件。若配套目标不在同一目录、失败证据没有前置资源信号，或目标只是无关 marker/report/no-op 文件，仍必须按无关 patch 拒绝。
 
+`strategyReassessment.required=true` 时，runtime 不得只使用上一轮 reassessment 记录的 `failedSurface` 作为唯一匹配口径。若上一轮失败是合同错误、schema 错误或 repair-of-repair 错误，而当前 `failureTargetScope`、`repairActionPackage.failureTargetScope`、`currentExecutionProgress.failureTargetScope` 或 `currentFailure.failedSurface` 已经保留原始失败目标，runtime 必须把这些结构化失败表面共同作为可接受匹配集合。LLM 输出只要声明并命中其中任一当前有效失败表面，且满足目标相关性、根因目标和验证合同，就不应被旧的合同错误文本阻塞。
+
+当 LLM 在 `continue_same_target_repair` 中选择修复与失败表面不同的根因目标时，runtime 只能在该目标已经被中立证据落地时接受，例如目标存在于 `failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots`、显式 `targetRef`、通用 prerequisite/manifest/metadata/lock/checksum 候选或等价 root-cause candidate。若输出声明了 `rootCauseTarget`，实际 `patch/apply.targetRef` 必须与该声明一致，并且不得把原失败表面再次作为 patch 目标后仅通过文字声明伪装成根因转移。该规则只判断“失败表面、根因配套资源和 patch target 是否由同一组结构化证据连接”，不解释具体语言、包管理器、文件类型或业务语义。
+
 Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无关 `patch/apply` marker 来满足 state-changing 合同。若某个 capability 本身是声明过的 state-changing artifact，必须由该 capability 的输入、输出和 evidence 直接表达目标关系；否则修复应使用目标相关的 `patch/apply`、返回 failed assessment，或进入 blocker。
 
 当 run 级 `stateChangePolicy=must_produce_state_change` 且失败输出包含 `missingDoDItems` 时，runtime repair 必须先区分中立缺口类型：

@@ -2778,7 +2778,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 	if len(requiredFields) == 0 {
 		requiredFields = []string{"failedSurface", "rootCauseTarget", "repairTargetDecision", "repairMode", "forbiddenRepair", "verificationPlan"}
 	}
-	expectedSurface := strings.TrimSpace(stringFromMap(reassessment, "failedSurface"))
+	expectedSurfaces := strategyReassessmentExpectedSurfaces(step, reassessment)
 	for _, candidate := range candidates {
 		if len(candidate) == 0 {
 			continue
@@ -2786,7 +2786,8 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		if !strategyCandidateHasRequiredFields(candidate, requiredFields) {
 			continue
 		}
-		if expectedSurface != "" && !strategyFailedSurfaceMatches(candidate, expectedSurface) && !strategyCandidateTargetsMatchFailedSurface(candidate, expectedSurface) {
+		expectedSurface, surfaceMatched := strategyCandidateMatchingExpectedSurface(candidate, expectedSurfaces)
+		if len(expectedSurfaces) > 0 && !surfaceMatched {
 			continue
 		}
 		repairMode := strategyRepairModeFromCandidate(candidate)
@@ -2797,7 +2798,9 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		switch repairMode {
 		case strategyRepairModeContinueSameTarget:
 			if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
-				!strategySameTargetContinuationAddressesCurrentFailure(step, candidate, expectedSurface) && !surfaceCorrection {
+				!strategySameTargetContinuationAddressesCurrentFailure(step, candidate, expectedSurface) &&
+				!strategyCandidateAddressesGroundedRootCauseTarget(step, candidate, expectedSurface) &&
+				!surfaceCorrection {
 				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=continue_same_target_repair requires patch/apply to address current primary diagnostics or return a failed assessment/blocker", common.ErrInvalidArgument)
 			}
 		case strategyRepairModeShiftRootCauseTarget:
@@ -2819,6 +2822,45 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		return nil
 	}
 	return fmt.Errorf("%w: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/repairMode/forbiddenRepair/verificationPlan aligned with current failed surface", common.ErrInvalidArgument)
+}
+
+func strategyReassessmentExpectedSurfaces(step *runModel.Step, reassessment map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value any) {
+		text := strings.TrimSpace(stringFromAny(value))
+		if text == "" || seen[text] {
+			return
+		}
+		seen[text] = true
+		ret = append(ret, text)
+	}
+	add(reassessment["failedSurface"])
+	if step != nil && step.Input != nil {
+		add(step.Input["failureTargetScope"])
+		actionPackage := mapFromValue(step.Input["repairActionPackage"])
+		add(actionPackage["failureTargetScope"])
+		progress := mapFromValue(step.Input["currentExecutionProgress"])
+		add(progress["failureTargetScope"])
+		failure := mapFromValue(step.Input["currentFailure"])
+		add(failure["failedSurface"])
+	}
+	return ret
+}
+
+func strategyCandidateMatchingExpectedSurface(candidate map[string]any, expectedSurfaces []string) (string, bool) {
+	if len(expectedSurfaces) == 0 {
+		return "", true
+	}
+	for _, expectedSurface := range expectedSurfaces {
+		if strings.TrimSpace(expectedSurface) == "" {
+			continue
+		}
+		if strategyFailedSurfaceMatches(candidate, expectedSurface) || strategyCandidateTargetsMatchFailedSurface(candidate, expectedSurface) {
+			return expectedSurface, true
+		}
+	}
+	return "", false
 }
 
 const (
@@ -2859,6 +2901,43 @@ func strategySameTargetContinuationAddressesCurrentFailure(step *runModel.Step, 
 		len(stringSliceFromValue(candidate["addressesFailureSignals"])) > 0 ||
 		strings.TrimSpace(stringFromAny(candidate["primaryDiagnosticResolution"])) != "" ||
 		len(mapSliceFromValue(candidate["primaryDiagnosticResolutions"])) > 0
+}
+
+func strategyCandidateAddressesGroundedRootCauseTarget(step *runModel.Step, candidate map[string]any, expectedSurface string) bool {
+	if step == nil || step.Input == nil || len(candidate) == 0 {
+		return false
+	}
+	request, err := runtimePatchRequestFromMap(candidate)
+	if err != nil {
+		return false
+	}
+	targetRef := normalizeRepairPatchTargetRef(request.TargetRef)
+	if targetRef == "" {
+		return false
+	}
+	if rootCauseTargets := rootCauseTargetRefsFromStrategyValue(candidate["rootCauseTarget"]); len(rootCauseTargets) > 0 &&
+		!repairPatchTargetRefMatches(targetRef, rootCauseTargets) {
+		return false
+	}
+	targetRefs := repairPatchRelevantTargetRefs(step)
+	surfaceRefs := strategySurfaceTargetRefs(expectedSurface)
+	for _, surfaceRef := range surfaceRefs {
+		targetRefs = append(targetRefs, surfaceRef)
+	}
+	targetRefs = uniqueProcessEvidenceStrings(targetRefs)
+	if len(targetRefs) == 0 {
+		return false
+	}
+	patchesFailedSurface := repairPatchTargetRefMatches(targetRef, surfaceRefs)
+	if patchesFailedSurface {
+		return false
+	}
+	if repairPatchRequestDeclaresRelatedFailureTargets(request, targetRefs) {
+		return repairPatchTargetRefIsRelatedPrerequisite(step.Input, targetRef, targetRefs) ||
+			repairPatchTargetRefIsGroundedRootCauseCandidate(step.Input, targetRef, targetRefs)
+	}
+	return repairPatchTargetRefIsRelatedPrerequisite(step.Input, targetRef, targetRefs) ||
+		repairPatchTargetRefIsGroundedRootCauseCandidate(step.Input, targetRef, targetRefs)
 }
 
 func strategyCandidateHasSurfaceContractCorrection(candidate map[string]any, expectedSurface string) bool {
