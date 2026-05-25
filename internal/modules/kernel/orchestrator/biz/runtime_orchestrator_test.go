@@ -10457,6 +10457,65 @@ func TestRuntimeRepairInputForSchemaInvalidRepairAddsJSONRecoveryContract(t *tes
 	}
 }
 
+func TestRuntimeRepairInputForSchemaInvalidPreservesConcreteValidationContract(t *testing.T) {
+	runID := common.RunID("run-schema-invalid-validation-contract")
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-verify"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "verify external contract",
+			}},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"forbiddenKinds":                        []string{"patch/apply"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"error":                   "invalid argument: invalid llm decision json: invalid character '0' in string escape code",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-schema-invalid-validation-contract", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedRepair, 2, errors.New("invalid argument: invalid llm decision json"))
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
+		input["evidenceRepairRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] == true {
+		t.Fatalf("input = %+v, want concrete validation evidence contract preserved", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustReturnValidJSON"] != true ||
+		required["mustNotReuseRejectedJSON"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation evidence plus schema recovery contract", required)
+	}
+	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 1 {
+		t.Fatalf("coverageTargetSet = %+v, want inherited validation target", input["coverageTargetSet"])
+	}
+}
+
 func TestRuntimeRepairInputCarriesCoverageTargetsAndProgressAfterRepairContractFailure(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-target-context-inherit")

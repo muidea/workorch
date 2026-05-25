@@ -476,6 +476,9 @@ func compactFailureContextForRuntimeContext(input map[string]any) map[string]any
 		"failedStepKind",
 		"failureReason",
 		"repairObjective",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"coverageRepairRequired",
 		"attempts",
 		"maxAttempts",
 		"repairAttempts",
@@ -486,6 +489,19 @@ func compactFailureContextForRuntimeContext(input map[string]any) map[string]any
 	} {
 		if value, ok := input[key]; ok && value != nil {
 			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		ret["repairActionPackage"] = compactLLMContextValue(pkg, 2)
+	}
+	for _, key := range []string{
+		"coverageTargetSet",
+		"missingDoDItems",
+		"missingGoalCoverage",
+		"missingDeliverableCoverage",
+	} {
+		if values := mapSliceFromValue(input[key]); len(values) > 0 {
+			ret[key] = cloneMapSlice(values)
 		}
 	}
 	if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {

@@ -80,6 +80,9 @@ func BuildConvergenceContract(
 				input[key] = source[key]
 			}
 		}
+		if sourceKey == "rejectedResultContinuation" {
+			inheritRejectedResultCoverageContract(input, source)
+		}
 	}
 	enrichRepairInputWithProgressFailureSignals(input)
 	contract := ConvergenceContract{
@@ -100,7 +103,21 @@ func BuildConvergenceContract(
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+		ensureCoverageRepairTargetSet(input)
 		contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		if len(contract.RepairActionPackage) == 0 {
+			contract.RepairActionPackage = map[string]any{}
+		}
+		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+			contract.RepairActionPackage["coverageRepairRequired"] = true
+			contract.RepairActionPackage["coverageTargetSet"] = targets
+		}
+		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) > 0 {
+			required["mustDeclareCoverageTargets"] = true
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		}
+		contract.RepairActionPackage["requiredOutput"] = required
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
@@ -143,6 +160,39 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func inheritRejectedResultCoverageContract(input map[string]any, source map[string]any) bool {
+	if input == nil || len(source) == 0 {
+		return false
+	}
+	coverageGaps := mapFromValue(source["coverageGaps"])
+	inherited := false
+	inheritSlice := func(targetKey string, value any) {
+		if len(mapSliceFromValue(input[targetKey])) > 0 {
+			return
+		}
+		items := mapSliceFromValue(value)
+		if len(items) == 0 {
+			return
+		}
+		input[targetKey] = cloneMapSlice(items)
+		inherited = true
+	}
+	inheritSlice("missingDoDItems", source["unsatisfiedDoDItems"])
+	inheritSlice("missingGoalCoverage", coverageGaps["missingGoalCoverage"])
+	inheritSlice("missingDeliverableCoverage", coverageGaps["missingDeliverableCoverage"])
+	if !inherited {
+		return false
+	}
+	input["coverageRepairRequired"] = true
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairRequired"] = true
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	ensureCoverageRepairTargetSet(input)
+	return true
 }
 
 func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract) map[string]any {
@@ -192,6 +242,15 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 		required := concreteValidationEvidenceRequiredOutput(mapFromValue(pkg["requiredOutput"]))
 		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+			input["coverageRepairRequired"] = true
+			input["coverageTargetSet"] = targets
+			pkg["coverageRepairRequired"] = true
+			pkg["coverageTargetSet"] = targets
+			required["mustDeclareCoverageTargets"] = true
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		} else if targets := mapSliceFromValue(pkg["coverageTargetSet"]); len(targets) > 0 {
+			input["coverageRepairRequired"] = true
+			input["coverageTargetSet"] = targets
 			pkg["coverageRepairRequired"] = true
 			pkg["coverageTargetSet"] = targets
 			required["mustDeclareCoverageTargets"] = true

@@ -2796,9 +2796,48 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
 		)
 	}
+	preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	return input
+}
+
+func preserveConcreteValidationSchemaInvalidRepairContract(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || failedStep == nil || !stateChangingSchemaInvalidRepair(failedStep) || !inputRequiresConcreteValidationEvidence(failedStep.Input) {
+		return false
+	}
+	inheritConcreteValidationRepairContract(input, failedStep)
+	input["schemaInvalidRepairMode"] = "single_valid_json_decision"
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["schemaInvalidRecovery"] = map[string]any{
+		"required": true,
+		"reason":   "previous_llm_decision_json_invalid",
+		"requirements": []string{
+			"return exactly one valid JSON object",
+			"do not reuse rejected raw output previews",
+			"do not include markdown, comments, duplicate objects, trailing braces, or partial arrays",
+			"make every executionGraph node a complete JSON object",
+		},
+	}
+	required := concreteValidationEvidenceRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+	required["mustReturnValidJSON"] = true
+	required["mustNotReuseRejectedJSON"] = true
+	required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]),
+		"malformed_json",
+		"markdown_wrapped_json",
+		"raw_rejected_json_reuse",
+		"partial_json_array",
+	))
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Previous validation-evidence repair output was rejected because the JSON shape was invalid; only fix the JSON/schema shape and preserve the concrete validation evidence contract.",
+		"Do not downgrade to evidence acquisition, assessment-only, or state-changing patch output; return one valid JSON object whose executionGraph follows repairActionPackage.requiredOutput.",
+	)
+	return true
 }
 
 func runtimeRepairLastFailureDiagnostics(failedStep *runModel.Step) map[string]any {

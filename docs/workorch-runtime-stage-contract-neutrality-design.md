@@ -188,6 +188,7 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 - 若合同状态是 `need_state_change`，输入必须包含 `repairActionPackage`，并至少包含一个通过准入的 concrete implementation target evidence：`repairTargetSet`、`structuredFailureSignals.targetRefs` / `lineRefs`、`targetSnapshots`、`patchRepairContext`、`failureTargetRepairContext` 或等价 capability evidence。`coverageTargetSet` 只定义待关闭的验收范围，不能单独作为允许 `patch/apply` 的实现目标证据。
 - 若合同状态是 `need_evidence`，输入必须移除顶层 `stateChangingOutputRequired`，并把 `repairActionPackage.requiredOutput.acceptedKinds` 限定为 evidence acquisition 能力。
 - 若合同状态是 `need_validation`，输入必须说明最近 state-changing artifact 或 coverage target set、目标 scope、bounded verification 条件和禁止的 read-only/self-inspection-only 输出；`repairActionPackage.requiredOutput` 必须设置 `mustProduceConcreteValidationEvidence=true`，且不得继承旧的 patch-only `acceptedKinds=["patch/apply"]`。
+- 若 `need_validation` 来源于 `rejectedResultContinuation.coverageGaps` 或 `unsatisfiedDoDItems`，`BuildConvergenceContract` 必须把未关闭缺口显式 rehydrate 为 `coverageTargetSet` 并写入 `ConvergenceContract.RepairActionPackage`。`ApplyConvergenceContract` 不得依赖构造阶段对克隆 input 的副作用；即使原始 input 只携带 execution context，也必须从 contract package 恢复顶层 `coverageRepairRequired` / `coverageTargetSet` 和 concrete validation `requiredOutput`。
 - `currentProgressDigest`、`processEvidenceTimeline`、`repairActionPackage`、`structuredFailureSignals`、`latestClosureEvidence` 的当前事实必须一致；历史 wrapper/schema/provider 失败只能作为历史诊断摘要。
 - 当最新 concrete failure 被包裹在 follow-up / wrapper LLM failure 后面时，runtime 必须从 `currentExecutionProgress.latestActionEvidence` / `completedGraphEvidence` 的 stdout、stderr、error、targetRef、line refs 或 failure signature 中提取中立 target evidence。若可机械提取出 target refs / line refs / failure target scope，则该 evidence 必须提升为当前 `currentGap` 与 `repairActionPackage.structuredFailureSignals`，并恢复 `need_state_change`；不得因为 wrapper failure 本身是 read-only graph、schema invalid 或 dodAssessment failed，就退回 `need_evidence`。
 - `latest_successful_action_evidence` 只能作为已完成动作或候选证据引用，不得被提升为 `currentFailure`、`lastObservedFailure` 或 failure target scope。只有 step 自身失败，或 completed action evidence 被明确标记为 `evidenceValidity=actionable_failure` / 输出中存在可机械识别的失败标记时，才允许覆盖旧失败成为当前失败。
@@ -224,6 +225,7 @@ Resolved decision 恢复必须遵守以下规则：
 - validation shell failure 带 targetRef / lineRef 时不得创建 decision，而应进入 `need_state_change`。
 - LLM 在 state-changing repair 中返回 blocked_on_decision，但 context 未声明外部依赖时，转换为 repair contract violation。
 - replan successor 能继承 predecessor unresolved repair contract；若只剩 wrapper failure，则进入 `need_evidence`。
+- replan successor 若继承的是 predecessor `rejectedResultContinuation` 中的 coverage gap / unsatisfied DoD，则首步不得退回普通 evidence acquisition；必须保持 `need_validation` 与 concrete validation evidence contract，并携带 unresolved coverage target set。
 - assessment-only coverage correction 与 state-changing repair 不互相污染。
 - memory / governance history / old rejected result 不得覆盖当前 repairActionPackage。
 
@@ -1393,6 +1395,12 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - `ConvergenceContract` 状态集已补默认 `blocked` 与 `need_governance` 回归，确保统一合同枚举闭环，`need_governance` 只在 runtime 依赖缺失时打开 ticket 门禁。
   - 新增回归测试覆盖默认 blocked 合同、runtime dependency governance 合同，以及 decision ticket 门禁仍按外部依赖信号放行。
   - 本批未出现新的人工决策冲突，继续沿用 CVC-01 编号。
+- 2026-05-25：
+  - 已完成 CVC-01 第六批收口。
+  - schema invalid / LLM decision invalid 的 repair-of-repair 若上一轮已是 concrete validation evidence 合同，只允许叠加 `single_valid_json_decision` 与 schema recovery 约束；不得降级为 `acquire_concrete_failure_evidence`、assessment-only 或 state-changing patch 合同。
+  - `rejectedResultContinuation` 中的 `unsatisfiedDoDItems`、`coverageGaps.missingGoalCoverage`、`coverageGaps.missingDeliverableCoverage` 已在统一合同构造时 rehydrate 为 `coverageTargetSet`，并通过 `ConvergenceContract.RepairActionPackage` 显式传递到 `ApplyConvergenceContract`，避免 successor / replan 初始输入因克隆 input 副作用丢失 unresolved coverage scope。
+  - compact failure context 已保留 bounded validation、coverage repair、repairActionPackage 与 missing coverage 字段，防止 successor run 只看到旧 replan failure 而看不到最新 rejected result required evidence。
+  - 新增回归测试覆盖 validation-evidence schema invalid repair 保持 `need_validation`，以及 rejected result coverage gaps 继承为 concrete validation evidence contract；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过。
 
 ## 非兼容性说明
 

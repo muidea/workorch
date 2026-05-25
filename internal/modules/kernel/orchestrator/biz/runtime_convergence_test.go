@@ -575,3 +575,43 @@ func TestBuildConvergenceContractRejectedResultSkipsHistoricalReplanPackage(t *t
 		t.Fatalf("repairActionPackage = %+v, want historical replan target suppressed", contract.RepairActionPackage)
 	}
 }
+
+func TestBuildConvergenceContractRejectedResultWithCoverageGapsNeedsValidation(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-rejected-coverage-validation",
+		WorkspaceID:     "ws-rejected-coverage-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-prev",
+				"unsatisfiedDoDItems": []map[string]any{{
+					"item":  "verify external contract",
+					"state": "skipped",
+				}},
+				"coverageGaps": map[string]any{
+					"missingGoalCoverage": []map[string]any{{
+						"goalRequirementId": "goal-req-1",
+						"item":              "goal coverage remains open",
+						"state":             "skipped",
+					}},
+				},
+			},
+		},
+	}
+
+	input := map[string]any{"executionContext": run.ExecutionContext}
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedValidation || contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_validation from rejected result coverage gaps", contract)
+	}
+	applied := ApplyConvergenceContract(input, contract)
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
+		t.Fatalf("requiredOutput = %+v, want validation evidence contract", required)
+	}
+	targets := mapSliceFromValue(applied["coverageTargetSet"])
+	if len(targets) != 2 {
+		t.Fatalf("applied = %+v, coverageTargetSet = %+v, want DoD + Goal targets inherited from rejected result", applied, targets)
+	}
+}
