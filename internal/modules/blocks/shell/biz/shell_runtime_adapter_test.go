@@ -394,6 +394,12 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCommands(t *testing.T)
 		{name: "chmod 777", command: "chmod", args: []any{"777", "file.txt"}},
 		{name: "git force push", command: "git", args: []any{"push", "--force"}},
 		{name: "shell script", command: "sh", args: []any{"-c", "rm -rf /tmp/project/.git"}},
+		{name: "direct kill", command: "kill", args: []any{"1234"}},
+		{name: "direct pkill", command: "pkill", args: []any{"workorch"}},
+		{name: "direct killall", command: "killall", args: []any{"workorch"}},
+		{name: "fuser kill port", command: "fuser", args: []any{"-k", "8080/tcp"}},
+		{name: "shell fuser kill port", command: "sh", args: []any{"-c", "fuser -k 8080/tcp 2>/dev/null || true"}},
+		{name: "shell lsof xargs kill", command: "sh", args: []any{"-c", "lsof -ti :8080 | xargs kill -9"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

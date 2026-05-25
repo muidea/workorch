@@ -206,6 +206,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	switch contract.State {
 	case convergenceStateNeedEvidence:
 		setRuntimeStage(input, runtimeStageRepair)
+		input[stepInputKeySoulStage] = soulStageExecution
 		input["repairObjective"] = repairObjectiveAcquireFailureEvidence
 		input["concreteFailureEvidenceRequired"] = true
 		delete(input, "stateChangingOutputRequired")
@@ -219,6 +220,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input["repairActionPackage"] = pkg
 	case convergenceStateNeedStateChange:
 		setRuntimeStage(input, runtimeStageRepair)
+		input[stepInputKeySoulStage] = soulStageExecution
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		delete(input, "concreteFailureEvidenceRequired")
@@ -227,6 +229,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 	case convergenceStateNeedValidation:
 		setRuntimeStage(input, runtimeStageVerification)
+		input[stepInputKeySoulStage] = soulStageValidation
 		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 		input["boundedValidationRequired"] = true
 		delete(input, stepInputKeyAssessmentOnly)
@@ -263,11 +266,13 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input["repairActionPackage"] = pkg
 	case convergenceStateNeedAssessment:
 		setRuntimeStage(input, runtimeStageVerification)
+		input[stepInputKeySoulStage] = soulStageValidation
 		input[stepInputKeyAssessmentOnly] = true
 		delete(input, "stateChangingOutputRequired")
 		delete(input, "concreteFailureEvidenceRequired")
 	case convergenceStateNeedGovernance:
 		setRuntimeStage(input, runtimeStageDecision)
+		input[stepInputKeySoulStage] = soulStageDecision
 		input["governanceRequired"] = true
 		if contract.GovernanceReason != "" {
 			input["governanceReason"] = contract.GovernanceReason

@@ -2154,6 +2154,59 @@ func TestParseLLMExecutionDecisionRepairsKnownMalformedKeysAndNestedCoverageItem
 	}
 }
 
+func TestParseLLMExecutionDecisionRepairsQuotedCoverageObjectElements(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"thoughtSummary":"assessed",
+		"dodAssessment":{
+			"satisfied":false,
+			"summary":"partial",
+			"items":[{"item":"runtime behavior","state":"skipped","reason":"environment unavailable"}],
+			"goalCoverage":{"satisfied":false,"items":[{"requirement":"usage extraction","state":"satisfied","evidenceRefs":["run-1/step-1"]},"{"requirement":"stream parsing","state":"skipped","reason":"environment unavailable"}]}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.GoalCoverage == nil {
+		t.Fatalf("goalCoverage = nil, want repaired coverage")
+	}
+	if got := len(decision.DoDAssessment.GoalCoverage.Items); got != 2 {
+		t.Fatalf("goalCoverage items = %d, want 2", got)
+	}
+	if decision.DoDAssessment.GoalCoverage.Items[1].Requirement != "stream parsing" {
+		t.Fatalf("goalCoverage item = %+v, want repaired second object", decision.DoDAssessment.GoalCoverage.Items[1])
+	}
+}
+
+func TestParseLLMExecutionDecisionFlattensNestedPatchStrategyReassessment(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"thoughtSummary":"patch target",
+		"executionGraph":{"nodes":[{"id":"patch-config","kind":"patch/apply","input":{
+			"targetRef":"config.yaml",
+			"patchType":"text_replace",
+			"oldText":"old",
+			"newText":"new",
+			"failedSurface":"targetRef=config.yaml",
+			"rootCauseTarget":"config.yaml",
+			"repairTargetDecision":"patch config",
+			"repairMode":"continue_same_target_repair",
+			"forbiddenRepair":"do not edit unrelated files",
+			"strategyReassessment":{"verificationPlan":"run bounded verification for targetRef=config.yaml"}
+		}}]}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if len(decision.ExecutionGraph.Nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(decision.ExecutionGraph.Nodes))
+	}
+	if got := strings.TrimSpace(stringValue(decision.ExecutionGraph.Nodes[0].Input["verificationPlan"])); got == "" {
+		t.Fatalf("verificationPlan missing from flattened patch input: %+v", decision.ExecutionGraph.Nodes[0].Input)
+	}
+}
+
 func TestParseLLMExecutionDecisionAcceptsMarkdownFencedJSONObject(t *testing.T) {
 	decision, err := ParseLLMExecutionDecision([]byte("```json\n{\"completionState\":\"continue\"}\n```"))
 	if err != nil {

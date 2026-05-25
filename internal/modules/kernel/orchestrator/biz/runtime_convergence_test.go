@@ -610,6 +610,9 @@ func TestBuildConvergenceContractRejectedResultWithCoverageGapsNeedsValidation(t
 		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
 		t.Fatalf("requiredOutput = %+v, want validation evidence contract", required)
 	}
+	if applied[stepInputKeyRuntimeStage] != runtimeStageVerification || applied[stepInputKeySoulStage] != soulStageValidation {
+		t.Fatalf("applied stages = runtime:%v soul:%v, want verification/validation", applied[stepInputKeyRuntimeStage], applied[stepInputKeySoulStage])
+	}
 	targets := mapSliceFromValue(applied["coverageTargetSet"])
 	if len(targets) != 2 {
 		t.Fatalf("applied = %+v, coverageTargetSet = %+v, want DoD + Goal targets inherited from rejected result", applied, targets)

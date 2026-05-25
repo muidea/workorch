@@ -1466,6 +1466,7 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	if err := decoder.Decode(&raw); err != nil {
 		repaired := repairMalformedShellCommandArgsJSON(normalized)
 		repaired = repairMalformedKnownDecisionKeyJSON(repaired)
+		repaired = repairMalformedQuotedObjectElementsJSON(repaired)
 		if bytes.Equal(repaired, normalized) {
 			return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 		}
@@ -1562,6 +1563,9 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 			delete(doc, "strategyReassessment")
 			changed = true
 		}
+	}
+	if flattenNestedStrategyReassessmentInPatchNodes(doc) {
+		changed = true
 	}
 	assessment, ok := doc["dodAssessment"].(map[string]any)
 	if !ok || len(assessment) == 0 {
@@ -1666,6 +1670,47 @@ func attachTopLevelStrategyReassessmentToPatchNodes(doc map[string]any, value an
 	return attached
 }
 
+func flattenNestedStrategyReassessmentInPatchNodes(doc map[string]any) bool {
+	graph, ok := doc["executionGraph"].(map[string]any)
+	if !ok || len(graph) == 0 {
+		return false
+	}
+	nodes, ok := graph["nodes"].([]any)
+	if !ok || len(nodes) == 0 {
+		return false
+	}
+	changed := false
+	for _, item := range nodes {
+		node, ok := item.(map[string]any)
+		if !ok || strings.TrimSpace(stringValue(node["kind"])) != "patch/apply" {
+			continue
+		}
+		input, ok := node["input"].(map[string]any)
+		if !ok || len(input) == 0 {
+			continue
+		}
+		nested, ok := input["strategyReassessment"].(map[string]any)
+		if !ok || len(nested) == 0 {
+			continue
+		}
+		for key, value := range nested {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, exists := input[key]; exists {
+				continue
+			}
+			input[key] = value
+			changed = true
+		}
+	}
+	if changed {
+		doc["executionGraph"] = graph
+	}
+	return changed
+}
+
 func normalizedNextActionValue(value any) (map[string]any, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -1750,6 +1795,7 @@ func NormalizeLLMDecisionPayload(payload []byte) ([]byte, error) {
 		text = stripMarkdownFence(text)
 	}
 	text = string(repairMalformedKnownDecisionKeyJSON([]byte(text)))
+	text = string(repairMalformedQuotedObjectElementsJSON([]byte(text)))
 	jsonText, ok := extractFirstJSONObject(text)
 	if !ok {
 		return nil, fmt.Errorf("%w: invalid llm decision json: no json object found", common.ErrInvalidArgument)
@@ -1965,6 +2011,78 @@ func repairMalformedKnownDecisionKeyJSON(payload []byte) []byte {
 		return payload
 	}
 	return []byte(builder.String())
+}
+
+func repairMalformedQuotedObjectElementsJSON(payload []byte) []byte {
+	text := string(payload)
+	var builder strings.Builder
+	changed := false
+	inString := false
+	escaped := false
+	last := 0
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			if i+1 < len(text) && text[i+1] == '{' && quotedObjectElementContext(text, i) {
+				objectEnd, ok := findJSONClosingDelimiter(text, i+1, '{', '}')
+				if !ok {
+					inString = true
+					continue
+				}
+				afterObject := skipJSONSpaces(text, objectEnd+1)
+				resume := objectEnd + 1
+				if afterObject < len(text) && text[afterObject] == '"' {
+					next := skipJSONSpaces(text, afterObject+1)
+					if next < len(text) && (text[next] == ',' || text[next] == ']' || text[next] == '}') {
+						resume = afterObject + 1
+					}
+				} else if afterObject < len(text) && (text[afterObject] == ',' || text[afterObject] == ']' || text[afterObject] == '}') {
+					resume = objectEnd + 1
+				} else {
+					inString = true
+					continue
+				}
+				builder.WriteString(text[last:i])
+				builder.WriteString(text[i+1 : objectEnd+1])
+				last = resume
+				i = resume - 1
+				changed = true
+				continue
+			}
+			inString = true
+		}
+	}
+	if !changed {
+		return payload
+	}
+	builder.WriteString(text[last:])
+	return []byte(builder.String())
+}
+
+func quotedObjectElementContext(text string, quoteStart int) bool {
+	prev := quoteStart - 1
+	for prev >= 0 {
+		switch text[prev] {
+		case ' ', '\n', '\r', '\t':
+			prev--
+			continue
+		case '[', ',':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func malformedShellCommandArgsReplacement(text string, commandKeyStart int) (int, int, string, bool) {

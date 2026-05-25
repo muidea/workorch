@@ -594,6 +594,43 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairActionPackageRefreshesStrategySurfaceFromConcreteTargets(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"runtimeRepairAttempt":        5,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		failureOutputKeyClass:         failureClassDoDCoverageMissing,
+		failureOutputKeySignature:     "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+		"strategyReassessment": map[string]any{
+			"required":      true,
+			"failedSurface": "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+		},
+		"repairTargetSet": []string{"config.yaml"},
+		"targetSnapshots": []map[string]any{{
+			"targetRef":        "config.yaml",
+			"exists":           true,
+			"contentHash":      "hash-config",
+			"content":          "port: 8080\n",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"status": "failed",
+		"error":  "coverage still missing",
+	})
+
+	reassessment := mapFromValue(actionPackage["strategyReassessment"])
+	if got := stringFromMap(reassessment, "failedSurface"); got != "targetRef=config.yaml" {
+		t.Fatalf("strategyReassessment.failedSurface = %q, want concrete targetRef surface", got)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustDeclareStrategyReassessmentFields"] != true {
+		t.Fatalf("requiredOutput = %#v, want strategy reassessment contract", required)
+	}
+}
+
 func TestRuntimeRepairActionPackageRequiresStrategyFieldsForDeclaredRelatedTargetSet(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

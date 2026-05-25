@@ -3238,7 +3238,7 @@ func repairStrategyReassessmentFromInput(input map[string]any) map[string]any {
 	if targetAttempts >= 2 {
 		reason = "same_target_scope_repeated_failure"
 	}
-	failedSurface := firstNonEmptyString(targetScope, failureSignature, failureClass, strings.TrimSpace(stringFromMap(input, "failedStepKind")))
+	failedSurface := repairStrategyFailedSurfaceFromInput(input)
 	ret := map[string]any{
 		"required":             true,
 		"reason":               reason,
@@ -3268,6 +3268,68 @@ func repairStrategyReassessmentFromInput(input map[string]any) map[string]any {
 		ret["failureTargetScope"] = targetScope
 	}
 	return ret
+}
+
+func refreshRepairStrategyReassessment(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	refreshed := repairStrategyReassessmentFromInput(input)
+	if len(refreshed) == 0 {
+		return
+	}
+	current := mapFromValue(input["strategyReassessment"])
+	if len(current) == 0 || repairStrategySurfaceMoreSpecific(refreshed, current) {
+		input["strategyReassessment"] = refreshed
+	}
+}
+
+func repairStrategyFailedSurfaceFromInput(input map[string]any) string {
+	targetScope := strings.TrimSpace(stringFromMap(input, "failureTargetScope"))
+	if targetScope != "" {
+		return targetScope
+	}
+	targetRefs := repairStrategyTargetRefsFromInput(input)
+	if len(targetRefs) == 1 {
+		return "targetRef=" + targetRefs[0]
+	}
+	if len(targetRefs) > 1 {
+		return "failureTargets=" + strings.Join(limitedStrings(targetRefs, maxLLMContextSliceItems), ",")
+	}
+	failureSignature := strings.TrimSpace(stringFromMap(input, failureOutputKeySignature))
+	failureClass := strings.TrimSpace(stringFromMap(input, failureOutputKeyClass))
+	return firstNonEmptyString(failureSignature, failureClass, strings.TrimSpace(stringFromMap(input, "failedStepKind")))
+}
+
+func repairStrategyTargetRefsFromInput(input map[string]any) []string {
+	seen := map[string]bool{}
+	var refs []string
+	add := func(ref string) {
+		ref = filepath.ToSlash(filepath.Clean(strings.TrimSpace(ref)))
+		if ref == "" || ref == "." || seen[ref] {
+			return
+		}
+		seen[ref] = true
+		refs = append(refs, ref)
+	}
+	for _, ref := range stringSliceFromValue(input["repairTargetSet"]) {
+		add(ref)
+	}
+	for _, key := range []string{"targetSnapshots", "currentTargetSnapshots", "failureTargetRepairContext", "patchRepairContext"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	return refs
+}
+
+func repairStrategySurfaceMoreSpecific(next map[string]any, current map[string]any) bool {
+	nextSurface := strings.TrimSpace(stringFromMap(next, "failedSurface"))
+	currentSurface := strings.TrimSpace(stringFromMap(current, "failedSurface"))
+	if nextSurface == "" || nextSurface == currentSurface {
+		return false
+	}
+	return len(strategySurfaceTargetRefs(nextSurface)) > 0 && len(strategySurfaceTargetRefs(currentSurface)) == 0
 }
 
 func concreteValidationEvidenceRepairGuidance() []string {
@@ -3329,6 +3391,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		return nil
 	}
 	enrichRepairInputWithProgressFailureSignals(input)
+	refreshRepairStrategyReassessment(input)
 	priorPackage := mapFromValue(input["repairActionPackage"])
 	requiredOutput := stateChangingRepairRequiredOutput()
 	pkg := map[string]any{

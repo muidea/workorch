@@ -327,6 +327,12 @@ func validateShellCommandPolicy(command string, args []string, deliverableDirect
 	switch base {
 	case "sudo", "su", "shutdown", "reboot", "poweroff", "halt", "mkfs", "mount", "umount":
 		return fmt.Errorf("%w: shell command %q is not allowed", common.ErrInvalidArgument, base)
+	case "kill", "pkill", "killall":
+		return fmt.Errorf("%w: process termination command %q is not allowed", common.ErrInvalidArgument, base)
+	case "fuser":
+		if fuserCommandIsDangerous(args) {
+			return fmt.Errorf("%w: process termination command %q is not allowed", common.ErrInvalidArgument, base)
+		}
 	case "rm":
 		if rmCommandIsDangerous(args, deliverableDirectory) {
 			return fmt.Errorf("%w: destructive rm command is not allowed", common.ErrInvalidArgument)
@@ -381,6 +387,15 @@ func rmCommandIsDangerous(args []string, deliverableDirectory string) bool {
 	return false
 }
 
+func fuserCommandIsDangerous(args []string) bool {
+	for _, arg := range args {
+		if strings.Contains(strings.TrimSpace(arg), "k") && strings.HasPrefix(strings.TrimSpace(arg), "-") {
+			return true
+		}
+	}
+	return false
+}
+
 func chmodCommandIsDangerous(args []string) bool {
 	for _, arg := range args {
 		if strings.TrimSpace(arg) == "777" {
@@ -413,6 +428,13 @@ func shellScriptIsDangerous(args []string) bool {
 			"rm -fr /",
 			"rm -rf .git",
 			"rm -fr .git",
+			" fuser -k ",
+			" fuser -k",
+			" xargs kill",
+			" pkill ",
+			" killall ",
+			" kill ",
+			" kill -",
 			"sudo ",
 			" shutdown",
 			" reboot",
