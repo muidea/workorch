@@ -439,6 +439,12 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
 
 能力边界属于 runtime capability contract，不属于业务领域规则。Core 可以声明“某 capability 不支持 delete、content 不能为空、diff 必须完整”等中立能力事实；但不能据此推断某个业务文件是否应该删除、保留或重命名。
 
+### 本地 HTTP 能力边界
+
+Runtime 可以限制 LLM 通过 shell 调用 WorkOrch 自身管理面 HTTP API，但该限制必须按“管理面路径”识别，不得按 `localhost`、`127.0.0.1` 或固定端口一刀切。`/api/v1/workorch/*`、`/runs`、`/observability`、`/metrics` 等 WorkOrch 管理面路径必须经过 `runtimeCapabilities.serviceAPIs` 显式声明；未声明的管理面路径应被拒绝并进入 repair。
+
+Workspace 交付物自身启动的本地服务端点属于当前 workspace 的运行时验证对象。只要命令仍满足 shell 安全边界、非破坏性、有界超时和当前 Goal / DoD，core 不得把 `/health`、协议兼容端点、临时端口上的 mock/stub/fixture 等普通本地服务访问误判为 WorkOrch 管理面调用。若端口、外部依赖或凭证不可用，LLM 应优先选择中立受控替代，例如临时 fixture、stub/mock、隔离工作目录、临时配置或可用替代端口；不得默认杀进程、清理系统端口或执行其他破坏性环境修改。
+
 ### 已知可读资源不得升级为人工缺失信息
 
 在任意阶段中，如果 LLM 返回 `blocked_on_decision/provide_missing_info`，但其 `missingFields` / `requiresHumanFields` 指向的内容已经存在于 runtime 可确认的 workspace manifest、known resource list、read-only evidence 或当前工作目录中，则该 decision 不属于真实人工阻塞。

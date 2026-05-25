@@ -672,7 +672,7 @@ func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
 			"- Do not use commands listed in runtimeCapabilities.shellPolicy.unavailableCommands, including inside sh -c, bash -c, or other nested shell scripts.",
 			"- Shell command input may include timeoutMillis for commands expected to take longer than the default; keep commands non-interactive and bounded.",
 			"- For curl-based data queries, use quiet output such as curl -sS so progress meters do not become execution evidence or final result text.",
-			"- Shell commands may call local workorchd HTTP only through runtimeCapabilities.serviceAPIs. Do not use /runs, /observability, /metrics?run=..., or any endpoint that is not explicitly declared.",
+			"- Shell commands may call local workorchd management HTTP paths only through runtimeCapabilities.serviceAPIs. Do not use /api/v1/workorch/*, /runs, /observability, /metrics?run=..., or any workorch management endpoint that is not explicitly declared. This policy does not prohibit bounded validation of workspace-owned local service endpoints that are outside workorch management paths.",
 		)
 	}
 	if requestHasBlockKind(request, "web/search") || requestHasBlockKind(request, "web/fetch") {

@@ -74,6 +74,7 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		!strings.Contains(joined, "Do not use a command named workorch") ||
 		!strings.Contains(joined, "runtimeCapabilities.shellPolicy.unavailableCommands") ||
 		!strings.Contains(joined, "runtimeCapabilities.serviceAPIs") ||
+		!strings.Contains(joined, "workspace-owned local service endpoints") ||
 		!strings.Contains(joined, "Do not assume remote host access credentials") ||
 		!strings.Contains(joined, "ssh/command") ||
 		!strings.Contains(joined, "timeoutMillis") ||

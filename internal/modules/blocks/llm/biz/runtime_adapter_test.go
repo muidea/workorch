@@ -2470,6 +2470,21 @@ func TestParseLLMExecutionDecisionAcceptsDeclaredLocalWorkorchServiceAPI(t *test
 	}
 }
 
+func TestParseLLMExecutionDecisionAllowsLocalWorkspaceServiceEndpoint(t *testing.T) {
+	for _, payload := range []string{
+		`{"completionState":"continue","shellCommands":[{"command":"curl","args":["-s","http://localhost:8080/health"]}]}`,
+		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"inspect","kind":"shell/command","input":{"command":"curl","args":["-s","http://127.0.0.1:8080/v1/chat/completions"]}}]}}`,
+	} {
+		decision, err := ParseLLMExecutionDecision([]byte(payload))
+		if err != nil {
+			t.Fatalf("parse decision err = %v for payload %s", err, payload)
+		}
+		if decision.CompletionState != "continue" {
+			t.Fatalf("completionState = %q, want continue", decision.CompletionState)
+		}
+	}
+}
+
 func TestParseLLMExecutionDecisionRepairsMalformedShellCommandArgs(t *testing.T) {
 	payload := `{"completionState":"continue","executionGraph":{"nodes":[{"id":"explore_workspace","kind":"shell/command","input":{"command":"ls","args":["-la"]}},{"id":"detect_structure","kind":"shell/command","dependsOn":["explore_workspace"],"input":{"command":"find",".","-maxdepth","3","-type","f","-name","*.go"]}},{"id":"detect_existing","kind":"shell/command","dependsOn":["detect_structure"],"input":{"command":"find",".","args":["-type","f","-name","*proxy*"]}}]}}`
 	decision, err := ParseLLMExecutionDecision([]byte(payload))

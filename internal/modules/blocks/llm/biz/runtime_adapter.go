@@ -47,7 +47,7 @@ const (
 	outputKeyExecutionGraph        = "executionGraph"
 	maxLLMOutputPreviewBytes       = 4096
 	unavailableWorkorchCLICommand  = "workorch"
-	localServiceHTTPDeclaredOnly   = "declared_service_apis_only"
+	localServiceHTTPDeclaredOnly   = "declared_workorch_management_apis_only"
 )
 
 var unavailableIfMissingShellCommands = []string{"sshpass", "expect"}
@@ -2796,6 +2796,9 @@ func localWorkorchServiceHTTPReferences(commandLine string) []localServiceAPIRef
 		if path == "" {
 			path = "/"
 		}
+		if !isWorkorchServiceAPIPath(path) {
+			continue
+		}
 		refs = append(refs, localServiceAPIReference{
 			Method:   method,
 			Path:     path,
@@ -2850,6 +2853,16 @@ func isLocalWorkorchServiceHost(host string) bool {
 		return false
 	}
 	return port == "" || port == "8080"
+}
+
+func isWorkorchServiceAPIPath(path string) bool {
+	path = "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
+	return strings.HasPrefix(path, "/api/v1/workorch/") ||
+		path == "/metrics" ||
+		path == "/runs" ||
+		strings.HasPrefix(path, "/runs/") ||
+		path == "/observability" ||
+		strings.HasPrefix(path, "/observability/")
 }
 
 func isDeclaredServiceAPI(ref localServiceAPIReference, apis []llmmodels.ServiceAPICapability) bool {
