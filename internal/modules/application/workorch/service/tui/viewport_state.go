@@ -20,6 +20,18 @@ func (m *AppModel) resetMainViewport() {
 	m.ensureMainViewport().GotoTop()
 }
 
+func (m *AppModel) followMainViewportTail() {
+	width := m.width
+	height := m.height
+	if width >= 96 {
+		width = width - 32
+	}
+	if width > 0 && height > 0 {
+		m.refreshMainViewport(width, height)
+	}
+	m.ensureMainViewport().GotoBottom()
+}
+
 func (m *AppModel) scrollMain(delta int) {
 	vp := m.ensureMainViewport()
 	if delta < 0 {

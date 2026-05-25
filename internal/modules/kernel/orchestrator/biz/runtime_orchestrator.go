@@ -4484,6 +4484,17 @@ func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.
 		if summary := strings.TrimSpace(stringFromMap(rejected, "summary")); summary != "" {
 			rejected["sourceSummary"] = summary
 		}
+		if reason := strings.TrimSpace(syntheticRejectedDoDReason(step, output)); reason != "" {
+			rejected["rejectionReason"] = reason
+			rejected["gateFailureReason"] = reason
+			if goalOutcome := strings.TrimSpace(stringFromMap(rejected, "goalOutcome")); goalOutcome != "" {
+				rejected["sourceGoalOutcome"] = goalOutcome
+			}
+			rejected["goalOutcome"] = reason
+		}
+		if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			rejected["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
+		}
 		rejected["summary"] = "DoD assessment rejected by runtime completion gate."
 		assessment = rejected
 	}

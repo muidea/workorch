@@ -31,6 +31,7 @@ type ResultSummary struct {
 	KnownLimitations      []string
 	ResidualRisks         []string
 	NextActions           []string
+	Diagnostics           map[string]any
 }
 
 type DoDAssessment struct {

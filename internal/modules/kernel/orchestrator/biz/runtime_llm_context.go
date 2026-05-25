@@ -183,6 +183,7 @@ func processEvidenceTimelineFromRejectedResultContinuation(continuation map[stri
 		return nil
 	}
 	sourceRef := firstNonEmptyString(stringFromMap(continuation, "sourceRef"), stringFromMap(continuation, "resultId"))
+	currentGap := rejectedResultContinuationCurrentGap(continuation)
 	item := map[string]any{
 		"order":      1,
 		"sourceRef":  firstNonEmptyString(sourceRef, "rejectedResultContinuation"),
@@ -192,7 +193,9 @@ func processEvidenceTimelineFromRejectedResultContinuation(continuation map[stri
 	}
 	if summary := strings.TrimSpace(stringFromMap(continuation, "summary")); summary != "" {
 		item["summary"] = summary
-		item["failureReason"] = summary
+	}
+	if currentGap != "" {
+		item["failureReason"] = currentGap
 	}
 	if evidence := stringSliceFromValue(continuation["requiredEvidence"]); len(evidence) > 0 {
 		item["requiredEvidence"] = limitedStrings(evidence, 8)
@@ -207,8 +210,7 @@ func currentProgressDigestFromRejectedResultContinuation(continuation map[string
 	if len(continuation) == 0 {
 		return nil
 	}
-	required := stringSliceFromValue(continuation["requiredEvidence"])
-	currentGap := firstNonEmptyString(strings.Join(required, "\n"), stringFromMap(continuation, "summary"), stringFromMap(continuation, "goalOutcome"))
+	currentGap := rejectedResultContinuationCurrentGap(continuation)
 	if strings.TrimSpace(currentGap) == "" {
 		return nil
 	}
@@ -234,6 +236,90 @@ func currentProgressDigestFromRejectedResultContinuation(continuation map[string
 		"nextRequiredAction":  "address_rejected_result_required_evidence",
 		"source":              "rejectedResultContinuation",
 	}
+}
+
+func rejectedResultContinuationCurrentGap(continuation map[string]any) string {
+	if len(continuation) == 0 {
+		return ""
+	}
+	diagnostics := mapFromValue(continuation["diagnostics"])
+	runtimeDiagnostics := mapFromValue(diagnostics["runtimeDiagnostics"])
+	if len(runtimeDiagnostics) == 0 {
+		runtimeDiagnostics = mapFromValue(continuation["runtimeDiagnostics"])
+	}
+	for _, value := range []string{
+		stringFromMap(diagnostics, "gateFailureReason"),
+		stringFromMap(diagnostics, "rejectionReason"),
+		stringFromMap(continuation, "gateFailureReason"),
+		stringFromMap(continuation, "rejectionReason"),
+		stringFromMap(runtimeDiagnostics, "reason"),
+		stringFromMap(runtimeDiagnostics, "failureReason"),
+		stringFromMap(runtimeDiagnostics, "error"),
+	} {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	if missing := rejectedContinuationMissingDoDLines(mapSliceFromValue(runtimeDiagnostics["missingDoDItems"])); len(missing) > 0 {
+		return strings.Join(missing, "\n")
+	}
+	if missing := rejectedContinuationMissingDoDLines(mapSliceFromValue(continuation["unsatisfiedDoDItems"])); len(missing) > 0 {
+		return strings.Join(missing, "\n")
+	}
+	if gaps := rejectedContinuationCoverageGapLines(mapFromValue(continuation["coverageGaps"])); len(gaps) > 0 {
+		return strings.Join(gaps, "\n")
+	}
+	requiredJoined := strings.TrimSpace(strings.Join(stringSliceFromValue(continuation["requiredEvidence"]), "\n"))
+	return firstNonEmptyString(
+		requiredJoined,
+		stringFromMap(continuation, "summary"),
+		stringFromMap(continuation, "goalOutcome"),
+	)
+}
+
+func rejectedContinuationMissingDoDLines(items []map[string]any) []string {
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		text := firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "requirement"),
+			stringFromMap(item, "goal"),
+			stringFromMap(item, "goalItem"),
+			stringFromMap(item, "id"),
+		)
+		reason := firstNonEmptyString(
+			stringFromMap(item, "reason"),
+			stringFromMap(item, "failureReason"),
+			stringFromMap(item, "requiredEvidenceHint"),
+		)
+		line := strings.TrimSpace(text)
+		if reason != "" {
+			line = strings.TrimSpace(line + ": " + reason)
+		}
+		if line != "" {
+			ret = append(ret, line)
+		}
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
+}
+
+func rejectedContinuationCoverageGapLines(gaps map[string]any) []string {
+	if len(gaps) == 0 {
+		return nil
+	}
+	ret := []string{}
+	for _, key := range []string{"missingGoalCoverage", "missingAcceptanceDimensions", "missingDeliverableCoverage"} {
+		for _, line := range rejectedContinuationMissingDoDLines(mapSliceFromValue(gaps[key])) {
+			ret = append(ret, key+": "+line)
+			if len(ret) >= 8 {
+				return ret
+			}
+		}
+	}
+	return ret
 }
 
 func processEvidenceTimelineFromReplanContinuation(replan map[string]any) []map[string]any {
@@ -364,6 +450,10 @@ func compactRejectedResultContinuationForRuntimeContext(input map[string]any) ma
 		"satisfiedDoDItems",
 		"unsatisfiedDoDItems",
 		"coverageGaps",
+		"diagnostics",
+		"runtimeDiagnostics",
+		"gateFailureReason",
+		"rejectionReason",
 		"requiredEvidence",
 		"resultEvidenceRefs",
 		"artifactRefs",

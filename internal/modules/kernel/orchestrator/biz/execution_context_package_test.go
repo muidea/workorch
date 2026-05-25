@@ -640,6 +640,48 @@ func TestRunExecutionContextPackageRejectedResultContinuationSupersedesReplanPro
 	}
 }
 
+func TestRejectedResultContinuationCurrentGapPrefersDiagnosticsOverRequiredEvidence(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-rejected-diagnostics-gap",
+		WorkspaceID: "ws-rejected-diagnostics-gap",
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"summary": "DoD assessment rejected by runtime completion gate.",
+				"requiredEvidence": []string{
+					"可在后续迭代中添加更多断言。",
+					"未来可以补充额外验证。",
+				},
+				"diagnostics": map[string]any{
+					"gateFailureReason": "requires evidence text or coverageTargets aligned with the satisfied claim",
+					"runtimeDiagnostics": map[string]any{
+						"kind":                       "dod_evidence_quality_gap",
+						"claimAlignedEvidenceNeeded": true,
+					},
+				},
+			},
+		},
+	}
+	current := &runmodel.Step{
+		ID:    "run-rejected-diagnostics-gap/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{stepInputKeyRuntimeStage: "repair"},
+	}
+
+	orch := &RuntimeOrchestrator{steps: memrepo.NewStepRepository()}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])
+	gap := stringFromMap(digest, "currentGap")
+	if !strings.Contains(gap, "coverageTargets aligned") {
+		t.Fatalf("currentProgressDigest = %+v, want gate diagnostics as current gap", digest)
+	}
+	if strings.Contains(gap, "后续迭代") || strings.Contains(gap, "未来可以") {
+		t.Fatalf("currentProgressDigest = %+v, should not prefer generic requiredEvidence", digest)
+	}
+}
+
 func TestRunExecutionContextPackageSynthesizesReplanFailureProcessEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{

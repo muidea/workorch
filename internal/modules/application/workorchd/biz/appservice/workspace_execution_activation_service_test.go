@@ -1425,6 +1425,13 @@ func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t
 			ResidualRisks:    []string{"coverage gap remains"},
 			KnownLimitations: []string{"no raw stream should be copied"},
 			EvidenceRefs:     []string{"run-latest/summary-evidence"},
+			Diagnostics: map[string]any{
+				"gateFailureReason": "requires concrete neutral evidence",
+				"runtimeDiagnostics": map[string]any{
+					"kind":   "dod_evidence_quality_gap",
+					"reason": "requires evidence aligned with the satisfied claim",
+				},
+			},
 		},
 		UpdatedAt: "2026-05-16T00:00:00Z",
 	}); err != nil {
@@ -1466,6 +1473,10 @@ func TestBuildWorkspaceExecutionContextInjectsLatestRejectedResultContinuation(t
 	unsatisfied := contextMapSliceFromValue(t, continuation["unsatisfiedDoDItems"])
 	if len(unsatisfied) != 1 || unsatisfied[0]["item"] != "missing DoD" || unsatisfied[0]["reason"] != "missing neutral evidence" {
 		t.Fatalf("unsatisfiedDoDItems = %+v, want missing DoD reason", unsatisfied)
+	}
+	diagnostics := contextMapFromValue(t, continuation["diagnostics"])
+	if diagnostics["gateFailureReason"] == nil {
+		t.Fatalf("diagnostics = %+v, want gate failure reason propagated", diagnostics)
 	}
 	gaps := contextMapFromValue(t, continuation["coverageGaps"])
 	missingGoal := contextMapSliceFromValue(t, gaps["missingGoalCoverage"])

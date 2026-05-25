@@ -292,6 +292,97 @@ func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 	}
 }
 
+func TestModelStepProgressShowsPathCommandAndMCPDetails(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 120
+	m.height = 18
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "file/read",
+			"input": map[string]any{
+				"summary": map[string]any{"path": "stats.go"},
+			},
+		},
+	})
+	if m.progressText != "Working: file/read stats.go" {
+		t.Fatalf("file/read progress = %q", m.progressText)
+	}
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "shell/command",
+			"input": map[string]any{
+				"summary": map[string]any{
+					"command": "go",
+					"args":    []string{"test", "./..."},
+				},
+			},
+		},
+	})
+	if m.progressText != "Working: shell/command go test ./..." {
+		t.Fatalf("shell progress = %q", m.progressText)
+	}
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "mcp/tool_call",
+			"input": map[string]any{
+				"summary": map[string]any{
+					"serverId": "mcp-lsp-bridge",
+					"toolName": "textDocument/definition",
+				},
+			},
+		},
+	})
+	if m.progressText != "Working: mcp/tool_call mcp-lsp-bridge:textDocument/definition" {
+		t.Fatalf("mcp progress = %q", m.progressText)
+	}
+}
+
+func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 120
+	m.height = 16
+	lines := make([]string, 0, 80)
+	for i := 0; i < 80; i++ {
+		lines = append(lines, fmt.Sprintf("tail-line-%02d", i))
+	}
+	m.result = strings.Join(lines, "\n")
+	_ = m.View()
+	if m.mainViewport == nil {
+		t.Fatal("expected viewport initialized")
+	}
+	before := m.mainViewport.YOffset
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "shell/command",
+			"input": map[string]any{
+				"summary": map[string]any{"command": "go", "args": []string{"test", "./..."}},
+			},
+		},
+	})
+	_ = m.View()
+	if m.mainViewport.YOffset < before {
+		t.Fatalf("viewport offset regressed: before=%d after=%d", before, m.mainViewport.YOffset)
+	}
+	if m.mainViewport.YOffset == 0 {
+		t.Fatalf("viewport should follow latest content, got offset=%d", m.mainViewport.YOffset)
+	}
+}
+
 func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyBackendEvent(backend.Event{

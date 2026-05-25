@@ -1860,6 +1860,9 @@ func rejectedResultContinuationContext(item *resultmodel.Result) map[string]any 
 		"resultEvidenceRefs": compactStringRefs(item.EvidenceRefs, 20),
 		"artifactRefs":       compactArtifactRefs(item.ArtifactRefs, 20),
 	}
+	if diagnostics := rejectedContinuationDiagnostics(item.SummaryDetail.Diagnostics); len(diagnostics) > 0 {
+		ret["diagnostics"] = diagnostics
+	}
 	if refs := compactStringRefs(item.SummaryDetail.EvidenceRefs, 20); len(refs) > 0 {
 		ret["summaryEvidenceRefs"] = refs
 	}
@@ -1867,6 +1870,25 @@ func rejectedResultContinuationContext(item *resultmodel.Result) map[string]any 
 		ret["summaryArtifactRefs"] = refs
 	}
 	return stripRuntimeLLMBindingFromActivationContext(common.RedactSensitiveMap(ret))
+}
+
+func rejectedContinuationDiagnostics(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"gateFailureReason", "rejectionReason", "sourceSummary"} {
+		if value, ok := input[key].(string); ok && strings.TrimSpace(value) != "" {
+			ret[key] = compactActivationContextValue(value, 1)
+		}
+	}
+	if diagnostics := contextMapValue(input["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		ret["runtimeDiagnostics"] = compactActivationContextValue(diagnostics, 1)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func rejectedContinuationDoDItems(items []resultmodel.DoDAssessmentItem, satisfied bool) []map[string]any {

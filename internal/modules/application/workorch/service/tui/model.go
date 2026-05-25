@@ -1193,15 +1193,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return m.fetchActiveBlockerDetails()
 	case backend.EventStepDispatched:
 		m.progress = progressRunning
-		kind := firstPayloadString(evt.Payload, "kind", "Kind", events.PayloadKeyKind)
-		m.progressText = stepProgressText("Working", kind, "Working; waiting for final result")
+		m.progressText = stepProgressTextFromPayload("Working", evt.Payload, "Working; waiting for final result")
+		m.followMainViewportTail()
 	case backend.EventStepCompleted:
 		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)); state == common.StepStateFailed {
 			m.rememberFailureHint(failureMessageFromPayload(evt.Payload))
 		}
 		if m.progress == progressRunning {
-			kind := firstPayloadString(evt.Payload, "kind", "Kind", events.PayloadKeyKind)
-			m.progressText = stepProgressText("Step completed", kind, "Step completed; waiting for next update")
+			m.progressText = stepProgressTextFromPayload("Step completed", evt.Payload, "Step completed; waiting for next update")
+			m.followMainViewportTail()
 		}
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
@@ -2136,6 +2136,85 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 		return kind
 	}
 	return prefix + ": " + kind
+}
+
+func stepProgressTextFromPayload(prefix string, payload map[string]any, fallback string) string {
+	kind := firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind)
+	if strings.TrimSpace(kind) == "" {
+		return fallback
+	}
+	detail := stepProgressDetailFromPayload(payload)
+	if detail == "" {
+		return stepProgressText(prefix, kind, fallback)
+	}
+	if strings.TrimSpace(prefix) == "" {
+		return strings.TrimSpace(kind + " " + detail)
+	}
+	return strings.TrimSpace(prefix + ": " + kind + " " + detail)
+}
+
+func stepProgressDetailFromPayload(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	input := payloadMap(payload, "input", "Input")
+	summary := payloadMap(input, "summary", "Summary")
+	kind := firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind)
+
+	if strings.Contains(kind, "mcp/") {
+		server := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "serverId", "ServerID", "mcpServerId", "MCPServerID")
+		tool := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolName", "ToolName", "name", "Name", "capabilityId", "CapabilityID")
+		if detail := strings.Trim(strings.Join([]string{server, tool}, ":"), ":"); detail != "" {
+			return detail
+		}
+	}
+	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "path", "Path"); detail != "" {
+		return detail
+	}
+	if detail := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "targetRef", "TargetRef", events.PayloadKeyTargetRef); detail != "" {
+		return detail
+	}
+	if command := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "command", "Command"); command != "" {
+		args := firstPayloadStringSliceFromMaps([]map[string]any{payload, summary, input}, "args", "Args")
+		if len(args) > 0 {
+			return strings.TrimSpace(command + " " + strings.Join(args, " "))
+		}
+		return command
+	}
+	if tool := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolName", "ToolName", "name", "Name"); tool != "" {
+		return tool
+	}
+	if node := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "graphNodeId", "GraphNodeID"); node != "" {
+		return node
+	}
+	if callID := firstPayloadStringFromMaps([]map[string]any{payload, summary, input}, "toolCallId", "ToolCallID", events.PayloadKeyToolCallID); callID != "" {
+		return callID
+	}
+	return ""
+}
+
+func firstPayloadStringFromMaps(payloads []map[string]any, keys ...string) string {
+	for _, payload := range payloads {
+		if len(payload) == 0 {
+			continue
+		}
+		if value := firstPayloadString(payload, keys...); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstPayloadStringSliceFromMaps(payloads []map[string]any, keys ...string) []string {
+	for _, payload := range payloads {
+		if len(payload) == 0 {
+			continue
+		}
+		if values := payloadStringSliceValue(payload, keys...); len(values) > 0 {
+			return values
+		}
+	}
+	return nil
 }
 
 func repairLoopSummary(progress backend.TaskProgressInfo) string {

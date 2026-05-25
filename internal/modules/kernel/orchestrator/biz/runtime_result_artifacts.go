@@ -371,6 +371,7 @@ func resultSummaryFromDoDAssessment(
 		KnownLimitations:      stringSliceFromValue(assessment["knownLimitations"]),
 		ResidualRisks:         stringSliceFromValue(assessment["residualRisks"]),
 		NextActions:           stringSliceFromValue(assessment["nextActions"]),
+		Diagnostics:           compactResultSummaryDiagnostics(assessment),
 	}
 	if len(ret.ResidualRisks) == 0 {
 		ret.ResidualRisks = localizedDefaultList(runDialogLanguage(run), "residual_risks")
@@ -380,6 +381,25 @@ func resultSummaryFromDoDAssessment(
 	}
 	if len(ret.NextActions) == 0 {
 		ret.NextActions = localizedDefaultList(runDialogLanguage(run), "next_actions")
+	}
+	return ret
+}
+
+func compactResultSummaryDiagnostics(assessment map[string]any) map[string]any {
+	if len(assessment) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if diagnostics := mapFromValue(assessment["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		ret["runtimeDiagnostics"] = compactLLMContextMap(diagnostics, 1)
+	}
+	for _, key := range []string{"sourceSummary", "rejectionReason", "gateFailureReason"} {
+		if value := strings.TrimSpace(stringFromMap(assessment, key)); value != "" {
+			ret[key] = truncateLLMContextString(value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }

@@ -1746,7 +1746,28 @@ func cloneResult(item *resultmodel.Result) *resultmodel.Result {
 		cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
 	}
 	cloned.DoDAssessment = cloneResultDoDAssessment(item.DoDAssessment)
+	cloned.SummaryDetail = cloneResultSummary(item.SummaryDetail)
 	return &cloned
+}
+
+func cloneResultSummary(item resultmodel.ResultSummary) resultmodel.ResultSummary {
+	cloned := item
+	cloned.EvidenceRefs = cloneStringSlice(item.EvidenceRefs)
+	if item.ArtifactRefs != nil {
+		cloned.ArtifactRefs = append([]common.ArtifactID(nil), item.ArtifactRefs...)
+	}
+	cloned.KnownLimitations = cloneStringSlice(item.KnownLimitations)
+	cloned.ResidualRisks = cloneStringSlice(item.ResidualRisks)
+	cloned.NextActions = cloneStringSlice(item.NextActions)
+	if item.DoDItems != nil {
+		cloned.DoDItems = make([]resultmodel.DoDAssessmentItem, 0, len(item.DoDItems))
+		for _, dodItem := range item.DoDItems {
+			dodItem.EvidenceRefs = cloneStringSlice(dodItem.EvidenceRefs)
+			cloned.DoDItems = append(cloned.DoDItems, dodItem)
+		}
+	}
+	cloned.Diagnostics = cloneMap(item.Diagnostics)
+	return cloned
 }
 
 func cloneResultDoDAssessment(item resultmodel.DoDAssessment) resultmodel.DoDAssessment {
