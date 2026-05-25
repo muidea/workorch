@@ -1870,8 +1870,6 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 			State: string(common.StepStateCompleted),
 			Output: map[string]any{
 				"contextBudget": map[string]any{
-					"providerId":            "reasoning",
-					"model":                 "gpt-5",
 					"maxBytes":              98304,
 					"actualBytes":           72440,
 					"maxTokens":             16000,
@@ -1907,6 +1905,12 @@ func TestMapLLMContextBudgetTracesProjectsStructuredBudgets(t *testing.T) {
 						"bytesHardLimit":         98304,
 						"estimatedTokensPerByte": 0.25,
 					},
+				},
+				"llmUsage": map[string]any{
+					"providerId": "reasoning",
+					"provider":   "compatible",
+					"model":      "gpt-5",
+					"estimated":  true,
 				},
 			},
 		},

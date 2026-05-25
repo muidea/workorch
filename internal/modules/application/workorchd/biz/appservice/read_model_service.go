@@ -1935,10 +1935,11 @@ func mapLLMContextBudgetTraces(steps []presenter.StepView) []LLMContextBudgetTra
 		if len(budget) == 0 {
 			continue
 		}
+		usage := readModelMapValue(step.Output["llmUsage"])
 		ret = append(ret, LLMContextBudgetTrace{
 			StepID:                step.ID,
-			ProviderID:            readModelStringValue(budget["providerId"]),
-			Model:                 readModelStringValue(budget["model"]),
+			ProviderID:            firstNonEmptyReadModel(readModelStringValue(budget["providerId"]), readModelStringValue(usage["providerId"])),
+			Model:                 firstNonEmptyReadModel(readModelStringValue(budget["model"]), readModelStringValue(usage["model"])),
 			MaxBytes:              readModelIntValue(budget["maxBytes"]),
 			ActualBytes:           readModelIntValue(budget["actualBytes"]),
 			MaxTokens:             readModelIntValue(budget["maxTokens"]),
