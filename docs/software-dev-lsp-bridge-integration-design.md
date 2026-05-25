@@ -227,11 +227,11 @@ WorkOrch 不负责在线安装语言服务器。部署环境可以按需准备�
 
 - 不要在未 `lsp_initialize` 的情况下请求语义信息。
 - `line` / `col` 均为 0-based。
-- `path` 必须是 WorkOrch、MCP Client 与 LSP Bridge 都可访问的规范路径。
+- 对 workspace-scoped stdio MCP server，WorkOrch runtime 以 workspace 交付目录作为子进程工作目录；`lsp_initialize.root_path` 可以使用 `.`，后续 `path` / `file_path` 使用 workspace 相对路径。
 - `lsp_definition`、`lsp_hover`、`lsp_references` 返回空不等于符号不存在，可能是索引未完成、位置不在符号上或语言服务器依赖缺失。
 - LSP 子进程错误时，优先重新 `lsp_initialize` 或稍后有界重试。
 - `lsp_references` 默认最多返回 10 条；`truncated=true` 时只能把返回项作为局部引用集合，不得声称已覆盖所有引用。
-- `lsp_sync` 必须传入修改后的完整文件内容；不能传 partial diff。
+- `lsp_sync` 必须传入修改后的完整文件内容，并提供对应的 `path` 或 `file_path`；不能只传 `root_path`，也不能传 partial diff。
 
 ### 6.1 Planning
 
@@ -491,6 +491,8 @@ sessionKey = workspaceId + serverId
 ```
 
 若后续存在同一 workspace 内不同有效配置的并行使用，sessionKey 应进一步包含 server config digest。
+
+workspace-scoped stdio session 启动时必须把子进程 cwd 设置为 workspace 交付目录。这样 LSP Bridge 这类工具收到 `root_path="."` 或 workspace 相对文件路径时，会解析到当前 workspace 交付物，而不是 WorkOrch 服务进程所在目录。该规则是通用 MCP stdio capability contract，不是 LSP 专用 core 逻辑。
 
 关闭规则：
 

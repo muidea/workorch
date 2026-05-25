@@ -170,6 +170,43 @@ func TestRuntimeAdapterCollectsHTTPStreamEvents(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{
+				{"type": "text", "text": "missing argument path"},
+			},
+			"isError": true,
+		})
+	}))
+	defer server.Close()
+
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-http-tool-error"),
+		Name:          "http tool error",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-http-tool-error",
+			"tool":     "repo.summary",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing argument path") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want MCP tool result error", err)
+	}
+	if result.Output["status"] != "failed" || result.Output["stage"] != "mcp_tool_call_failed" {
+		t.Fatalf("output = %+v, want failed tool call", result.Output)
+	}
+}
+
 func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
 	ctx := context.Background()
 	service := newMCPService(t, kernelmcp.CreateServerCommand{
@@ -284,6 +321,44 @@ func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing
 	}
 }
 
+func TestRuntimeAdapterStartsStdioInWorkspaceDeliverableDirectory(t *testing.T) {
+	ctx := context.Background()
+	deliverableDir := t.TempDir()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-workdir"),
+		Name:          "stdio workdir",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   common.WorkspaceID("ws-mcp-workdir"),
+		WorkspaceDeliverableDirectory: deliverableDir,
+		Kind:                          "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-workdir",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	resultPayload, ok := result.Output["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %#v, want decoded response", result.Output["result"])
+	}
+	structured, ok := resultPayload["structuredContent"].(map[string]any)
+	if !ok || structured["cwd"] != deliverableDir {
+		t.Fatalf("structured content = %#v, want cwd %q", resultPayload["structuredContent"], deliverableDir)
+	}
+}
+
 func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 	ctx := context.Background()
 	service := newMCPService(t, kernelmcp.CreateServerCommand{
@@ -314,6 +389,36 @@ func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 	structured, _ := resultPayload["structuredContent"].(map[string]any)
 	if structured["envEcho"] != "from-endpoint" {
 		t.Fatalf("structured content = %#v, want endpoint env to take priority", structured)
+	}
+}
+
+func TestRuntimeAdapterFailsStdioToolResultError(t *testing.T) {
+	ctx := context.Background()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-tool-error"),
+		Name:          "stdio tool error",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_TOOL_ERROR": "1"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-tool-error",
+			"tool":     "repo.summary",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "stdio tool failed") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want stdio MCP tool result error", err)
+	}
+	if result.Output["status"] != "failed" || result.Output["stage"] != "mcp_tool_call_failed" {
+		t.Fatalf("output = %+v, want failed tool call", result.Output)
 	}
 }
 
@@ -523,6 +628,23 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 			})
 		case "notifications/initialized":
 		case "tools/call":
+			if os.Getenv("WORKORCH_MCP_STDIO_TOOL_ERROR") == "1" {
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      request.ID,
+					"result": map[string]any{
+						"content": []map[string]any{
+							{
+								"type": "text",
+								"text": "stdio tool failed",
+							},
+						},
+						"isError": true,
+					},
+				})
+				continue
+			}
+			cwd, _ := os.Getwd()
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"method":  "notifications/progress",
@@ -544,6 +666,7 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 						"tool":      request.Params["name"],
 						"arguments": request.Params["arguments"],
 						"envEcho":   os.Getenv("WORKORCH_MCP_STDIO_ENV_ECHO"),
+						"cwd":       cwd,
 						"ok":        true,
 					},
 					"isError": false,

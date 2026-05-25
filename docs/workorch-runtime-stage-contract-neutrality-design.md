@@ -835,6 +835,8 @@ Repair exhausted 后必须二选一：
 
 `shell/command` 的工作目录属于 runtime capability contract，而不是业务语义。若 capability 已声明其工作目录由 runtime 绑定到 workspace 交付目录，则 LLM 不得再硬编码 `cd /home/user/workspace`、`.workorch-workspaces/...` 或等价的绝对 workspace 路径；core 可以把这类输出视为 capability-boundary violation 并拒绝，因为它破坏的是通用执行能力合同，而不是某个具体业务规则。
 
+`mcp/tool_call` 的 stdio server 启动目录同样属于 runtime capability contract。对 workspace-scoped stdio session，runtime 应以 workspace 交付目录作为子进程工作目录，并继续通过 env / args 提供必要的 workspace ref；LLM 向工具传入的相对 path/root 参数应按该能力合同解析，不应依赖 WorkOrch 进程自身 cwd。若 MCP tool result 按协议返回 `isError=true` 或等价结构化失败标记，runtime 必须把该 step 标记为 failed 并保留原始 result 作为诊断证据，不能把其作为 completed evidence 输入后续 DoD / Goal coverage 判断。
+
 默认预算用于避免普通长流程任务被过短固定值误杀；单步覆盖用于让 LLM 在严格收敛阶段为明确长耗时操作申请有限执行窗口。无论默认值还是单步覆盖，都必须是有界的，并在 step output 中记录实际 `timeoutMillis`，作为后续 repair / verification 的中立证据。
 
 当非 LLM 执行因为 timeout 失败时，runtime repair 只能基于“执行超时”这一中立失败形态选择重试、缩小动作、调整有界预算、返回 failed assessment 或 blocker，不得依赖具体命令名推断业务策略。

@@ -14,7 +14,7 @@
 ## LSP 使用约束
 - LSP 只作为语义定位与关系确认辅助；不能替代 Goal / DoD gap analysis、build/test/lint 证据，也不能单独作为 DoD satisfied 的充分依据
 - 遇到 undefined、unknown field、missing method、constructor/interface mismatch、符号引用不清或跨文件影响面不明确时，如果当前 failureTargetRepairContext、targetSnapshots、workspaceFileManifest 和 build/test 输出仍不足以确定根因，可按需调用已选的 LSP MCP 能力
-- 首次使用 LSP 前必须先执行 lsp_initialize；patch 落盘后需要对相关文件执行 lsp_sync（完整内容），再使用 lsp_diagnostics、lsp_definition、lsp_references 或等价只读能力补充上下文
+- 首次使用 LSP 前必须先执行 lsp_initialize；workspace-scoped stdio MCP 的工作目录已由 runtime 设置为交付目录，root_path 可使用 "."；patch 落盘后需要对相关文件执行 lsp_sync，必须传入 workspace 相对文件路径或 file_path 以及完整 content，不能只传 root_path，再使用 lsp_diagnostics、lsp_definition、lsp_references 或等价只读能力补充上下文
 - LSP 初始化失败、查询超时、返回空结果或 truncated 结果时，回退到 file/read、rg、build/test 证据继续修复；不要因此进入 blocked_on_decision
 - LSP 返回的 diagnostics、definition、references 只能帮助确认当前代码形状、调用关系和受影响范围；不能替代对真实生产入口、构建命令、测试命令和补丁证据的验证
 

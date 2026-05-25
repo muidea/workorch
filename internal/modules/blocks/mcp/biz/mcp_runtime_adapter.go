@@ -216,6 +216,12 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 		output["error"] = err.Error()
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
+	if err := toolResultError(spec, responsePayload); err != nil {
+		output["status"] = "failed"
+		output["stage"] = failedStage(spec)
+		output["error"] = err.Error()
+		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
@@ -248,6 +254,12 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runt
 	if stderrText != "" {
 		output["stderr"] = stderrText
 	}
+	if err := toolResultError(spec, response.Result); err != nil {
+		output["status"] = "failed"
+		output["stage"] = failedStage(spec)
+		output["error"] = err.Error()
+		return runtimemodel.StepExecutionResult{Output: output}, err
+	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
 
@@ -276,6 +288,12 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, req
 	}
 	if stderrText := session.Stderr(); stderrText != "" {
 		output["stderr"] = stderrText
+	}
+	if err := toolResultError(spec, response.Result); err != nil {
+		output["status"] = "failed"
+		output["stage"] = failedStage(spec)
+		output["error"] = err.Error()
+		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
 }
@@ -320,6 +338,9 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 	defer cancel()
 
 	cmd := exec.Command(command, args...)
+	if dir := strings.TrimSpace(request.WorkspaceDeliverableDirectory); dir != "" {
+		cmd.Dir = dir
+	}
 	if len(env) > 0 {
 		cmd.Env = mergeEnv(os.Environ(), env)
 	}
@@ -654,6 +675,42 @@ func parseResponsePayload(raw []byte) any {
 		return payload
 	}
 	return string(raw)
+}
+
+func toolResultError(spec operationSpec, result any) error {
+	if spec.Operation != blockcommon.StepKindToolCall {
+		return nil
+	}
+	payload, ok := result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	isError, _ := payload["isError"].(bool)
+	if !isError {
+		return nil
+	}
+	message := strings.TrimSpace(firstToolResultText(payload))
+	if message == "" {
+		message = "mcp tool returned isError=true"
+	}
+	return fmt.Errorf("mcp tool %s failed: %s", spec.Tool, message)
+}
+
+func firstToolResultText(payload map[string]any) string {
+	content, ok := payload["content"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, item := range content {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text, _ := entry["text"].(string); strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func cloneMap(input map[string]any) map[string]any {
