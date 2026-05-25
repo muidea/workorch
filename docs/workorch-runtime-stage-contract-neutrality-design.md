@@ -191,6 +191,7 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 - 若 `need_validation` 来源于 `rejectedResultContinuation.coverageGaps` 或 `unsatisfiedDoDItems`，`BuildConvergenceContract` 必须把未关闭缺口显式 rehydrate 为 `coverageTargetSet` 并写入 `ConvergenceContract.RepairActionPackage`。`ApplyConvergenceContract` 不得依赖构造阶段对克隆 input 的副作用；即使原始 input 只携带 execution context，也必须从 contract package 恢复顶层 `coverageRepairRequired` / `coverageTargetSet` 和 concrete validation `requiredOutput`。
 - `currentProgressDigest`、`processEvidenceTimeline`、`repairActionPackage`、`structuredFailureSignals`、`latestClosureEvidence` 的当前事实必须一致；历史 wrapper/schema/provider 失败只能作为历史诊断摘要。
 - 当最新 concrete failure 被包裹在 follow-up / wrapper LLM failure 后面时，runtime 必须从 `currentExecutionProgress.latestActionEvidence` / `completedGraphEvidence` 的 stdout、stderr、error、targetRef、line refs 或 failure signature 中提取中立 target evidence。若可机械提取出 target refs / line refs / failure target scope，则该 evidence 必须提升为当前 `currentGap` 与 `repairActionPackage.structuredFailureSignals`，并恢复 `need_state_change`；不得因为 wrapper failure 本身是 read-only graph、schema invalid 或 dodAssessment failed，就退回 `need_evidence`。
+- target evidence 抽取必须保持中立准入：显式 `targetRef` / `failureTargets` / `conflictRef`、行号诊断、文件系统失败诊断或 workspace manifest grounding 可以成为 repair target；普通 stdout/stderr 中偶然出现的 path-like 文本只能作为诊断消息，不能单独升级为 `repairTargetSet`。Core 不得通过枚举业务文件名、系统库路径、语言运行时路径、测试框架路径等黑白名单决定 target 是否可修。
 - `latest_successful_action_evidence` 只能作为已完成动作或候选证据引用，不得被提升为 `currentFailure`、`lastObservedFailure` 或 failure target scope。只有 step 自身失败，或 completed action evidence 被明确标记为 `evidenceValidity=actionable_failure` / 输出中存在可机械识别的失败标记时，才允许覆盖旧失败成为当前失败。
 - `repairActionPackage.currentFailure` 与 `repairActionPackage.currentExecutionProgress` 是 canonical repair context 的组成部分。若顶层 `currentFailure` / `currentExecutionProgress` 缺失但 package 内存在有效字段，runtime 在 provider context gate 前必须提升或等价识别这些字段；不得误报 `runtime_repair_current_failure_missing`。
 - `shell/command` 的可行动失败不能只依赖进程退出码。若命令因管道、截断、wrapper 或 shell 组合返回 `exitCode=0`，但 stdout / stderr 中存在明确失败标记、断言失败、文件行号或测试失败摘要，`processEvidenceTimeline` 与 `currentProgressDigest` 必须把它记录为 actionable validation failure，并作为下一轮 repair 的当前 gap。
@@ -199,6 +200,8 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 `ShouldCreateDecisionTicket` 必须作为所有 decision ticket 写入前的统一门禁。若当前合同状态是 `need_state_change`，并且已经具备 concrete target evidence、required output 允许 state-changing artifact、缺口不涉及外部权限/凭证/部署/审批/破坏性变更/无法读取的业务信息，则 LLM 返回的 `blocked_on_decision` 必须被转换为 continuable repair contract violation，而不是直接创建人工 ticket。Runtime 应记录 converted decision 摘要，并继续派发 repair 或 bounded validation。只有合同状态为 `need_governance`，或证据门禁明确缺少 runtime 无法自行获得的信息时，才允许创建 ticket。
 
 若 validation / completion follow-up 已输出 failed `dodAssessment`，并且 assessment 中存在可机械映射的 DoD / Goal / deliverable coverage gap、nextActions、evidence candidates 或 coverage target set，则该输出属于 `need_validation` / `need_state_change` 的可继续收口合同。即使 LLM 同时返回 `llm_decision_required` / `blocked_on_decision`，runtime 也必须先转换为 runtime repair follow-up；只有缺口明确需要外部信息、权限、凭证、配置、审批或无法自动读取的业务事实时，才允许创建 decision ticket。
+
+当 `need_validation` / concrete validation evidence repair 中的 LLM 请求用户选择，但当前合同已经要求 `mustProduceConcreteValidationEvidence=true`，且 `requiredOutput.acceptedKinds` 仍包含可执行验证能力时，该请求默认不属于真实人工决策。Runtime 必须只依据结构化字段判断：若 context 没有明确声明 `scope=external_dependency`、`requiresExternalEvidence`、`equivalentEvidenceNotApplicable` 或等价中立 blocker 字段，则将该 decision 转换为 continuable validation repair contract violation，继续要求 bounded `shell/command` / `mcp/tool_call` 生成具体验证证据。Core 不得通过识别 API、网络、凭证、mock、stub、fixture 等自然语言关键词决定是否阻塞。
 
 `patch/apply`、`file/edit` 或等价 state-changing artifact 失败的 repair-of-repair 必须遵守以下收敛规则：
 
@@ -1588,3 +1591,6 @@ Memory 是参考知识，不是运行流水。LLM 输入中的 memory 必须满�
 15. decision resolved、patch/apply failed、schema invalid、graph follow-up、replan successor、validation gap 等恢复路径是否都复用同一收敛合同构造，而不是各自拼接局部字段。
 16. 在创建 decision ticket 前是否执行 `ShouldCreateDecisionTicket` 门禁；已有 target evidence 且可机械推进时，是否把 LLM decision 转为 repair contract violation。
 17. `currentProgressDigest.currentGap`、`currentRuntimeStage`、`repairActionPackage`、`structuredFailureSignals`、`processEvidenceTimeline` 是否自洽，且没有让历史失败覆盖最新成功/失败事实。
+18. Core runtime 的治理判断是否只读取结构化字段、枚举状态、capability kind、evidence refs、failure class / signature、target refs、runtime stage 与 contract flags；不得读取 `question`、`reason`、`summary`、stdout/stderr 自由文本中的业务/技术关键词来决定是否 repair、block、approve、replan 或选择具体策略。
+19. 若确实需要领域语义、技术栈语义、测试框架语义、业务对象语义或自然语言关键词，只能放在 workspaceTemplate、profile、soul、skill、capability adapter 或 profile verifier 中；进入 core 前必须先转换成中立结构字段，并有对应回归测试证明 core 不解析该领域词。
+20. 新增 core 规则必须至少补一组 neutrality guard test：同一结构化输入下，自由文本中出现或移除具体业务/技术词不得改变结果；结构化 blocker 字段存在时，必须优先于自由文本。

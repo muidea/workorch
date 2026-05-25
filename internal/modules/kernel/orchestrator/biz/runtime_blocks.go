@@ -131,6 +131,7 @@ func continuableDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBl
 		return false
 	}
 	return continuableCandidateContext(spec.Context) ||
+		concreteValidationDecisionShouldRepair(step, spec) ||
 		knownReadableWorkspaceResourceDecisionSpec(spec) ||
 		knownActionableDecisionSpec(spec) ||
 		mechanicallyRepairableDecisionShouldRepair(step, spec)
@@ -231,7 +232,74 @@ func mechanicallyRepairableDecisionShouldRepair(step *runModel.Step, spec runtim
 	return true
 }
 
+func concreteValidationDecisionShouldRepair(step *runModel.Step, spec runtimeDecisionBlockSpec) bool {
+	if step == nil || !concreteValidationEvidenceRequired(step.Input) {
+		return false
+	}
+	// Core neutrality guard: governance conversion here is driven only by
+	// structured contract fields and declared blocker scopes, never by free-text
+	// business/technology wording in question, reason, or summary.
+	if decisionBlockDeclaresWorkorchRuntimeDependency(spec.Context) ||
+		decisionBlockDeclaresRequiredRealExternalDependency(spec.Context) {
+		return false
+	}
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	return stringSliceContains(stringListFromValue(required["acceptedKinds"]), "shell/command") ||
+		stringSliceContains(stringListFromValue(required["acceptedKinds"]), "mcp/tool_call")
+}
+
+func concreteValidationEvidenceRequired(input map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence {
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	return boolValue(required["mustProduceConcreteValidationEvidence"])
+}
+
+func decisionBlockDeclaresWorkorchRuntimeDependency(context map[string]any) bool {
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) {
+	case decisionContextScopeWorkorchRuntime:
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) {
+	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate:
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) {
+	case decisionContextRecoveryPolicyConfigOnly, decisionContextRecoveryPolicyContext, decisionContextRecoveryPolicyRepairPlan:
+		return true
+	}
+	return false
+}
+
+func decisionBlockDeclaresRequiredRealExternalDependency(context map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) == decisionContextScopeExternalDependency {
+		return true
+	}
+	for _, source := range []map[string]any{context, mapFromValue(context["knownValues"])} {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{
+			"requiresExternalEvidence",
+			"externalEvidenceRequired",
+			"equivalentEvidenceNotApplicable",
+			"equivalentEvidenceRejected",
+			"mustUseDeclaredExternalEvidence",
+		} {
+			if boolValue(source[key]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func decisionBlockDeclaresExternalOrRuntimeDependency(context map[string]any) bool {
+	if decisionBlockDeclaresWorkorchRuntimeDependency(context) ||
+		decisionBlockDeclaresRequiredRealExternalDependency(context) {
+		return true
+	}
 	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyScope)) {
 	case decisionContextScopeExternalDependency, decisionContextScopeWorkorchRuntime:
 		return true

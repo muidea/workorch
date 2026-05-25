@@ -152,6 +152,9 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 		return true
 	}
 	if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		if convertedDecisionGateFailure(output) {
+			return false
+		}
 		if doDCoverageContractCorrectionRequired(step) {
 			return false
 		}
@@ -159,6 +162,25 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 	}
 	if strings.TrimSpace(stringFromMap(assessment, "summary")) == "" {
 		return true
+	}
+	return false
+}
+
+func convertedDecisionGateFailure(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(output, "convertedDecisionGate")) != "" {
+		return true
+	}
+	for _, key := range []string{
+		"assessmentOnlyDecisionConvertedToRepair",
+		"continuableDecisionConvertedToRepair",
+		"actionableFailedAssessmentDecisionConvertedToRepair",
+	} {
+		if boolValue(output[key]) {
+			return true
+		}
 	}
 	return false
 }
@@ -4445,17 +4467,37 @@ func structuredFailureTargetRefGroundedBySourceOrText(source string, text string
 	if targetRef == "" {
 		return false
 	}
-	if strings.Contains(targetRef, "/") {
-		return true
-	}
 	source = strings.ToLower(strings.TrimSpace(source))
 	if strings.Contains(source, "signature") || strings.HasSuffix(source, "targetref") {
 		return true
 	}
 	text = strings.ToLower(strings.TrimSpace(text))
-	return strings.Contains(text, "targetref=") ||
+	return structuredFailureTextGroundsPathDiagnostic(text) ||
+		strings.Contains(text, "targetref=") ||
 		strings.Contains(text, "failuretargets=") ||
 		strings.Contains(text, "conflictref=")
+}
+
+func structuredFailureTextGroundsPathDiagnostic(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"no such file",
+		"file does not exist",
+		"cannot find",
+		"not found",
+		"lstat ",
+		"stat ",
+		"open ",
+		"read ",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeStructuredFailureTargetRef(value string) string {

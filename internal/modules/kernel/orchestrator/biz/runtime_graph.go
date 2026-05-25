@@ -1998,6 +1998,8 @@ func processEvidenceValidity(step *runModel.Step) string {
 		return "diagnostic_only"
 	case failureClassLLMDecisionInvalid:
 		return "stale_or_rejected"
+	case failureClassDoDCoverageMissing:
+		return "actionable_gap"
 	}
 	if stage == "llm_schema_invalid" || strings.Contains(strings.ToLower(stage), "schema") {
 		return "stale_or_rejected"
@@ -2244,7 +2246,7 @@ func processEvidenceItemIsActionableFailure(item map[string]any) bool {
 		return false
 	}
 	validity := strings.TrimSpace(stringFromMap(item, "evidenceValidity"))
-	if validity == "actionable_failure" {
+	if validity == "actionable_failure" || validity == "actionable_gap" {
 		return true
 	}
 	if validity == "stale_or_rejected" || validity == "diagnostic_only" {

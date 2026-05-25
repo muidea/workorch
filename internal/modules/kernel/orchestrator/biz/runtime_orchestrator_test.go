@@ -13302,6 +13302,147 @@ func TestContinuableDecisionShouldRepairRejectsMechanicalTargetChoiceBlock(t *te
 	}
 }
 
+func TestContinuableDecisionShouldRepairConvertsConcreteValidationChoice(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-validation-dependency/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "validation decision did not return required bounded evidence",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "choose whether to continue with an equivalent bounded validation action",
+		Context: map[string]any{
+			"candidateValues": map[string]any{
+				"provide_input":  "provide additional input",
+				"use_equivalent": "continue with equivalent bounded validation",
+			},
+			"knownValues": map[string]any{
+				"validation_constraint": "direct evidence is not yet available",
+			},
+			"missingFields":       []any{"user choice"},
+			"requiresHumanFields": []any{"user choice"},
+		},
+	}
+
+	if !continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected concrete validation choice to be converted to repair")
+	}
+}
+
+func TestContinuableDecisionShouldRepairKeepsRequiredExternalEvidenceBlocked(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-real-dependency/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "validation requires an external dependency declared by the acceptance contract",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "provide required external dependency input",
+		Context: map[string]any{
+			decisionContextKeyScope: "external_dependency",
+			"knownValues": map[string]any{
+				"requiresExternalEvidence": true,
+			},
+			"missingFields":       []any{"requiredExternalInput"},
+			"requiresHumanFields": []any{"requiredExternalInput"},
+		},
+	}
+
+	if continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected required external evidence decision to remain blocked")
+	}
+}
+
+func TestContinuableDecisionShouldRepairIgnoresFreeTextWordsWithoutStructuredBlocker(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-neutrality-text/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "validation mentions api key, network, mock server, fixture, stub, gateway, go build, and test failure",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "should runtime use a mock server or request credentials?",
+		Context: map[string]any{
+			"knownValues": map[string]any{
+				"summary": "the free-text contains technology and business words but no structured blocker contract",
+			},
+			"missingFields":       []any{"user choice"},
+			"requiresHumanFields": []any{"user choice"},
+		},
+	}
+
+	if !continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected free-text words without structured blocker to remain continuable")
+	}
+}
+
+func TestContinuableDecisionShouldRepairStructuredBlockerOverridesBenignFreeText(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run-neutrality-structured/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+	}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "plain text sounds easy to continue",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "continue with bounded validation",
+		Context: map[string]any{
+			decisionContextKeyScope: "external_dependency",
+			"knownValues": map[string]any{
+				"requiresExternalEvidence": true,
+				"summary":                  "free-text says continue, but structured blocker requires governance",
+			},
+		},
+	}
+
+	if continuableDecisionShouldRepair(step, spec) {
+		t.Fatalf("expected structured blocker to override benign free-text")
+	}
+}
+
 func TestContinuableDecisionShouldRepairKeepsUngroundedDecisionBlocked(t *testing.T) {
 	step := &runmodel.Step{
 		ID:   "run-ungrounded-decision/repair-001",
@@ -22108,6 +22249,40 @@ func TestCompletionGateAssessmentOnlyFailedCoverageCorrectionSwitchesToConcreteE
 	}
 }
 
+func TestCompletionGateConvertedDecisionFollowUpDoesNotCloseRun(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-converted-decision/repair-003",
+		RunID: "run-converted-decision",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			stepInputKeyRuntimeStageMode:      "strict_convergence",
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+		},
+		Output: map[string]any{
+			"stage":                                "llm_decision_required",
+			"convertedDecisionGate":                "convergence_contract",
+			"continuableDecisionConvertedToRepair": true,
+			failureOutputKeyClass:                  failureClassDoDCoverageMissing,
+			failureOutputKeySignature:              "class=dod_coverage_missing|stage=llm_decision_required",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "decision converted to repair contract violation",
+				"items": []map[string]any{{
+					"item":  "bounded evidence",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+
+	if shouldCloseCompletionGateFailureWithoutRepair("runtime completion gate failed", step, step.Output) {
+		t.Fatalf("converted decision repair follow-up should continue through runtime repair")
+	}
+}
+
 func TestRuntimeOrchestrator_StateChangingProviderRetryViolationContinuesRecovery(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -26829,5 +27004,38 @@ func TestRuntimeRepairTargetAdmissionRejectsRuntimeAndAbsoluteTargets(t *testing
 	}, nil, failureClassShellCommand, "class=shell_command_failed|kind=shell/command|exitCode=1")
 	if structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
 		t.Fatalf("signals = %+v, want local absolute workspace path treated as diagnostic-only", signals)
+	}
+	signals = structuredFailureSignalsFromFailureOutput(map[string]any{
+		"stdout": "gateway: ELF executable, interpreter /lib64/ld-linux-x86-64.so.2, not stripped",
+	}, nil, failureClassShellCommand, "")
+	if structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+		t.Fatalf("signals = %+v, want incidental command-output path treated as diagnostic-only", signals)
+	}
+	signals = structuredFailureSignalsFromFailureOutput(map[string]any{
+		"stderr": "main.go:12: undefined: Gateway",
+	}, nil, failureClassShellCommand, "")
+	if !structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+		t.Fatalf("signals = %+v, want explicit line diagnostic treated as target evidence", signals)
+	}
+}
+
+func TestProcessEvidenceDigestTreatsDoDCoverageMissingAsActionableGap(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-coverage/verify",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			"error":                   "invalid argument: dodAssessment is not satisfied",
+		},
+	}
+	timeline := processEvidenceTimelineFromRunSteps(&runmodel.Run{ID: "run-coverage", WorkspaceID: "ws-coverage"}, []*runmodel.Step{step}, "")
+	digest := currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if stringFromMap(failure, "evidenceValidity") != "actionable_gap" ||
+		!strings.Contains(stringFromMap(digest, "currentGap"), "dodAssessment") {
+		t.Fatalf("digest = %+v, want latest DoD coverage failure as actionable gap", digest)
 	}
 }
