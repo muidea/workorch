@@ -1465,6 +1465,7 @@ func ParseLLMExecutionDecision(payload []byte) (llmmodels.LLMExecutionDecision, 
 	var raw map[string]json.RawMessage
 	if err := decoder.Decode(&raw); err != nil {
 		repaired := repairMalformedShellCommandArgsJSON(normalized)
+		repaired = repairMalformedKnownDecisionKeyJSON(repaired)
 		if bytes.Equal(repaired, normalized) {
 			return llmmodels.LLMExecutionDecision{}, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 		}
@@ -1574,11 +1575,15 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return normalized, nil
 	}
 	for _, key := range []string{"goalCoverage", "acceptanceDimensions", "deliverableCoverage"} {
-		if items, ok := assessment[key].([]any); ok {
-			assessment[key] = map[string]any{
-				"satisfied": coverageItemsSatisfied(items),
-				"items":     items,
+		if value, ok := doc[key]; ok {
+			if _, exists := assessment[key]; !exists {
+				assessment[key] = value
 			}
+			delete(doc, key)
+			changed = true
+		}
+		if normalized, ok := normalizeDecisionCoverageValue(assessment[key]); ok {
+			assessment[key] = normalized
 			changed = true
 		}
 	}
@@ -1591,6 +1596,32 @@ func normalizeLLMDecisionSchemaPayload(payload []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: invalid llm decision json: %v", common.ErrInvalidArgument, err)
 	}
 	return normalized, nil
+}
+
+func normalizeDecisionCoverageValue(value any) (map[string]any, bool) {
+	if items, ok := value.([]any); ok {
+		return map[string]any{
+			"satisfied": coverageItemsSatisfied(items),
+			"items":     items,
+		}, true
+	}
+	coverage, ok := value.(map[string]any)
+	if !ok || len(coverage) == 0 {
+		return nil, false
+	}
+	itemsContainer, ok := coverage["items"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	items, ok := itemsContainer["items"].([]any)
+	if !ok {
+		return nil, false
+	}
+	coverage["items"] = items
+	if _, ok := coverage["satisfied"]; !ok {
+		coverage["satisfied"] = coverageItemsSatisfied(items)
+	}
+	return coverage, true
 }
 
 func attachTopLevelStrategyReassessmentToPatchNodes(doc map[string]any, value any) bool {
@@ -1718,6 +1749,7 @@ func NormalizeLLMDecisionPayload(payload []byte) ([]byte, error) {
 	if strings.HasPrefix(text, "```") {
 		text = stripMarkdownFence(text)
 	}
+	text = string(repairMalformedKnownDecisionKeyJSON([]byte(text)))
 	jsonText, ok := extractFirstJSONObject(text)
 	if !ok {
 		return nil, fmt.Errorf("%w: invalid llm decision json: no json object found", common.ErrInvalidArgument)
@@ -1807,6 +1839,131 @@ func repairMalformedShellCommandArgsJSON(payload []byte) []byte {
 		return payload
 	}
 	builder.WriteString(text[last:])
+	return []byte(builder.String())
+}
+
+func repairMalformedKnownDecisionKeyJSON(payload []byte) []byte {
+	text := string(payload)
+	keys := map[string]bool{
+		"acceptanceDimensions":  true,
+		"action":                true,
+		"approvalId":            true,
+		"args":                  true,
+		"artifactRefs":          true,
+		"baseHash":              true,
+		"command":               true,
+		"completionState":       true,
+		"content":               true,
+		"context":               true,
+		"coverageTargets":       true,
+		"deliverable":           true,
+		"deliverableCoverage":   true,
+		"diff":                  true,
+		"dodAssessment":         true,
+		"evidenceRefs":          true,
+		"executionGraph":        true,
+		"goal":                  true,
+		"goalCoverage":          true,
+		"goalItem":              true,
+		"goalOutcome":           true,
+		"id":                    true,
+		"implementationSummary": true,
+		"impact":                true,
+		"input":                 true,
+		"item":                  true,
+		"items":                 true,
+		"knownLimitations":      true,
+		"kind":                  true,
+		"mcpToolCalls":          true,
+		"memoryType":            true,
+		"memoryWrites":          true,
+		"name":                  true,
+		"nextAction":            true,
+		"nextActions":           true,
+		"nodes":                 true,
+		"operation":             true,
+		"patchRequests":         true,
+		"patchType":             true,
+		"path":                  true,
+		"plan":                  true,
+		"reason":                true,
+		"requiredApproval":      true,
+		"requiredDecision":      true,
+		"requirement":           true,
+		"residualRisks":         true,
+		"satisfied":             true,
+		"serverId":              true,
+		"shellCommands":         true,
+		"state":                 true,
+		"summary":               true,
+		"tags":                  true,
+		"targetRef":             true,
+		"thoughtSummary":        true,
+		"tool":                  true,
+		"verificationSummary":   true,
+	}
+	var builder strings.Builder
+	changed := false
+	inString := false
+	escaped := false
+	for i := 0; i < len(text); {
+		ch := text[i]
+		if inString {
+			builder.WriteByte(ch)
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			builder.WriteByte(ch)
+			i++
+			continue
+		}
+		if ch != ',' && ch != '{' {
+			builder.WriteByte(ch)
+			i++
+			continue
+		}
+		builder.WriteByte(ch)
+		i++
+		for i < len(text) && unicode.IsSpace(rune(text[i])) {
+			builder.WriteByte(text[i])
+			i++
+		}
+		start := i
+		for i < len(text) && (text[i] == '_' || text[i] >= 'a' && text[i] <= 'z' || text[i] >= 'A' && text[i] <= 'Z' || text[i] >= '0' && text[i] <= '9') {
+			i++
+		}
+		if start == i || i >= len(text) || text[i] != '"' {
+			builder.WriteString(text[start:i])
+			continue
+		}
+		key := text[start:i]
+		quoteEnd := i + 1
+		j := quoteEnd
+		for j < len(text) && unicode.IsSpace(rune(text[j])) {
+			j++
+		}
+		if j >= len(text) || text[j] != ':' || !keys[key] {
+			builder.WriteString(text[start:i])
+			continue
+		}
+		builder.WriteByte('"')
+		builder.WriteString(key)
+		builder.WriteByte('"')
+		i = quoteEnd
+		changed = true
+	}
+	if !changed {
+		return payload
+	}
 	return []byte(builder.String())
 }
 
