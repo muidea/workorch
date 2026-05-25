@@ -1416,6 +1416,9 @@ func mapWorkspaceWithRunProjection(workspace *workspacemodel.Workspace, run *run
 	if run == nil {
 		return ret
 	}
+	if run.State == common.RunStateCreated {
+		return ret
+	}
 	ret.State = string(workspaceProjectionState(run.State))
 	if isTerminalProjectionRunState(run.State) {
 		ret.ActiveRunID = ""

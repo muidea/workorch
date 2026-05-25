@@ -2472,6 +2472,10 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 					return runID, nil
 				}
 			}
+			_ = exports.Services.RunService.FailRun(ctx, runmodule.FailRunCommand{
+				RunID:  runID,
+				Reason: fmt.Sprintf("activation start failed: %v", err),
+			})
 			return "", err
 		}
 		return runID, nil

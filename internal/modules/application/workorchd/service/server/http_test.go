@@ -3389,6 +3389,9 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 			},
 		}, nil
 	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return nil, nil
+	}
 	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if workspaceID != "ws-replan-continuation" {
 			t.Fatalf("workspaceID = %q, want ws-replan-continuation", workspaceID)
@@ -3409,6 +3412,49 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 	case <-time.After(time.Second):
 		t.Fatalf("replan continuation activation was not scheduled")
 	}
+}
+
+func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	const workspaceID = "ws-replan-successor"
+	const runID = "run-replan-successor"
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-replan-successor",
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{
+			{
+				ID:          runID + "-replan-001",
+				WorkspaceID: workspaceID,
+				State:       string(common.RunStateRunning),
+				ExecutionContext: map[string]any{
+					"replanContinuation": map[string]any{"predecessorRunId": runID},
+				},
+			},
+		}, nil
+	}
+	state.activateWorkspace = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		t.Fatalf("activateWorkspace should not be called when runtime successor exists")
+		return appservice.WorkspaceExecutionActivation{}, nil
+	}
+
+	state.scheduleReplanContinuationIfNeeded(context.Background(), workspaceID, runID, 3)
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T) {
@@ -3434,6 +3480,9 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 				ResolutionType: decisioncommon.ResolutionTypeReplan,
 			},
 		}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return nil, nil
 	}
 	var calls atomic.Int32
 	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
@@ -3479,7 +3528,7 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 	}
 }
 
-func TestServerStateReplanContinuationWatcherUsesSharedSessionEventHub(t *testing.T) {
+func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -3491,26 +3540,10 @@ func TestServerStateReplanContinuationWatcherUsesSharedSessionEventHub(t *testin
 	if state.eventHub == nil {
 		t.Fatalf("server state eventHub is nil, want shared session event hub")
 	}
-	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
-	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
-		return []appservice.Decision{
-			{
-				ID:             "ticket-replan-watcher",
-				WorkspaceID:    "ws-replan-watcher",
-				RunID:          "run-replan-watcher",
-				State:          string(common.DecisionTicketStateResolved),
-				ResolutionType: decisioncommon.ResolutionTypeReplan,
-			},
-		}, nil
-	}
-	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		if workspaceID != "ws-replan-watcher" {
-			t.Fatalf("workspaceID = %q, want ws-replan-watcher", workspaceID)
-		}
-		activated <- cmd
-		return appservice.WorkspaceExecutionActivation{
-			Run: appservice.Run{ID: "run-replan-watcher-continuation", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
-		}, nil
+	activated := make(chan struct{}, 1)
+	state.activateWorkspace = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		activated <- struct{}{}
+		return appservice.WorkspaceExecutionActivation{}, nil
 	}
 
 	if err := state.eventHub.Publish(context.Background(), events.Envelope{
@@ -3525,8 +3558,8 @@ func TestServerStateReplanContinuationWatcherUsesSharedSessionEventHub(t *testin
 
 	select {
 	case <-activated:
-	case <-time.After(time.Second):
-		t.Fatalf("replan continuation activation was not scheduled from shared session event hub")
+		t.Fatalf("run state watcher scheduled duplicate replan continuation")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -3561,6 +3594,9 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 				ResolutionType: decisioncommon.ResolutionTypeReplan,
 			},
 		}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return nil, nil
 	}
 	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if workspaceID != "ws-auto-replan" {

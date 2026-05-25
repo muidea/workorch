@@ -664,6 +664,9 @@ func decisionResolutionInput(ticket *decisionmodel.Ticket, resolution *decisionm
 		if action == "retry_same_step" && ticket.Context[decisionContextKeyRecoveryPolicy] == decisionContextRecoveryPolicyConfigOnly {
 			ret["providerRetryDecisionRetry"] = true
 		}
+		if action == "retry_same_step" && ticket.Context[decisionContextKeyRecoveryPolicy] == decisionContextRecoveryPolicyRepairPlan {
+			ret["repairPlanDecisionRetry"] = true
+		}
 	}
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": ret}, map[string]any{"ticketContext": ticket.Context, "resolution": resolution.Payload})
 	ret = ApplyConvergenceContract(ret, contract)

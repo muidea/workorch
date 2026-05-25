@@ -26486,6 +26486,126 @@ func TestRuntimeOrchestrator_ResumeContextGateResolutionRegeneratesRepairContext
 	}
 }
 
+func TestRuntimeOrchestrator_ResumeRepairPlanRetryDispatchesRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &requestCapturingRuntimeAdapter{fn: func(request runtimemodel.StepExecutionRequest) map[string]any {
+		return map[string]any{
+			"status": "completed",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "decision-authorized repair retry completed",
+				"items": []map[string]any{
+					{
+						"item":         "decision-authorized repair retry",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(request.StepID)},
+					},
+				},
+			},
+		}
+	}}
+	orch := NewRuntimeOrchestratorWithResolutions(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-repair-plan-retry")
+	runID := common.RunID("run-repair-plan-retry")
+	failedStepID := common.StepID(string(runID) + "/repair-010-of-verify")
+	ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		DoDID:            "dod-repair-plan-retry",
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  defaultMaxRuntimeRepairAttempts,
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+			stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+			stepInputKeyRepairOfFailureSig:    "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|target=validation",
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stage":                   "llm_execution_graph_plan",
+			"error":                   "runtime repair exhausted",
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|target=validation",
+		},
+	}); err != nil {
+		t.Fatalf("seed failed repair step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			"attempts":                       defaultMaxRuntimeRepairAttempts,
+			"failedStepId":                   string(failedStepID),
+			"failureClass":                   failureClassRuntime,
+			"failureSignature":               "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|target=validation",
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-repair-plan-retry",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume repair plan retry: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %+v, want one decision-authorized repair retry", runtime.requests)
+	}
+	input := runtime.requests[0].Input
+	if input["decisionAuthorizedRetry"] != true ||
+		input[stepInputKeyRuntimeRepairFollowUp] != true ||
+		input[stepInputKeyRuntimeStage] != runtimeStageRepair {
+		t.Fatalf("retry input = %+v, want decision-authorized runtime repair", input)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State == common.RunStateFailed || runItem.FailureReason == "conflict" {
+		t.Fatalf("run = %+v, want no conflict terminal failure", runItem)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

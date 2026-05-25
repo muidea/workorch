@@ -656,6 +656,24 @@ func TestActivationObservableRunState(t *testing.T) {
 	}
 }
 
+func TestActivationSnapshotDoesNotProjectCreatedRunAsActive(t *testing.T) {
+	workspace := &workspacemodel.Workspace{
+		ID:    common.WorkspaceID("ws-created-projection"),
+		Title: "created projection workspace",
+		State: common.WorkspaceStateFailed,
+	}
+	run := &runmodel.Run{
+		ID:          common.RunID("run-created-projection"),
+		WorkspaceID: workspace.ID,
+		State:       common.RunStateCreated,
+	}
+
+	snapshot := activationSnapshot(workspace, run, nil, nil)
+	if snapshot.Workspace.State != string(common.WorkspaceStateFailed) || snapshot.Workspace.ActiveRunID != "" {
+		t.Fatalf("snapshot workspace = %+v, want persisted failed workspace without created active run projection", snapshot.Workspace)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendUsesNumericRunSequence(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()

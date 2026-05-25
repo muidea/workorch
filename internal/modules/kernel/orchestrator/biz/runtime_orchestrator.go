@@ -4739,12 +4739,46 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 			return specs, err
 		}
 	}
+	if boolValue(resumeInput["repairPlanDecisionRetry"]) {
+		if specs, ok, err := o.runtimeRepairSpecsAfterResolvedDecision(ctx, run, stepID); ok || err != nil {
+			return specs, err
+		}
+	}
 	if contextGateDecisionResumeInput(resumeInput) {
 		if specs, ok, err := o.contextIntegritySpecsAfterResolvedDecision(ctx, run, stepID, resumeInput); ok || err != nil {
 			return specs, err
 		}
 	}
 	return o.nextDispatchSpecsAfterStep(ctx, run, stepID)
+}
+
+func (o *RuntimeOrchestrator) runtimeRepairSpecsAfterResolvedDecision(
+	ctx context.Context,
+	run *runModel.Run,
+	stepID common.StepID,
+) ([]stepDispatchSpec, bool, error) {
+	if o == nil || run == nil || stepID == "" || o.steps == nil {
+		return nil, false, nil
+	}
+	step, err := o.steps.Get(ctx, stepID)
+	if err != nil {
+		return nil, true, err
+	}
+	if step == nil || step.State != common.StepStateFailed {
+		return nil, false, nil
+	}
+	attempt := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
+	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
+	if err != nil {
+		return nil, true, err
+	}
+	input := o.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, nil)
+	input["decisionAuthorizedRetry"] = true
+	return []stepDispatchSpec{{
+		ID:    stepID,
+		Kind:  initialStepKind(run),
+		Input: input,
+	}}, true, nil
 }
 
 func contextGateDecisionResumeInput(resumeInput map[string]any) bool {

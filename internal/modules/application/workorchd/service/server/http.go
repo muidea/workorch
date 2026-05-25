@@ -3818,17 +3818,7 @@ func (s *serverState) registerReplanContinuationWatcher() {
 	if s == nil || s.eventHub == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe(events.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
-		data, ok := events.DecodeRunPayload(envelope.Payload)
-		if !ok || data.State != common.RunStateSuperseded || strings.TrimSpace(envelope.RunID) == "" || strings.TrimSpace(envelope.WorkspaceID) == "" {
-			return nil
-		}
-		s.scheduleReplanContinuationIfNeeded(
-			appservice.ContextWithEventHub(ctx, s.eventHub),
-			envelope.WorkspaceID,
-			envelope.RunID,
-			0,
-		)
+	unsubscribe := s.eventHub.Subscribe(events.TopicRunStateChanged, func(context.Context, events.Envelope) error {
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
@@ -4793,6 +4783,9 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 	if !s.runHasResolvedReplanDecision(ctx, workspaceID, runID) {
 		return
 	}
+	if s.workspaceHasReplanSuccessor(ctx, workspaceID, runID) {
+		return
+	}
 	key := workspaceID + "/" + runID
 	s.replanContinuationMu.Lock()
 	if s.replanContinuationStarted == nil {
@@ -4836,6 +4829,39 @@ func (s *serverState) clearReplanContinuationStarted(key string) {
 	s.replanContinuationMu.Lock()
 	defer s.replanContinuationMu.Unlock()
 	delete(s.replanContinuationStarted, key)
+}
+
+func (s *serverState) workspaceHasReplanSuccessor(ctx context.Context, workspaceID string, runID string) bool {
+	if s == nil || s.listRuns == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+		return false
+	}
+	items, err := s.listRuns(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
+	if err != nil {
+		slog.Warn("workorch replan continuation successor scan failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+		return false
+	}
+	for _, item := range items {
+		if item.WorkspaceID != workspaceID || item.ID == runID {
+			continue
+		}
+		if runIsReplanSuccessorOf(item, runID) {
+			return true
+		}
+	}
+	return false
+}
+
+func runIsReplanSuccessorOf(item appservice.Run, predecessorRunID string) bool {
+	predecessorRunID = strings.TrimSpace(predecessorRunID)
+	if predecessorRunID == "" {
+		return false
+	}
+	if replan, _ := item.ExecutionContext["replanContinuation"].(map[string]any); len(replan) > 0 {
+		if predecessor, _ := replan["predecessorRunId"].(string); strings.TrimSpace(predecessor) == predecessorRunID {
+			return true
+		}
+	}
+	return strings.HasPrefix(item.ID, predecessorRunID+"-replan-")
 }
 
 func (s *serverState) runHasResolvedReplanDecision(ctx context.Context, workspaceID string, runID string) bool {
