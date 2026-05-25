@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
+import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatButton, Form, Input, InputNumber, List, Modal, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
@@ -2602,6 +2602,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </Form.Item>
         </Form>
       </Modal>
+      <FloatButton.BackTop className="workspace-back-top" visibilityHeight={240} tooltip="返回顶部" />
     </PageContainer>
   );
 }

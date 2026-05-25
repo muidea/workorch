@@ -173,6 +173,11 @@ body {
   gap: 8px;
 }
 
+.workspace-back-top {
+  right: 32px;
+  bottom: 32px;
+}
+
 .workorch-card-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

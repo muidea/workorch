@@ -2217,6 +2217,110 @@ func TestParseLLMExecutionDecisionRepairsKnownMalformedKeysAndNestedCoverageItem
 	}
 }
 
+func TestParseLLMExecutionDecisionRepairsTripleNestedCoverageItems(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"complete",
+			"items":[{"item":"runtime check","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"acceptanceDimensions":{"items":{"items":{"items":[{"id":"runtime_entrypoint","state":"satisfied","evidenceRefs":["run-1/step-1"]}]}}}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.AcceptanceDimensions == nil {
+		t.Fatalf("acceptanceDimensions = %+v, want repaired coverage", decision.DoDAssessment)
+	}
+	if got := len(decision.DoDAssessment.AcceptanceDimensions.Items); got != 1 {
+		t.Fatalf("acceptanceDimensions items = %d, want 1", got)
+	}
+	if decision.DoDAssessment.AcceptanceDimensions.Items[0].ID != "runtime_entrypoint" {
+		t.Fatalf("acceptanceDimensions item = %+v, want runtime_entrypoint", decision.DoDAssessment.AcceptanceDimensions.Items[0])
+	}
+	if !decision.DoDAssessment.AcceptanceDimensions.Satisfied {
+		t.Fatalf("acceptanceDimensions.satisfied = false, want inferred true")
+	}
+}
+
+func TestParseLLMExecutionDecisionRepairsObjectMappedAcceptanceDimensions(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"complete",
+			"items":[{"item":"runtime check","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"acceptanceDimensions":{
+				"runtime_entrypoint":{"satisfied":true,"evidenceRefs":["run-1/step-1"]},
+				"configuration":{"state":"satisfied","evidenceRefs":["run-1/step-2"]}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.AcceptanceDimensions == nil {
+		t.Fatalf("acceptanceDimensions = %+v, want repaired coverage", decision.DoDAssessment)
+	}
+	if got := len(decision.DoDAssessment.AcceptanceDimensions.Items); got != 2 {
+		t.Fatalf("acceptanceDimensions items = %d, want 2", got)
+	}
+	if decision.DoDAssessment.AcceptanceDimensions.Items[0].ID == "" || decision.DoDAssessment.AcceptanceDimensions.Items[1].ID == "" {
+		t.Fatalf("acceptanceDimensions items = %+v, want ids populated from object keys", decision.DoDAssessment.AcceptanceDimensions.Items)
+	}
+	if decision.DoDAssessment.AcceptanceDimensions.Items[0].State != "satisfied" {
+		t.Fatalf("acceptanceDimensions item = %+v, want state inferred from satisfied", decision.DoDAssessment.AcceptanceDimensions.Items[0])
+	}
+}
+
+func TestParseLLMExecutionDecisionNormalizesDimensionCoverageItems(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"complete",
+			"items":[{"item":"runtime check","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"acceptanceDimensions":{
+				"satisfied":true,
+				"items":[{"dimension":"functional_behavior","evidenceRefs":["run-1/step-1"]}]
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.AcceptanceDimensions == nil ||
+		len(decision.DoDAssessment.AcceptanceDimensions.Items) != 1 {
+		t.Fatalf("acceptanceDimensions = %+v, want one item", decision.DoDAssessment)
+	}
+	item := decision.DoDAssessment.AcceptanceDimensions.Items[0]
+	if item.ID != "functional_behavior" || item.State != "satisfied" {
+		t.Fatalf("acceptanceDimensions item = %+v, want id from dimension and parent satisfied state", item)
+	}
+}
+
+func TestParseLLMExecutionDecisionAcceptsCountOnlyCoverageItemsAsEmpty(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"completed",
+		"dodAssessment":{
+			"satisfied":true,
+			"summary":"complete",
+			"items":[{"item":"runtime check","state":"satisfied","evidenceRefs":["run-1/step-1"]}],
+			"acceptanceDimensions":{"satisfied":true,"items":{"items":9}}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.DoDAssessment == nil || decision.DoDAssessment.AcceptanceDimensions == nil {
+		t.Fatalf("acceptanceDimensions = %+v, want repaired empty coverage", decision.DoDAssessment)
+	}
+	if got := len(decision.DoDAssessment.AcceptanceDimensions.Items); got != 0 {
+		t.Fatalf("acceptanceDimensions items = %d, want no fabricated evidence item", got)
+	}
+}
+
 func TestParseLLMExecutionDecisionRepairsQuotedCoverageObjectElements(t *testing.T) {
 	decision, err := ParseLLMExecutionDecision([]byte(`{
 		"completionState":"completed",

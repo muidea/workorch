@@ -1736,6 +1736,7 @@ func normalizeDecisionStringScalar(value any) (string, bool) {
 
 func normalizeDecisionCoverageValue(value any) (map[string]any, bool) {
 	if items, ok := value.([]any); ok {
+		items = normalizeDecisionCoverageItems(items, nil)
 		return map[string]any{
 			"satisfied": coverageItemsSatisfied(items),
 			"items":     items,
@@ -1745,19 +1746,123 @@ func normalizeDecisionCoverageValue(value any) (map[string]any, bool) {
 	if !ok || len(coverage) == 0 {
 		return nil, false
 	}
-	itemsContainer, ok := coverage["items"].(map[string]any)
+	items, ok := normalizeDecisionCoverageItemsValue(coverage["items"])
+	if !ok {
+		items, ok = normalizeDecisionCoverageItemsValue(coverage)
+	}
 	if !ok {
 		return nil, false
 	}
-	items, ok := itemsContainer["items"].([]any)
-	if !ok {
-		return nil, false
+	var parentSatisfied *bool
+	if satisfied, ok := coverage["satisfied"].(bool); ok {
+		parentSatisfied = &satisfied
 	}
+	items = normalizeDecisionCoverageItems(items, parentSatisfied)
 	coverage["items"] = items
 	if _, ok := coverage["satisfied"]; !ok {
 		coverage["satisfied"] = coverageItemsSatisfied(items)
 	}
 	return coverage, true
+}
+
+func normalizeDecisionCoverageItemsValue(value any) ([]any, bool) {
+	switch typed := value.(type) {
+	case []any:
+		return normalizeDecisionCoverageItems(typed, nil), true
+	case []map[string]any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, item)
+		}
+		return normalizeDecisionCoverageItems(ret, nil), true
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil, false
+		}
+		hasItemsKey := false
+		if _, exists := typed["items"]; exists {
+			hasItemsKey = true
+		}
+		if nested, ok := normalizeDecisionCoverageItemsValue(typed["items"]); ok {
+			return nested, true
+		}
+		ret := make([]any, 0, len(typed))
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if decisionCoverageKeyedItemMetadata(key) {
+				continue
+			}
+			item, ok := typed[key].(map[string]any)
+			if !ok || len(item) == 0 {
+				continue
+			}
+			next := map[string]any{}
+			for itemKey, itemValue := range item {
+				next[itemKey] = itemValue
+			}
+			if strings.TrimSpace(stringValue(next["id"])) == "" &&
+				strings.TrimSpace(stringValue(next["item"])) == "" &&
+				strings.TrimSpace(stringValue(next["name"])) == "" &&
+				strings.TrimSpace(stringValue(next["requirement"])) == "" {
+				next["id"] = key
+			}
+			ret = append(ret, next)
+		}
+		if len(ret) == 0 {
+			if hasItemsKey {
+				return []any{}, true
+			}
+			return nil, false
+		}
+		return normalizeDecisionCoverageItems(ret, nil), true
+	default:
+		return nil, false
+	}
+}
+
+func decisionCoverageKeyedItemMetadata(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "", "items", "satisfied", "summary", "state", "reason", "evidenceRefs", "artifactRefs", "_truncatedEntryCount", "itemCount", "itemsCount":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeDecisionCoverageItems(items []any, parentSatisfied *bool) []any {
+	if len(items) == 0 {
+		return items
+	}
+	ret := make([]any, 0, len(items))
+	for _, item := range items {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			ret = append(ret, item)
+			continue
+		}
+		if strings.TrimSpace(stringValue(itemMap["id"])) == "" {
+			if dimension := strings.TrimSpace(stringValue(itemMap["dimension"])); dimension != "" {
+				itemMap["id"] = dimension
+			}
+		}
+		if strings.TrimSpace(stringValue(itemMap["state"])) == "" {
+			if satisfied, ok := itemMap["satisfied"].(bool); ok {
+				if satisfied {
+					itemMap["state"] = "satisfied"
+				} else {
+					itemMap["state"] = "failed"
+				}
+			} else if parentSatisfied != nil && *parentSatisfied {
+				itemMap["state"] = "satisfied"
+			}
+		}
+		ret = append(ret, itemMap)
+	}
+	return ret
 }
 
 func attachTopLevelStrategyReassessmentToPatchNodes(doc map[string]any, value any) bool {
