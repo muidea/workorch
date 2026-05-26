@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -84,6 +85,9 @@ func (m AppModel) renderEditableInput() string {
 
 func (m AppModel) renderInputBuffer(prompt string, width int) string {
 	prefix := prompt + " > "
+	if m.inputPreviewShouldCollapse() {
+		return m.renderCollapsedInputBuffer(prefix, width)
+	}
 	editable := strings.ReplaceAll(m.renderEditableInput(), "\r\n", "\n")
 	lines := strings.Split(editable, "\n")
 	if len(lines) == 0 {
@@ -103,6 +107,54 @@ func (m AppModel) renderInputBuffer(prompt string, width int) string {
 		out = append(out, truncateDisplay(linePrefix+line, width-2))
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m AppModel) inputPreviewShouldCollapse() bool {
+	normalized := strings.ReplaceAll(m.input, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) <= 1 {
+		return false
+	}
+	runeCount := utf8.RuneCountInString(normalized)
+	return len(lines) > 6 || runeCount > 800
+}
+
+func (m AppModel) renderCollapsedInputBuffer(prefix string, width int) string {
+	normalized := strings.ReplaceAll(m.input, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	runeCount := utf8.RuneCountInString(normalized)
+	cursor := m.inputCursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > runeCount {
+		cursor = runeCount
+	}
+	summary := fmt.Sprintf("[folded input: %d lines, %d chars]", len(lines), runeCount)
+	if cursor != runeCount {
+		summary += fmt.Sprintf(" [cursor %d/%d]", cursor, runeCount)
+	}
+	tail := lastNonEmptyLine(lines)
+	if tail == "" {
+		tail = "(blank)"
+	}
+	if cursor == runeCount {
+		tail += "|"
+	}
+	indent := strings.Repeat(" ", lipgloss.Width(prefix))
+	return strings.Join([]string{
+		truncateDisplay(prefix+summary, width-2),
+		truncateDisplay(indent+"... "+tail, width-2),
+	}, "\n")
+}
+
+func lastNonEmptyLine(lines []string) string {
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		if value := strings.TrimSpace(lines[idx]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (m *AppModel) addInputHistory(value string) {

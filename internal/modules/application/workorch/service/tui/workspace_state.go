@@ -251,7 +251,11 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.dodItems = append([]string(nil), msg.DoD.Items...)
 	}
 	if msg.Snapshot != nil {
-		m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
+		if runStateIsTerminal(run.State) {
+			m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
+		} else {
+			m.result = ""
+		}
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
 		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
@@ -292,6 +296,30 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	m.syncBlockingApprovalFromList()
 	if strings.TrimSpace(m.result) != "" {
 		m.followMainViewportTail()
+	}
+}
+
+func runStateIsTerminal(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func runStateIsLive(state common.RunState) bool {
+	return state != "" && !runStateIsTerminal(state) &&
+		state != common.RunStateBlockedOnDecision &&
+		state != common.RunStateBlockedOnApproval
+}
+
+func workspaceStateIsLive(state common.WorkspaceState) bool {
+	switch state {
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		return true
+	default:
+		return false
 	}
 }
 

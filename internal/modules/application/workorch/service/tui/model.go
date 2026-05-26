@@ -329,6 +329,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Run != nil {
 			m.activeRunID = string(msg.Run.ID)
+			if !runStateIsTerminal(msg.Run.State) {
+				m.clearRunDisplayState()
+			}
 			switch msg.Run.State {
 			case common.RunStateCompleted:
 				m.running = false
@@ -568,6 +571,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	if isRunControlIntent(text) {
 		m.clearInput()
 		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
 		m.lastError = nil
 		m.progress = progressSubmitting
 		m.progressText = "Continuing active run"
@@ -576,6 +580,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	if m.activeRunID != "" {
 		m.clearInput()
 		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
 		m.lastError = nil
 		m.appendTranscript("Input", text)
 		m.progress = progressSubmitting
@@ -585,6 +590,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	if strings.TrimSpace(m.currentTask) != "" {
 		m.clearInput()
 		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
 		m.lastError = nil
 		m.appendTranscript("Input", text)
 		m.progress = progressSubmitting
@@ -600,13 +606,7 @@ func (m *AppModel) submitGoalText(text string) (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("goal requires text")
 		return m, nil
 	}
-	m.result = ""
-	m.artifacts = nil
-	m.patches = nil
-	m.llmUsage = backend.LLMUsageSummaryInfo{}
-	m.llmContext = nil
-	m.runtimeEvents = nil
-	m.failureReason = ""
+	m.clearRunDisplayState()
 	m.lastError = nil
 	m.clearInput()
 	m.cancelWorkspaceSelection()
@@ -686,6 +686,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.addInputHistory(text)
 		m.clearInput()
 		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
 		m.lastError = nil
 		m.progress = progressSubmitting
 		m.progressText = "Continuing active run"
@@ -695,6 +696,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
 		m.clearInput()
 		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
 		m.lastError = nil
 		if args != "" {
 			m.appendTranscript("Input", args)
@@ -1187,6 +1189,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
 		activeRunID := firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID)
 		if activeRunID != "" {
+			if activeRunID != m.activeRunID && workspaceStateIsLive(state) {
+				m.clearRunDisplayState()
+			}
 			m.activeRunID = activeRunID
 		}
 		m.applyWorkspaceProgress(state)
@@ -1364,6 +1369,9 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
 	default:
 		if state != "" {
+			if runStateIsLive(state) {
+				m.clearResultDisplayState()
+			}
 			m.running = true
 			m.progress = progressRunning
 			if state == common.RunStateRunning {
@@ -1399,6 +1407,32 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 			}
 		}
 	}
+}
+
+func (m *AppModel) clearRunDisplayState() {
+	m.clearResultDisplayState()
+	m.patches = nil
+	m.taskDecomp = nil
+	m.memoryRecalls = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
+	m.runtimeEvents = nil
+	m.repairLoop = ""
+	m.failureReason = ""
+	m.failureHint = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	m.decisions = nil
+	m.approvals = nil
+	m.resetMainViewport()
+}
+
+func (m *AppModel) clearResultDisplayState() {
+	m.result = ""
+	m.artifacts = nil
+	m.sources = nil
+	m.failureReason = ""
+	m.failureHint = ""
 }
 
 func (m AppModel) emptyResultText() string {

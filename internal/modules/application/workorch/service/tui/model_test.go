@@ -220,6 +220,9 @@ func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *te
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
 	m.currentTask = "已有目标"
+	m.result = "old final result"
+	m.artifacts = []string{"old-artifact"}
+	m.runtimeEvents = []string{"old event"}
 	m.setInput("补充信息：继续基于现有目标修复")
 
 	next, cmd := m.submitInput()
@@ -245,6 +248,9 @@ func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *te
 	}
 	if m.activeRunID != "run-new" || !m.running {
 		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
+	}
+	if m.result != "" || len(m.artifacts) != 0 || len(m.runtimeEvents) != 0 {
+		t.Fatalf("old run display not cleared: result=%q artifacts=%v events=%v", m.result, m.artifacts, m.runtimeEvents)
 	}
 }
 
@@ -274,6 +280,26 @@ func TestModelRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testin
 	latest, ok := be.activations[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
 	if !ok || latest["content"] != "重新执行并纳入刚补充的信息" {
 		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.activations[0].ExecutionContextPatch["latestOperatorInput"])
+	}
+}
+
+func TestModelRunControlRunningClearsStaleResult(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.result = "stale result"
+	m.artifacts = []string{"stale-artifact"}
+	m.runtimeEvents = []string{"stale event"}
+
+	next, _ := m.Update(RunControlMsg{
+		Run:         &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-1", State: common.RunStateRunning},
+		WorkspaceID: "ws-1",
+		Message:     "Restarting workspace run",
+	})
+	m = asModel(next)
+	if m.activeRunID != "run-new" || m.progress != progressRunning || !m.running {
+		t.Fatalf("run state = %q/%s/%v, want running run-new", m.activeRunID, m.progress, m.running)
+	}
+	if m.result != "" || len(m.artifacts) != 0 || len(m.runtimeEvents) != 0 {
+		t.Fatalf("stale display not cleared on run control: result=%q artifacts=%v events=%v", m.result, m.artifacts, m.runtimeEvents)
 	}
 }
 
@@ -621,6 +647,46 @@ func TestModelInputHistoryAndMultilineEditing(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "line one") || !strings.Contains(view, "line two") {
 		t.Fatalf("view missing multiline input:\n%s", view)
+	}
+}
+
+func TestModelLargeMultilinePasteRendersCollapsedInputPreview(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{ID: "ws-1", Title: "Project", State: "active"}}})
+	m = asModel(next)
+	var pasted strings.Builder
+	for i := 1; i <= 20; i++ {
+		if i > 1 {
+			pasted.WriteString("\n")
+		}
+		fmt.Fprintf(&pasted, "pasted-line-%02d with detailed text", i)
+	}
+	text := pasted.String()
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	m = asModel(next)
+	if m.input != text {
+		t.Fatalf("input was modified by folded preview")
+	}
+	m.width = 100
+	m.height = 14
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "[folded input: 20 lines") || !strings.Contains(view, "pasted-line-20") {
+		t.Fatalf("view missing folded paste preview:\n%s", view)
+	}
+	if strings.Contains(view, "pasted-line-01") || strings.Contains(view, "pasted-line-10") {
+		t.Fatalf("folded preview leaked hidden paste body:\n%s", view)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg := cmd()
+	next, _ = asModel(next).Update(msg)
+	m = asModel(next)
+	if m.currentTask != text {
+		t.Fatalf("submitted task length = %d, want original pasted text length %d", len(m.currentTask), len(text))
 	}
 }
 
@@ -1499,6 +1565,34 @@ func TestModelWorkspaceContextDoesNotTreatOutcomeRunAsActive(t *testing.T) {
 	}
 	if m.currentTask != "goal" || m.result != "failed result" {
 		t.Fatalf("display state = task:%q result:%q, want terminal run details retained", m.currentTask, m.result)
+	}
+}
+
+func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.result = "stale result"
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+			Outcome:   backend.WorkspaceOutcomeInfo{Summary: "old outcome without run id"},
+			Runs: []backend.RunInfo{
+				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: common.RunStateCompleted},
+				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+			},
+		},
+		ActiveRun:        &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+		DisplayRun:       &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+		Goal:             &backend.GoalInfo{ID: "goal-new", Text: "new goal"},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if m.activeRunID != "run-new" || m.progress != progressRunning || !m.running {
+		t.Fatalf("live run state = %q/%s/%v, want running run-new", m.activeRunID, m.progress, m.running)
+	}
+	if m.result != "" {
+		t.Fatalf("workspace context restored stale result for live run: %q", m.result)
 	}
 }
 
