@@ -510,6 +510,8 @@ Provider-facing message 必须把 `C0/C1/C2` 组织为真实连续前缀，而�
 
 Assessment-only、repair、follow-up、provider retry、validation 等当前路径模式不得改写 C0 stable runtime prefix，也不得把 C2 声明式 capability catalog 替换为另一套当前路径专用能力目录。它们只能通过 C3 stage contract、C4 current-action、C4 validation/failure signal 表达“本轮是否允许 executable output”。Runtime 执行层仍必须拒绝 assessment-only 响应中的 executionGraph、patch、shell、MCP、memory write 等 executable output。
 
+`stateChangingOutputRequired`、`stateChangingRecoveryMode`、`providerTimeoutStateChangingRetry`、`repairObjective`、`repairActionPackage.requiredOutput` 等 state-changing / repair 动态约束只能出现在 C3/C4。C0 只能表达长期稳定的输出 schema、JSON 字段边界和中立 runtime 合同；不得追加“本轮必须产生状态变更”“禁止 shell-only graph”“direct recovery 已授权”等随阶段变化的提示，否则会导致同一 run 内 `stablePrefixHash` 分裂并降低 provider cache 命中。
+
 同一 run 内 `stablePrefixHash` 必须保持不变；如果它因为当前路径模式、临时能力过滤、provider retry 或 assessment-only 而变化，说明 request rendering 将动态信息放入了稳定前缀。`workspaceDefinitionHash` 只应随 Goal / DoD revision 变化；`capabilityContractHash` 只应随声明式 capability catalog / governance policy 变化。若同一 run 内 cacheKey 分裂过多，必须用 request-log audit 定位是 C1 definition churn、C2 capability/governance churn，还是 C4 体积膨胀造成 provider 实际缓存收益下降。
 
 同级 section 内固定顺序：
@@ -789,6 +791,7 @@ Provider adapter 不可以做：
 验收：
 
 - C0 已不包含 workspaceId/runId/stepId/current failure，能力合同已从 C0 拆出到 C2。
+- C0 已不包含 `stateChangingOutputRequired`、repair objective、direct recovery、provider retry、assessment-only 等运行期动态提示；这类约束必须由 C3/C4 表达。
 - C1 已包含完整 Goal / DoD 原文和 definitionChangeImpact，并保留 raw_required protectedSections。
 - C2 已独立表达 runtime capability contract / governance policy / runtime capability summary，并位于 C3 workspace-run 之前，形成真实 provider-facing 连续缓存前缀。
 - C3 已表达 workspace-run、stage-contract、repair-action-package。

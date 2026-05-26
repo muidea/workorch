@@ -624,27 +624,6 @@ func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 		`{"completionState":"blocked_on_decision","requiredDecision":{"reason":"missing execution target","decisionKind":"provide_missing_info","question":"Please provide target.","context":{"knownValues":{"source":"workspace"},"missingFields":["target"],"candidateValues":{"target":"artifact"},"confidenceByField":{"target":0.92}}}}`,
 		`{"completionState":"completed","dodAssessment":{"satisfied":true,"summary":"The requested outcome is ready and evidenced.","goalOutcome":"The requested outcome is complete.","implementationSummary":"Produced the required state change.","verificationSummary":"Verification evidence passed.","items":[{"item":"required outcome is evidenced","state":"satisfied","evidenceRefs":["run-1/validation/runtime-step"]}],"knownLimitations":[],"residualRisks":[],"nextActions":["Review the generated artifacts."]}}`,
 	}
-	if boolValue(request.Input["stateChangingOutputRequired"]) {
-		lines = append(lines,
-			"State-changing output is required for this request.",
-			"- Prefer top-level patchRequests/patches with complete concrete file_write content or unified_diff diffs.",
-			"- file_write content must be non-empty and cannot mean delete. If removing a resource is required but no delete-capable block exists, choose an equivalent supported patch or return a failed assessment/blocker.",
-			"- If current target content is redacted, truncated, or not visible, do not use file_write; use a minimal exact diff, file/edit with exact oldText, file/read, or a failed assessment/blocker.",
-			"- If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node as the state-changing path.",
-			"- Do not return read-only, inspection-only, or shell-only executionGraph.",
-			"- Do not use shell/command to modify workspace files when patchRequests, patches, or patch/apply can represent the state change with auditable evidence; shell/command should prepare or verify after the patch.",
-			"- If the required state change cannot be produced, return failed with dodAssessment or a real requiredDecision/requiredApproval blocker.",
-		)
-		if strings.TrimSpace(stringValue(request.Input["stateChangingRecoveryMode"])) == "direct_state_change" ||
-			boolValue(request.Input["providerTimeoutStateChangingRetry"]) {
-			lines = append(lines,
-				"State-changing recovery is already scoped by the runtime.",
-				"- Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs.",
-				"- Continue from the effective Goal and DoD already present in input.executionContextPackage or input.executionContext.",
-				"- The next output must be a direct state-changing artifact path, failed dodAssessment, or a real governance blocker.",
-			)
-		}
-	}
 	return strings.Join(lines, "\n")
 }
 

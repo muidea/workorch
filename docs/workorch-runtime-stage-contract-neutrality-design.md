@@ -1010,6 +1010,7 @@ LLM request 的组织方式还必须兼顾 provider prompt / context cache 的�
 - Goal / DoD 运行期变更后，旧 revision 只能作为 lineage / historical evidence 使用，不能继续作为当前目标或验收基准。Runtime 必须在 request 中提供 definitionChangeImpact，说明已有 plan / output / evidence 是否仍覆盖最新 definition，以及下一步应 replan、repair、revalidate、acceptance 还是进入 decision。
 - 当前失败、当前进展、timeline tail、target snapshot、latest validation、memory recall 等高频变化信息必须位于易变尾部，不能污染 stable prefix。
 - C2 capability contract 必须表达声明式能力目录和通用能力使用规则，不能因为 assessment-only 或当前阶段临时禁用可执行输出而改写为另一套能力目录。当前步骤是否允许调用可执行 block 属于 C3/C4 当前动作约束；runtime 仍必须在执行层拒绝违反 assessment-only 的 executable output。
+- `stateChangingOutputRequired`、`repairObjective`、`stateChangingRecoveryMode`、provider timeout retry、requiredOutput / forbiddenActions 等阶段收敛约束必须位于 C3 stage contract 或 C4 current-action；不得进入 C0 stable language / JSON contract。若同一 run 内仅因 state-changing / repair / recovery 模式变化导致 `stablePrefixHash` 改变，视为 request rendering 缺陷。
 - section 顺序、字段顺序、source refs 顺序、空字段策略必须 canonical 化，避免语义相同但文本不同导致缓存失效。
 - 每次 request audit 应记录 stablePrefixHash、workspaceDefinitionHash、capabilityContractHash、stageBundleHash、volatileTailHash 和 cacheBreakers；这些字段用于观测，不作为业务恢复状态。
 - 同一 run 内 `stablePrefixHash` 不应变化；若变化，视为 request rendering 缺陷。`cacheKey` 可以因 Goal / DoD revision 或 capability revision 变化而变化，但若同一 run 内无定义变更却出现过度分裂，必须通过 request-log 校验提示 C1/C2/C4 churn。

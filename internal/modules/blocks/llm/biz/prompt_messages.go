@@ -1118,11 +1118,17 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"type":           "produce_state_changing_repair_or_failed_assessment",
 			"requiredOutput": required,
 			"requirements": []string{
+				"State-changing output is required by the current Stage Contract",
+				"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract",
 				"Use the effective Goal and DoD already supplied in the request",
 				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
+				"If multiple dependent operations are needed, executionGraph is allowed only when it contains an accepted state-changing path declared by requiredOutput",
+				"Do not return read-only, inspection-only, or shell-only executionGraph",
+				"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
+				"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
 				"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
-				"Do not use shell commands to modify workspace files when a patch artifact can represent the change",
+				"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
 				"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
 			},
 		})

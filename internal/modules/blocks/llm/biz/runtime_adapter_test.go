@@ -1507,6 +1507,84 @@ func TestProviderCachePlanKeepsStablePrefixForAssessmentOnlyMode(t *testing.T) {
 	}
 }
 
+func TestProviderCachePlanKeepsStablePrefixForStateChangingContract(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "goal text"},
+			"dod":                map[string]any{"items": []any{"dod item"}},
+			"definitionRevision": "definition-001",
+		},
+		"currentRuntimeStage":     "repair",
+		"currentRuntimeStageMode": "strict_convergence",
+	}
+	stateChangingInput := cloneMap(baseInput)
+	stateChangingInput["stateChangingOutputRequired"] = true
+	stateChangingInput["repairObjective"] = "produce_state_changing_output"
+	stateChangingInput["stateChangingRecoveryMode"] = "direct_state_change"
+	stateChangingInput["repairActionPackage"] = map[string]any{
+		"requiredOutput": map[string]any{
+			"acceptedKinds":                []string{llmcommon.RuntimeBlockKindPatchApply},
+			"forbiddenKinds":               []string{"read_only_graph", "shell_only_graph"},
+			"mustIncludeStateChangingNode": true,
+		},
+	}
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-state-changing",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{
+				{Kind: llmcommon.StepKindWorkspaceExecution, Description: "plan next step"},
+				{Kind: llmcommon.RuntimeBlockKindPatchApply, Description: "apply patch"},
+				{Kind: "shell/command", Description: "run command"},
+			},
+		},
+		Input: baseInput,
+	}
+	stateChanging := base
+	stateChanging.Input = stateChangingInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	stateChanging.PromptContext = buildPromptContextFromRequest(stateChanging)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&stateChanging)
+
+	if base.ContextBudget == nil || base.ContextBudget.CachePlan == nil ||
+		stateChanging.ContextBudget == nil || stateChanging.ContextBudget.CachePlan == nil {
+		t.Fatalf("cachePlan missing: base=%+v stateChanging=%+v", base.ContextBudget, stateChanging.ContextBudget)
+	}
+	if base.ContextBudget.CachePlan.StablePrefixHash != stateChanging.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatalf("stablePrefixHash base=%q stateChanging=%q, want C0 unchanged by state-changing contract", base.ContextBudget.CachePlan.StablePrefixHash, stateChanging.ContextBudget.CachePlan.StablePrefixHash)
+	}
+	if base.ContextBudget.CachePlan.VolatileTailHash == stateChanging.ContextBudget.CachePlan.VolatileTailHash {
+		t.Fatalf("volatileTailHash base=%q stateChanging=%q, want C4 to carry state-changing contract difference", base.ContextBudget.CachePlan.VolatileTailHash, stateChanging.ContextBudget.CachePlan.VolatileTailHash)
+	}
+	c0, ok := promptContextSectionByID(stateChanging.PromptContext, "C0.language-and-contract")
+	if !ok {
+		t.Fatalf("missing C0.language-and-contract; sections=%+v", promptContextSectionIDsForTest(stateChanging.PromptContext))
+	}
+	if strings.Contains(c0.Content, "State-changing output is required by the current Stage Contract") ||
+		strings.Contains(c0.Content, "Do not return read-only, inspection-only, or shell-only executionGraph") {
+		t.Fatalf("state-changing dynamic guidance leaked into C0: %s", c0.Content)
+	}
+	c4, ok := promptContextSectionByID(stateChanging.PromptContext, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(stateChanging.PromptContext))
+	}
+	for _, want := range []string{
+		"State-changing output is required by the current Stage Contract",
+		"acceptedKinds",
+		"Do not return read-only, inspection-only, or shell-only executionGraph",
+	} {
+		if !strings.Contains(c4.Content, want) {
+			t.Fatalf("C4.current-action missing %q: %s", want, c4.Content)
+		}
+	}
+}
+
 func providerCacheBreakersContain(items []llmmodels.ProviderCacheBreaker, sectionID, reason string) bool {
 	for _, item := range items {
 		if item.SectionID == sectionID && item.Reason == reason {
