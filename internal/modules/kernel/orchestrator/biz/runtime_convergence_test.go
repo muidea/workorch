@@ -206,6 +206,65 @@ func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *t
 	}
 }
 
+func TestShouldCreateDecisionTicketBlocksMechanicalEvidenceAcquisitionDecision(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteFailureEvidence": true,
+				"acceptedKinds": []string{
+					"file/list",
+					"file/read",
+					"shell/command",
+					"mcp/tool_call",
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/evidence-001", Input: input}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "need stage choice",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Should the runtime switch stage?",
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, map[string]any{"llmOutput": output})
+
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false for mechanically continuable evidence acquisition contract")
+	}
+}
+
+func TestShouldCreateDecisionTicketKeepsEvidenceAcquisitionRuntimeDependency(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": evidenceAcquisitionRequiredOutput(nil),
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/evidence-001", Input: input}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "runtime config required",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Please configure the runtime.",
+		Context: map[string]any{
+			decisionContextKeyScope:      decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency: decisionContextDependencyContextGate,
+		},
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, map[string]any{"llmOutput": output})
+
+	if !ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = false, want true for runtime dependency")
+	}
+}
+
 func TestBuildConvergenceContractNeedGovernanceForRuntimeDependencyDecision(t *testing.T) {
 	step := &runmodel.Step{
 		ID: "run-governance/repair-001",
@@ -678,5 +737,60 @@ func TestBuildConvergenceContractRejectedResultWithCoverageGapsNeedsValidation(t
 	targets := mapSliceFromValue(applied["coverageTargetSet"])
 	if len(targets) != 2 {
 		t.Fatalf("applied = %+v, coverageTargetSet = %+v, want DoD + Goal targets inherited from rejected result", applied, targets)
+	}
+}
+
+func TestBuildConvergenceContractValidationAssessmentGapNeedsEvidenceWhenTargetMissing(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:    runtimeStageVerification,
+		"repairObjective":           repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired": true,
+		"evidenceRepairRequired":    true,
+		"missingDoDItems": []map[string]any{{
+			"item":  "runtime behavior remains unproven",
+			"state": "failed",
+		}},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "runtime behavior remains unproven",
+				"state":      "failed",
+			}},
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-validation-gap/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: cloneStepPayload(input),
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "coverage gap remains after concrete validation attempt",
+				"items": []map[string]any{{
+					"item":        "runtime behavior remains unproven",
+					"state":       "failed",
+					"reason":      "no current evidence closes the target",
+					"nextActions": []string{"acquire bounded target evidence"},
+				}},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedEvidence || contract.RepairObjective != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_evidence after failed concrete validation assessment without target evidence", contract)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteFailureEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") {
+		t.Fatalf("requiredOutput = %+v, want bounded evidence acquisition contract", required)
 	}
 }

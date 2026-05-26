@@ -210,6 +210,8 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input["repairObjective"] = repairObjectiveAcquireFailureEvidence
 		input["concreteFailureEvidenceRequired"] = true
 		delete(input, "stateChangingOutputRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
 		pkg := cloneStepPayload(contract.RepairActionPackage)
 		if len(pkg) == 0 {
 			pkg = map[string]any{}
@@ -290,6 +292,8 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 		return true
 	}
 	switch contract.State {
+	case convergenceStateNeedEvidence:
+		return !mechanicalEvidenceAcquisitionContractCanContinue(input, contract)
 	case convergenceStateNeedStateChange:
 		return !mechanicalStateChangingContractCanContinue(contract)
 	case convergenceStateNeedValidation:
@@ -301,6 +305,25 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 
 func mechanicalStateChangingContractCanContinue(contract ConvergenceContract) bool {
 	return contract.StateChangingOutputRequired && len(contract.TargetEvidence) > 0
+}
+
+func mechanicalEvidenceAcquisitionContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
+	if !contract.ConcreteFailureEvidenceRequired && !boolValue(input["concreteFailureEvidenceRequired"]) {
+		return false
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	if len(pkg) == 0 {
+		pkg = mapFromValue(input["repairActionPackage"])
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		return false
+	}
+	accepted := stringSliceFromValue(required["acceptedKinds"])
+	return stringSliceContains(accepted, "file/list") ||
+		stringSliceContains(accepted, "file/read") ||
+		stringSliceContains(accepted, "shell/command") ||
+		stringSliceContains(accepted, "mcp/tool_call")
 }
 
 func mechanicalConcreteValidationContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
@@ -326,6 +349,9 @@ func convergenceAssessmentOnly(input map[string]any, failedStep *runModel.Step) 
 }
 
 func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step) bool {
+	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
+		return false
+	}
 	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence {
 		return true
 	}
@@ -368,11 +394,60 @@ func convergenceCoverageVerificationEvidenceGap(input map[string]any, failedStep
 }
 
 func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) bool {
+	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
+		return true
+	}
 	if boolValue(input["concreteFailureEvidenceRequired"]) ||
 		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
 		return true
 	}
 	return repairActionPackageRequiresEvidenceAcquisition(mapFromValue(input["repairActionPackage"]))
+}
+
+func convergenceConcreteValidationCannotAdvanceWithoutTarget(input map[string]any, failedStep *runModel.Step) bool {
+	if failedStep == nil || !inputRequiresConcreteValidationEvidence(failedStep.Input) {
+		return false
+	}
+	diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"])
+	if strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap" ||
+		boolValue(diagnostics["claimAlignedEvidenceNeeded"]) {
+		return false
+	}
+	if !coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if repairHasImplementationTargetEvidence(input, pkg) ||
+		repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		return false
+	}
+	if failedConcreteValidationAssessmentOutput(failedStep.Output) {
+		return true
+	}
+	return false
+}
+
+func failedConcreteValidationAssessmentOutput(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if assessment := doDAssessmentFromOutput(output); len(assessment) > 0 {
+		if satisfied, ok := assessment["satisfied"].(bool); ok && !satisfied {
+			return true
+		}
+	}
+	if len(missingDoDItemsFromFailureOutput(output)) > 0 ||
+		len(missingGoalCoverageFromFailureOutput(output)) > 0 ||
+		len(missingDeliverableCoverageFromFailureOutput(output)) > 0 {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, failureOutputKeySignature),
+	}, "\n"))
+	return strings.Contains(text, "plain failed dodassessment") ||
+		strings.Contains(text, "dodassessment is not satisfied")
 }
 
 func convergenceNeedsEvidenceFromRejectedContinuation(run *runModel.Run) bool {
