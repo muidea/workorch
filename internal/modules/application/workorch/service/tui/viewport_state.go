@@ -21,11 +21,7 @@ func (m *AppModel) resetMainViewport() {
 }
 
 func (m *AppModel) followMainViewportTail() {
-	width := m.width
-	height := m.height
-	if width >= 96 {
-		width = width - 32
-	}
+	width, height := m.contentDimensions()
 	if width > 0 && height > 0 {
 		m.refreshMainViewport(width, height)
 	}

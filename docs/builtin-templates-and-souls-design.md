@@ -364,6 +364,7 @@ soulMD: |
   "doDItems": [
     "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
     "代码和配置变更保持最小且与目标直接相关，并提供 unified_diff 证据",
+    "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
     "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
     "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
     "最终结果包含改动摘要、验证命令、验证结果、失败/跳过说明、残余风险和后续建议",
@@ -432,7 +433,7 @@ soulMD: |
 
   ## 允许的操作
   - 使用 git/read 查询仓库 status、diff、log、show 和 branch 证据
-  - 使用 git/write init 初始化尚未建仓的 workspace 交付目录；仅当目标明确要求本地提交时使用 git/write add/commit，先用 git/write add 显式暂存路径，再用 git/write commit 提交已 staged 内容
+  - 使用 git/write init 初始化尚未建仓的 workspace 交付目录；当源代码、配置、测试、文档或其他 workspace 输出产生有意义变更时，先用 git/read status/diff 核对范围，再用 git/write add 显式暂存相关路径，并用 git/write commit 形成本地版本控制快照
   - 使用 shell/command 执行 go、npm、python、make、docker、curl 等非 Git 开发工具
   - 使用 file_write/unified_diff 创建或修改源代码文件
   - 使用 MCP 工具访问数据库、API 等外部依赖
@@ -529,6 +530,7 @@ soulMD: |
   - [ ] 所有测试通过（go test / npm test）
   - [ ] lint 无错误（golangci-lint / eslint）
   - [ ] unified_diff 完整且可应用
+  - [ ] workspace 输出发生有意义变更时，存在 git/write add/commit 版本控制快照证据
   - [ ] 测试报告包含 pass/fail 统计
 
   ## evidenceRefs
@@ -536,6 +538,7 @@ soulMD: |
   - build 证据：shell/command 成功输出
   - test 证据：测试结果输出
   - lint 证据：lint 命令成功输出
+  - 版本控制快照证据：git/write commit 输出
 ```
 
 #### soul-software-dev-artifact
@@ -555,6 +558,7 @@ soulMD: |
   - source: unified_diff 格式的代码变更
   - test_report: JSON 格式的测试结果报告
   - configuration: 如有配置变更一并提交
+  - version_control_snapshot: 如 workspace 输出发生有意义变更，记录 git/write add/commit 证据、commit hash、提交信息和相关路径；无可提交变更时说明 zeroWork 或跳过原因
   - final_summary 由 runtime artifact 记录：实现总结和已知限制
   - deliverable_manifest 由 runtime artifact 记录：所有交付物索引
 

@@ -1808,6 +1808,58 @@ func TestModelResultAcceptedRefreshesWorkspaceContext(t *testing.T) {
 	}
 }
 
+func TestModelResultAcceptedAutoScrollsMainViewportToResult(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 80
+	m.height = 12
+	m.currentTask = "long task before result"
+	m.dodItems = []string{"dod one", "dod two", "dod three", "dod four"}
+	m.runtimeEvents = []string{
+		"event 01", "event 02", "event 03", "event 04",
+		"event 05", "event 06", "event 07", "event 08",
+	}
+
+	next, _ := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventResultAccepted,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload:     map[string]any{"summary": "最终结果已完成"},
+	}})
+	m = asModel(next)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "最终结果已完成") {
+		t.Fatalf("accepted result should auto-scroll into the main viewport:\n%s", view)
+	}
+}
+
+func TestModelWorkspaceContextWithResultAutoScrollsMainViewportToResult(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.width = 80
+	m.height = 12
+	m.activeWorkspaceID = "ws-a"
+	m.currentTask = "old task"
+	m.dodItems = []string{"dod one", "dod two", "dod three", "dod four"}
+	m.runtimeEvents = []string{
+		"event 01", "event 02", "event 03", "event 04",
+		"event 05", "event 06", "event 07", "event 08",
+	}
+
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateCompleted},
+			Outcome:   backend.WorkspaceOutcomeInfo{RunID: "run-1", Summary: "快照结果已完成"},
+			Runs:      []backend.RunInfo{{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateCompleted}},
+		},
+		DisplayRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", GoalID: "goal-1", State: common.RunStateCompleted},
+	})
+	m = asModel(next)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "快照结果已完成") {
+		t.Fatalf("workspace snapshot result should auto-scroll into the main viewport:\n%s", view)
+	}
+}
+
 func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"

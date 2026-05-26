@@ -29,6 +29,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertContainsAnyDoDItem(t, item.DoDItems, "Goal")
 	assertContainsAnyDoDItem(t, item.DoDItems, "PRD")
 	assertContainsAnyDoDItem(t, item.DoDItems, "unified_diff")
+	assertContainsAnyDoDItem(t, item.DoDItems, "git/write")
 	assertContainsAnyDoDItem(t, item.DoDItems, "build/test")
 	assertContainsAnyDoDItem(t, item.DoDItems, "最终交付入口")
 	assertContainsAnyDoDItem(t, item.DoDItems, "真实交付入口")
@@ -48,6 +49,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	gitConfig, ok := versionControl["git"].(map[string]any)
 	if !ok || gitConfig["initializeOnCreate"] != true {
 		t.Fatalf("software-dev git context hint = %+v, want initializeOnCreate=true", versionControl["git"])
+	}
+	if gitConfig["snapshotPolicy"] != "commit_meaningful_changes" || gitConfig["snapshotEvidence"] != "local_commit_for_workspace_output_changes" {
+		t.Fatalf("software-dev git snapshot hint = %+v, want commit_meaningful_changes policy", gitConfig)
 	}
 	semanticNavigation, ok := item.ContextHints["semanticCodeNavigation"].(map[string]any)
 	if !ok {
@@ -142,6 +146,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "file/read")
 	assertSoulContains(t, execution.SoulMD, "git/read")
 	assertSoulContains(t, execution.SoulMD, "git/write")
+	assertSoulContains(t, execution.SoulMD, "版本控制快照")
+	assertSoulContains(t, execution.SoulMD, "git/write commit")
 	assertSoulContains(t, execution.SoulMD, "编译与接口形状修复")
 	assertSoulContains(t, execution.SoulMD, "undefined")
 	assertSoulContains(t, execution.SoulMD, "unknown field")
@@ -192,6 +198,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "入口路径")
 	assertSoulContains(t, validation.SoulMD, "acceptanceDimensions")
 	assertSoulContains(t, validation.SoulMD, "deliverableCoverage")
+	assertSoulContains(t, validation.SoulMD, "version_control_snapshot")
+	assertSoulContains(t, validation.SoulMD, "提交 hash")
 	assertSoulContains(t, validation.SoulMD, "claim-to-evidence consistency")
 	assertSoulContains(t, validation.SoulMD, "file/read")
 	assertSoulContains(t, validation.SoulMD, "persistence_or_side_effect")
@@ -224,6 +232,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, artifact.SoulMD, "变更文件")
 	assertSoulContains(t, artifact.SoulMD, "行为变化")
 	assertSoulContains(t, artifact.SoulMD, "coverage_map")
+	assertSoulContains(t, artifact.SoulMD, "version_control_snapshot")
+	assertSoulContains(t, artifact.SoulMD, "commit hash")
 	assertSoulContains(t, artifact.SoulMD, "Goal 覆盖项")
 	assertSoulContains(t, artifact.SoulMD, "构建产物")
 	assertSoulContains(t, artifact.SoulMD, "不要只写")
@@ -471,10 +481,11 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		t.Fatalf("software-dev deliverableExpectations = %+v, want declared expectations", softwareDev["deliverableExpectations"])
 	}
 	requiredDeliverables := map[string]bool{
-		"source_change":     false,
-		"validation_report": false,
-		"coverage_map":      false,
-		"user_deliverable":  false,
+		"source_change":            false,
+		"validation_report":        false,
+		"coverage_map":             false,
+		"version_control_snapshot": false,
+		"user_deliverable":         false,
 	}
 	for _, raw := range deliverables {
 		item, ok := raw.(map[string]any)
@@ -507,12 +518,36 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"error_behavior":             false,
 		"concurrency":                false,
 	}
+	versionControlEvidenceFound := false
 	for _, raw := range requirements {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			t.Fatalf("evidence requirement item = %+v, want map", raw)
 		}
 		id, _ := item["id"].(string)
+		if id == "version_control_snapshot" {
+			if scope, _ := item["scope"].(string); scope != "deliverable" {
+				t.Fatalf("version_control_snapshot evidence scope = %q, want deliverable", scope)
+			}
+			accepted, ok := item["acceptedStepKinds"].([]any)
+			if !ok {
+				t.Fatalf("version_control_snapshot acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
+			}
+			rejected, ok := item["rejectedStepKinds"].([]any)
+			if !ok {
+				t.Fatalf("version_control_snapshot rejectedStepKinds = %+v, want list", item["rejectedStepKinds"])
+			}
+			assertStringListContains(t, accepted, "git/write")
+			operations, ok := item["acceptedOperations"].([]any)
+			if !ok {
+				t.Fatalf("version_control_snapshot acceptedOperations = %+v, want list", item["acceptedOperations"])
+			}
+			assertStringListContains(t, operations, "commit")
+			assertStringListContains(t, rejected, "shell/command")
+			assertStringListContains(t, rejected, "file/read")
+			versionControlEvidenceFound = true
+			continue
+		}
 		if _, ok := requiredEvidence[id]; !ok {
 			continue
 		}
@@ -543,6 +578,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if !seen {
 			t.Fatalf("software-dev evidenceRequirements missing %q in %+v", id, requirements)
 		}
+	}
+	if !versionControlEvidenceFound {
+		t.Fatalf("software-dev evidenceRequirements missing version_control_snapshot in %+v", requirements)
 	}
 }
 

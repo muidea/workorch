@@ -47,6 +47,7 @@
       "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
       "已从 PRD、README、需求文档或用户 Goal 中提取功能目标、约束和验收点，并映射到执行计划",
       "代码和配置变更保持最小且与目标直接相关，并提供 unified_diff 证据",
+      "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
       "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
       "若 Goal 或 DoD 涉及 CLI、服务、API、脚本、单二进制或其他运行交付入口，必须提供命中最终交付入口的直接验证证据",
       "针对高风险验收维度的测试必须绑定真实交付入口或生产实现；测试文件中临时定义的 fake/mock/helper 只能作为辅助，不能作为唯一 satisfied 证据",
@@ -68,7 +69,9 @@
       "stateChangePolicy": "must_produce_state_change",
       "versionControl": {
         "git": {
-          "initializeOnCreate": true
+          "initializeOnCreate": true,
+          "snapshotPolicy": "commit_meaningful_changes",
+          "snapshotEvidence": "local_commit_for_workspace_output_changes"
         }
       },
       "semanticCodeNavigation": {
@@ -166,6 +169,7 @@
             { "id": "source_change", "required": true, "description": "Source, configuration, documentation, or workspace state change directly related to Goal" },
             { "id": "validation_report", "required": true, "description": "Validation command, test report, lint/static check, or justified skipped validation" },
             { "id": "coverage_map", "required": true, "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks" },
+            { "id": "version_control_snapshot", "required": true, "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence" },
             { "id": "user_deliverable", "required": true, "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data" }
           ],
           "evidenceRequirements": [
@@ -216,6 +220,15 @@
               "acceptedStepKinds": ["shell/command", "patch/apply", "mcp/tool_call"],
               "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
               "description": "Concurrency claims must be supported by executed validation, implementation changes, or equivalent action evidence."
+            },
+            {
+              "id": "version_control_snapshot",
+              "scope": "deliverable",
+              "requireDirectEvidence": true,
+              "acceptedStepKinds": ["git/write"],
+              "acceptedOperations": ["commit"],
+              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get", "shell/command"],
+              "description": "A satisfied version-control snapshot must cite git/write evidence, normally add plus commit, rather than read-only inspection or shell-based git commands."
             },
             {
               "id": "*",

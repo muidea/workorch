@@ -9,6 +9,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - [ ] 所有相关测试通过（go test / npm test / pytest / 项目约定命令）
 - [ ] lint/静态检查按项目约定执行；没有可用命令时必须说明跳过原因
 - [ ] unified_diff 或 patch 证据完整且与目标（Goal）相关
+- [ ] 若 workspace 输出发生有意义变更，存在 git/write add/commit 证据，并能追踪到提交 hash、提交信息和相关路径；若无可提交变更，说明 zeroWork 或跳过原因
 - [ ] 结果说明验证命令、失败/跳过原因、残余风险和后续动作
 
 ## DoD 评估要求
@@ -21,7 +22,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 每个 satisfied 的 DoD / Goal coverage 条目必须让 evidenceRefs 与该条目声明直接对齐：优先引用带有匹配 coverageTargets 的 patch/验证步骤，或引用输出/测试名/命令结果中能直接体现该 claim 的步骤；不要用泛化 build/test 通过替代细粒度行为证据
 - dodAssessment 必须包含 goalCoverage：goalCoverage.satisfied 与 goalCoverage.items；每个当前 Goal 需求都要有 state、evidenceRefs、reason/nextActions（如未满足）
 - dodAssessment 必须包含 acceptanceDimensions：只列 Goal / DoD 涉及的维度，并为 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等相关维度提供 evidenceRefs
-- dodAssessment 必须包含 deliverableCoverage，覆盖 source_change、validation_report、coverage_map、user_deliverable；每项必须有 evidenceRefs 或 artifactRefs
+- dodAssessment 必须包含 deliverableCoverage，覆盖 source_change、validation_report、coverage_map、version_control_snapshot、user_deliverable；每项必须有 evidenceRefs 或 artifactRefs
 - goalCoverage 必须覆盖 Goal 叶子需求，并说明 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等被 Goal / DoD 涉及的验收维度
 - 如果项目存在显式入口目录、脚本、命令或构建目标，且 Goal / DoD 声明 CLI、服务、API、单二进制或其他可运行交付物，必须验证目标入口可用；未覆盖入口时不得标记对应条目 satisfied
 - 如果 Goal / DoD 要求最终可运行交付物或用户可观察行为，必须通过最终交付入口完成验证，不能只验证库级函数、局部模块或中间适配层后就声称整体 satisfied
@@ -47,6 +48,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - test 证据：测试结果输出
 - lint 证据：lint 命令成功输出或明确的跳过说明
 - diff 证据：patch/apply 或 unified_diff 步骤（Step）ID
+- 版本控制快照证据：git/write add 与 git/write commit 步骤（Step）ID，优先引用 commit 输出
 - 副作用证据：优先引用执行测试/命令或写入 patch；不要只引用 file/read
 - 直接 evidenceRefs：优先引用最终入口命令、针对性测试命令、真实 patch/apply、mcp/tool_call 或其他可追踪 runtime action；不要用 summary 文本替代直接证据
 

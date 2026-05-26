@@ -290,6 +290,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	m.syncBlockingDecisionFromList()
 	m.syncBlockingApprovalFromList()
+	if strings.TrimSpace(m.result) != "" {
+		m.followMainViewportTail()
+	}
 }
 
 func effectiveGoalText(run *backend.RunInfo) string {

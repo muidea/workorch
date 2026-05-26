@@ -759,7 +759,9 @@ software-dev execution Soul 应补充：
 
 - 使用 `patch/apply` 修改文件。
 - 使用 `git/read` 查看仓库状态和差异。
-- 使用 `git/write init` 初始化尚未建仓的 workspace 交付目录；只有用户目标明确要求提交时才使用 `git/write add/commit`。
+- 使用 `git/write init` 初始化尚未建仓的 workspace 交付目录；当对应 WorkspaceTemplate
+  或 Soul 声明需要版本控制快照时，workspace 输出发生有意义变更后必须使用
+  `git/write add/commit` 形成本地提交证据。
 - 不要通过 `shell/command` 调用 `git` 完成已由 Git block 支持的操作。
 - software-dev execution Soul 的结构化 `allowedToolKinds` 必须同步开放
   `git/read` 与 `git/write`，不得只在 `soulMD` 文本中声明 Git 能力。
@@ -777,7 +779,9 @@ software-dev validation Soul 应补充：
 {
   "versionControl": {
     "git": {
-      "initializeOnCreate": true
+      "initializeOnCreate": true,
+      "snapshotPolicy": "commit_meaningful_changes",
+      "snapshotEvidence": "local_commit_for_workspace_output_changes"
     }
   }
 }
@@ -786,7 +790,14 @@ software-dev validation Soul 应补充：
 workorch 在创建 workspace 时只读取该通用 hint，并在交付目录初始化本地 Git
 仓库；核心 runtime 不得根据模板名称、业务领域或 Goal 文本硬编码 Git 初始化。
 已存在 `.git` 时必须保持原仓库不变。初始化只提供本地 `git/read` /
-`git/write` 可用性，不代表自动提交；是否提交仍由 Goal、DoD 与 Soul 策略决定。
+`git/write` 可用性，不代表自动提交。
+
+若模板希望运行期输出可被 commit 级证据支撑，应额外通过中立 profile contract 声明
+required deliverable，例如 `version_control_snapshot`，并通过 evidence requirement
+要求该 deliverable 引用 `git/write` 且 `acceptedOperations=["commit"]` 的证据。
+这样 completion gate 只校验“声明的交付物是否引用了允许的 step kind / operation”，
+不会把软件开发语义硬编码到核心 runtime。是否提交、何时提交、提交哪些路径仍由
+WorkspaceTemplate / Soul 策略和当前 Goal / DoD 共同决定。
 
 ## 与 patch / shell 的关系
 

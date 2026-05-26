@@ -21160,6 +21160,105 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T)
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementAcceptsGitWriteDeliverableEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable")
+	gitStepID := common.StepID("run-dod-git-deliverable/graph-001/003-git-commit")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    gitStepID,
+		RunID: runID,
+		Kind:  gitcommon.StepKindWrite,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"operation": gitcommon.OperationCommit},
+		Output: map[string]any{
+			"operation": gitcommon.OperationCommit,
+			"commit": map[string]any{
+				"hash":    "1111111111111111111111111111111111111111",
+				"subject": "implement goal",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "version_control_snapshot",
+							"scope":                 "deliverable",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{gitcommon.StepKindWrite},
+							"rejectedStepKinds":     []string{"file/read", shellcommon.StepKindCommand},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": map[string]any{
+			"items": []map[string]any{{
+				"id":           "version_control_snapshot",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(gitStepID)},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable-operation")
+	addStepID := common.StepID("run-dod-git-deliverable-operation/graph-001/002-git-add")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     addStepID,
+		RunID:  runID,
+		Kind:   gitcommon.StepKindWrite,
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{"operation": gitcommon.OperationAdd},
+		Output: map[string]any{"operation": gitcommon.OperationAdd},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": []map[string]any{{
+			"id":           "version_control_snapshot",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(addStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "requires evidence operation: commit") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want commit operation requirement", err)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidence(t *testing.T) {
 	ctx := context.Background()
 	validationRepo := memory.NewValidationResultRepository()

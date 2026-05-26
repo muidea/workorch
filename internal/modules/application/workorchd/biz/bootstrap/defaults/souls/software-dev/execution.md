@@ -4,7 +4,7 @@
 
 ## 允许的操作
 - 使用 git/read 查询仓库 status、diff、log、show 和 branch 证据
-- 使用 git/write init 初始化尚未建仓的 workspace 交付目录；仅当目标明确要求本地提交时使用 git/write add/commit，先用 git/write add 显式暂存路径，再用 git/write commit 提交已 staged 内容
+- 使用 git/write init 初始化尚未建仓的 workspace 交付目录；当源代码、配置、测试、文档或其他 workspace 输出产生有意义变更时，先用 git/read status/diff 核对范围，再用 git/write add 显式暂存相关路径，并用 git/write commit 形成本地版本控制快照
 - 使用 shell/command 执行 go、npm、python、make、docker、curl 等非 Git 开发工具
 - 使用 file_write/unified_diff 创建或修改源代码文件
 - 使用 MCP 工具访问数据库、API、LSP 语义查询等外部或辅助能力
@@ -41,8 +41,9 @@
 7. 如果 DoD 不满足、证据缺失或测试只有占位/跳过/无断言，优先补实现、补有效测试和补验证命令，不要只输出失败评估
 7a. 如果 graph follow-up、completion follow-up 或 latestClosureEvidence 已经表明未满足项可自动关闭，优先直接输出 bounded repair graph；不要先停在只有 failed dodAssessment 的描述性结果
 8. 如果最新失败来自测试代码与功能代码不匹配，应先判断真实 Goal/DoD 缺口和生产实现状态；不能长期只调整测试而不修正缺失的功能代码
-9. 在完成前确认 DoD 条目有对应证据（命令输出、diff、artifact 引用）
-10. 产出测试命令、测试结果、diff 和残余风险证据
+9. 在完成前使用 git/read status/diff 核对 workspace 输出变更；若存在与 Goal 相关的有意义变更，必须用 git/write add/commit 形成一次本地提交，并在后续 dodAssessment.deliverableCoverage.version_control_snapshot 中引用 git/write 证据；若无可提交变更，必须说明 zeroWork 或跳过原因
+10. 在完成前确认 DoD 条目有对应证据（命令输出、diff、git commit、artifact 引用）
+11. 产出测试命令、测试结果、diff、git 快照证据和残余风险证据
 
 ## 新增 Goal 处理
 - 新增 Goal 或 DoD 后必须基于当前代码与测试做 gap analysis，明确哪些能力已满足、哪些能力缺失、需要修改哪些文件以及需要新增哪些验证

@@ -28,6 +28,7 @@ type profileEvidenceKindRequirement struct {
 	Scope                string
 	ID                   string
 	AcceptedStepKinds    []string
+	AcceptedOperations   []string
 	RejectedStepKinds    []string
 	Description          string
 	RequireDirect        bool
@@ -291,12 +292,13 @@ func profileEvidenceKindRequirements(run *runModel.Run) []profileEvidenceKindReq
 				Scope:                scope,
 				ID:                   id,
 				AcceptedStepKinds:    stringSliceFromValue(raw["acceptedStepKinds"]),
+				AcceptedOperations:   stringSliceFromValue(raw["acceptedOperations"]),
 				RejectedStepKinds:    stringSliceFromValue(raw["rejectedStepKinds"]),
 				Description:          strings.TrimSpace(stringFromMap(raw, "description")),
 				RequireDirect:        boolValue(raw["requireDirectEvidence"]),
 				RequireClaimEvidence: boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
 			}
-			if len(req.AcceptedStepKinds) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence {
+			if len(req.AcceptedStepKinds) == 0 && len(req.AcceptedOperations) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence {
 				continue
 			}
 			ret = append(ret, req)
@@ -372,12 +374,14 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		return nil
 	}
 	accepted := mapStringSet(requirement.AcceptedStepKinds)
+	acceptedOperations := mapStringSet(lowerStringSlice(requirement.AcceptedOperations))
 	rejected := mapStringSet(requirement.RejectedStepKinds)
 	hasAcceptedRequirement := len(accepted) > 0
 	hasAcceptedEvidence := false
 	knownEvidenceRefs := 0
 	rejectedRefs := make([]string, 0)
 	rejectedKind := ""
+	acceptedKindWrongOperationRefs := make([]string, 0)
 	acceptedSteps := make([]*runModel.Step, 0)
 	itemName := evidenceKindRequirementItemName(requirement, item)
 	for _, ref := range refs {
@@ -397,6 +401,13 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 			}
 		}
 		if accepted[kind] {
+			if len(acceptedOperations) > 0 {
+				operation := stepEvidenceOperation(step)
+				if !acceptedOperations[operation] {
+					acceptedKindWrongOperationRefs = append(acceptedKindWrongOperationRefs, ref)
+					continue
+				}
+			}
 			hasAcceptedEvidence = true
 			acceptedSteps = append(acceptedSteps, step)
 		}
@@ -413,6 +424,9 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 			return evidenceKindRequirementError(requirement, itemName, strings.Join(rejectedRefs, ", "), rejectedKind, reason)
 		}
 		if hasAcceptedRequirement && knownEvidenceRefs > 0 && !hasAcceptedEvidence {
+			if len(acceptedKindWrongOperationRefs) > 0 && len(acceptedOperations) > 0 {
+				return evidenceKindRequirementError(requirement, itemName, strings.Join(acceptedKindWrongOperationRefs, ", "), "", fmt.Sprintf("requires evidence operation: %s", strings.Join(requirement.AcceptedOperations, ", ")))
+			}
 			return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", fmt.Sprintf("requires evidence from step kinds: %s", strings.Join(requirement.AcceptedStepKinds, ", ")))
 		}
 	}
@@ -434,6 +448,27 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func stepEvidenceOperation(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	if operation := strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "operation"))); operation != "" {
+		return operation
+	}
+	return strings.ToLower(strings.TrimSpace(stringFromMap(step.Input, "operation")))
+}
+
+func lowerStringSlice(values []string) []string {
+	ret := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			ret = append(ret, value)
+		}
+	}
+	return ret
 }
 
 func (o *RuntimeOrchestrator) evidenceRefStepKind(ctx context.Context, ref string) (string, bool, error) {

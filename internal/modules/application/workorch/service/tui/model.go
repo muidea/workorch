@@ -1280,7 +1280,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.result = firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary)
 		m.artifacts = artifactPayloadStrings(evt.Payload)
 		m.sources = nil
-		m.resetMainViewport()
+		m.followMainViewportTail()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
 		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)

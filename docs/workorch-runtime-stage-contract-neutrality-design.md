@@ -434,6 +434,25 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
 交付目录；该操作只表达“为当前交付目录建立本地版本控制状态”，不得推导任何具体业务
 模板、Goal 语义、远程仓库或自动提交行为。已有同根仓库时必须返回幂等零工作结果。
 
+版本控制快照不能只依赖仓库初始化。若某个 WorkspaceTemplate 期望 workspace 输出变更
+在运行过程中形成稳定证据，必须继续通过中立合同表达：
+
+- `contextHints.versionControl.git.snapshotPolicy` 只声明快照策略意图，例如
+  `commit_meaningful_changes`，core 不得根据该值推导具体业务修改内容。
+- `profileContracts.<profile>.deliverableExpectations[]` 可声明
+  `version_control_snapshot` 或等价中立交付物 id，并设置 `required=true`。
+- `profileContracts.<profile>.evidenceRequirements[]` 可声明该交付物的可接受证据
+  step kind，例如 `git/write`；必要时还可声明 `acceptedOperations`，例如
+  `commit`。core 只校验 evidenceRefs 是否可追踪、step kind / operation 是否匹配，
+  不判断提交内容是否满足具体业务。
+- 对应 Soul 必须说明何时读取状态、何时暂存路径、何时提交，以及无可提交变更时如何
+  输出 zeroWork / skipped 原因。若 Soul 未声明该流程，即使模板初始化了 `.git`，也不能
+  假设 LLM 会自动提交。
+
+该设计保持核心中立：runtime 只执行通用 `git/read` / `git/write` 能力和通用
+deliverable/evidence 合同校验；“软件开发变更应形成本地提交”属于软件开发
+WorkspaceTemplate / Soul 的配置约束，不允许下沉为 orchestrator 的硬编码规则。
+
 当 `execution/strict_convergence` 阶段的非只读步骤失败，且 run 级 contract 要求 `must_produce_state_change` 时，后续 runtime repair 必须继续携带 `stateChangingOutputRequired=true` 与 `repairObjective=produce_state_changing_output`。这包括 shell/test/build、patch/apply、file/edit、MCP tool 等执行或验证 state change 的步骤失败；普通 read observation 失败只有在缺失目标文件、DoD 缺口同时具备 concrete implementation target evidence，或其他明确 contract failure 指向实现目标时才提升为 state-changing repair。只有 coverageTargetSet / missing DoD / missing Goal 时，应进入 bounded validation evidence 或 assessment correction。
 
 若非 LLM 执行步骤失败原因是中立的瞬时执行超时（例如 runtime deadline / timeout，且尚未形成确定性失败证据），runtime repair 不应强制要求 state-changing 输出；应允许一次受预算约束的重试、缩小验证范围或返回 failed assessment / blocker。该规则只基于“执行超时”这一中立失败形态，不得写入特定命令、语言、测试框架或业务领域判断。

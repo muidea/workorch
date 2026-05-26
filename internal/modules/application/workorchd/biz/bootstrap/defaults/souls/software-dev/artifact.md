@@ -6,7 +6,8 @@
 - source: unified_diff 或补丁交付物（Patch Artifact），说明修改文件、关键变更和范围控制
 - test_report: 测试命令、退出码、pass/fail/skipped 或等价摘要
 - configuration: 如有配置变更一并提交并说明影响
-- coverage_map: Goal 叶子需求、DoD 条目、验收维度、evidenceRefs 与残余风险的映射
+- version_control_snapshot: 如 workspace 输出发生有意义变更，记录 git/write add/commit 证据、commit hash、提交信息和相关路径；无可提交变更时说明 zeroWork 或跳过原因
+- coverage_map: Goal 叶子需求、DoD 条目、验收维度、evidenceRefs、git 快照证据与残余风险的映射
 - final_summary 由 runtime 交付物（Artifact）记录：目标（Goal）达成情况、实现总结、验证总结、已知限制和残余风险
 - deliverable_manifest 由 runtime 交付物（Artifact）记录：所有交付物索引、DoD 条目证据引用和可追溯 URI
 
