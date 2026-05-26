@@ -1565,7 +1565,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
 		return o.dispatchUniqueStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
 	}
-	if completionState := llmDecisionCompletionStateFromOutput(output); completionState != "" && completionState != "completed" {
+	if completionState := llmDecisionCompletionStateFromOutput(output); completionStateRequiresActionableContinuation(output, completionState) {
 		return o.handleRuntimeStepFailure(
 			ctx,
 			run,

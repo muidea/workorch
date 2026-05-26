@@ -171,7 +171,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if shouldDispatchNoActionableContinuationFollowUp(currentRun, last, last.Output) {
 		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
-	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionState != "" && completionState != "completed" {
+	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionStateRequiresActionableContinuation(last.Output, completionState) {
 		return o.handleGraphBatchCompletionGateFailure(
 			ctx,
 			currentRun,
@@ -851,6 +851,14 @@ func shouldDispatchNoActionableContinuationFollowUp(run *runModel.Run, step *run
 		return true
 	}
 	return false
+}
+
+func completionStateRequiresActionableContinuation(output map[string]any, completionState string) bool {
+	completionState = strings.TrimSpace(completionState)
+	if completionState == "" || completionState == "completed" {
+		return false
+	}
+	return doDAssessmentFromOutput(output) == nil
 }
 
 func failedAssessmentHasActionableCoverageGap(output map[string]any) bool {

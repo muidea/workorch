@@ -22832,6 +22832,122 @@ func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairFailedCompletionStateWithAssessmentUsesDoDGate(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	resultRepo := memory.NewResultRepository()
+	workspaceID := common.WorkspaceID("ws-failed-completion-assessment-gate")
+	runID := common.RunID("run-failed-completion-assessment-gate")
+	var repairCalls int
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		if !boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			return nil, fmt.Errorf("unexpected non-repair request %s", request.StepID)
+		}
+		repairCalls++
+		if repairCalls == 1 {
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyLLMDecision: map[string]any{
+					"completionState": "failed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied": true,
+						"summary":   "Base DoD is satisfied, but deliverable coverage is omitted.",
+						"items": []map[string]any{{
+							"item":         "build passes",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				},
+			}, nil
+		}
+		return map[string]any{
+			"status": "completed",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "DoD and deliverable coverage passed.",
+				"items": []map[string]any{{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(request.StepID)},
+				}},
+				"deliverableCoverage": map[string]any{
+					"items": []map[string]any{{
+						"id":           "single_binary",
+						"state":        "satisfied",
+						"evidenceRefs": []string{string(request.StepID)},
+					}},
+				},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-failed-completion-assessment-gate",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "single_binary", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	err := orch.dispatchStepWithWorkspace(ctx, run, common.StepID(runID+"/repair-001-of-verify"), llmWorkspaceExecutionStepKind, map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairObjective":                 "complete_dod_goal_coverage_assessment",
+	}, nil)
+	if err != nil {
+		t.Fatalf("dispatch repair step: %v", err)
+	}
+	if repairCalls < 2 {
+		t.Fatalf("repairCalls = %d, want follow-up repair after completion gate coverage failure", repairCalls)
+	}
+	closed, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if closed.State != common.RunStateCompleted {
+		t.Fatalf("run = %+v, want completed after coverage repair follow-up", closed)
+	}
+	result, err := resultRepo.Get(ctx, common.ResultID(runID+"/result/dod-assessment"))
+	if err != nil {
+		t.Fatalf("get result: %v", err)
+	}
+	if result.State != common.ResultStateAccepted {
+		t.Fatalf("result = %+v, want accepted result", result)
+	}
+}
+
 func TestCompletionGateAssessmentOnlyFailedCoverageCorrectionSwitchesToConcreteEvidenceRepair(t *testing.T) {
 	runID := common.RunID("run-dod-coverage-assessment-contradiction")
 	step := &runmodel.Step{
