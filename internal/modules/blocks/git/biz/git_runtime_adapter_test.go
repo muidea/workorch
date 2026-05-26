@@ -225,6 +225,51 @@ func TestRuntimeAdapterAddAndCommitDoesNotRunHooks(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterCommitAllowsUnbornBranchInitialCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	repo := t.TempDir()
+	runGitForTest(t, repo, "init", "-q")
+	runGitForTest(t, repo, "config", "user.email", "workorch@example.test")
+	runGitForTest(t, repo, "config", "user.name", "WorkOrch Test")
+	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
+	adapter := NewRuntimeAdapter(true)
+
+	status, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindRead,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationStatus},
+	})
+	if err != nil {
+		t.Fatalf("execute status: %v", err)
+	}
+	if status.Output["detachedHead"] == true || status.Output["unbornHead"] != true {
+		t.Fatalf("status output = %+v, want unborn branch without detached HEAD", status.Output)
+	}
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"README.md"}},
+	}); err != nil {
+		t.Fatalf("execute add: %v", err)
+	}
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationCommit, "message": "docs: initial readme"},
+	})
+	if err != nil {
+		t.Fatalf("execute initial commit: %v\noutput=%+v", err, result.Output)
+	}
+	if result.Output["status"] != "completed" || result.Output["detachedHead"] == true {
+		t.Fatalf("commit output = %+v, want completed non-detached commit", result.Output)
+	}
+	if result.Output["headCommitAfter"] == "" {
+		t.Fatalf("commit output = %+v, want headCommitAfter", result.Output)
+	}
+}
+
 func TestRuntimeAdapterCommitRejectsPathspec(t *testing.T) {
 	repo := newTestRepo(t)
 	adapter := NewRuntimeAdapter(true)

@@ -146,6 +146,137 @@ func TestNormalizeCompletionGateDoDAssessmentOutputFillsGoalCoverageItemFromRunR
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputFillsDeliverableCoverageIDsByRequiredOrder(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-id-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-id-normalize",
+		DoDID:           "dod-deliverable-coverage-id-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-id-normalize/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD and deliverable requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-id-normalize/graph-001/002-verify"},
+			}},
+			"deliverableCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{
+					{
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-id-normalize/graph-001/001-change"},
+					},
+					{
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-id-normalize/graph-001/002-verify"},
+					},
+				},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) != 2 || stringFromMap(items[0], "id") != "source_change" || stringFromMap(items[1], "id") != "validation_report" {
+		t.Fatalf("deliverableCoverage.items = %+v, want required ids filled by order", items)
+	}
+}
+
+func TestNormalizeCompletionGateDoDAssessmentOutputMapsRepairGoalCoverageByEquivalentText(t *testing.T) {
+	goalText := "针对**非流式响应**，解析返回包中的 `usage` 字段。"
+	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-equivalent-normalize",
+		WorkspaceID:     "ws-goal-coverage-equivalent-normalize",
+		DoDID:           "dod-goal-coverage-equivalent-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": goalText,
+			},
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-goal-coverage-equivalent-normalize/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": requirementID,
+				"raw":               goalText,
+			}},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Goal and DoD requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-goal-coverage-equivalent-normalize/graph-001/002-verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"item":         "Token 自动审计-非流式响应：解析返回包中的 usage 字段。",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-equivalent-normalize/graph-001/001-test"},
+				}},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	coverage := mapFromValue(assessment["goalCoverage"])
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) != 1 {
+		t.Fatalf("goalCoverage.items = %+v, want one normalized item", coverage["items"])
+	}
+	if got := stringFromMap(items[0], "goalRequirementId"); got != requirementID {
+		t.Fatalf("goalRequirementId = %q, want repair input id", got)
+	}
+}
+
 func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcreteRunEvidence(t *testing.T) {
 	runID := common.RunID("run-assessment-empty-evidence-normalize")
 	verifyStepID := common.StepID(runID + "/graph-001/002-run-tests")

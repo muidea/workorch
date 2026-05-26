@@ -85,6 +85,7 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 		return output
 	}
 	normalized := normalizeDoDAssessmentGoalCoverageForRun(assessment, run)
+	normalized = normalizeDoDAssessmentDeliverableCoverageForRun(normalized, run)
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) &&
 		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
 		normalized = normalizeDoDAssessmentGoalCoverageForRepairInput(normalized, step.Input)
@@ -149,6 +150,61 @@ func normalizeDoDAssessmentGoalCoverageForRun(assessment map[string]any, run *ru
 	coverage["items"] = items
 	normalizedAssessment[coverageKey] = coverage
 	return normalizedAssessment
+}
+
+func normalizeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, run *runModel.Run) map[string]any {
+	if len(assessment) == 0 || run == nil {
+		return assessment
+	}
+	required := requiredProfileDeliverableExpectations(run)
+	if len(required) == 0 {
+		return assessment
+	}
+	coverageKey, coverage := deliverableCoverageContainerFromAssessment(assessment)
+	if len(coverage) == 0 {
+		return assessment
+	}
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) != len(required) {
+		return assessment
+	}
+	changed := false
+	for idx, item := range items {
+		if strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "deliverable"),
+			stringFromMap(item, "name"),
+			stringFromMap(item, "path"),
+			stringFromMap(item, "item"),
+		)) == "" {
+			item["id"] = required[idx]
+			changed = true
+		}
+		if strings.TrimSpace(stringFromMap(item, "item")) == "" {
+			item["item"] = required[idx]
+			changed = true
+		}
+		items[idx] = item
+	}
+	if !changed {
+		return assessment
+	}
+	normalizedAssessment := cloneStepPayload(assessment)
+	coverage["items"] = items
+	normalizedAssessment[coverageKey] = coverage
+	return normalizedAssessment
+}
+
+func deliverableCoverageContainerFromAssessment(assessment map[string]any) (string, map[string]any) {
+	if assessment == nil {
+		return "", nil
+	}
+	for _, key := range []string{"deliverableCoverage", "deliverables", "producedArtifacts"} {
+		if mapped := mapFromValue(assessment[key]); len(mapped) > 0 {
+			return key, mapped
+		}
+	}
+	return "", nil
 }
 
 func matchingRunGoalCoverageRequirement(item map[string]any, required []normalizedDoDItem) (normalizedDoDItem, bool) {
@@ -293,6 +349,8 @@ func missingGoalCoverageItemForAssessmentItem(item map[string]any, missing []map
 	if len(item) == 0 || len(missing) == 0 {
 		return nil
 	}
+	var matched map[string]any
+	matches := 0
 	for _, candidate := range missing {
 		if stringFromMap(item, "goalRequirementId") != "" &&
 			stringFromMap(item, "goalRequirementId") == firstNonEmptyString(stringFromMap(candidate, "goalRequirementId"), stringFromMap(candidate, "id")) {
@@ -305,11 +363,36 @@ func missingGoalCoverageItemForAssessmentItem(item map[string]any, missing []map
 			stringFromMap(item, "requirement"),
 		))
 		candidateText := normalizeDoDCoverageText(missingGoalCoverageRequirementText(candidate))
-		if normalizedCoverageTextMatches(itemText, candidateText) {
-			return candidate
+		if normalizedRepairGoalCoverageTextMatches(itemText, candidateText) {
+			matched = candidate
+			matches++
 		}
 	}
+	if matches == 1 {
+		return matched
+	}
 	return nil
+}
+
+func normalizedRepairGoalCoverageTextMatches(actual string, required string) bool {
+	actual = strings.TrimSpace(actual)
+	required = strings.TrimSpace(required)
+	if actual == "" || required == "" {
+		return false
+	}
+	if normalizedCoverageTextMatches(actual, required) || coverageTextsLikelyEquivalent(actual, required) {
+		return true
+	}
+	shorter, longer := actual, required
+	if len([]rune(shorter)) > len([]rune(longer)) {
+		shorter, longer = longer, shorter
+	}
+	shorterLen := len([]rune(shorter))
+	if shorterLen < 8 {
+		return false
+	}
+	lcs := longestCommonRuneSubsequenceLength(shorter, longer)
+	return float64(lcs)/float64(shorterLen) >= 0.8
 }
 
 func normalizeAssessmentItemEvidenceRefs(item map[string]any, missing map[string]any) bool {

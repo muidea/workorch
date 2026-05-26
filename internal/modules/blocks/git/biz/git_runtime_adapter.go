@@ -47,6 +47,7 @@ type repoContext struct {
 	Branch               string
 	HeadCommit           string
 	DetachedHead         bool
+	UnbornHead           bool
 }
 
 func NewRuntimeAdapter(writeEnabled bool) *RuntimeAdapter {
@@ -422,15 +423,28 @@ func (a *RuntimeAdapter) resolveRepo(ctx context.Context, request runtimemodel.S
 	if strings.TrimSpace(bare) == "true" {
 		return repoContext{}, fmt.Errorf("%w: bare git repository is not supported", common.ErrInvalidArgument)
 	}
-	branch, _ := a.gitOutput(ctx, rootAbs, timeout, "rev-parse", "--abbrev-ref", "HEAD")
+	branch, _ := a.gitOutput(ctx, rootAbs, timeout, "symbolic-ref", "--short", "HEAD")
 	head, _ := a.gitOutput(ctx, rootAbs, timeout, "rev-parse", "--verify", "HEAD")
 	branch = strings.TrimSpace(branch)
+	head = strings.TrimSpace(head)
+	if branch == "" {
+		abbrev, _ := a.gitOutput(ctx, rootAbs, timeout, "rev-parse", "--abbrev-ref", "HEAD")
+		abbrev = strings.TrimSpace(abbrev)
+		if abbrev != "" && abbrev != "HEAD" {
+			branch = abbrev
+		}
+	}
+	detachedHead := branch == "" && head != ""
+	if branch == "" {
+		branch = "HEAD"
+	}
 	return repoContext{
 		DeliverableDirectory: deliverable,
 		RepoRoot:             rootAbs,
 		Branch:               branch,
-		HeadCommit:           strings.TrimSpace(head),
-		DetachedHead:         branch == "HEAD",
+		HeadCommit:           head,
+		DetachedHead:         detachedHead,
+		UnbornHead:           head == "",
 	}, nil
 }
 
@@ -536,7 +550,7 @@ func (a *RuntimeAdapter) diffChangedFiles(ctx context.Context, repoRoot string, 
 }
 
 func (a *RuntimeAdapter) baseOutput(_ runtimemodel.StepExecutionRequest, repo repoContext, operation string, cmd gitCommandResult, status string) map[string]any {
-	return map[string]any{
+	output := map[string]any{
 		"status":         status,
 		"operation":      operation,
 		"stage":          stageForOperation(operation),
@@ -552,6 +566,10 @@ func (a *RuntimeAdapter) baseOutput(_ runtimemodel.StepExecutionRequest, repo re
 		"timeoutMillis":  a.timeout.Milliseconds(),
 		"truncated":      cmd.Truncated,
 	}
+	if repo.UnbornHead {
+		output["unbornHead"] = true
+	}
+	return output
 }
 
 func (a *RuntimeAdapter) rejectedResult(request runtimemodel.StepExecutionRequest, operation string, code string, err error) (runtimemodel.StepExecutionResult, error) {
