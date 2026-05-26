@@ -71,6 +71,70 @@ func TestGoalCoverageRequiredFailureDispatchesAssessmentOnlyRepair(t *testing.T)
 	}
 }
 
+func TestGoalCoverageItemShapeFailureDispatchesAssessmentOnlyRepair(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-shape-repair",
+		WorkspaceID:     "ws-goal-coverage-shape-repair",
+		DoDID:           "dod-goal-coverage-shape-repair",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "publish completion evidence",
+			},
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Goal and DoD requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-goal-coverage-shape-repair/graph-001/002-verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-shape-repair/graph-001/002-verify"},
+				}},
+			},
+		},
+	}
+	_, _, err := validatedCompletionDoDAssessment(run, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "dodAssessment.goalCoverage item and state are required") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want goal coverage item shape error", err)
+	}
+	failed := &runmodel.Step{
+		ID:    "run-goal-coverage-shape-repair/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+			stepInputKeySoulStage:    soulStageValidation,
+		},
+		Output: runtimeFailureOutput(output, err),
+	}
+	attachRuntimeFailureClassification(failed.Output, classifyRuntimeFailure(failed, failed.Output, "runtime completion gate failed", err))
+	if got := stringFromMap(failed.Output, failureOutputKeyClass); got != failureClassDoDCoverageMissing {
+		t.Fatalf("failureClass = %q, want %q", got, failureClassDoDCoverageMissing)
+	}
+
+	input := (&RuntimeOrchestrator{steps: memory.NewStepRepository()}).runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, err)
+	if input[stepInputKeyAssessmentOnly] != true ||
+		input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+		boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want non-state-changing assessment-only coverage correction", input)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsGraphNodeOutsideCurrentSoulToolKinds(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-soul-tool-kind-contract",

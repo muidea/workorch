@@ -83,6 +83,69 @@ func TestNormalizeCompletionGateDoDAssessmentOutputCompletesAssessmentOnlyGoalCo
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputFillsGoalCoverageItemFromRunRequirementID(t *testing.T) {
+	goalText := "publish completion evidence"
+	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-id-normalize",
+		WorkspaceID:     "ws-goal-coverage-id-normalize",
+		DoDID:           "dod-goal-coverage-id-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": goalText,
+			},
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-goal-coverage-id-normalize/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Goal and DoD requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-goal-coverage-id-normalize/graph-001/002-verify"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"goalRequirementId": requirementID,
+					"state":             "satisfied",
+					"evidenceRefs":      []string{"run-goal-coverage-id-normalize/graph-001/002-verify"},
+				}},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	coverage := mapFromValue(assessment["goalCoverage"])
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) != 1 {
+		t.Fatalf("goalCoverage.items = %+v, want one normalized item", coverage["items"])
+	}
+	if got := stringFromMap(items[0], "item"); got != goalText {
+		t.Fatalf("goalCoverage item = %q, want current Goal requirement text", got)
+	}
+	if got := stringFromMap(items[0], "goalRequirementId"); got != requirementID {
+		t.Fatalf("goalRequirementId = %q, want %q", got, requirementID)
+	}
+}
+
 func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcreteRunEvidence(t *testing.T) {
 	runID := common.RunID("run-assessment-empty-evidence-normalize")
 	verifyStepID := common.StepID(runID + "/graph-001/002-run-tests")

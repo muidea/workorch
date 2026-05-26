@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strings"
 	"unicode"
 
@@ -79,16 +80,19 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	if run == nil || step == nil || len(output) == 0 || !requiresDoDAssessmentCompletionGate(run) {
 		return output
 	}
-	if !boolValue(step.Input[stepInputKeyAssessmentOnly]) ||
-		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) != "complete_dod_goal_coverage_assessment" {
-		return output
-	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		return output
 	}
-	normalized := normalizeDoDAssessmentGoalCoverageForRepairInput(assessment, step.Input)
+	normalized := normalizeDoDAssessmentGoalCoverageForRun(assessment, run)
+	if boolValue(step.Input[stepInputKeyAssessmentOnly]) &&
+		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
+		normalized = normalizeDoDAssessmentGoalCoverageForRepairInput(normalized, step.Input)
+	}
 	if len(normalized) == 0 {
+		return output
+	}
+	if reflect.DeepEqual(assessment, normalized) {
 		return output
 	}
 	ret := cloneStepPayload(output)
@@ -103,6 +107,107 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	decision[stepOutputKeyDoDAssessment] = normalized
 	ret[stepOutputKeyLLMDecision] = decision
 	return ret
+}
+
+func normalizeDoDAssessmentGoalCoverageForRun(assessment map[string]any, run *runModel.Run) map[string]any {
+	if len(assessment) == 0 || run == nil {
+		return assessment
+	}
+	required := normalizedRunGoalCoverageItems(run)
+	if len(required) == 0 {
+		return assessment
+	}
+	coverage := mapFromValue(assessment["goalCoverage"])
+	coverageKey := "goalCoverage"
+	if len(coverage) == 0 {
+		coverage = mapFromValue(assessment["goalOutcomeCoverage"])
+		coverageKey = "goalOutcomeCoverage"
+	}
+	if len(coverage) == 0 {
+		return assessment
+	}
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if !ok || len(items) == 0 {
+		return assessment
+	}
+	changed := false
+	parentSatisfied := boolValue(coverage["satisfied"])
+	for idx, item := range items {
+		requiredItem, ok := matchingRunGoalCoverageRequirement(item, required)
+		if !ok {
+			continue
+		}
+		if normalizeGoalCoverageAssessmentItemFromRequired(item, requiredItem, parentSatisfied) {
+			changed = true
+		}
+		items[idx] = item
+	}
+	if !changed {
+		return assessment
+	}
+	normalizedAssessment := cloneStepPayload(assessment)
+	coverage["items"] = items
+	normalizedAssessment[coverageKey] = coverage
+	return normalizedAssessment
+}
+
+func matchingRunGoalCoverageRequirement(item map[string]any, required []normalizedDoDItem) (normalizedDoDItem, bool) {
+	if len(item) == 0 || len(required) == 0 {
+		return normalizedDoDItem{}, false
+	}
+	id := strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "id")))
+	if id != "" {
+		for _, candidate := range required {
+			if candidate.id == id {
+				return candidate, true
+			}
+		}
+		return normalizedDoDItem{}, false
+	}
+	text := normalizeDoDCoverageText(firstNonEmptyString(
+		stringFromMap(item, "goal"),
+		stringFromMap(item, "goalItem"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "requirement"),
+	))
+	if text == "" {
+		return normalizedDoDItem{}, false
+	}
+	var matched normalizedDoDItem
+	count := 0
+	for _, candidate := range required {
+		if normalizedGoalCoverageTextMatches(text, candidate.normalized) {
+			matched = candidate
+			count++
+		}
+	}
+	return matched, count == 1
+}
+
+func normalizeGoalCoverageAssessmentItemFromRequired(item map[string]any, required normalizedDoDItem, parentSatisfied bool) bool {
+	if len(item) == 0 || strings.TrimSpace(required.raw) == "" {
+		return false
+	}
+	changed := false
+	if strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "goal"),
+		stringFromMap(item, "goalItem"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "requirement"),
+	)) == "" {
+		item["item"] = required.raw
+		changed = true
+	}
+	if strings.TrimSpace(stringFromMap(item, "goalRequirementId")) == "" && strings.TrimSpace(required.id) != "" {
+		item["goalRequirementId"] = required.id
+		changed = true
+	}
+	if parentSatisfied && strings.TrimSpace(stringFromMap(item, "state")) == "" &&
+		len(evidenceRefsFromValue(item["evidenceRefs"])) > 0 {
+		item["state"] = "satisfied"
+		changed = true
+	}
+	return changed
 }
 
 func normalizeDoDAssessmentGoalCoverageForRepairInput(assessment map[string]any, input map[string]any) map[string]any {

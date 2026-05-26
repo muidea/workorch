@@ -1483,6 +1483,9 @@ func coverageCorrectionNeedsConcreteEvidence(step *runModel.Step) bool {
 	if step == nil {
 		return false
 	}
+	if assessmentOutputContractRepairRequired(step) {
+		return false
+	}
 	missingGoal := missingGoalCoverageFromInput(step.Input)
 	if len(missingGoal) > 0 {
 		for _, item := range missingGoal {
@@ -1504,6 +1507,28 @@ func coverageCorrectionNeedsConcreteEvidence(step *runModel.Step) bool {
 				len(mapSliceFromValue(item["evidenceCandidates"])) == 0 {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func assessmentOutputContractRepairRequired(step *runModel.Step) bool {
+	if step == nil || strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) != failureClassDoDCoverageMissing {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+		stringFromMap(step.Output, failureOutputKeySignature),
+	}, " ")))
+	for _, marker := range []string{
+		"dodassessment.goalcoverage item and state are required",
+		"dodassessment.goalcoverage.items are required",
+		"dodassessment.goalcoverage.satisfied is required",
+		"satisfied dodassessment.goalcoverage item requires evidencerefs",
+	} {
+		if strings.Contains(text, marker) {
+			return true
 		}
 	}
 	return false
