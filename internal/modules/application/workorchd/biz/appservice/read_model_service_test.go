@@ -2682,6 +2682,11 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		summary.CacheProviderEntries != 1 {
 		t.Fatalf("summary = %+v, want aggregated cache usage", summary)
 	}
+	if summary.CacheReadInputRatio < 0.11 || summary.CacheReadInputRatio > 0.12 ||
+		summary.CacheableInputRatio != 0.5 ||
+		summary.NonCacheableInputRatio < 0.16 || summary.NonCacheableInputRatio > 0.17 {
+		t.Fatalf("summary cache ratios = read:%v cacheable:%v nonCacheable:%v, want aggregated ratios", summary.CacheReadInputRatio, summary.CacheableInputRatio, summary.NonCacheableInputRatio)
+	}
 	if len(summary.ProviderModelBreakdown) != 2 {
 		t.Fatalf("summary breakdown = %+v, want 2 provider/model entries", summary.ProviderModelBreakdown)
 	}
@@ -2692,7 +2697,9 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		summary.ProviderModelBreakdown[1].Model != "model-b" ||
 		summary.ProviderModelBreakdown[1].EntryTotal != 1 ||
 		summary.ProviderModelBreakdown[1].CacheReadTokens != 20 ||
-		summary.ProviderModelBreakdown[1].CacheWriteTokens != 8 {
+		summary.ProviderModelBreakdown[1].CacheWriteTokens != 8 ||
+		summary.ProviderModelBreakdown[1].CacheReadInputRatio < 0.33 ||
+		summary.ProviderModelBreakdown[1].CacheReadInputRatio > 0.34 {
 		t.Fatalf("summary breakdown = %+v, want provider-a/model-a and provider-b/model-b", summary.ProviderModelBreakdown)
 	}
 }

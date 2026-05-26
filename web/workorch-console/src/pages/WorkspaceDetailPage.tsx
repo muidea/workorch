@@ -22,7 +22,7 @@ const {
   evidenceCount, executionSectionsCard, goalOutcomeState, goalOutcomeSummary,
   hasWorkspaceSetupDraftContent, hasWorkspaceSetupDraftInfoItems, isNotFoundError,
   joinLines, llmContextBudgetCard, llmUsageCard, memoryRecallCard,
-  memoryRefIDs, mergeById, metricGrid, normalizeSoulBindingFormValues, numberText,
+  memoryRefIDs, mergeById, metricGrid, normalizeSoulBindingFormValues, numberText, percentText,
   numericRunPriority, outputText, pendingCount, primaryAcceptedResult, primaryResult,
   runOutcomeState, runPriority, runRawState, runStateSummary, runtimeArtifactPageLimit,
   runtimeCapabilityTable, runtimeCheckpointPageLimit, runtimeDetailActions,
@@ -1268,6 +1268,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'llmTotalTokens', label: 'LLM Token 总量', value: numberText(summaryLLMUsage?.totalTokens), color: summaryLLMUsage?.totalTokens ? '#0958d9' : undefined },
                 { key: 'llmCacheReadTokens', label: 'LLM Cache Read Token', value: numberText(summaryLLMUsage?.cacheReadTokens) },
                 { key: 'llmCacheWriteTokens', label: 'LLM Cache Write Token', value: numberText(summaryLLMUsage?.cacheWriteTokens) },
+                { key: 'llmCacheReadRatio', label: 'LLM Cache Read/Input', value: percentText(summaryLLMUsage?.cacheReadInputRatio), color: summaryLLMUsage?.cacheReadInputRatio ? '#389e0d' : undefined },
                 { key: 'decisions', label: '待处理决策', value: pendingCount(snapshot.decisions), color: pendingCount(snapshot.decisions) ? '#d48806' : undefined },
                 { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined }
               ])}

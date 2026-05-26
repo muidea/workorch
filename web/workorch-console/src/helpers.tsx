@@ -749,6 +749,13 @@ export function numberText(value?: number) {
   return new Intl.NumberFormat('zh-CN').format(value ?? 0);
 }
 
+export function percentText(value?: number) {
+  if (value === undefined || value === null) {
+    return '-';
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 export function llmUsageProviderModelKey(item: LLMUsageProviderModelBreakdown, index?: number) {
   return [item.providerId, item.provider, item.model, index].filter(Boolean).join('|');
 }
@@ -776,6 +783,7 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
         { key: 'output', label: '输出 Token', value: numberText(usageSummary.outputTokens) },
         { key: 'cacheRead', label: 'Cache Read Token', value: numberText(usageSummary.cacheReadTokens) },
         { key: 'cacheWrite', label: 'Cache Write Token', value: numberText(usageSummary.cacheWriteTokens) },
+        { key: 'cacheReadRatio', label: 'Cache Read/Input', value: percentText(usageSummary.cacheReadInputRatio), color: usageSummary.cacheReadInputRatio ? '#389e0d' : undefined },
         { key: 'failed', label: '失败调用', value: numberText(usageSummary.failedEntries), color: usageSummary.failedEntries ? '#cf1322' : undefined }
       ])}
       <Descriptions
@@ -785,6 +793,7 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
           { key: 'native', label: 'Provider 原生 usage', children: numberText(usageSummary.providerNativeEntries) },
           { key: 'estimated', label: '估算 usage', children: numberText(usageSummary.estimatedEntries) },
           { key: 'cacheable', label: 'Cacheable/Non-cacheable 输入', children: `${numberText(usageSummary.cacheableInputTokens)} / ${numberText(usageSummary.nonCacheableInputTokens)}` },
+          { key: 'cacheRatio', label: 'Cacheable/Non-cacheable 比例', children: `${percentText(usageSummary.cacheableInputRatio)} / ${percentText(usageSummary.nonCacheableInputRatio)}` },
           { key: 'cacheEntries', label: 'Cache 口径', children: `${numberText(usageSummary.cacheProviderEntries)} provider / ${numberText(usageSummary.cacheEstimatedEntries)} estimated` },
           { key: 'providerModels', label: 'Provider/Model', children: numberText(usageSummary.providerModelBreakdown?.length ?? 0) }
         ]}
@@ -808,6 +817,7 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
                   { title: '输入/输出', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)}` },
                   { title: 'Token', dataIndex: 'totalTokens', width: 120, render: (_, item) => numberText(item.totalTokens) },
                   { title: 'Cache R/W', width: 130, render: (_, item) => `${numberText(item.cacheReadTokens)} / ${numberText(item.cacheWriteTokens)}` },
+                  { title: 'Cache Read/Input', width: 140, render: (_, item) => percentText(item.cacheReadInputRatio) },
                   { title: '估算/失败', width: 120, render: (_, item) => `${numberText(item.estimatedEntries)} / ${numberText(item.failedEntries)}` }
                 ]}
                 dataSource={usageSummary.providerModelBreakdown ?? []}

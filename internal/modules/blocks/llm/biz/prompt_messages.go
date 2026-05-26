@@ -844,14 +844,219 @@ func definitionChangeImpactPayload(input map[string]any) map[string]any {
 	return nil
 }
 
-func processEvidenceTimelineSignalPayload(input map[string]any) []map[string]any {
-	if timeline := mapSliceFromAny(input["processEvidenceTimeline"]); len(timeline) > 0 {
-		return timeline
+func processEvidenceTimelineSignalPayload(input map[string]any) map[string]any {
+	var timeline []map[string]any
+	if items := mapSliceFromAny(input["processEvidenceTimeline"]); len(items) > 0 {
+		timeline = items
+	} else if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
+		timeline = mapSliceFromAny(pkg["processEvidenceTimeline"])
 	}
-	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
-		return mapSliceFromAny(pkg["processEvidenceTimeline"])
+	return compactProcessEvidenceTimelineSignal(timeline)
+}
+
+func compactProcessEvidenceTimelineSignal(timeline []map[string]any) map[string]any {
+	if len(timeline) == 0 {
+		return nil
 	}
-	return nil
+	selected, omittedMiddle := compactTimelineEventWindow(timeline)
+	events := make([]map[string]any, 0, len(selected))
+	for _, item := range selected {
+		if compacted := compactProcessEvidenceTimelineEvent(item); len(compacted) > 0 {
+			events = append(events, compacted)
+		}
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"totalEvents":        len(timeline),
+		"omittedMiddleCount": omittedMiddle,
+		"retentionPolicy":    "preserve first events and most recent events; compact bulky outputs into diagnostic summaries",
+		"events":             events,
+	}
+}
+
+func compactTimelineEventWindow(timeline []map[string]any) ([]map[string]any, int) {
+	const maxEvents = 12
+	const headEvents = 2
+	if len(timeline) <= maxEvents {
+		return timeline, 0
+	}
+	tailEvents := maxEvents - headEvents
+	selected := make([]map[string]any, 0, maxEvents)
+	selected = append(selected, timeline[:headEvents]...)
+	selected = append(selected, timeline[len(timeline)-tailEvents:]...)
+	return selected, len(timeline) - maxEvents
+}
+
+func compactProcessEvidenceTimelineEvent(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"order",
+		"actionKind",
+		"kind",
+		"state",
+		"stage",
+		"stepId",
+		"sourceRef",
+		"inputSummary",
+		"outputSummary",
+		"summary",
+		"failureClass",
+		"failureReason",
+		"failureSignature",
+		"evidenceValidity",
+		"repairObjective",
+		"recoveryAction",
+	} {
+		copyCompactTimelineValue(out, key, item[key])
+	}
+	if refs := stringSliceFromAny(item["evidenceRefs"]); len(refs) > 0 {
+		out["evidenceRefs"] = limitedStringSlice(refs, 8)
+	}
+	if output := recordFromAny(item["output"]); len(output) > 0 {
+		if compacted := compactProcessEvidenceOutput(output); len(compacted) > 0 {
+			out["output"] = compacted
+		}
+	}
+	return out
+}
+
+func copyCompactTimelineValue(target map[string]any, key string, value any) {
+	if target == nil || strings.TrimSpace(key) == "" || value == nil {
+		return
+	}
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(truncateProviderBudgetString(typed, 2048)); text != "" {
+			target[key] = text
+		}
+	case []string:
+		if values := limitedStringSlice(typed, 8); len(values) > 0 {
+			target[key] = values
+		}
+	default:
+		if cloned, ok := cloneAny(value); ok {
+			target[key] = cloned
+		}
+	}
+}
+
+func compactProcessEvidenceOutput(output map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{
+		"status",
+		"stage",
+		"summary",
+		"error",
+		"reason",
+		"failureClass",
+		"failureSignature",
+	} {
+		copyCompactTimelineValue(out, key, output[key])
+	}
+	if usage := recordFromAny(output["llmUsage"]); len(usage) > 0 {
+		out["llmUsage"] = compactTimelineLLMUsage(usage)
+	}
+	if budget := recordFromAny(output["contextBudget"]); len(budget) > 0 {
+		out["contextBudget"] = compactTimelineContextBudget(budget)
+	}
+	if diagnostics := recordFromAny(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		out["lastFailureDiagnostics"] = budgetProviderValue(diagnostics, 0, 2048, 8, 16, 3)
+	}
+	if runtimeDiagnostics := recordFromAny(output["runtimeDiagnostics"]); len(runtimeDiagnostics) > 0 {
+		out["runtimeDiagnostics"] = budgetProviderValue(runtimeDiagnostics, 0, 1024, 8, 16, 3)
+	}
+	if assessment := recordFromAny(output["dodAssessment"]); len(assessment) > 0 {
+		out["dodAssessment"] = compactTimelineDoDAssessment(assessment)
+	}
+	return out
+}
+
+func compactTimelineLLMUsage(usage map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{
+		"status",
+		"usageSource",
+		"inputTokens",
+		"outputTokens",
+		"totalTokens",
+		"requestBytes",
+		"responseBytes",
+		"durationMs",
+		"streaming",
+		"failureClass",
+	} {
+		copyMapValue(out, key, usage[key])
+	}
+	if cacheUsage := recordFromAny(usage["cacheUsage"]); len(cacheUsage) > 0 {
+		out["cacheUsage"] = budgetProviderValue(cacheUsage, 0, 256, 8, 16, 2)
+	}
+	return out
+}
+
+func compactTimelineContextBudget(budget map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{
+		"actualBytes",
+		"actualTokens",
+		"estimatedInputTokens",
+		"estimatedOutputTokens",
+		"contextGateAction",
+		"contextGateReason",
+		"stageBudgetSource",
+		"shrinkLevel",
+		"overBudget",
+		"p0Overflow",
+	} {
+		copyMapValue(out, key, budget[key])
+	}
+	if plan := recordFromAny(budget["cachePlan"]); len(plan) > 0 {
+		out["cachePlan"] = map[string]any{
+			"cacheKey":                plan["cacheKey"],
+			"stablePrefixHash":        plan["stablePrefixHash"],
+			"workspaceDefinitionHash": plan["workspaceDefinitionHash"],
+			"capabilityContractHash":  plan["capabilityContractHash"],
+			"stageBundleHash":         plan["stageBundleHash"],
+			"volatileTailHash":        plan["volatileTailHash"],
+		}
+	}
+	return out
+}
+
+func compactTimelineDoDAssessment(assessment map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{"satisfied", "summary", "goalOutcome", "verificationSummary", "implementationSummary"} {
+		copyCompactTimelineValue(out, key, assessment[key])
+	}
+	for _, key := range []string{"items", "goalCoverage", "acceptanceDimensions", "deliverableCoverage", "nextActions"} {
+		switch typed := assessment[key].(type) {
+		case []map[string]any:
+			out[key] = len(typed)
+		case []any:
+			out[key] = len(typed)
+		case map[string]any:
+			out[key] = budgetProviderValue(typed, 0, 512, 6, 12, 2)
+		}
+	}
+	return out
+}
+
+func limitedStringSlice(values []string, limit int) []string {
+	if limit <= 0 || len(values) == 0 {
+		return nil
+	}
+	count := min(len(values), limit)
+	out := make([]string, 0, count)
+	for idx := 0; idx < count; idx++ {
+		if value := strings.TrimSpace(values[idx]); value != "" {
+			out = append(out, truncateProviderBudgetString(value, 512))
+		}
+	}
+	return out
 }
 
 func validationSignalPayload(input map[string]any) map[string]any {

@@ -2123,7 +2123,20 @@ func summarizeLLMUsage(items []LLMUsageTrace) LLMUsageSummary {
 			return false
 		})
 	}
+	ret.CacheReadInputRatio = readModelRatio(ret.CacheReadTokens, ret.InputTokens)
+	ret.CacheableInputRatio = readModelRatio(ret.CacheableInputTokens, ret.InputTokens)
+	ret.NonCacheableInputRatio = readModelRatio(ret.NonCacheableInputTokens, ret.InputTokens)
+	for idx := range ret.ProviderModelBreakdown {
+		ret.ProviderModelBreakdown[idx].CacheReadInputRatio = readModelRatio(ret.ProviderModelBreakdown[idx].CacheReadTokens, ret.ProviderModelBreakdown[idx].InputTokens)
+	}
 	return ret
+}
+
+func readModelRatio(part, total int) float64 {
+	if total <= 0 || part <= 0 {
+		return 0
+	}
+	return float64(part) / float64(total)
 }
 
 func webSearchTrace(step presenter.StepView) WebSourceTrace {

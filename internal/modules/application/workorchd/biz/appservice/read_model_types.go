@@ -733,23 +733,27 @@ type LLMUsageSummary struct {
 	CacheCreationTokens     int                              `json:"cacheCreationTokens,omitempty"`
 	CacheableInputTokens    int                              `json:"cacheableInputTokens,omitempty"`
 	NonCacheableInputTokens int                              `json:"nonCacheableInputTokens,omitempty"`
+	CacheReadInputRatio     float64                          `json:"cacheReadInputRatio,omitempty"`
+	CacheableInputRatio     float64                          `json:"cacheableInputRatio,omitempty"`
+	NonCacheableInputRatio  float64                          `json:"nonCacheableInputRatio,omitempty"`
 	CacheEstimatedEntries   int                              `json:"cacheEstimatedEntries,omitempty"`
 	CacheProviderEntries    int                              `json:"cacheProviderEntries,omitempty"`
 	ProviderModelBreakdown  []LLMUsageProviderModelBreakdown `json:"providerModelBreakdown,omitempty"`
 }
 
 type LLMUsageProviderModelBreakdown struct {
-	ProviderID       string `json:"providerId,omitempty"`
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model,omitempty"`
-	EntryTotal       int    `json:"entryTotal"`
-	InputTokens      int    `json:"inputTokens"`
-	OutputTokens     int    `json:"outputTokens"`
-	TotalTokens      int    `json:"totalTokens"`
-	CacheReadTokens  int    `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens int    `json:"cacheWriteTokens,omitempty"`
-	EstimatedEntries int    `json:"estimatedEntries"`
-	FailedEntries    int    `json:"failedEntries"`
+	ProviderID          string  `json:"providerId,omitempty"`
+	Provider            string  `json:"provider,omitempty"`
+	Model               string  `json:"model,omitempty"`
+	EntryTotal          int     `json:"entryTotal"`
+	InputTokens         int     `json:"inputTokens"`
+	OutputTokens        int     `json:"outputTokens"`
+	TotalTokens         int     `json:"totalTokens"`
+	CacheReadTokens     int     `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens    int     `json:"cacheWriteTokens,omitempty"`
+	CacheReadInputRatio float64 `json:"cacheReadInputRatio,omitempty"`
+	EstimatedEntries    int     `json:"estimatedEntries"`
+	FailedEntries       int     `json:"failedEntries"`
 }
 
 type WebSource struct {

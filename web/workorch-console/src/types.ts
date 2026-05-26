@@ -811,6 +811,9 @@ export type LLMUsageSummary = {
   cacheCreationTokens?: number;
   cacheableInputTokens?: number;
   nonCacheableInputTokens?: number;
+  cacheReadInputRatio?: number;
+  cacheableInputRatio?: number;
+  nonCacheableInputRatio?: number;
   cacheEstimatedEntries?: number;
   cacheProviderEntries?: number;
   providerModelBreakdown?: LLMUsageProviderModelBreakdown[];
@@ -826,6 +829,7 @@ export type LLMUsageProviderModelBreakdown = {
   totalTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  cacheReadInputRatio?: number;
   estimatedEntries: number;
   failedEntries: number;
 };

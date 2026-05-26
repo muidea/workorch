@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -382,6 +383,66 @@ func TestMemorySignalPayloadFiltersNonReferenceMemoryNoise(t *testing.T) {
 		if strings.Contains(encoded, forbidden) {
 			t.Fatalf("memory payload leaked %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestProcessEvidenceTimelineSignalCompactsBulkyHistoricalOutputs(t *testing.T) {
+	timeline := make([]map[string]any, 0, 20)
+	for idx := 1; idx <= 20; idx++ {
+		timeline = append(timeline, map[string]any{
+			"order":         idx,
+			"kind":          "llm/workspace_execution",
+			"state":         "completed",
+			"stepId":        fmt.Sprintf("run-001/step-%03d", idx),
+			"sourceRef":     fmt.Sprintf("step://run-001/step-%03d", idx),
+			"failureReason": strings.Repeat("diagnostic ", 600),
+			"output": map[string]any{
+				"contextBudget": map[string]any{
+					"actualBytes":          1000 + idx,
+					"includedSections":     []string{"C0.system", "C4.process-evidence-timeline", strings.Repeat("large-section", 200)},
+					"protectedFields":      []string{strings.Repeat("protected", 300)},
+					"estimatedInputTokens": 2000 + idx,
+					"cachePlan": map[string]any{
+						"stablePrefixHash":        "sha256:stable",
+						"workspaceDefinitionHash": "sha256:def",
+						"capabilityContractHash":  "sha256:cap",
+						"volatileTailHash":        "sha256:tail",
+						"sectionHashes":           []map[string]any{{"sectionId": "C4.large", "hash": strings.Repeat("x", 5000)}},
+					},
+				},
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{{"id": "node", "input": map[string]any{"content": strings.Repeat("graph", 2000)}}},
+				},
+				"llmUsage": map[string]any{
+					"inputTokens": 100,
+					"cacheUsage":  map[string]any{"cacheReadTokens": 10, "volatileSections": []string{strings.Repeat("volatile", 200)}},
+				},
+			},
+		})
+	}
+
+	payload := processEvidenceTimelineSignalPayload(map[string]any{"processEvidenceTimeline": timeline})
+	if payload["totalEvents"] != 20 || payload["omittedMiddleCount"] != 8 {
+		t.Fatalf("payload = %+v, want total 20 and omitted middle 8", payload)
+	}
+	events := mapSliceFromAny(payload["events"])
+	if len(events) != 12 {
+		t.Fatalf("events = %d, want compact 12", len(events))
+	}
+	if events[0]["stepId"] != "run-001/step-001" || events[len(events)-1]["stepId"] != "run-001/step-020" {
+		t.Fatalf("events window = %+v, want first and latest retained", events)
+	}
+	encoded := marshalPromptSection("Process Evidence Timeline", payload)
+	if len(encoded) > 60000 {
+		t.Fatalf("encoded timeline length = %d, want compact payload", len(encoded))
+	}
+	for _, forbidden := range []string{"executionGraph", "includedSections", "protectedFields", "sectionHashes", strings.Repeat("diagnostic ", 300)} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("encoded timeline leaked bulky field %q", forbidden)
+		}
+	}
+	if !strings.Contains(encoded, "stablePrefixHash") || !strings.Contains(encoded, "cacheReadTokens") {
+		t.Fatalf("encoded timeline missing cache diagnostics: %s", encoded)
 	}
 }
 

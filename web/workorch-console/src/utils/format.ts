@@ -118,6 +118,13 @@ export function numberText(value?: number): string {
   return value.toLocaleString();
 }
 
+export function percentText(value?: number): string {
+  if (value === undefined || value === null) {
+    return '-';
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 // 按 ID 合并数组（用于分页追加）
 export function mergeById<T extends { id: string }>(current: T[], items: T[], append: boolean): T[] {
   if (!append) {

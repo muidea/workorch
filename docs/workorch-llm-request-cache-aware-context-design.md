@@ -900,6 +900,8 @@ Provider adapter 不可以做：
 | LCAC-10 | P1 | done | request log 核对脚本 | 可对比连续请求的 section hash 和 cacheBreakers |
 | LCAC-11 | P1 | done | 文档摘要回填核心合同 | 将强制性规则摘要合入 runtime stage neutrality design |
 | LCAC-12 | P0 | done | 连续可缓存前缀收口 | provider-facing section 顺序为 C0 -> C1 -> C2 -> C3 -> C4 -> C5，`cacheablePrefix` 不跨越动态 section |
+| LCAC-13 | P0 | done | C4 process evidence timeline 压缩 | 保留首批与最新事件、压缩 bulky output/contextBudget/llmUsage，避免历史完整输出反复进入 volatile tail |
+| LCAC-14 | P1 | done | workspace 级 cache ratio 可观测 | LLM usage summary 输出 cache read/input、cacheable/input、non-cacheable/input 比率，Web 摘要直接展示 |
 
 LCAC-08 至 LCAC-11 已落地：
 
@@ -908,6 +910,8 @@ LCAC-08 至 LCAC-11 已落地：
 - 新增 `scripts/verify-llm-cache-aware-request-log.sh`，可离线核对 workspace request.json 的 C0/C1/C4 section、section hash、cachePlan 和 cacheBreakers。
 - `scripts/verify-llm-cache-aware-request-log.sh` 已扩展跨轮缓存质量审计：支持按 workspace / run 过滤，检查同一 run 内 `stablePrefixHash` 变化，提示 C4 section / tail 体积膨胀、non-cacheable 输入占比过高、cacheKey 过度分裂和 C2 capability hash churn。
 - read model 与 Web `LLMContextBudgetCard` 已投影并展示 cachePlan hash 简写和 cacheBreakers，不展示 prompt 明文。
+- `C4.process-evidence-timeline` 已改为首尾窗口 + 结构化摘要，不再把历史 step 的完整 `contextBudget`、`executionGraph`、大数组和完整输出重复放入每轮 volatile tail；当前失败、当前进展和验证信号仍由独立 C4 section 保留。
+- LLM usage read model 已累计 cache read/write、cacheable/non-cacheable token，并输出 cache read/input、cacheable/input、non-cacheable/input 比率，便于直接观察缓存收益和 non-cacheable tail 膨胀趋势。
 
 验证：
 
