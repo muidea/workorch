@@ -303,6 +303,28 @@ func TestModelRunControlRunningClearsStaleResult(t *testing.T) {
 	}
 }
 
+func TestModelClearRunDisplayStateSyncsViewportHeightAfterResultClear(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 100
+	m.height = 18
+	m.currentTask = "goal"
+	m.dodItems = []string{"dod one", "dod two", "dod three"}
+	m.result = strings.Repeat("result line\n", 30)
+	m.mainViewport = newMainViewport()
+	m.mainViewport.Height = 3
+	m.mainViewport.Width = 20
+
+	m.clearRunDisplayState()
+
+	width, height := m.contentDimensions()
+	if m.result != "" {
+		t.Fatalf("result not cleared: %q", m.result)
+	}
+	if m.mainViewport.Height != height || m.mainViewport.Width != width {
+		t.Fatalf("viewport size = %d/%d, want synced %d/%d", m.mainViewport.Width, m.mainViewport.Height, width, height)
+	}
+}
+
 func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyBackendEvent(backend.Event{

@@ -1371,6 +1371,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		if state != "" {
 			if runStateIsLive(state) {
 				m.clearResultDisplayState()
+				m.syncMainViewportToCurrentContent()
 			}
 			m.running = true
 			m.progress = progressRunning
@@ -1424,7 +1425,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.blockingApproval = nil
 	m.decisions = nil
 	m.approvals = nil
-	m.resetMainViewport()
+	m.syncMainViewportToCurrentContent()
 }
 
 func (m *AppModel) clearResultDisplayState() {
@@ -1433,6 +1434,14 @@ func (m *AppModel) clearResultDisplayState() {
 	m.sources = nil
 	m.failureReason = ""
 	m.failureHint = ""
+}
+
+func (m *AppModel) syncMainViewportToCurrentContent() {
+	width, height := m.contentDimensions()
+	if width > 0 && height > 0 {
+		m.refreshMainViewport(width, height)
+	}
+	m.resetMainViewport()
 }
 
 func (m AppModel) emptyResultText() string {
