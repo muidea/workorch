@@ -1686,6 +1686,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMSoulGraphCapabilityContract(run, step, output); err != nil {
 		return err
 	}
+	if err := validateLLMCapabilityUsagePolicyContract(run, step, output); err != nil {
+		return err
+	}
 	if err := validateLLMFollowUpGraphStateChangingContract(run, step, output); err != nil {
 		return err
 	}
@@ -1976,6 +1979,251 @@ func validateLLMSoulGraphCapabilityContract(run *runModel.Run, step *runModel.St
 		return err
 	}
 	return nil
+}
+
+func validateLLMCapabilityUsagePolicyContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if run == nil || step == nil || !ok || len(graph.Nodes) == 0 {
+		return nil
+	}
+	policies := capabilityUsagePoliciesForStep(run, step)
+	if len(policies) == 0 {
+		return nil
+	}
+	for _, policy := range policies {
+		requiredAfter := stringSliceFromValue(policy["requiredAfterKinds"])
+		if len(requiredAfter) == 0 || !capabilityUsagePolicyAppliesToStage(policy, step) {
+			continue
+		}
+		if !graphHasAnyNodeKind(graph, requiredAfter) {
+			continue
+		}
+		if !capabilityUsagePolicyHasAvailableCapability(run, step, policy) {
+			continue
+		}
+		if graphHasCapabilityPolicyFollowUp(graph, policy) || outputDeclaresCapabilityPolicySkip(output, policy) {
+			continue
+		}
+		return fmt.Errorf(
+			"%w: executionGraph triggered capability usage policy %q after %q but returned no dependent matching mcp/tool_call or structured capabilityPolicySkips reason",
+			common.ErrInvalidArgument,
+			strings.TrimSpace(stringFromMap(policy, "id")),
+			strings.Join(requiredAfter, ","),
+		)
+	}
+	return nil
+}
+
+func capabilityUsagePoliciesForStep(run *runModel.Run, step *runModel.Step) []map[string]any {
+	if run == nil {
+		return nil
+	}
+	var ret []map[string]any
+	for _, source := range []map[string]any{
+		mapFromValue(run.ExecutionContext["executionContract"]),
+		mapFromValue(stepInputValue(step, "executionContract")),
+		mapFromValue(mapFromValue(stepInputValue(step, "executionContext"))["executionContract"]),
+		mapFromValue(mapFromValue(stepInputValue(step, stepInputKeyExecutionContextPackage))["executionContract"]),
+	} {
+		for _, policy := range mapSliceFromValue(source["capabilityUsagePolicies"]) {
+			if len(policy) > 0 {
+				ret = append(ret, policy)
+			}
+		}
+	}
+	return ret
+}
+
+func stepInputValue(step *runModel.Step, key string) any {
+	if step == nil || step.Input == nil {
+		return nil
+	}
+	return step.Input[key]
+}
+
+func capabilityUsagePolicyAppliesToStage(policy map[string]any, step *runModel.Step) bool {
+	stages := stringSliceFromValue(policy["triggerStages"])
+	if len(stages) == 0 {
+		return true
+	}
+	stage := strings.TrimSpace(firstNonEmptyString(
+		runtimeStageFromStepInput(step.Input),
+		stringFromMap(step.Input, stepInputKeySoulStage),
+	))
+	if stage == "" {
+		return true
+	}
+	return stringSliceContains(stages, stage)
+}
+
+func capabilityUsagePolicyHasAvailableCapability(run *runModel.Run, step *runModel.Step, policy map[string]any) bool {
+	category := strings.TrimSpace(stringFromMap(policy, "appliesToCategory"))
+	if category == "" {
+		return false
+	}
+	preferred := stringSet(stringSliceFromValue(policy["preferredTools"]))
+	for _, capability := range capabilityUsagePolicyCapabilityContexts(run, step) {
+		if strings.TrimSpace(stringFromMap(capability, "category")) != category {
+			continue
+		}
+		if !capabilityContextEnabled(capability) {
+			continue
+		}
+		if len(preferred) == 0 || preferred[strings.TrimSpace(stringFromMap(capability, "name"))] {
+			return true
+		}
+	}
+	return false
+}
+
+func capabilityUsagePolicyCapabilityContexts(run *runModel.Run, step *runModel.Step) []map[string]any {
+	var ret []map[string]any
+	if run != nil {
+		ret = append(ret, mapSliceFromValue(run.ExecutionContext["mcpCapabilities"])...)
+	}
+	for _, source := range []any{
+		stepInputValue(step, "mcpCapabilities"),
+		mapFromValue(stepInputValue(step, "executionContext"))["mcpCapabilities"],
+		mapFromValue(stepInputValue(step, stepInputKeyExecutionContextPackage))["mcpCapabilities"],
+		mapFromValue(mapFromValue(stepInputValue(step, stepInputKeyExecutionContextPackage))["runtimeCapabilities"])["mcpCapabilities"],
+	} {
+		ret = append(ret, mapSliceFromValue(source)...)
+	}
+	return ret
+}
+
+func capabilityContextEnabled(capability map[string]any) bool {
+	status := strings.TrimSpace(stringFromMap(capability, "status"))
+	if status != "" && status != "active" {
+		return false
+	}
+	enabled, ok := capability["enabled"]
+	if !ok {
+		return true
+	}
+	return boolValue(enabled)
+}
+
+func graphHasCapabilityPolicyFollowUp(graph runtimemodel.BlockExecutionGraph, policy map[string]any) bool {
+	preferred := stringSet(stringSliceFromValue(policy["preferredTools"]))
+	nodes := graphNodesByID(graph)
+	for _, node := range graph.Nodes {
+		if strings.TrimSpace(node.Kind) != "mcp/tool_call" {
+			continue
+		}
+		tool := graphNodeMCPToolName(node)
+		if len(preferred) > 0 && !preferred[tool] {
+			continue
+		}
+		if graphNodeHasAnyRequiredAfterAncestor(node, nodes, stringSliceFromValue(policy["requiredAfterKinds"]), map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeMCPToolName(node runtimemodel.BlockExecutionNode) string {
+	if value := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(node.Input, "tool"),
+		stringFromMap(node.Input, "toolName"),
+		stringFromMap(node.Input, "name"),
+	)); value != "" {
+		return value
+	}
+	nested := mapFromValue(node.Input["input"])
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(nested, "tool"),
+		stringFromMap(nested, "toolName"),
+		stringFromMap(nested, "name"),
+	))
+}
+
+func graphNodeHasAnyRequiredAfterAncestor(node runtimemodel.BlockExecutionNode, nodes map[string]runtimemodel.BlockExecutionNode, requiredAfter []string, seen map[string]bool) bool {
+	if len(requiredAfter) == 0 {
+		return false
+	}
+	required := stringSet(requiredAfter)
+	for _, depID := range node.DependsOn {
+		depID = strings.TrimSpace(depID)
+		if depID == "" || seen[depID] {
+			continue
+		}
+		seen[depID] = true
+		parent, ok := nodes[depID]
+		if !ok {
+			continue
+		}
+		if required[strings.TrimSpace(parent.Kind)] {
+			return true
+		}
+		if graphNodeHasAnyRequiredAfterAncestor(parent, nodes, requiredAfter, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphHasAnyNodeKind(graph runtimemodel.BlockExecutionGraph, kinds []string) bool {
+	if len(kinds) == 0 {
+		return false
+	}
+	allowed := stringSet(kinds)
+	for _, node := range graph.Nodes {
+		if allowed[strings.TrimSpace(node.Kind)] {
+			return true
+		}
+	}
+	return false
+}
+
+func outputDeclaresCapabilityPolicySkip(output map[string]any, policy map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	for _, item := range capabilityPolicySkipItems(output) {
+		if !capabilityPolicySkipMatches(item, policy) {
+			continue
+		}
+		if strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "reason"),
+			stringFromMap(item, "skipReason"),
+			stringFromMap(item, "fallbackReason"),
+		)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func capabilityPolicySkipItems(output map[string]any) []map[string]any {
+	var ret []map[string]any
+	for _, key := range []string{"capabilityPolicySkips", "capabilityUsageSkips", "capabilityPolicyDecisions"} {
+		ret = append(ret, mapSliceFromValue(output[key])...)
+	}
+	for _, key := range []string{"capabilityPolicySkip", "capabilityUsageSkip"} {
+		if item := mapFromValue(output[key]); len(item) > 0 {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func capabilityPolicySkipMatches(item map[string]any, policy map[string]any) bool {
+	if len(item) == 0 || len(policy) == 0 {
+		return false
+	}
+	policyID := strings.TrimSpace(stringFromMap(policy, "id"))
+	if policyID != "" && strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "policyId"),
+		stringFromMap(item, "id"),
+	)) == policyID {
+		return true
+	}
+	category := strings.TrimSpace(stringFromMap(policy, "appliesToCategory"))
+	return category != "" && strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "category"),
+		stringFromMap(item, "appliesToCategory"),
+	)) == category
 }
 
 func runtimeSoulForStep(run *runModel.Run, step *runModel.Step) map[string]any {

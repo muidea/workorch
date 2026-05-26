@@ -74,6 +74,78 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 	}
 }
 
+func TestBuildConvergenceContractPromotesConcreteValidationTargetEvidenceToStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:    runtimeStageVerification,
+		"repairObjective":           repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired": true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "dod",
+			"coverageTargetToken": "dod-streaming",
+			"targetText":          "streaming behavior remains unresolved",
+			"state":               "failed",
+		}},
+		"convergenceContract": map[string]any{
+			"state":           convergenceStateNeedValidation,
+			"runtimeStage":    runtimeStageVerification,
+			"repairObjective": repairObjectiveConcreteValidationEvidence,
+			"targetEvidence": map[string]any{
+				"repairTargetSet": []string{"proxy/proxy.go", "proxy/proxy_test.go"},
+				"coverageTargetSet": []map[string]any{{
+					"kind":                "dod",
+					"coverageTargetToken": "dod-streaming",
+					"targetText":          "streaming behavior remains unresolved",
+					"state":               "failed",
+				}},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "proxy/proxy.go",
+					"exists":           true,
+					"content":          "package proxy\n",
+					"contentHash":      "hash-proxy",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/follow-up",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": "invalid argument: dodAssessment is not satisfied",
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	if !contract.StateChangingOutputRequired {
+		t.Fatalf("StateChangingOutputRequired = false, want true")
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
+	}
+	if targets := mapSliceFromValue(contract.RepairActionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "proxy/proxy.go" {
+		t.Fatalf("targetSnapshots = %+v, want hydrated target snapshot", targets)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		applied["repairObjective"] != repairObjectiveStateChangingOutput ||
+		applied["stateChangingOutputRequired"] != true {
+		t.Fatalf("applied input = %+v, want state-changing repair", applied)
+	}
+}
+
 func TestBuildConvergenceContractBlockedByDefault(t *testing.T) {
 	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": map[string]any{}}, nil)
 	if contract.State != convergenceStateBlocked {

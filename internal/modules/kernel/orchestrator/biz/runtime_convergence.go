@@ -85,6 +85,7 @@ func BuildConvergenceContract(
 		}
 	}
 	enrichRepairInputWithProgressFailureSignals(input)
+	hydrateConvergenceTargetEvidence(input)
 	contract := ConvergenceContract{
 		State:            convergenceStateBlocked,
 		RuntimeStage:     runtimeStageRepair,
@@ -96,6 +97,16 @@ func BuildConvergenceContract(
 		contract.RuntimeStage = runtimeStageDecision
 		contract.RuntimeStageMode = "structured_governance"
 		contract.GovernanceReason = governanceReason
+		return contract
+	}
+	if convergenceTargetEvidenceReadyForStateChange(input, failedStep) {
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
 	if convergenceNeedsValidation(input, failedStep) {
@@ -160,6 +171,132 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func hydrateConvergenceTargetEvidence(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	targetEvidence := mapFromValue(contract["targetEvidence"])
+	if len(targetEvidence) == 0 {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkgChanged := false
+	inherit := func(key string) {
+		value, ok := targetEvidence[key]
+		if !ok || value == nil {
+			return
+		}
+		if input[key] == nil {
+			input[key] = cloneStepInputValue(value)
+		}
+		if pkg[key] == nil {
+			pkg[key] = cloneStepInputValue(value)
+			pkgChanged = true
+		}
+	}
+	for _, key := range []string{
+		"repairTargetSet",
+		"structuredFailureSignals",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"coverageTargetSet",
+		"targetSnapshots",
+		"primaryDiagnosticRepair",
+	} {
+		inherit(key)
+	}
+	if len(mapSliceFromValue(pkg["currentTargetSnapshots"])) == 0 {
+		if snapshots := mapSliceFromValue(pkg["targetSnapshots"]); len(snapshots) > 0 {
+			pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(snapshots)
+			pkgChanged = true
+		}
+	}
+	if pkgChanged || len(pkg) > 0 {
+		input["repairActionPackage"] = pkg
+	}
+}
+
+func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
+		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+		return false
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
+			boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+			return false
+		}
+	}
+	if !coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if !repairHasImplementationTargetEvidence(input, pkg) {
+		return false
+	}
+	return inputRequiresConcreteValidationEvidence(input) ||
+		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+		stringFromMap(mapFromValue(input["convergenceContract"]), "state") == convergenceStateNeedValidation
+}
+
+func stateChangingRepairActionPackageForConvergence(input map[string]any, failedStep *runModel.Step) map[string]any {
+	existing := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if len(existing) > 0 {
+		required := mapFromValue(existing["requiredOutput"])
+		if boolValue(required["mustIncludeStateChangingNode"]) {
+			applyConcreteRepairEvidenceOutputContract(input, existing, required)
+			addStrategyReassessmentRequiredOutputContract(existing, required)
+			return existing
+		}
+	}
+	var rawFailedOutput []map[string]any
+	if failedStep != nil && len(failedStep.Output) > 0 {
+		rawFailedOutput = append(rawFailedOutput, failedStep.Output)
+	}
+	pkg := repairActionPackageFromRepairInput(input, rawFailedOutput...)
+	if len(pkg) == 0 {
+		pkg = existing
+	}
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	addStrategyReassessmentRequiredOutputContract(pkg, required)
+	return pkg
+}
+
+func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[string]any {
+	required := stateChangingRepairRequiredOutput()
+	for key, value := range mapFromValue(pkg["requiredOutput"]) {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustDeclareStrategyReassessmentFields", "strategyReassessmentRequiredFields", "strategyReassessmentMatchRule", "mustReassessRepeatedFailedSurface":
+			required[key] = value
+		}
+	}
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
+		required["mustTargetFailureScope"] = true
+		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+		required["mustUseCurrentTargetSnapshot"] = true
+		required["forbiddenStalePatchReuse"] = true
+	}
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		required["mustTargetRepairTargetSet"] = true
+	}
+	if len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 {
+		required["mustDeclareCoverageTargets"] = true
+		required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	}
+	pkg["requiredOutput"] = required
+	return required
 }
 
 func inheritRejectedResultCoverageContract(input map[string]any, source map[string]any) bool {

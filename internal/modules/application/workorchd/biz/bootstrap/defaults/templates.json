@@ -108,6 +108,7 @@
           ],
           "preferredTools": [
             "lsp_initialize",
+            "lsp_sync",
             "lsp_definition",
             "lsp_hover",
             "lsp_references",

@@ -351,6 +351,49 @@ LSP evidence 的证据强度定义：
 - 高风险维度仍必须引用 shell/command、patch/apply、mcp/tool_call 等直接动作证据。
 - LSP 诊断失败应进入 repair context，而不是直接生成 accepted result。
 
+## 8.1 Post-action capability policy contract
+
+`capabilityUsagePolicies` 不是只给 LLM 阅读的提示信息。它们是由 workspaceTemplate / profile 声明、由 runtime 以中立方式校验的能力使用合同。
+
+Core runtime 只能理解以下通用字段：
+
+- `id`
+- `scope`
+- `appliesToCategory`
+- `usageMode`
+- `triggerStages`
+- `triggerSignals`
+- `preferredTools`
+- `requiredAfterKinds`
+- `fallbackPolicy`
+- `evidenceStrength`
+
+Core runtime 不得识别 `lsp-bridge`、`gopls`、`software-dev` 或任何具体业务名称。具体 MCP server、tool 名称、语言策略和降级策略只能来自 template / soul / capability catalog。
+
+当某个 policy 声明 `requiredAfterKinds`，并且当前 execution graph 中出现对应 step kind 时，runtime 必须执行以下中立门禁：
+
+1. 若当前 run 存在匹配 `appliesToCategory` 且启用的 MCP capability，则该 graph 必须包含一个匹配 policy 的 `mcp/tool_call` follow-up node。
+2. follow-up node 必须依赖触发 `requiredAfterKinds` 的 node，避免与 patch 并发执行造成顺序错误。
+3. 若本轮确实不应或不能调用该能力，LLM 输出必须包含结构化 `capabilityPolicySkips`，至少声明 `policyId` 或 `category` 以及非空 `reason`。
+4. 若没有匹配 category 的可用 capability，runtime 不强行阻塞，但后续可观测信息应能显示该能力未绑定或不可用。
+
+推荐 `capabilityPolicySkips` 结构：
+
+```json
+{
+  "capabilityPolicySkips": [
+    {
+      "policyId": "software-dev-code-semantics-guidance",
+      "category": "code_semantics",
+      "reason": "capability_unavailable",
+      "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking"
+    }
+  ]
+}
+```
+
+对 `software-dev` 来说，`patch/apply` 后若 `code_semantics` 能力可用，应优先安排 `lsp_sync` 和/或 `lsp_diagnostics`。但这是 template/capability catalog 的策略，不是 core runtime 的业务逻辑。
+
 ## 9. Template / Soul 改动方向
 
 ### 9.1 software-dev workspaceTemplate
@@ -586,6 +629,9 @@ LSP tool call 可以作为辅助 evidenceRef，但不能单独支撑 high-risk D
 | LSP-16 | Web MCP server 配置支持 command/args/env 和 env 三态编辑/脱敏展示 | web | Done |
 | LSP-17 | read-model / LLM context / memory / artifact 全链路 env 脱敏测试 | appservice/orchestrator/test | Done：activation/LLM context env 脱敏已覆盖；runtime memory 写入会拒绝敏感 env 文本，MCP evidence summary 不注入 env 原值 |
 | LSP-18 | 补充 endpoint 优先、command fallback、missing config、session workspace isolation 的 MCP runtime 单测 | mcp runtime/test | Done |
+| LSP-19 | 将 `capabilityUsagePolicies.requiredAfterKinds` 升级为 runtime 中立合同，触发后要求匹配 `mcp/tool_call` 或结构化 skip reason | orchestrator/runtime | Done |
+| LSP-20 | software-dev code semantics policy 将 `lsp_sync` 纳入 preferredTools，确保 patch 后同步能力可被模板明确表达 | template | Done |
+| LSP-21 | 增加 runtime 单测覆盖：触发 post-action capability policy 后缺少 MCP follow-up 被拒绝，声明 follow-up 或 skip reason 可通过 | orchestrator/test | Done |
 
 ## 13. 影响面核对
 

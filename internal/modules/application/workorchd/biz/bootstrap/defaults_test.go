@@ -566,6 +566,12 @@ func assertSoftwareDevCapabilityUsagePolicies(t *testing.T, hints map[string]any
 			if item["usageMode"] != "prefer_when_triggered" {
 				t.Fatalf("capability usage policy = %+v, want prefer_when_triggered usageMode", item)
 			}
+			preferred, ok := item["preferredTools"].([]any)
+			if !ok {
+				t.Fatalf("capability usage policy preferredTools = %+v, want list", item["preferredTools"])
+			}
+			assertStringListContains(t, preferred, "lsp_sync")
+			assertStringListContains(t, preferred, "lsp_diagnostics")
 		}
 	}
 	if !found {
