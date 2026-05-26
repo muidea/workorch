@@ -1047,15 +1047,22 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 	input["completionFollowUp"] = false
 	input["continuationFollowUp"] = true
 	setRuntimeStage(input, runtimeStageVerification)
-	inheritConcreteValidationRepairContract(input, step)
+	stateChangingContractInherited := inheritStateChangingRepairContract(input, step)
+	if !stateChangingContractInherited {
+		inheritConcreteValidationRepairContract(input, step)
+	}
 	if completionState := llmDecisionCompletionStateFromOutput(step.Output); completionState != "" {
 		input["previousCompletionState"] = completionState
 		input["continuationFailureReason"] = fmt.Sprintf("completionState %s has no actionable continuation", completionState)
 	}
 	if failedAssessmentHasActionableCoverageGap(step.Output) {
 		input["actionableFailedAssessmentContinuation"] = true
-		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
-		input["evidenceRepairRequired"] = true
+		if !stateChangingContractInherited {
+			input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+			input["evidenceRepairRequired"] = true
+		} else {
+			input["coverageRepairRequired"] = true
+		}
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Previous output returned a failed assessment with actionable coverage gaps; convert the gaps into bounded validation evidence or targeted repair instead of repeating a descriptive failed assessment.",
 			"Preserve missing DoD, Goal, and deliverable coverage targets and cite concrete evidenceRefs when a target is closed.",
@@ -1072,6 +1079,62 @@ func noActionableContinuationFollowUpStepInput(run *runModel.Run, step *runModel
 		ensureCoverageRepairTargetSet(input)
 	}
 	return input
+}
+
+func inheritStateChangingRepairContract(input map[string]any, previousStep *runModel.Step) bool {
+	if len(input) == 0 || previousStep == nil || !inputRequiresStateChangingOutput(previousStep.Input) {
+		return false
+	}
+	for _, key := range []string{
+		"repairObjective",
+		"stateChangingOutputRequired",
+		"coverageRepairRequired",
+		"coverageTargetSet",
+		"missingDoDItems",
+		"missingGoalCoverage",
+		"missingDeliverableCoverage",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"rootCauseCandidateContext",
+		"structuredFailureSignals",
+		"repairTargetSet",
+		"currentExecutionProgress",
+		"processEvidenceTimeline",
+		"convergenceContract",
+		"requiresCurrentTargetSnapshotForStateChange",
+	} {
+		if value, ok := previousStep.Input[key]; ok && value != nil {
+			input[key] = cloneStepInputValue(value)
+		}
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	if pkg := mapFromValue(previousStep.Input["repairActionPackage"]); len(pkg) > 0 {
+		next := cloneStepPayload(pkg)
+		required := mapFromValue(next["requiredOutput"])
+		if len(required) == 0 {
+			required = stateChangingRepairRequiredOutput()
+		}
+		if !boolValue(required["mustIncludeStateChangingNode"]) {
+			required["mustIncludeStateChangingNode"] = true
+		}
+		if len(stringSliceFromValue(required["acceptedKinds"])) == 0 {
+			required["acceptedKinds"] = stateChangingRepairAcceptedKinds()
+		}
+		next["requiredOutput"] = required
+		input["repairActionPackage"] = next
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Previous step was governed by a state-changing repair contract; preserve repairObjective, convergenceContract, repairActionPackage.requiredOutput, and target evidence.",
+		"Do not convert this continuation into a stage-choice decision while accepted state-changing outputs or bounded evidence acquisition remain available to runtime.",
+	)
+	ensureCoverageRepairTargetSet(input)
+	return true
 }
 
 func inheritConcreteValidationRepairContract(input map[string]any, previousStep *runModel.Step) bool {
@@ -1114,6 +1177,17 @@ func inheritConcreteValidationRepairContract(input map[string]any, previousStep 
 	)
 	ensureCoverageRepairTargetSet(input)
 	return true
+}
+
+func inputRequiresStateChangingOutput(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["stateChangingOutputRequired"]) ||
+		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveStateChangingOutput {
+		return true
+	}
+	return repairActionPackageRequiresStateChangingOutput(mapFromValue(input["repairActionPackage"]))
 }
 
 func inputRequiresConcreteValidationEvidence(input map[string]any) bool {

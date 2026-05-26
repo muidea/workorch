@@ -1421,6 +1421,12 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - `rejectedResultContinuation` 中的 `unsatisfiedDoDItems`、`coverageGaps.missingGoalCoverage`、`coverageGaps.missingDeliverableCoverage` 已在统一合同构造时 rehydrate 为 `coverageTargetSet`，并通过 `ConvergenceContract.RepairActionPackage` 显式传递到 `ApplyConvergenceContract`，避免 successor / replan 初始输入因克隆 input 副作用丢失 unresolved coverage scope。
   - compact failure context 已保留 bounded validation、coverage repair、repairActionPackage 与 missing coverage 字段，防止 successor run 只看到旧 replan failure 而看不到最新 rejected result required evidence。
   - 新增回归测试覆盖 validation-evidence schema invalid repair 保持 `need_validation`，以及 rejected result coverage gaps 继承为 concrete validation evidence contract；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过。
+- 2026-05-26：
+  - 已完成 CVC-01 第七批收口。
+  - no-actionable continuation 必须优先继承上一轮 `need_state_change` / `repairActionPackage.requiredOutput.mustIncludeStateChangingNode` 合同；只有上一轮不是 state-changing repair 时，才允许继承或转入 concrete validation evidence 合同，避免可继续修复的缺口被降级为 stage-choice decision。
+  - `ShouldCreateDecisionTicket` 已扩展为同时识别 `need_state_change` 与 `need_validation` 的机械可继续合同；当 concrete validation evidence 合同仍允许 bounded `shell/command` / `mcp/tool_call` 且无外部/runtime blocker 时，LLM 的 `blocked_on_decision` 必须转为 continuable repair violation。
+  - LLM current-action prompt 已补 concrete validation evidence 分支，明确要求输出具体验证证据、failed assessment 或真实 blocker，不再把该场景渲染成普通 `plan_next_step`。
+  - 新增回归测试覆盖 state-changing no-actionable continuation 合同继承、concrete validation decision ticket 抑制和 current-action prompt 渲染；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 与 `go test ./internal/modules/blocks/llm/biz -count=1` 通过。
 
 ## 非兼容性说明
 

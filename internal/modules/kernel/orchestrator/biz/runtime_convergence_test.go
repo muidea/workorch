@@ -144,6 +144,68 @@ func TestShouldCreateDecisionTicketKeepsExternalGovernanceDecision(t *testing.T)
 	}
 }
 
+func TestShouldCreateDecisionTicketBlocksMechanicalConcreteValidationDecision(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":  true,
+		"evidenceRepairRequired":     true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":       "dod",
+			"targetText": "close validation coverage",
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},
+			},
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/validation-001", Input: input}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "need stage choice",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Should the runtime switch to an execution stage?",
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, map[string]any{"llmOutput": output})
+
+	if ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false for mechanically continuable validation evidence contract")
+	}
+}
+
+func TestShouldCreateDecisionTicketKeepsConcreteValidationRuntimeDependency(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:    runtimeStageVerification,
+		"repairObjective":           repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired": true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustProduceConcreteValidationEvidence": true,
+				"acceptedKinds":                         []string{"shell/command"},
+			},
+		},
+	}
+	step := &runmodel.Step{ID: "run-convergence/validation-001", Input: input}
+	spec := runtimeDecisionBlockSpec{
+		Reason:       "runtime config required",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Please configure the runtime.",
+		Context: map[string]any{
+			decisionContextKeyScope:      decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency: decisionContextDependencyContextGate,
+		},
+	}
+	output := decisionOutputFromSpec(spec)
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": input}, map[string]any{"llmOutput": output})
+
+	if !ShouldCreateDecisionTicket(input, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = false, want true for runtime dependency")
+	}
+}
+
 func TestBuildConvergenceContractNeedGovernanceForRuntimeDependencyDecision(t *testing.T) {
 	step := &runmodel.Step{
 		ID: "run-governance/repair-001",

@@ -613,6 +613,59 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 	}
 }
 
+func TestBuildProviderPromptMessagesUsesConcreteValidationRepairAction(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-validation-repair",
+		RunID:          "run-validation-repair",
+		StepID:         "step-validation-repair",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"repairObjective":           "produce_concrete_validation_evidence",
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":             false,
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+					"forbiddenKinds":                           []string{"patch/apply", "read_only_graph"},
+				},
+			},
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "satisfy the requested outcome"},
+				"dod":  map[string]any{"items": []any{"validation evidence exists"}},
+			},
+		},
+	}
+
+	build := buildProviderPromptMessages(req)
+	joined := ""
+	for _, item := range build.Messages {
+		joined += "\n" + item.Content
+	}
+	for _, want := range []string{
+		"Current Repair Action Package",
+		"produce_concrete_validation_evidence_or_failed_assessment",
+		"mustProduceConcreteValidationEvidence",
+		"shell/command",
+		"mcp/tool_call",
+		"Do not ask the user to choose planning, execution, repair, or validation stage",
+		"runtime observations",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prompt missing %q, joined=%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "\"type\":\"plan_next_step\"") {
+		t.Fatalf("concrete validation repair prompt still requests plan_next_step, joined=%s", joined)
+	}
+}
+
 func TestBuildProviderPromptMessagesUsesPromptContextWithoutDuplicatingSystem(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		PromptContext: &llmmodels.PromptContext{

@@ -13998,6 +13998,73 @@ func TestNoActionableContinuationPreservesConcreteValidationRepairContract(t *te
 	}
 }
 
+func TestNoActionableContinuationPreservesStateChangingRepairContract(t *testing.T) {
+	runID := common.RunID("run-state-changing-contract-continuation")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "close target behavior",
+			}},
+			"convergenceContract": map[string]any{
+				"state":                       convergenceStateNeedStateChange,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+				"stateChangingOutputRequired": true,
+			},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"exists":           true,
+					"contentHash":      "hash-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply", "mcp/tool_call"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"status": "completed",
+			stepOutputKeyLLMDecision: map[string]any{
+				"completionState":                  "blocked_on_decision",
+				stepOutputKeyBlockDecisionReason:   "need stage choice",
+				stepOutputKeyBlockDecisionQuestion: "Should the runtime switch stage?",
+			},
+		},
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-state-changing-contract-continuation", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+
+	input := noActionableContinuationFollowUpStepInput(run, step)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input[stepInputKeySoulStage] != soulStageExecution {
+		t.Fatalf("input = %+v, want state-changing repair contract preserved", input)
+	}
+	if boolValue(input["boundedValidationRequired"]) || boolValue(input["evidenceRepairRequired"]) {
+		t.Fatalf("input = %+v, want no validation-only downgrade", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing output contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_DispatchStepDoesNotOverwriteTerminalStep(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

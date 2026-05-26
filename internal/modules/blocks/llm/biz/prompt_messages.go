@@ -1112,6 +1112,22 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			},
 		})
 	}
+	if concreteValidationDecisionRequest(request.Input) {
+		required := concreteValidationDecisionRequiredOutput(request.Input)
+		return marshalPromptSection("Current Requested Action", map[string]any{
+			"type":           "produce_concrete_validation_evidence_or_failed_assessment",
+			"requiredOutput": required,
+			"requirements": []string{
+				"Concrete validation evidence is required by the current Stage Contract",
+				"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed validation evidence contract",
+				"Return bounded executable validation evidence, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
+				"Do not ask the user to choose planning, execution, repair, or validation stage when runtime capabilities can continue",
+				"Do not return patch/apply or other state-changing work unless a separate state-changing repair contract explicitly requires it",
+				"Validation evidence must cite concrete runtime observations, controlled substitutes, executable contracts, or dynamic execution observations when requiredOutput declares validationEvidence rules",
+				"If an external credential, permission, unavailable provider, or runtime configuration is truly required, declare it through requiredDecision/requiredApproval with structured context",
+			},
+		})
+	}
 	if stateChangingDecisionRequest(request.Input) {
 		required := stateChangingDecisionRequiredOutput(request.Input)
 		return marshalPromptSection("Current Requested Action", map[string]any{
@@ -1152,6 +1168,33 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		"type":         "plan_next_step",
 		"requirements": requirements,
 	})
+}
+
+func concreteValidationDecisionRequest(input map[string]any) bool {
+	if strings.TrimSpace(stringValue(input["repairObjective"])) == "produce_concrete_validation_evidence" ||
+		boolValue(input["boundedValidationRequired"]) ||
+		boolValue(input["evidenceRepairRequired"]) {
+		return true
+	}
+	required := recordFromAny(recordFromAny(input["repairActionPackage"])["requiredOutput"])
+	return boolValue(required["mustProduceConcreteValidationEvidence"])
+}
+
+func concreteValidationDecisionRequiredOutput(input map[string]any) map[string]any {
+	pkg := recordFromAny(input["repairActionPackage"])
+	required := recordFromAny(pkg["requiredOutput"])
+	if len(required) > 0 {
+		return required
+	}
+	return map[string]any{
+		"mustIncludeStateChangingNode":             false,
+		"mustProduceConcreteValidationEvidence":    true,
+		"mustPreferExecutableBehaviorValidation":   true,
+		"mustDeclareValidationEvidenceMode":        true,
+		"mustDeclareValidationEvidenceObservation": true,
+		"acceptedKinds":                            []string{"shell/command", "mcp/tool_call"},
+		"forbiddenKinds":                           []string{"patch/apply", "read_only_graph", "llm_gated_graph", "self_inspection_graph", "context_rehydration_graph", "run_snapshot_graph", "observability_only_graph"},
+	}
 }
 
 func stateChangingDecisionRequest(input map[string]any) bool {

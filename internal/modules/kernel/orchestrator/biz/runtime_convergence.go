@@ -286,19 +286,34 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 	if spec.Reason == "" {
 		return true
 	}
-	if contract.State != convergenceStateNeedStateChange {
-		return true
-	}
-	if !contract.StateChangingOutputRequired {
-		return true
-	}
-	if len(contract.TargetEvidence) == 0 {
-		return true
-	}
 	if decisionBlockDeclaresExternalOrRuntimeDependency(spec.Context) {
 		return true
 	}
-	return false
+	switch contract.State {
+	case convergenceStateNeedStateChange:
+		return !mechanicalStateChangingContractCanContinue(contract)
+	case convergenceStateNeedValidation:
+		return !mechanicalConcreteValidationContractCanContinue(input, contract)
+	default:
+		return true
+	}
+}
+
+func mechanicalStateChangingContractCanContinue(contract ConvergenceContract) bool {
+	return contract.StateChangingOutputRequired && len(contract.TargetEvidence) > 0
+}
+
+func mechanicalConcreteValidationContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
+	pkg := mapFromValue(contract.RepairActionPackage)
+	if len(pkg) == 0 {
+		pkg = mapFromValue(input["repairActionPackage"])
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		return false
+	}
+	accepted := stringSliceFromValue(required["acceptedKinds"])
+	return stringSliceContains(accepted, "shell/command") || stringSliceContains(accepted, "mcp/tool_call")
 }
 
 func convergenceAssessmentOnly(input map[string]any, failedStep *runModel.Step) bool {
