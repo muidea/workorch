@@ -799,7 +799,7 @@ Provider adapter 不可以做：
 
 ### LCAC-P3: Typed Event Tape
 
-状态：已完成首批 C4 typed section 拆分；后续继续细化 event 粒度裁剪和 sourceRef 强校验。
+状态：已完成首批 C4 typed section 拆分；LCAC-P3.1 已补充 processEvidenceTimeline 事件锚点校验、事件级裁剪审计和 cachePlan typedEventTape 标记。
 
 目标：把大体量 `Execution Context and Evidence Signals` 拆成 C4 typed events。
 
@@ -816,8 +816,29 @@ Provider adapter 不可以做：
 
 - C4 已不再只依赖一个混合大 JSON，首批拆为 runtime-stage、current-failure、current-progress、process-evidence-timeline、validation-signal、governance-resolution、memory-recall、repair-json-output、current-action。
 - processEvidenceTimeline 继续使用运行期已提供的顺序数据，不在 LLM block 中重新排序。
-- 首批实现保留 sourceRef / payloadRef / contentHash 等原始字段；后续需要在 LCAC-P3.1 增加强校验与 event 粒度裁剪。
+- 首批实现保留 sourceRef / payloadRef / contentHash 等原始字段；LCAC-P3.1 要求 processEvidenceTimeline 事件输出 `schemaVersion=workorch.c4.processEvidenceTimeline.v1`，并按事件校验 `sourceRef` / `payloadRef` / `contentHash` / `artifactRef` / `targetRef` / `stepId` / `evidenceRefs` 至少存在一个锚点。
 - repair 请求中 latest failure、validation、target snapshot 由 current-failure / validation-signal / repair-action-package 共同表达。
+
+### LCAC-P3.1: Strong Validation and Event-Grained Trimming
+
+状态：已完成首批收口。
+
+目标：让 C4 dynamic tail 在裁剪后仍可证明“少而准”，避免把不可追踪的大块历史 JSON 直接注入 LLM。
+
+约束：
+
+- `C4.process-evidence-timeline` 必须输出 typed payload schemaVersion，便于 request-log 审计区分旧混合 JSON 与新事件流。
+- 每个保留事件必须带 `eventTapeSequence`，该 sequence 只表达进入 tape 前的原始顺序位置，禁止在 LLM block 内按 kind、id、summary 或 ref 重新排序。
+- 每个保留事件必须尽量保留中立锚点：`sourceRef`、`payloadRef`、`contentHash`、`artifactRef`、`targetRef`、`stepId`、`evidenceRefs`。缺失时必须在事件上标记 `anchorRefStatus=missing`，并在 `sourceRefValidation.missingAnchorCount` 汇总。
+- 被 event window 裁掉的中间事件必须通过 `omittedRefs` 保留可追踪引用；引用数量可被上限约束，但不得静默丢弃。
+- 大体量 output 只能保留诊断摘要、context budget 摘要、LLM usage 摘要、DoD assessment 摘要等当前决策可用字段；被省略的 output key 必须进入 `omittedOutputKeys`。
+- CachePlan 的 `observedRequestShape.typedEventTape` 必须反映 provider-facing promptContext 是否已经使用 C4 typed sections，供缓存审计判断 request shape。
+
+验收：
+
+- `scripts/verify-llm-cache-aware-request-log.sh` 能检查 typed C4 section 与 `observedRequestShape.typedEventTape` 是否一致。
+- 审计脚本能解析 `C4.process-evidence-timeline`，校验 schemaVersion、sourceRefValidation policy、eventTapeSequence、missingAnchorCount 与 omittedRefs。
+- `go test ./internal/modules/blocks/llm/biz -count=1` 覆盖事件锚点保留、缺失锚点计数、omitted refs、omitted output keys 和 typedEventTape 标记。
 
 ### LCAC-P4: CachePlan 与 ContextBudget 联动
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -560,6 +561,11 @@ type executionSignalPromptEvent struct {
 	Content   string
 }
 
+type timelineEventSelection struct {
+	Item    map[string]any
+	Ordinal int
+}
+
 func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionSignalPromptEvent {
 	events := make([]executionSignalPromptEvent, 0, 8)
 	appendEvent := func(sectionID, title string, value any) {
@@ -858,50 +864,82 @@ func compactProcessEvidenceTimelineSignal(timeline []map[string]any) map[string]
 	if len(timeline) == 0 {
 		return nil
 	}
-	selected, omittedMiddle := compactTimelineEventWindow(timeline)
+	selected, omittedMiddle, omittedRefs := compactTimelineEventWindow(timeline)
 	events := make([]map[string]any, 0, len(selected))
-	for _, item := range selected {
-		if compacted := compactProcessEvidenceTimelineEvent(item); len(compacted) > 0 {
+	missingAnchorCount := 0
+	for _, selectedEvent := range selected {
+		if !timelineEventHasAnchorRef(selectedEvent.Item) {
+			missingAnchorCount++
+		}
+		if compacted := compactProcessEvidenceTimelineEvent(selectedEvent.Item, selectedEvent.Ordinal); len(compacted) > 0 {
 			events = append(events, compacted)
 		}
 	}
 	if len(events) == 0 {
 		return nil
 	}
-	return map[string]any{
+	out := map[string]any{
+		"schemaVersion":      "workorch.c4.processEvidenceTimeline.v1",
 		"totalEvents":        len(timeline),
 		"omittedMiddleCount": omittedMiddle,
-		"retentionPolicy":    "preserve first events and most recent events; compact bulky outputs into diagnostic summaries",
-		"events":             events,
+		"retentionPolicy":    "preserve first event and most recent events; compact bulky outputs into diagnostic summaries; retain omitted refs for audit",
+		"sourceRefValidation": map[string]any{
+			"policy":             "sourceRef_or_payloadRef_or_contentHash_required_per_event",
+			"checkedEvents":      len(selected),
+			"missingAnchorCount": missingAnchorCount,
+		},
+		"events": events,
 	}
+	if len(omittedRefs) > 0 {
+		out["omittedRefs"] = omittedRefs
+	}
+	if omittedMiddle > len(omittedRefs) {
+		out["omittedRefPolicy"] = "omitted refs are capped to keep C4 audit bounded"
+	}
+	return out
 }
 
-func compactTimelineEventWindow(timeline []map[string]any) ([]map[string]any, int) {
+func compactTimelineEventWindow(timeline []map[string]any) ([]timelineEventSelection, int, []string) {
 	const maxEvents = 12
-	const headEvents = 2
+	const headEvents = 1
 	if len(timeline) <= maxEvents {
-		return timeline, 0
+		selected := make([]timelineEventSelection, 0, len(timeline))
+		for idx, item := range timeline {
+			selected = append(selected, timelineEventSelection{Item: item, Ordinal: idx + 1})
+		}
+		return selected, 0, nil
 	}
 	tailEvents := maxEvents - headEvents
-	selected := make([]map[string]any, 0, maxEvents)
-	selected = append(selected, timeline[:headEvents]...)
-	selected = append(selected, timeline[len(timeline)-tailEvents:]...)
-	return selected, len(timeline) - maxEvents
+	selected := make([]timelineEventSelection, 0, maxEvents)
+	for idx := 0; idx < headEvents; idx++ {
+		selected = append(selected, timelineEventSelection{Item: timeline[idx], Ordinal: idx + 1})
+	}
+	tailStart := len(timeline) - tailEvents
+	for idx := tailStart; idx < len(timeline); idx++ {
+		selected = append(selected, timelineEventSelection{Item: timeline[idx], Ordinal: idx + 1})
+	}
+	return selected, len(timeline) - maxEvents, omittedTimelineEventRefs(timeline[headEvents:tailStart])
 }
 
-func compactProcessEvidenceTimelineEvent(item map[string]any) map[string]any {
+func compactProcessEvidenceTimelineEvent(item map[string]any, ordinal int) map[string]any {
 	if len(item) == 0 {
 		return nil
 	}
-	out := map[string]any{}
+	out := map[string]any{"eventTapeSequence": ordinal}
 	for _, key := range []string{
 		"order",
+		"sequence",
+		"eventType",
 		"actionKind",
 		"kind",
 		"state",
 		"stage",
 		"stepId",
 		"sourceRef",
+		"payloadRef",
+		"contentHash",
+		"artifactRef",
+		"targetRef",
 		"inputSummary",
 		"outputSummary",
 		"summary",
@@ -917,12 +955,64 @@ func compactProcessEvidenceTimelineEvent(item map[string]any) map[string]any {
 	if refs := stringSliceFromAny(item["evidenceRefs"]); len(refs) > 0 {
 		out["evidenceRefs"] = limitedStringSlice(refs, 8)
 	}
+	if !timelineEventHasAnchorRef(item) {
+		out["anchorRefStatus"] = "missing"
+	}
 	if output := recordFromAny(item["output"]); len(output) > 0 {
 		if compacted := compactProcessEvidenceOutput(output); len(compacted) > 0 {
 			out["output"] = compacted
 		}
 	}
 	return out
+}
+
+func timelineEventHasAnchorRef(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	for _, key := range []string{"sourceRef", "payloadRef", "contentHash", "artifactRef", "targetRef", "stepId"} {
+		if strings.TrimSpace(firstProviderString(item[key])) != "" {
+			return true
+		}
+	}
+	if len(stringSliceFromAny(item["evidenceRefs"])) > 0 {
+		return true
+	}
+	return false
+}
+
+func omittedTimelineEventRefs(items []map[string]any) []string {
+	const maxRefs = 32
+	if len(items) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, min(len(items), maxRefs))
+	for _, item := range items {
+		ref := timelineEventPrimaryRef(item)
+		if ref == "" {
+			continue
+		}
+		refs = append(refs, ref)
+		if len(refs) >= maxRefs {
+			break
+		}
+	}
+	return uniqueStrings(refs)
+}
+
+func timelineEventPrimaryRef(item map[string]any) string {
+	if len(item) == 0 {
+		return ""
+	}
+	for _, key := range []string{"sourceRef", "payloadRef", "artifactRef", "targetRef", "stepId", "contentHash"} {
+		if ref := strings.TrimSpace(firstProviderString(item[key])); ref != "" {
+			return ref
+		}
+	}
+	if refs := stringSliceFromAny(item["evidenceRefs"]); len(refs) > 0 {
+		return refs[0]
+	}
+	return ""
 }
 
 func copyCompactTimelineValue(target map[string]any, key string, value any) {
@@ -947,6 +1037,7 @@ func copyCompactTimelineValue(target map[string]any, key string, value any) {
 
 func compactProcessEvidenceOutput(output map[string]any) map[string]any {
 	out := map[string]any{}
+	copied := map[string]bool{}
 	for _, key := range []string{
 		"status",
 		"stage",
@@ -957,23 +1048,55 @@ func compactProcessEvidenceOutput(output map[string]any) map[string]any {
 		"failureSignature",
 	} {
 		copyCompactTimelineValue(out, key, output[key])
+		if _, ok := out[key]; ok {
+			copied[key] = true
+		}
 	}
 	if usage := recordFromAny(output["llmUsage"]); len(usage) > 0 {
 		out["llmUsage"] = compactTimelineLLMUsage(usage)
+		copied["llmUsage"] = true
 	}
 	if budget := recordFromAny(output["contextBudget"]); len(budget) > 0 {
 		out["contextBudget"] = compactTimelineContextBudget(budget)
+		copied["contextBudget"] = true
 	}
 	if diagnostics := recordFromAny(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
 		out["lastFailureDiagnostics"] = budgetProviderValue(diagnostics, 0, 2048, 8, 16, 3)
+		copied["lastFailureDiagnostics"] = true
 	}
 	if runtimeDiagnostics := recordFromAny(output["runtimeDiagnostics"]); len(runtimeDiagnostics) > 0 {
 		out["runtimeDiagnostics"] = budgetProviderValue(runtimeDiagnostics, 0, 1024, 8, 16, 3)
+		copied["runtimeDiagnostics"] = true
 	}
 	if assessment := recordFromAny(output["dodAssessment"]); len(assessment) > 0 {
 		out["dodAssessment"] = compactTimelineDoDAssessment(assessment)
+		copied["dodAssessment"] = true
+	}
+	if omitted := omittedTimelineOutputKeys(output, copied); len(omitted) > 0 {
+		out["omittedOutputKeys"] = omitted
 	}
 	return out
+}
+
+func omittedTimelineOutputKeys(output map[string]any, copied map[string]bool) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	omitted := make([]string, 0, min(len(output), 12))
+	for key := range output {
+		if copied[key] || strings.TrimSpace(key) == "" {
+			continue
+		}
+		omitted = append(omitted, key)
+	}
+	if len(omitted) == 0 {
+		return nil
+	}
+	sort.Strings(omitted)
+	if len(omitted) > 12 {
+		omitted = omitted[:12]
+	}
+	return omitted
 }
 
 func compactTimelineLLMUsage(usage map[string]any) map[string]any {

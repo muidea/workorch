@@ -90,11 +90,30 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		ObservedRequestShape: llmmodels.ProviderObservedRequestShape{
 			ProviderFacingMode:  "prompt_context_turns",
 			TurnsHaveSectionIDs: promptContextTurnsHaveSectionIDs(request.PromptContext),
-			TypedEventTape:      false,
+			TypedEventTape:      promptContextHasTypedEventTape(request.PromptContext),
 		},
 	}
 	plan.AdapterHint = providerAdapterCacheHint(plan)
 	return plan
+}
+
+func promptContextHasTypedEventTape(context *llmmodels.PromptContext) bool {
+	if context == nil {
+		return false
+	}
+	for _, section := range context.Sections {
+		sectionID := strings.TrimSpace(section.ID)
+		if !strings.HasPrefix(sectionID, "C4.") {
+			continue
+		}
+		switch sectionID {
+		case "C4.execution-signals", "C4.fallback-user-prompt":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func providerAdapterCacheHint(plan llmmodels.ProviderCachePlan) llmmodels.ProviderAdapterCacheHint {

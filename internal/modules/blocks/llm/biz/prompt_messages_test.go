@@ -436,13 +436,103 @@ func TestProcessEvidenceTimelineSignalCompactsBulkyHistoricalOutputs(t *testing.
 	if len(encoded) > 60000 {
 		t.Fatalf("encoded timeline length = %d, want compact payload", len(encoded))
 	}
-	for _, forbidden := range []string{"executionGraph", "includedSections", "protectedFields", "sectionHashes", strings.Repeat("diagnostic ", 300)} {
+	for _, forbidden := range []string{"includedSections", "protectedFields", "sectionHashes", strings.Repeat("diagnostic ", 300)} {
 		if strings.Contains(encoded, forbidden) {
 			t.Fatalf("encoded timeline leaked bulky field %q", forbidden)
 		}
 	}
 	if !strings.Contains(encoded, "stablePrefixHash") || !strings.Contains(encoded, "cacheReadTokens") {
 		t.Fatalf("encoded timeline missing cache diagnostics: %s", encoded)
+	}
+}
+
+func TestProcessEvidenceTimelineSignalPreservesEventAnchorsAndTrimAudit(t *testing.T) {
+	timeline := make([]map[string]any, 0, 16)
+	for idx := 1; idx <= 16; idx++ {
+		item := map[string]any{
+			"order":     idx,
+			"eventType": "tool_result",
+			"stepId":    fmt.Sprintf("run-anchor/step-%03d", idx),
+			"output": map[string]any{
+				"summary":        "summary",
+				"largePayload":   strings.Repeat("payload", 1000),
+				"executionGraph": map[string]any{"nodes": []any{"node"}},
+			},
+		}
+		switch idx {
+		case 1:
+			item["sourceRef"] = "step://run-anchor/step-001"
+		case 2:
+			item["payloadRef"] = "workorch://payload/002"
+		case 3:
+			item["contentHash"] = "sha256:003"
+		case 4:
+			item["artifactRef"] = "artifact://004"
+		case 16:
+			delete(item, "stepId")
+		default:
+			item["sourceRef"] = fmt.Sprintf("step://run-anchor/step-%03d", idx)
+		}
+		timeline = append(timeline, item)
+	}
+
+	payload := processEvidenceTimelineSignalPayload(map[string]any{"processEvidenceTimeline": timeline})
+	if payload["schemaVersion"] != "workorch.c4.processEvidenceTimeline.v1" {
+		t.Fatalf("schemaVersion = %#v", payload["schemaVersion"])
+	}
+	validation := recordFromAny(payload["sourceRefValidation"])
+	if validation["policy"] != "sourceRef_or_payloadRef_or_contentHash_required_per_event" ||
+		validation["missingAnchorCount"] != 1 {
+		t.Fatalf("sourceRefValidation = %+v, want one missing anchor", validation)
+	}
+	omittedRefs := stringSliceFromAny(payload["omittedRefs"])
+	if len(omittedRefs) == 0 || !strings.Contains(strings.Join(omittedRefs, "\n"), "workorch://payload/002") {
+		t.Fatalf("omittedRefs = %+v, want middle event refs retained", omittedRefs)
+	}
+	events := mapSliceFromAny(payload["events"])
+	if len(events) != 12 {
+		t.Fatalf("events = %d, want 12", len(events))
+	}
+	first := events[0]
+	if first["sourceRef"] != "step://run-anchor/step-001" || first["eventTapeSequence"] != 1 {
+		t.Fatalf("first event = %+v, want sourceRef and eventTapeSequence", first)
+	}
+	last := events[len(events)-1]
+	if last["anchorRefStatus"] != "missing" || last["eventTapeSequence"] != 16 {
+		t.Fatalf("last event = %+v, want missing anchor status and original sequence", last)
+	}
+	output := recordFromAny(last["output"])
+	omittedOutputKeys := stringSliceFromAny(output["omittedOutputKeys"])
+	if !stringSliceContains(omittedOutputKeys, "executionGraph") || !stringSliceContains(omittedOutputKeys, "largePayload") {
+		t.Fatalf("omittedOutputKeys = %+v, want bulky output keys audited", omittedOutputKeys)
+	}
+}
+
+func TestProviderCachePlanMarksTypedEventTape(t *testing.T) {
+	context := buildPromptContextFromRequest(llmmodels.ProviderRequest{
+		WorkspaceID: "ws-tape",
+		RunID:       "run-001",
+		StepID:      "step-001",
+		Kind:        llmcommon.StepKindWorkspaceExecution,
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"goal": "goal",
+				"dod":  "dod",
+			},
+			"currentProgressDigest": map[string]any{"nextRequiredAction": "continue"},
+			"processEvidenceTimeline": []any{
+				map[string]any{"order": 1, "sourceRef": "step://run-001/step-001", "summary": "done"},
+			},
+		},
+	})
+	if context == nil {
+		t.Fatalf("promptContext = nil")
+	}
+	plan := buildProviderCachePlan(llmmodels.ProviderRequest{PromptContext: context})
+	if !plan.ObservedRequestShape.TypedEventTape {
+		t.Fatalf("typedEventTape = false, want true")
 	}
 }
 

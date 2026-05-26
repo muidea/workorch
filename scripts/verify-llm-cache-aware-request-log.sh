@@ -52,6 +52,7 @@ for path in request_paths:
     turns = prompt_context.get("turns") or []
     budget = req.get("contextBudget") or {}
     cache_plan = budget.get("cachePlan") or {}
+    observed_shape = cache_plan.get("observedRequestShape") or {}
     rel = os.path.relpath(path, workspace_dir)
     run_id = req.get("runId") or rel.split(os.sep)[1]
     if not sections:
@@ -85,6 +86,9 @@ for path in request_paths:
     if missing_hashes:
         errors.append(f"{rel}: sectionHashes missing {missing_hashes}")
     c4_total = 0
+    has_typed_c4 = any(str(item).startswith("C4.") and item not in ("C4.execution-signals", "C4.fallback-user-prompt") for item in section_ids)
+    if has_typed_c4 and not observed_shape.get("typedEventTape"):
+        errors.append(f"{rel}: observedRequestShape.typedEventTape=false for typed C4 sections")
     for section in sections:
         section_id = str(section.get("id") or "")
         if not section_id.startswith("C4"):
@@ -93,6 +97,26 @@ for path in request_paths:
         c4_total += size
         if size > c4_section_max_bytes:
             warnings.append(f"{rel}: C4 section {section_id} is {size} bytes, exceeds {c4_section_max_bytes}")
+        if section_id == "C4.process-evidence-timeline":
+            content = str(section.get("content") or "").strip()
+            payload_text = content.split("\n", 1)[1] if "\n" in content else content
+            try:
+                payload = json.loads(payload_text)
+                if payload.get("schemaVersion") != "workorch.c4.processEvidenceTimeline.v1":
+                    warnings.append(f"{rel}: C4.process-evidence-timeline missing P3.1 schemaVersion")
+                validation = payload.get("sourceRefValidation") or {}
+                if validation.get("policy") != "sourceRef_or_payloadRef_or_contentHash_required_per_event":
+                    warnings.append(f"{rel}: C4.process-evidence-timeline missing sourceRef validation policy")
+                events = payload.get("events") or []
+                if events and any(not item.get("eventTapeSequence") for item in events):
+                    errors.append(f"{rel}: C4.process-evidence-timeline event missing eventTapeSequence")
+                missing = sum(1 for item in events if item.get("anchorRefStatus") == "missing")
+                if validation.get("missingAnchorCount") != missing:
+                    errors.append(f"{rel}: C4.process-evidence-timeline missingAnchorCount does not match events")
+                if int(payload.get("omittedMiddleCount") or 0) > 0 and "omittedRefs" not in payload:
+                    warnings.append(f"{rel}: C4.process-evidence-timeline omitted middle events without omittedRefs")
+            except Exception as exc:
+                warnings.append(f"{rel}: unable to parse C4.process-evidence-timeline for P3.1 audit: {exc}")
     if c4_total > c4_total_max_bytes:
         warnings.append(f"{rel}: C4 volatile tail is {c4_total} bytes, exceeds {c4_total_max_bytes}")
     usage_path = os.path.join(os.path.dirname(path), "usage.json")
