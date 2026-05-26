@@ -2786,6 +2786,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If choosing a rootCauseTarget that differs from the failed surface, patch that resource directly and declare relatedFailureTargets for the failed surface being unblocked.",
 		)
 	}
+	if context := o.convertedDecisionReadableResourceContext(ctx, run, failedStep); len(context) > 0 {
+		input["readableResourceRepairContext"] = context
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"The previous decision requested information that is already available as a readable workspace resource.",
+			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
+		)
+	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 {
 		manifest := o.workspaceFileManifest(ctx, run)
 		if len(manifest) > 0 {
@@ -2827,13 +2834,6 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 				"If returning executionGraph, every node must be a complete JSON object and must follow repairActionPackage.requiredOutput acceptedKinds.",
 			)
 		}
-	}
-	if context := o.convertedDecisionReadableResourceContext(ctx, run, failedStep); len(context) > 0 {
-		input["readableResourceRepairContext"] = context
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"The previous decision requested information that is already available as a readable workspace resource.",
-			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
-		)
 	}
 	preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
@@ -4054,7 +4054,7 @@ func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOu
 		add(stringFromMap(diagnostics, "targetRef"))
 		add(stringFromMap(diagnostics, "conflictRef"))
 	}
-	for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "targetSnapshots", "patchRepairSuggestions"} {
+	for _, key := range []string{"failureTargetRepairContext", "readableResourceRepairContext", "patchRepairContext", "targetSnapshots", "patchRepairSuggestions"} {
 		for _, item := range mapSliceFromValue(input[key]) {
 			add(stringFromMap(item, "targetRef"))
 		}
@@ -4975,6 +4975,9 @@ func repairActionTargetSnapshots(input map[string]any) []map[string]any {
 		}
 	}
 	add(mapSliceFromValue(input["failureTargetRepairContext"]), "failure_target")
+	if len(ret) < maxLLMContextSliceItems {
+		add(mapSliceFromValue(input["readableResourceRepairContext"]), "readable_resource")
+	}
 	if len(ret) < maxLLMContextSliceItems {
 		add(mapSliceFromValue(input["patchRepairContext"]), "patch_target")
 	}

@@ -13286,6 +13286,83 @@ func TestRuntimeOrchestrator_ConvertsQuestionOnlyReadableResourceDecisionToRepai
 	}
 }
 
+func TestRuntimeRepairInputPromotesReadableResourceDecisionIntoStateChangingTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDirectory, "target"), 0o755); err != nil {
+		t.Fatalf("create target dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target", "resource.txt"), []byte("current target content\n"), 0o644); err != nil {
+		t.Fatalf("write target resource: %v", err)
+	}
+
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	workspaceID := common.WorkspaceID("ws-readable-state-changing")
+	runID := common.RunID("run-readable-state-changing")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateRunning}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	failedStep := &runmodel.Step{
+		ID:    "run-readable-state-changing/repair-001",
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"status":                               "failed",
+			"error":                                "decision requested a readable resource",
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecisionGate":                "convergence_contract",
+			"convertedDecision": map[string]any{
+				"reason":   "target/resource.txt is needed before producing a precise state-changing artifact",
+				"question": "Please provide target/resource.txt current content.",
+				"context": map[string]any{
+					"knownValues": map[string]any{
+						"targetRef": "target/resource.txt",
+					},
+					"missingFields":       []string{"target/resource.txt current content"},
+					"requiresHumanFields": []string{"target/resource.txt current content"},
+				},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	resourceContext := mapSliceFromValue(input["readableResourceRepairContext"])
+	if len(resourceContext) != 1 ||
+		resourceContext[0]["targetRef"] != "target/resource.txt" ||
+		!strings.Contains(stringFromMap(resourceContext[0], "content"), "current target content") {
+		t.Fatalf("readableResourceRepairContext = %+v, want current target resource snapshot", resourceContext)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) != 1 ||
+		targets[0]["targetRef"] != "target/resource.txt" ||
+		!strings.Contains(stringFromMap(targets[0], "content"), "current target content") {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want readable resource promoted to actionable target snapshot", actionPackage["targetSnapshots"])
+	}
+	if required := mapFromValue(actionPackage["requiredOutput"]); required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("requiredOutput = %+v, want state-changing contract", required)
+	}
+}
+
 func TestContinuableDecisionShouldRepairRejectsMechanicalTargetChoiceBlock(t *testing.T) {
 	step := &runmodel.Step{
 		ID:   "run-mechanical-decision/repair-001",

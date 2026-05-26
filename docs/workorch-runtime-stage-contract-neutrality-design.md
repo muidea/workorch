@@ -1427,6 +1427,10 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - `ShouldCreateDecisionTicket` 已扩展为同时识别 `need_state_change` 与 `need_validation` 的机械可继续合同；当 concrete validation evidence 合同仍允许 bounded `shell/command` / `mcp/tool_call` 且无外部/runtime blocker 时，LLM 的 `blocked_on_decision` 必须转为 continuable repair violation。
   - LLM current-action prompt 已补 concrete validation evidence 分支，明确要求输出具体验证证据、failed assessment 或真实 blocker，不再把该场景渲染成普通 `plan_next_step`。
   - 新增回归测试覆盖 state-changing no-actionable continuation 合同继承、concrete validation decision ticket 抑制和 current-action prompt 渲染；`go test ./internal/modules/kernel/orchestrator/biz -count=1` 与 `go test ./internal/modules/blocks/llm/biz -count=1` 通过。
+- 2026-05-26：
+  - 已完成 CVC-01 第八批收口。
+  - 当 LLM decision 请求某个 workspace resource 的当前内容，且 runtime 可从 workspace manifest / deliverable directory 读取该资源时，该 decision 不得形成或延续人工输入依赖。Runtime repair 必须把该资源作为 `readableResourceRepairContext` 注入，并在 state-changing repair 中提升为 `repairActionPackage.targetSnapshots` / `repairTargetSet`，使后续 LLM 基于当前快照生成状态变更。
+  - 该规则只基于中立 resource ref、manifest、snapshot 与 requiredOutput，不得依赖具体业务文件名、语言、测试框架或领域语义。
 
 ## 非兼容性说明
 
