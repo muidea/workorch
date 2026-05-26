@@ -232,6 +232,7 @@ WorkOrch 不负责在线安装语言服务器。部署环境可以按需准备�
 - LSP 子进程错误时，优先重新 `lsp_initialize` 或稍后有界重试。
 - `lsp_references` 默认最多返回 10 条；`truncated=true` 时只能把返回项作为局部引用集合，不得声称已覆盖所有引用。
 - `lsp_sync` 必须传入修改后的完整文件内容，并提供对应的 `path` 或 `file_path`；不能只传 `root_path`，也不能传 partial diff。
+- 生成 `lsp_sync` 的图节点时，必须把完整更新后的文件内容显式放入 `input.content`；仅有 `path/file_path` 的同步请求无效。
 
 ### 6.1 Planning
 

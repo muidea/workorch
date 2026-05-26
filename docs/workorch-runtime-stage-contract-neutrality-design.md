@@ -689,6 +689,8 @@ Runtime repair 预算必须来自 runtime 配置，默认 `maxRuntimeRepairAttem
 
 State-changing repair 必须满足目标相关性约束。若 repair 输入已经包含 `failureTargetScope`、`failureTargetRepairContext`、`patchRepairContext`、`repairActionPackage.targetSnapshots` 或等价的显式 `targetRef`，则 `patch/apply` 只有在目标属于这些失败目标、当前目标快照或明确 repair 目标时，才算有效 state-changing artifact。写入无关 marker、空转文件、报告文件或与失败目标无关的 no-op patch，不得满足 state-changing repair 合同；runtime 必须将其作为 contract violation 重新进入 repair / blocker / rejected 治理。
 
+所有来自 stderr/stdout、coverage、shell 输出、LLM assessment、failure signature 或历史 result 的 targetRef / failureTargets 在进入强修复范围前，必须先与当前 `workspaceFileManifest` 做中立归一化。若诊断路径带有额外项目名、二进制名、工作目录名或工具前缀，例如 `<prefix>/path/to/file`，而 manifest 中存在唯一后缀匹配的真实 workspace 文件，则 runtime 必须把强目标归一为 manifest 路径，并保留原始值为 diagnostic/source ref；若无法唯一落到 manifest 中的文件，该诊断路径只能作为弱诊断消息保留，不得单独锁死 `repairTargetSet`、`failureTargetRepairContext`、`repairActionPackage.targetSnapshots` 或 patch 相关性门禁。该规则只处理路径形态和 manifest 事实，不解释语言、项目结构、业务文件类型或 Goal / DoD 语义。
+
 Scoped repair 允许在 state-changing artifact 后追加验证，但验证必须能被 runtime 识别为 bounded。满足任一条件即可视为 bounded verification：`shell/command` 输入显式声明 `targetRef`、`relatedFailureTargets`、`verificationScope` 或 `boundedReason`；或该验证节点依赖一个直接命中当前 failure target / repair target 的 `patch/apply` 节点。若验证命令宽泛且既无显式 scope，也不依赖命中失败目标的 patch，runtime 必须拒绝并要求补 scope 或返回 failed assessment / blocker。该规则只约束“验证与当前失败目标的可追踪关系”，不得硬编码命令、语言、测试框架或业务类型。
 
 该约束属于 core runtime 的中立合同，只比较结构化目标引用、target snapshot 和 capability input，不解释文件类型、测试框架、编程语言或业务正确性。Core 可以判断“patch target 与失败目标不相关”，但不能判断“某个业务文件应如何修改”。当没有任何显式目标引用时，runtime 不得臆造目标；此时只能依赖 capability contract、LLM 输出和后续 evidence 判断。

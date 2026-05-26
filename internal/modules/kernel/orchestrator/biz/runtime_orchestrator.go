@@ -4161,9 +4161,22 @@ func repairPatchRelevantTargetRefsFromInput(input map[string]any) []string {
 	}
 	seen := map[string]bool{}
 	var ret []string
+	manifest := repairPatchRelevantWorkspaceManifest(input)
 	add := func(value string) {
 		value = normalizeRepairPatchTargetRef(value)
-		if value == "" || seen[value] {
+		if value == "" {
+			return
+		}
+		if canonical, ok := canonicalRepairTargetRefFromManifest(manifest, value); ok {
+			value = canonical
+		} else if len(manifest) > 0 {
+			// When a current workspace manifest is available, ungrounded
+			// diagnostic paths are weak signals and must not lock the repair
+			// scope. They can still be carried in diagnostics, but not as hard
+			// patch target constraints.
+			return
+		}
+		if seen[value] {
 			return
 		}
 		seen[value] = true
@@ -4198,6 +4211,25 @@ func repairPatchRelevantTargetRefsFromInput(input map[string]any) []string {
 		}
 	}
 	return ret
+}
+
+func repairPatchRelevantWorkspaceManifest(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	if manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]); len(manifest) > 0 {
+		return manifest
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	if manifest := mapSliceFromValue(actionPackage["workspaceFileManifest"]); len(manifest) > 0 {
+		return manifest
+	}
+	if pkg := mapFromValue(input[stepInputKeyExecutionContextPackage]); len(pkg) > 0 {
+		if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+			return manifest
+		}
+	}
+	return nil
 }
 
 func repairPatchTargetRefsFromScopeText(value string) []string {

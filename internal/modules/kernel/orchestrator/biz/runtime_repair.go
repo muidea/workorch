@@ -2774,6 +2774,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If patchRepairSuggestions are present, prefer patch/apply text_replace with exact oldText/newText/baseHash, or use that evidence to construct the smallest current unified_diff/file/edit repair.",
 			"If patch application failed because of malformed unified_diff syntax, return patch/apply text_replace with exact oldText/newText/baseHash or a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@.",
 			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
+			"Any MCP tool call that synchronizes modified file content must include the complete current file content in input.content together with the target path; do not emit path-only, root-only, or partial sync requests.",
 			"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
 			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
 		)
@@ -3242,6 +3243,7 @@ func stateChangingRepairGuidance() []string {
 		"unified_diff patches must include explicit hunk line ranges such as @@ -12,3 +12,4 @@; never emit a bare @@ hunk.",
 		"Do not use shell/command or mcp/tool_call to modify workspace files when a patch/apply state-change artifact can represent the change; when acceptedKinds explicitly allows them, declare stateChanging=true plus targetRef, relatedFailureTargets, stateChangingReason, or boundedReason, then add bounded verification that depends on the operation.",
 		"For scoped repair verification, shell/command input must declare targetRef, relatedFailureTargets, verificationScope, or boundedReason, or depend on a patch/apply node that directly targets the current failure scope.",
+		"Any MCP tool call that synchronizes modified file content must include the complete current file content in input.content together with the target path; do not emit path-only, root-only, or partial sync requests.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
 		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope/current repair snapshot, or explicitly declare relatedFailureTargets that cite the current failure target being validated or unblocked; unrelated marker/no-op patches are invalid.",
 		"When a workspace already contains known resources, reconcile the repair with those existing resources and prefer the smallest coherent state change over broad replacement.",
@@ -4104,9 +4106,18 @@ func firstRawFailureOutput(input map[string]any, rawFailedOutput ...map[string]a
 func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOutput ...map[string]any) []string {
 	seen := map[string]bool{}
 	var ret []string
+	manifest := repairPatchRelevantWorkspaceManifest(input)
 	add := func(value string) {
 		value = normalizeStructuredFailureTargetRef(value)
-		if value == "" || seen[value] {
+		if value == "" {
+			return
+		}
+		if canonical, ok := canonicalRepairTargetRefFromManifest(manifest, value); ok {
+			value = canonical
+		} else if len(manifest) > 0 {
+			return
+		}
+		if seen[value] {
 			return
 		}
 		seen[value] = true
@@ -5062,9 +5073,16 @@ var structuredFailureIdentifierStopWords = map[string]bool{
 func repairActionTargetSnapshots(input map[string]any) []map[string]any {
 	var ret []map[string]any
 	seen := map[string]bool{}
+	manifest := repairPatchRelevantWorkspaceManifest(input)
 	add := func(items []map[string]any, source string) {
 		for _, item := range items {
 			targetRef := strings.TrimSpace(stringFromMap(item, "targetRef"))
+			if canonical, ok := canonicalRepairTargetRefFromManifest(manifest, targetRef); ok {
+				if canonical != normalizeRepairPatchTargetRef(targetRef) && !boolValue(item["exists"]) && strings.TrimSpace(stringFromMap(item, "content")) == "" {
+					continue
+				}
+				targetRef = canonical
+			}
 			if targetRef == "" || !runtimeRepairTargetRefAdmissible(targetRef) || boolValue(item["isBinary"]) || seen[targetRef] {
 				continue
 			}
@@ -5073,6 +5091,10 @@ func repairActionTargetSnapshots(input map[string]any) []map[string]any {
 			if len(snapshot) == 0 || boolValue(snapshot["isBinary"]) {
 				continue
 			}
+			if original := strings.TrimSpace(stringFromMap(snapshot, "targetRef")); original != "" && original != targetRef {
+				snapshot["diagnosticTargetRef"] = original
+			}
+			snapshot["targetRef"] = targetRef
 			if source != "" {
 				snapshot["contextSource"] = source
 			}
@@ -5102,6 +5124,7 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 	ret := map[string]any{}
 	for _, key := range []string{
 		"targetRef",
+		"diagnosticTargetRef",
 		"exists",
 		"contentHash",
 		"contentComplete",
@@ -5137,6 +5160,7 @@ func repairActionTargetSnapshotMetadata(items []map[string]any) []map[string]any
 		next := map[string]any{}
 		for _, key := range []string{
 			"targetRef",
+			"diagnosticTargetRef",
 			"exists",
 			"contentHash",
 			"contentComplete",
@@ -6092,13 +6116,17 @@ func resolveWorkspaceTargetRef(files []workspaceDeliverableFile, targetRef strin
 		return ""
 	}
 	for _, file := range files {
-		if file.Path == targetRef {
-			return targetRef
+		if normalizeRepairPatchTargetRef(file.Path) == normalizeRepairPatchTargetRef(targetRef) {
+			return file.Path
 		}
 	}
 	var match string
 	for _, file := range files {
-		if strings.HasSuffix(file.Path, "/"+targetRef) {
+		path := normalizeRepairPatchTargetRef(file.Path)
+		if path == "" {
+			continue
+		}
+		if strings.HasSuffix(path, "/"+targetRef) || strings.HasSuffix(targetRef, "/"+path) {
 			if match != "" {
 				return targetRef
 			}
@@ -6109,6 +6137,53 @@ func resolveWorkspaceTargetRef(files []workspaceDeliverableFile, targetRef strin
 		return match
 	}
 	return targetRef
+}
+
+func workspaceManifestFilesFromMaps(manifest []map[string]any) []workspaceDeliverableFile {
+	if len(manifest) == 0 {
+		return nil
+	}
+	ret := make([]workspaceDeliverableFile, 0, len(manifest))
+	for _, item := range manifest {
+		path := normalizeRepairPatchTargetRef(stringFromMap(item, "path"))
+		if path == "" {
+			continue
+		}
+		ret = append(ret, workspaceDeliverableFile{
+			Path:       path,
+			Size:       int64FromValue(item["size"]),
+			Executable: boolValue(item["executable"]),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func canonicalRepairTargetRefFromManifest(manifest []map[string]any, targetRef string) (string, bool) {
+	files := workspaceManifestFilesFromMaps(manifest)
+	if len(files) == 0 {
+		normalized := normalizeRepairPatchTargetRef(targetRef)
+		return normalized, normalized != ""
+	}
+	normalized := normalizeRepairPatchTargetRef(targetRef)
+	if normalized == "" {
+		return "", false
+	}
+	resolved := normalizeRepairPatchTargetRef(resolveWorkspaceTargetRef(files, normalized))
+	if resolved == "" {
+		return "", false
+	}
+	if resolved != normalized {
+		return resolved, true
+	}
+	for _, file := range files {
+		if normalizeRepairPatchTargetRef(file.Path) == normalized {
+			return normalized, true
+		}
+	}
+	return normalized, false
 }
 
 func failureTargetRepairRefs(step *runModel.Step) []string {

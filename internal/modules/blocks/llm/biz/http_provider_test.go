@@ -108,6 +108,47 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 }
 
+func TestHTTPProviderCompleteParsesNonStreamingUsage(t *testing.T) {
+	var gotPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"usage parsed\",\"items\":[{\"item\":\"usage parsed\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}}],
+			"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":6}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if gotPayload.Stream {
+		t.Fatalf("stream flag = true, want false")
+	}
+	if gotPayload.ResponseFormat == nil || gotPayload.ResponseFormat["type"] != "json_object" {
+		t.Fatalf("payload response_format = %+v, want json_object", gotPayload.ResponseFormat)
+	}
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 11 ||
+		result.Usage.OutputTokens != 7 ||
+		result.Usage.TotalTokens != 18 ||
+		result.Usage.CacheReadTokens != 5 ||
+		result.Usage.CacheWriteTokens != 6 {
+		t.Fatalf("usage = %+v, want parsed non-stream usage", result.Usage)
+	}
+}
+
 func TestHTTPProviderAssessmentOnlyPromptHidesExecutionGraphContract(t *testing.T) {
 	var gotPayload chatCompletionRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

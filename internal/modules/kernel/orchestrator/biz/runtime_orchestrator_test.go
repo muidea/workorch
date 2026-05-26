@@ -2991,7 +2991,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputIncludesPatchTargetSnapshot(t *te
 		t.Fatalf("patchRepairContext safety = %#v, want complete safe snapshot", item)
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "runtime redaction marker tokens"} {
+	for _, want := range []string{"patchRepairContext", "failed patch text as stale", "safeForFileWrite", "minimal unified_diff", "runtime redaction marker tokens", "synchronizes modified file content", "input.content"} {
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("repairGuidance = %q, want %q", guidance, want)
 		}
@@ -5122,6 +5122,67 @@ func TestWorkspaceFileManifestSkipsRepositoryAndRuntimeNoise(t *testing.T) {
 	}
 	if !reflect.DeepEqual(paths, []string{"README.md", "cmd/workorch/main.go"}) {
 		t.Fatalf("manifest paths = %+v, want only source-facing files", paths)
+	}
+}
+
+func TestResolveWorkspaceTargetRefStripsDiagnosticPrefix(t *testing.T) {
+	files := []workspaceDeliverableFile{
+		{Path: "ai-gateway"},
+		{Path: "proxy/proxy.go"},
+		{Path: "proxy/proxy_test.go"},
+	}
+	if got := resolveWorkspaceTargetRef(files, "ai-gateway/proxy/proxy.go"); got != "proxy/proxy.go" {
+		t.Fatalf("resolve target = %q, want proxy/proxy.go", got)
+	}
+}
+
+func TestRepairPatchRelevantTargetRefsUseManifestCanonicalTargets(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyWorkspaceFileManifest: []map[string]any{
+			{"path": "ai-gateway", "kind": "file", "executable": true},
+			{"path": "proxy/proxy.go", "kind": "file"},
+			{"path": "proxy/proxy_test.go", "kind": "file"},
+		},
+		"failureTargetScope": "failureTargets=ai-gateway/proxy/proxy.go,proxy/non_stream_test.go",
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef": "proxy/proxy.go",
+				"exists":    true,
+			}},
+		},
+	}
+	targets := repairPatchRelevantTargetRefsFromInput(input)
+	if !reflect.DeepEqual(targets, []string{"proxy/proxy.go"}) {
+		t.Fatalf("repair targets = %+v, want only canonical existing target", targets)
+	}
+}
+
+func TestValidateRepairPatchTargetRelevanceAllowsDeclaredRelatedCanonicalTarget(t *testing.T) {
+	step := &runmodel.Step{
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"runtimeStage":                runtimeStageRepair,
+			"repairObjective":             "produce_state_changing_output",
+			"stateChangingOutputRequired": true,
+			stepInputKeyWorkspaceFileManifest: []map[string]any{
+				{"path": "ai-gateway", "kind": "file", "executable": true},
+				{"path": "proxy/proxy.go", "kind": "file"},
+				{"path": "proxy/proxy_test.go", "kind": "file"},
+			},
+			"failureTargetScope": "failureTargets=ai-gateway/proxy/proxy.go",
+		},
+	}
+	request := runtimePatchRequest{
+		TargetRef: "proxy/proxy_test.go",
+		PatchType: "text_replace",
+		OldText:   "old",
+		NewText:   "new",
+		Extra: map[string]any{
+			"relatedFailureTargets": []string{"ai-gateway/proxy/proxy.go"},
+		},
+	}
+	if err := validateRepairPatchTargetRelevance(step, request); err != nil {
+		t.Fatalf("validateRepairPatchTargetRelevance: %v", err)
 	}
 }
 
