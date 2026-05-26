@@ -20180,6 +20180,91 @@ func TestValidateLLMExecutionOutputContractAllowsDependencyPrerequisiteRootCause
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCoverageTargetSurfaceRepair(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-coverage-surface",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-coverage-surface/repair-005",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"coverageTargetSet": []map[string]any{{
+				"coverageTargetToken": "dod-console-feedback",
+				"targetText":          "DoD requires bounded operational feedback to be visible in the runtime output.",
+				"item":                "DoD requires bounded operational feedback to be visible in the runtime output.",
+				"kind":                "dod",
+				"state":               "failed",
+			}},
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "repeated_repair_failure",
+				"targetRepairAttempts": 0,
+				"failedSurface":        "invalid argument: concrete validation evidence repair must return bounded executionGraph instead of assessment-only output",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":       "handler.go",
+				"exists":          true,
+				"contentHash":     "hash-handler",
+				"contentComplete": true,
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-handler-feedback",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "handler.go",
+						"patchType":            "unified_diff",
+						"diff":                 "--- a/handler.go\n+++ b/handler.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+						"failedSurface":        "runtime output feedback is not yet visible",
+						"rootCauseTarget":      "handler.go",
+						"repairTargetDecision": "patch handler.go to expose bounded operational feedback",
+						"repairMode":           "continue_same_target_repair",
+						"forbiddenRepair":      "do not modify unrelated resources",
+						"verificationPlan":     "run targeted verification for handler.go",
+						"coverageTargets": []string{
+							"dod-console-feedback",
+						},
+					},
+				},
+				{
+					"id":        "verify-feedback",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-handler-feedback"},
+					"input": map[string]any{
+						"command":           "verify",
+						"args":              []string{"--target=handler.go"},
+						"targetRef":         "handler.go",
+						"verificationScope": "bounded_to_repaired_target",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage-target surface repair accepted", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsRepeatedFailedSurfacePatchWhenRootCauseTargetDoesNotMatchPatchTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-root-cause-mismatch",

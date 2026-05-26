@@ -2841,8 +2841,25 @@ func strategyReassessmentExpectedSurfaces(step *runModel.Step, reassessment map[
 	add(reassessment["failedSurface"])
 	if step != nil && step.Input != nil {
 		add(step.Input["failureTargetScope"])
+		addCoverageTargets := func(value any) {
+			for _, item := range mapSliceFromValue(value) {
+				add(item["coverageTargetToken"])
+				add(item["targetText"])
+				add(item["item"])
+				add(item["goalRequirementId"])
+			}
+			for _, item := range stringSliceFromValue(value) {
+				add(item)
+			}
+		}
+		addCoverageTargets(step.Input["coverageTargetSet"])
+		addCoverageTargets(step.Input["missingDoDItems"])
+		addCoverageTargets(step.Input["missingGoalCoverage"])
 		actionPackage := mapFromValue(step.Input["repairActionPackage"])
 		add(actionPackage["failureTargetScope"])
+		addCoverageTargets(actionPackage["coverageTargetSet"])
+		addCoverageTargets(actionPackage["missingDoDItems"])
+		addCoverageTargets(actionPackage["missingGoalCoverage"])
 		progress := mapFromValue(step.Input["currentExecutionProgress"])
 		add(progress["failureTargetScope"])
 		failure := mapFromValue(step.Input["currentFailure"])
@@ -2859,11 +2876,25 @@ func strategyCandidateMatchingExpectedSurface(candidate map[string]any, expected
 		if strings.TrimSpace(expectedSurface) == "" {
 			continue
 		}
-		if strategyFailedSurfaceMatches(candidate, expectedSurface) || strategyCandidateTargetsMatchFailedSurface(candidate, expectedSurface) {
+		if strategyFailedSurfaceMatches(candidate, expectedSurface) ||
+			strategyCandidateTargetsMatchFailedSurface(candidate, expectedSurface) ||
+			strategyCandidateCoverageTargetsMatchSurface(candidate, expectedSurface) {
 			return expectedSurface, true
 		}
 	}
 	return "", false
+}
+
+func strategyCandidateCoverageTargetsMatchSurface(candidate map[string]any, expectedSurface string) bool {
+	if len(candidate) == 0 || strings.TrimSpace(expectedSurface) == "" {
+		return false
+	}
+	for _, target := range stringSliceFromValue(candidate["coverageTargets"]) {
+		if strategyFailedSurfaceTextMatches(target, expectedSurface) {
+			return true
+		}
+	}
+	return false
 }
 
 const (
@@ -3135,7 +3166,7 @@ func strategyReassessmentRequiresRootCauseTargetShift(reassessment map[string]an
 		return true
 	}
 	reason := strings.ToLower(strings.TrimSpace(stringFromAny(reassessment["reason"])))
-	return strings.Contains(reason, "same_target") || strings.Contains(reason, "repeated")
+	return strings.Contains(reason, "same_target")
 }
 
 func strategyCandidatePatchesFailedSurface(candidate map[string]any, expectedSurface string) bool {
