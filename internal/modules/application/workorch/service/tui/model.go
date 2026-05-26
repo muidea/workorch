@@ -48,9 +48,10 @@ type transcriptItem struct {
 }
 
 const (
-	maxInputHistory = 100
-	maxResultLines  = 1000
-	ctrlCQuitWindow = 750 * time.Millisecond
+	maxInputHistory  = 100
+	maxResultLines   = 1000
+	maxRuntimeEvents = 80
+	ctrlCQuitWindow  = 750 * time.Millisecond
 )
 
 type AppModel struct {
@@ -84,6 +85,7 @@ type AppModel struct {
 	memoryRecalls []backend.MemoryRecallTraceInfo
 	llmUsage      backend.LLMUsageSummaryInfo
 	llmContext    map[string]any
+	runtimeEvents []string
 	progress      progressState
 	progressText  string
 	repairLoop    string
@@ -603,6 +605,7 @@ func (m *AppModel) submitGoalText(text string) (tea.Model, tea.Cmd) {
 	m.patches = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.runtimeEvents = nil
 	m.failureReason = ""
 	m.lastError = nil
 	m.clearInput()
@@ -642,6 +645,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.patches = nil
 		m.llmUsage = backend.LLMUsageSummaryInfo{}
 		m.llmContext = nil
+		m.runtimeEvents = nil
 		m.failureReason = ""
 		m.lastError = nil
 		m.resetMainViewport()
@@ -761,6 +765,20 @@ func (m *AppModel) appendTranscript(kind string, text string) {
 	m.transcript = append(m.transcript, transcriptItem{Kind: kind, Text: text})
 	if len(m.transcript) > 20 {
 		m.transcript = append([]transcriptItem(nil), m.transcript[len(m.transcript)-20:]...)
+	}
+}
+
+func (m *AppModel) appendRuntimeEvent(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if len(m.runtimeEvents) > 0 && m.runtimeEvents[len(m.runtimeEvents)-1] == text {
+		return
+	}
+	m.runtimeEvents = append(m.runtimeEvents, text)
+	if len(m.runtimeEvents) > maxRuntimeEvents {
+		m.runtimeEvents = append([]string(nil), m.runtimeEvents[len(m.runtimeEvents)-maxRuntimeEvents:]...)
 	}
 }
 
@@ -1194,6 +1212,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventStepDispatched:
 		m.progress = progressRunning
 		m.progressText = stepProgressTextFromPayload("Working", evt.Payload, "Working; waiting for final result")
+		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTail()
 	case backend.EventStepCompleted:
 		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)); state == common.StepStateFailed {
@@ -1201,6 +1220,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		if m.progress == progressRunning {
 			m.progressText = stepProgressTextFromPayload("Step completed", evt.Payload, "Step completed; waiting for next update")
+			m.appendRuntimeEvent(m.progressText)
 			m.followMainViewportTail()
 		}
 	case backend.EventDecisionCreated:
@@ -1270,6 +1290,8 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		} else {
 			m.progressText = string(evt.Type)
 		}
+		m.appendRuntimeEvent(m.progressText)
+		m.followMainViewportTail()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryRecallRecorded:
 		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
@@ -1279,10 +1301,14 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		} else {
 			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
 		}
+		m.appendRuntimeEvent(m.progressText)
+		m.followMainViewportTail()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventLLMUsageRecorded:
 		m.progressText = llmUsageProgressText(evt.Payload)
 		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
+		m.appendRuntimeEvent(m.progressText)
+		m.followMainViewportTail()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"

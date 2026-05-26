@@ -219,6 +219,24 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 			}
 			return err
 		}
+		if strings.EqualFold(strings.TrimSpace(beforeState.Hash), strings.TrimSpace(afterHash)) {
+			err = newPatchApplyDiagnosticError(
+				request.TargetRef,
+				request.PatchType,
+				"patch_apply_noop",
+				common.ErrInvalidArgument,
+				fmt.Sprintf("invalid argument: runtime repair patch/apply %s for target %q is non-substantive", request.PatchType, request.TargetRef),
+				"Return a substantive state-changing artifact, a bounded validation graph when the current snapshot already satisfies the intended change, or a failed assessment/blocker.",
+				"before/after content hashes are identical",
+			)
+			patch.State = common.PatchStateFailed
+			patch.AfterHash = afterHash
+			_ = o.evidence.Patches.Update(ctx, patch)
+			if publishErr := o.publishPatchChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+				return errors.Join(err, publishErr)
+			}
+			return err
+		}
 		patch.State = common.PatchStateApplied
 		patch.AfterHash = afterHash
 		patch.ReverseDiff = reverseDiffForPatch(request.TargetRef, beforeState.Content, beforeState.Exists)
@@ -414,6 +432,9 @@ func runtimePatchRequestFromMap(item map[string]any) (runtimePatchRequest, error
 	}
 	if patchType == "text_replace" && oldText == "" {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch oldText is required for text_replace", common.ErrInvalidArgument)
+	}
+	if patchType == "text_replace" && oldText == newText {
+		return runtimePatchRequest{}, fmt.Errorf("%w: patch text_replace oldText/newText must describe a substantive change", common.ErrInvalidArgument)
 	}
 	if containsUnresolvedPatchBaseHash(baseHash) {
 		return runtimePatchRequest{}, fmt.Errorf("%w: patch baseHash contains unresolved runtime template placeholders", common.ErrInvalidArgument)

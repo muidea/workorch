@@ -2816,7 +2816,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		)
 		if !boolValue(input["concreteFailureEvidenceRequired"]) {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include patch/apply before verification, or return a failed dodAssessment/blocker.",
+				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a failed dodAssessment/blocker.",
 			)
 		}
 		if stateChangingSchemaInvalidRepair(failedStep) {
@@ -3058,7 +3058,7 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 	if inheritedTarget || inheritedPatch || inheritedReadable || inheritedManifest {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Preserve inherited repair context from the previous repair attempt; it contains the current target snapshots needed for direct state-changing recovery.",
-			"Use inherited target snapshots and workspace manifest to produce patch/apply artifacts instead of retrying rejected shell-only or read-only recovery output.",
+			"Use inherited target snapshots and workspace manifest to produce accepted state-changing artifacts instead of retrying rejected undeclared tool or read-only recovery output.",
 			"When a snapshot exposes contentHash, use that literal hash as baseHash or omit baseHash; do not emit template or interpolation syntax in patch fields.",
 			"Do not generate file_write from inherited snapshots unless the snapshot is complete and not redacted; use exact minimal diffs or file/read when content is incomplete.",
 		)
@@ -3210,12 +3210,12 @@ func textContainsShapeConflictDiagnostic(text string) bool {
 func stateChangingRepairGuidance() []string {
 	return []string{
 		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
-		"If multiple dependent operations are needed, executionGraph is allowed only when it contains at least one valid patch/apply node that does not depend on llm/workspace_execution before the patch.",
-		"Do not return read-only, inspection-only, shell-only executionGraph, or LLM-gated executionGraph.",
+		"If multiple dependent operations are needed, executionGraph must contain an auditable state-changing operation accepted by repairActionPackage.requiredOutput; patch/apply is preferred when it can represent the change.",
+		"Do not return read-only, inspection-only, or LLM-gated executionGraph.",
 		"patch/apply supports file_write, unified_diff, and text_replace; file_write content must be non-empty and must not be used as a delete operation.",
 		"When changing an existing target file, prefer text_replace with exact oldText/newText or the smallest unified_diff over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"unified_diff patches must include explicit hunk line ranges such as @@ -12,3 +12,4 @@; never emit a bare @@ hunk.",
-		"Do not use shell/command to modify workspace files when a patch/apply state-change artifact can represent the change; use shell/command for bounded preparation or verification after the patch.",
+		"Do not use shell/command or mcp/tool_call to modify workspace files when a patch/apply state-change artifact can represent the change; when acceptedKinds explicitly allows them, declare stateChanging=true plus targetRef, relatedFailureTargets, stateChangingReason, or boundedReason, then add bounded verification that depends on the operation.",
 		"For scoped repair verification, shell/command input must declare targetRef, relatedFailureTargets, verificationScope, or boundedReason, or depend on a patch/apply node that directly targets the current failure scope.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
 		"When repair target snapshots or failure target scope are present, patch/apply must target that failure scope/current repair snapshot, or explicitly declare relatedFailureTargets that cite the current failure target being validated or unblocked; unrelated marker/no-op patches are invalid.",
@@ -3605,15 +3605,18 @@ func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput ma
 func stateChangingRepairRequiredOutput() map[string]any {
 	return map[string]any{
 		"mustIncludeStateChangingNode": true,
-		"acceptedKinds":                []string{"patch/apply"},
+		"acceptedKinds":                stateChangingRepairAcceptedKinds(),
 		"forbiddenKinds": []string{
 			"read_only_graph",
-			"shell_only_graph",
 			"llm_gated_graph",
 			"self_inspection_graph",
 			"context_rehydration_graph",
 		},
 	}
+}
+
+func stateChangingRepairAcceptedKinds() []string {
+	return []string{"patch/apply", "shell/command", "mcp/tool_call"}
 }
 
 func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
@@ -3680,7 +3683,8 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 	}
 	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
 		requiredOutput["mustIncludeStateChangingNode"] = true
-		requiredOutput["acceptedKinds"] = []string{"patch/apply"}
+		acceptedKinds := compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
+		requiredOutput["acceptedKinds"] = acceptedKinds
 		return
 	}
 	next := evidenceAcquisitionRequiredOutput(requiredOutput)

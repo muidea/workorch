@@ -349,6 +349,29 @@ func TestModelStepProgressShowsPathCommandAndMCPDetails(t *testing.T) {
 	}
 }
 
+func TestModelStepProgressAppendsRuntimeEvents(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 120
+	m.height = 16
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "mcp/tool_call",
+			"input": map[string]any{
+				"summary": map[string]any{"serverId": "mcp-lsp-bridge", "toolName": "textDocument/references"},
+			},
+		},
+	})
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Runtime Events") || !strings.Contains(view, "Working: mcp/tool_call mcp-lsp-bridge:textDocument/references") {
+		t.Fatalf("view missing runtime event log:\n%s", view)
+	}
+}
+
 func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.width = 120

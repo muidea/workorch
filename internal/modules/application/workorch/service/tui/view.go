@@ -172,6 +172,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, width-2); section != "" {
 		b.WriteString(section)
 	}
+	if section := renderRuntimeEventsCompact(m.runtimeEvents, width-2, 8); section != "" {
+		b.WriteString(section)
+	}
 	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
 		b.WriteString(section)
 	}
@@ -413,6 +416,28 @@ func renderLLMContextCompact(budget map[string]any, width int) string {
 	compressed := payloadStringSliceValue(budget, "compressedSections", "CompressedSections")
 	if len(compressed) > 0 {
 		b.WriteString(truncateDisplay("- compressed: "+strings.Join(compressed, ", "), width))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderRuntimeEventsCompact(items []string, width int, limit int) string {
+	if len(items) == 0 || width <= 0 || limit <= 0 {
+		return ""
+	}
+	start := len(items) - limit
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Runtime Events"))
+	b.WriteString("\n")
+	for _, item := range items[start:] {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		b.WriteString(truncateDisplay("- "+item, width))
 		b.WriteString("\n")
 	}
 	return b.String()

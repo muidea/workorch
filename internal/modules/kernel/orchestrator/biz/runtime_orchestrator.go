@@ -1709,6 +1709,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
 				return nil
 			}
+			if allowDeclaredToolStateChangingRepairGraph(step, graph) {
+				return nil
+			}
 			if err := validateStateChangingExecutionGraph(graph); err != nil {
 				return err
 			}
@@ -4049,7 +4052,7 @@ func graphHasStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool
 
 func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph) error {
 	if !graphHasStateChangingPatchNode(graph) {
-		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply; read-only, inspection-only, or shell-only graphs cannot satisfy the state-changing contract", common.ErrInvalidArgument)
+		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation; read-only or inspection-only graphs cannot satisfy the state-changing contract", common.ErrInvalidArgument)
 	}
 	if !graphHasUngatedStateChangingPatchNode(graph) {
 		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
@@ -4093,6 +4096,21 @@ func allowPatchRepairValidationEvidenceGraph(step *runModel.Step, graph runtimem
 	return graphIsConcreteValidationEvidenceGraph(graph)
 }
 
+func allowDeclaredToolStateChangingRepairGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) bool {
+	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
+		return false
+	}
+	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+		return false
+	}
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	accepted := stringSliceFromValue(required["acceptedKinds"])
+	if !stringSliceContains(accepted, "shell/command") && !stringSliceContains(accepted, "mcp/tool_call") {
+		return false
+	}
+	return graphHasDeclaredUngatedStateChangingToolNode(graph) && graphHasBoundedVerificationDependingOnDeclaredStateChangingTool(graph)
+}
+
 func stepRepairsPatchCapabilityFailure(step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
@@ -4130,6 +4148,101 @@ func graphIsConcreteValidationEvidenceGraph(graph runtimemodel.BlockExecutionGra
 		}
 	}
 	return hasEvidenceProducer
+}
+
+func graphHasDeclaredUngatedStateChangingToolNode(graph runtimemodel.BlockExecutionGraph) bool {
+	nodes := graphNodesByID(graph)
+	for _, node := range graph.Nodes {
+		if !graphNodeIsStateChangingTool(node) || !graphNodeDeclaresStateChangingIntent(node) {
+			continue
+		}
+		if !graphNodeHasAncestorKind(node, nodes, llmWorkspaceExecutionStepKind, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphHasBoundedVerificationDependingOnDeclaredStateChangingTool(graph runtimemodel.BlockExecutionGraph) bool {
+	nodes := graphNodesByID(graph)
+	for _, node := range graph.Nodes {
+		if !graphNodeIsVerificationTool(node) || !shellCommandInputHasExplicitVerificationScope(node.Input) {
+			continue
+		}
+		if graphNodeHasDeclaredStateChangingToolAncestor(node, nodes, map[string]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeHasDeclaredStateChangingToolAncestor(node runtimemodel.BlockExecutionNode, nodes map[string]runtimemodel.BlockExecutionNode, seen map[string]bool) bool {
+	for _, depID := range node.DependsOn {
+		depID = strings.TrimSpace(depID)
+		if depID == "" || seen[depID] {
+			continue
+		}
+		seen[depID] = true
+		parent, ok := nodes[depID]
+		if !ok {
+			continue
+		}
+		if graphNodeIsStateChangingTool(parent) && graphNodeDeclaresStateChangingIntent(parent) {
+			return true
+		}
+		if graphNodeHasDeclaredStateChangingToolAncestor(parent, nodes, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodeIsStateChangingTool(node runtimemodel.BlockExecutionNode) bool {
+	switch strings.TrimSpace(node.Kind) {
+	case "shell/command", "mcp/tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func graphNodeIsVerificationTool(node runtimemodel.BlockExecutionNode) bool {
+	switch strings.TrimSpace(node.Kind) {
+	case "shell/command", "mcp/tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func graphNodeDeclaresStateChangingIntent(node runtimemodel.BlockExecutionNode) bool {
+	if len(node.Input) == 0 {
+		return false
+	}
+	if boolValue(node.Input["stateChanging"]) || boolValue(node.Input["stateChange"]) {
+		return true
+	}
+	for _, key := range []string{"stateChangingReason", "stateChangeReason", "targetRef", "boundedReason"} {
+		if strings.TrimSpace(stringFromAny(node.Input[key])) != "" {
+			return true
+		}
+	}
+	for _, key := range []string{"relatedFailureTargets", "targetRefs", "affectedTargets"} {
+		if len(stringSliceFromValue(node.Input[key])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func graphNodesByID(graph runtimemodel.BlockExecutionGraph) map[string]runtimemodel.BlockExecutionNode {
+	nodes := map[string]runtimemodel.BlockExecutionNode{}
+	for _, node := range graph.Nodes {
+		if id := strings.TrimSpace(node.ID); id != "" {
+			nodes[id] = node
+		}
+	}
+	return nodes
 }
 
 func graphHasUngatedStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool {

@@ -369,6 +369,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""

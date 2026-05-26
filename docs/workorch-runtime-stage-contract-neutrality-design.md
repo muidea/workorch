@@ -155,7 +155,7 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 | State | 触发条件 | LLM 合同 |
 | --- | --- | --- |
 | `need_evidence` | 未关闭失败存在，但缺少 concrete target evidence | `runtimeStage=repair`，`repairObjective=acquire_concrete_failure_evidence`，`concreteFailureEvidenceRequired=true`，只允许有界 `file/list` / `file/read` / `shell/command` / `mcp/tool_call` 或等价取证能力 |
-| `need_state_change` | 未关闭失败存在，且已有 target refs / line refs / snapshots / patch repair context / failure target repair context / structured diagnostics 等 concrete implementation target evidence | `runtimeStage=repair`，`runtimeStageMode=strict_convergence`，`repairObjective=produce_state_changing_output`，`stateChangingOutputRequired=true`，`repairActionPackage.requiredOutput.acceptedKinds=["patch/apply"]` |
+| `need_state_change` | 未关闭失败存在，且已有 target refs / line refs / snapshots / patch repair context / failure target repair context / structured diagnostics 等 concrete implementation target evidence | `runtimeStage=repair`，`runtimeStageMode=strict_convergence`，`repairObjective=produce_state_changing_output`，`stateChangingOutputRequired=true`，`repairActionPackage.requiredOutput.acceptedKinds` 必须来自当前 capability contract。`patch/apply` 是首选 state-changing artifact；当状态变更只能由已声明 capability 表达时，可接受显式声明 state-changing intent 的 `shell/command` / `mcp/tool_call`，并必须带依赖其后的 bounded verification。 |
 | `need_validation` | 当前 state-changing artifact 已应用，下一步需要证明结果；或只存在 Goal / DoD / deliverable coverage gap，但尚无 concrete implementation target evidence | `runtimeStage=verification`，只允许 bounded validation evidence graph；不得返回新的 LLM 嵌套、只读自检 graph 或 `patch/apply` |
 | `need_assessment` | 验证证据足以进入 DoD / Goal 覆盖判断，或 assessment-only contract correction | `runtimeStage=validation` 或 assessment-only correction，只允许 `dodAssessment` / coverage correction |
 | `need_governance` | 真实缺少外部信息、权限、凭证、配置、审批、破坏性变更授权或无法自动获取的业务决策 | 创建 decision / approval ticket，并写明 missing field、source refs 与无法自动获取原因 |
@@ -355,7 +355,7 @@ Runtime 要求 LLM：
 
 Runtime 必须拒绝：
 
-- shell-only / read-only graph 冒充实现进展。
+- 未声明 state-changing intent、缺少 bounded verification 的 shell/tool graph，或 read-only graph 冒充实现进展。
 - 下层 `executionGraph` 继续依赖 `llm/workspace_execution` 决策节点套娃。
 - placeholder artifact。
 - weak evidence 直接 accepted。
@@ -709,7 +709,7 @@ Runtime 必须维护中立 coverage ledger 或等价的 coverage 状态视图。
 
 Follow-up、repair、provider retry、replan successor 和 validation 输入必须从 coverage ledger / 等价状态视图重建上下文，至少包含未关闭 coverage targets、最近 accepted evidence、最近 rejected evidence 及原因、当前 failure surface、`repairObjective`、`stateChangingOutputRequired`、`requiredOutput`、`currentExecutionProgress` 与 `processEvidenceTimeline`。若 follow-up 输入只包含最近 step 摘要而缺少 Goal / DoD coverage contract，runtime 必须先补齐上下文或 fail-fast，不得让 LLM 基于低价值 smoke evidence 继续生成 state-changing 输出或 failed assessment。
 
-当上述 coverage repair 因 repair 输出合同违规而再次进入 repair-of-repair，例如 patch/apply 缺少 `coverageTargets`、返回只读 graph、返回 shell-only graph 或 LLM decision JSON 无效，runtime 必须继承上一轮 `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、候选 evidence、已完成 action evidence、当前失败信息和最近 repair 尝试摘要。`repairActionPackage` 必须携带中立 `coverageRepairRequired=true`、`coverageTargetSet`、`currentExecutionProgress` 与 `requiredOutput.mustDeclareCoverageTargets=true`。这里的 `currentExecutionProgress` 只保留 step id、kind、state、命令/patch 摘要、stdout/stderr 预览、覆盖缺口计数和失败摘要，不得复制大段 patch content、历史 raw LLM 输出或被拒绝的失败正文。该规则保证 LLM 能看到“已有内容、当前进展、遇到的问题和仍未关闭的覆盖目标”，同时避免单 JSON 膨胀和失败产物复用。
+当上述 coverage repair 因 repair 输出合同违规而再次进入 repair-of-repair，例如 patch/apply 缺少 `coverageTargets`、返回只读 graph、返回未声明 state-changing intent 或缺少 bounded verification 的 shell/tool graph，或 LLM decision JSON 无效，runtime 必须继承上一轮 `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、候选 evidence、已完成 action evidence、当前失败信息和最近 repair 尝试摘要。`repairActionPackage` 必须携带中立 `coverageRepairRequired=true`、`coverageTargetSet`、`currentExecutionProgress` 与 `requiredOutput.mustDeclareCoverageTargets=true`。这里的 `currentExecutionProgress` 只保留 step id、kind、state、命令/patch 摘要、stdout/stderr 预览、覆盖缺口计数和失败摘要，不得复制大段 patch content、历史 raw LLM 输出或被拒绝的失败正文。该规则保证 LLM 能看到“已有内容、当前进展、遇到的问题和仍未关闭的覆盖目标”，同时避免单 JSON 膨胀和失败产物复用。
 
 当 patch / preview / apply 因 context mismatch、base mismatch 或 stale artifact 失败，或 `file/edit` 因 `oldText` 不存在、上下文冲突失败时，默认 repair 仍要求基于当前 target snapshot 重新生成可应用 state-changing artifact。runtime 必须把失败目标的当前快照放入 `patchRepairContext` / `repairActionPackage.targetSnapshots`，并明确失败 patch / edit 片段已经陈旧，不能重复使用同一 hunk、oldText 或未解析模板。完整 `file_write` 只允许建立在完整、未脱敏、未截断且标记为 `safeForFileWrite` 的当前快照上，且 patch 请求必须携带与当前快照 `contentHash` 完全一致的字面 `baseHash`；否则必须优先使用 `text_replace` 的精确 `oldText` / `newText` / `baseHash`、最小 `unified_diff`、`file/edit` 或先重新读取目标。若 repair context 中的内容包含 runtime redaction marker、被省略片段或截断标记，LLM 不得把该内容复制进 patch content / diff，而应先读取目标、使用 exact oldText 的最小替换，或基于可见上下文生成最小 `unified_diff`。`baseHash` 只能省略或使用当前 evidence 中的字面 `contentHash` 值；不得输出 `${...}`、`{{...}}`、`<<...>>` 或其他未解析占位符。`unified_diff` 的 hunk header 必须是可解析的真实行号范围，`@@ ... @@` 等伪 hunk 属于无效 artifact。
 

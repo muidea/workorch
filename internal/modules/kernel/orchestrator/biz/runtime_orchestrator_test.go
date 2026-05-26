@@ -2559,6 +2559,18 @@ func TestRuntimePatchRequestAcceptsTextReplace(t *testing.T) {
 	}
 }
 
+func TestRuntimePatchRequestRejectsNoOpTextReplace(t *testing.T) {
+	_, err := runtimePatchRequestFromMap(map[string]any{
+		"patchType": "text_replace",
+		"targetRef": "main.go",
+		"oldText":   "same",
+		"newText":   "same",
+	})
+	if err == nil || !strings.Contains(err.Error(), "substantive change") {
+		t.Fatalf("runtimePatchRequestFromMap error = %v, want no-op text_replace rejection", err)
+	}
+}
+
 func TestRuntimePatchRequestRejectsUnresolvedSymbolicPlaceholderContent(t *testing.T) {
 	_, err := runtimePatchRequestFromMap(map[string]any{
 		"patchType": "file_write",
@@ -4229,7 +4241,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputInheritsTargetContextAfterContrac
 		t.Fatalf("workspaceFileManifest = %#v, want inherited manifest preserved for direct recovery", input[stepInputKeyWorkspaceFileManifest])
 	}
 	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
-	if !strings.Contains(guidance, "Preserve inherited repair context") || !strings.Contains(guidance, "patch/apply artifacts") || !strings.Contains(guidance, "workspace manifest") {
+	if !strings.Contains(guidance, "Preserve inherited repair context") || !strings.Contains(guidance, "accepted state-changing artifacts") || !strings.Contains(guidance, "workspace manifest") {
 		t.Fatalf("repairGuidance = %q, want inherited repair context guidance", guidance)
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
@@ -17614,6 +17626,144 @@ func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairReadOnlyGra
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "executionGraph without patch/apply") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want state-changing repair read-only graph rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsDeclaredStateChangingShellGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-shell-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-shell-graph/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "prepare-state",
+					"kind": "shell/command",
+					"input": map[string]any{
+						"command":               "tool",
+						"args":                  []string{"sync"},
+						"stateChanging":         true,
+						"targetRef":             "manifest.lock",
+						"stateChangingReason":   "refresh derived state from current workspace inputs",
+						"relatedFailureTargets": []string{"manifest.lock"},
+					},
+				},
+				{
+					"id":        "verify-state",
+					"kind":      "shell/command",
+					"dependsOn": []string{"prepare-state"},
+					"input": map[string]any{
+						"command":           "tool",
+						"args":              []string{"verify"},
+						"targetRef":         "manifest.lock",
+						"verificationScope": "manifest.lock",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared state-changing shell graph allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsUndeclaredStateChangingShellGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-undeclared-shell-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-undeclared-shell-graph/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"shell/command"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "run-command",
+				"kind":  "shell/command",
+				"input": map[string]any{"command": "tool", "args": []string{"sync"}},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "auditable state-changing operation") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want undeclared shell graph rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsStateChangingShellGraphWithoutBoundedVerification(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-shell-no-verification",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-shell-no-verification/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"shell/command"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "prepare-state",
+				"kind": "shell/command",
+				"input": map[string]any{
+					"command":       "tool",
+					"args":          []string{"sync"},
+					"stateChanging": true,
+					"targetRef":     "manifest.lock",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "auditable state-changing operation") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want missing bounded verification rejection", err)
 	}
 }
 

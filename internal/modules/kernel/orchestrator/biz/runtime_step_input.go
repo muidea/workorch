@@ -97,10 +97,9 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 	pkg := map[string]any{
 		"requiredOutput": map[string]any{
 			"mustIncludeStateChangingNode": true,
-			"acceptedKinds":                []string{"patch/apply"},
+			"acceptedKinds":                stateChangingRepairAcceptedKinds(),
 			"forbiddenKinds": []string{
 				"read_only_graph",
-				"shell_only_graph",
 				"llm_gated_graph",
 				"self_inspection_graph",
 				"context_rehydration_graph",
