@@ -110,6 +110,16 @@ func BuildConvergenceContract(
 		return contract
 	}
 	if convergenceNeedsValidation(input, failedStep) {
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			contract.State = convergenceStateNeedStateChange
+			contract.RuntimeStage = runtimeStageRepair
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveStateChangingOutput
+			contract.StateChangingOutputRequired = true
+			contract.RepairActionPackage = pkg
+			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+			return contract
+		}
 		contract.State = convergenceStateNeedValidation
 		contract.RuntimeStage = runtimeStageVerification
 		contract.RuntimeStageMode = "strict_convergence"
@@ -507,6 +517,126 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 		}
 		required := mapFromValue(pkg["requiredOutput"])
 		return boolValue(required["mustProduceConcreteValidationEvidence"])
+	}
+	return false
+}
+
+func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, input map[string]any) map[string]any {
+	if run == nil || len(input) == 0 {
+		return nil
+	}
+	targets := coverageTargetSetFromRepairInput(input)
+	if len(targets) == 0 {
+		targets = mapSliceFromValue(input["coverageTargetSet"])
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	requirements := coverageTargetEvidenceKindRequirements(run, targets)
+	if len(requirements) == 0 {
+		return nil
+	}
+	acceptedKinds := make([]string, 0)
+	acceptedOperations := make([]string, 0)
+	requirementSummaries := make([]map[string]any, 0, len(requirements))
+	requiresStateChange := false
+	for _, requirement := range requirements {
+		if len(requirement.AcceptedStepKinds) == 0 {
+			continue
+		}
+		acceptedKinds = append(acceptedKinds, requirement.AcceptedStepKinds...)
+		acceptedOperations = append(acceptedOperations, requirement.AcceptedOperations...)
+		if profileRequirementAcceptsStateChangingEvidence(requirement) {
+			requiresStateChange = true
+		}
+		requirementSummaries = append(requirementSummaries, map[string]any{
+			"scope":              normalizeEvidenceKindRequirementScope(requirement.Scope),
+			"id":                 requirement.ID,
+			"acceptedStepKinds":  compactUniqueStrings(requirement.AcceptedStepKinds),
+			"acceptedOperations": compactUniqueStrings(requirement.AcceptedOperations),
+			"requireDirect":      requirement.RequireDirect,
+			"description":        requirement.Description,
+		})
+	}
+	if !requiresStateChange {
+		return nil
+	}
+	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["coverageRepairRequired"] = true
+	pkg["coverageTargetSet"] = targets
+	pkg["evidenceKindRequirements"] = requirementSummaries
+	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
+		pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
+	}
+	required := stateChangingRepairRequiredOutput()
+	for key, value := range mapFromValue(pkg["requiredOutput"]) {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustDeclareStrategyReassessmentFields", "strategyReassessmentRequiredFields", "strategyReassessmentMatchRule", "mustReassessRepeatedFailedSurface":
+			required[key] = value
+		}
+	}
+	required["acceptedKinds"] = compactUniqueStrings(acceptedKinds)
+	if len(acceptedOperations) > 0 {
+		required["acceptedOperations"] = compactUniqueStrings(lowerStringSlice(acceptedOperations))
+	}
+	required["mustDeclareCoverageTargets"] = true
+	required["coverageTargetMatchRule"] = "state-changing evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	required["evidenceKindRequirementRule"] = "when a coverage target has profile evidenceRequirements, include at least one accepted state-changing evidence node with the required kind and operation before claiming the target satisfied"
+	pkg["requiredOutput"] = required
+	pkg["exitCriteria"] = []string{
+		"profile_required_state_changing_evidence_produced_then_verify",
+		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
+	}
+	return pkg
+}
+
+func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {
+	requirements := profileEvidenceKindRequirements(run)
+	if len(requirements) == 0 || len(targets) == 0 {
+		return nil
+	}
+	ret := make([]profileEvidenceKindRequirement, 0)
+	seen := map[string]bool{}
+	for _, requirement := range requirements {
+		for _, target := range targets {
+			if !evidenceKindRequirementMatchesCoverageTarget(requirement, target) {
+				continue
+			}
+			key := normalizeEvidenceKindRequirementScope(requirement.Scope) + ":" + requirement.ID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ret = append(ret, requirement)
+			break
+		}
+	}
+	return ret
+}
+
+func evidenceKindRequirementMatchesCoverageTarget(requirement profileEvidenceKindRequirement, target map[string]any) bool {
+	if len(target) == 0 {
+		return false
+	}
+	scope := normalizeEvidenceKindRequirementScope(requirement.Scope)
+	targetKind := normalizeEvidenceKindRequirementScope(firstNonEmptyString(
+		stringFromMap(target, "kind"),
+		stringFromMap(target, "source"),
+	))
+	if scope != "" && targetKind != "" && scope != targetKind {
+		return false
+	}
+	return evidenceKindRequirementMatchesItem(requirement, target)
+}
+
+func profileRequirementAcceptsStateChangingEvidence(requirement profileEvidenceKindRequirement) bool {
+	for _, kind := range requirement.AcceptedStepKinds {
+		if stepKindCanProduceStateChangingEvidence(kind) {
+			return true
+		}
 	}
 	return false
 }

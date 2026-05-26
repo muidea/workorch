@@ -21275,6 +21275,43 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsGitWriteDeliverableEvidence(
 	}
 }
 
+func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraph(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{gitcommon.StepKindWrite},
+					"acceptedOperations":           []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "commit-snapshot",
+				"kind": gitcommon.StepKindWrite,
+				"input": map[string]any{
+					"operation": gitcommon.OperationCommit,
+					"message":   "record workspace snapshot",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want accepted profile-required write evidence graph", err)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()

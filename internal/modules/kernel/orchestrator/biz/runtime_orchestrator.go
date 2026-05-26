@@ -1715,6 +1715,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			if allowDeclaredToolStateChangingRepairGraph(step, graph) {
 				return nil
 			}
+			if allowAcceptedStateChangingEvidenceGraph(step, graph) {
+				return nil
+			}
 			if err := validateStateChangingExecutionGraph(graph); err != nil {
 				return err
 			}
@@ -4422,6 +4425,42 @@ func allowDeclaredToolStateChangingRepairGraph(step *runModel.Step, graph runtim
 	return graphHasDeclaredUngatedStateChangingToolNode(graph) && graphHasBoundedVerificationDependingOnDeclaredStateChangingTool(graph)
 }
 
+func allowAcceptedStateChangingEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) bool {
+	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
+		return false
+	}
+	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+		return false
+	}
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		return false
+	}
+	accepted := mapStringSet(stringSliceFromValue(required["acceptedKinds"]))
+	if len(accepted) == 0 {
+		return false
+	}
+	acceptedOperations := mapStringSet(lowerStringSlice(stringSliceFromValue(required["acceptedOperations"])))
+	nodes := graphNodesByID(graph)
+	for _, node := range graph.Nodes {
+		kind := strings.TrimSpace(node.Kind)
+		if !accepted[kind] || !stepKindCanProduceStateChangingEvidence(kind) {
+			continue
+		}
+		if len(acceptedOperations) > 0 {
+			operation := strings.ToLower(strings.TrimSpace(stringFromMap(node.Input, "operation")))
+			if !acceptedOperations[operation] {
+				continue
+			}
+		}
+		if graphNodeHasAncestorKind(node, nodes, llmWorkspaceExecutionStepKind, map[string]bool{}) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func stepRepairsPatchCapabilityFailure(step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
@@ -4515,6 +4554,17 @@ func graphNodeIsStateChangingTool(node runtimemodel.BlockExecutionNode) bool {
 	default:
 		return false
 	}
+}
+
+func stepKindCanProduceStateChangingEvidence(kind string) bool {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		return false
+	}
+	if kind == "patch/apply" {
+		return true
+	}
+	return strings.HasSuffix(kind, "/write")
 }
 
 func graphNodeIsVerificationTool(node runtimemodel.BlockExecutionNode) bool {

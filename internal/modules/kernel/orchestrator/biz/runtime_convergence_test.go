@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -42,6 +43,66 @@ func TestBuildConvergenceContractNeedStateChangeWithTargetEvidence(t *testing.T)
 	}
 	if len(contract.TargetEvidence) == 0 {
 		t.Fatalf("target evidence missing")
+	}
+}
+
+func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCoverageTarget(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-profile-evidence/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+				"source":              "deliverableCoverage",
+			}},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	if !contract.StateChangingOutputRequired || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("contract = %+v, want state-changing repair objective", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want git/write commit accepted state-changing evidence", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, should not introduce unrelated state-changing kinds", required["acceptedKinds"])
+	}
+	if targets := mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"]); len(targets) != 1 || targets[0]["item"] != "version_control_snapshot" {
+		t.Fatalf("coverageTargetSet = %+v, want version_control_snapshot target", targets)
 	}
 }
 
