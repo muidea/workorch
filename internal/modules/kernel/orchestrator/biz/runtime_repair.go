@@ -3711,7 +3711,7 @@ func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]
 		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"])
 	if len(input) > 0 {
 		for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
-			if len(mapSliceFromValue(input[key])) > 0 {
+			if repairContextHasAdmissibleTargetEvidence(input[key]) {
 				return true
 			}
 		}
@@ -3728,11 +3728,11 @@ func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]
 		}
 	}
 	if len(pkg) > 0 {
-		if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		if repairContextHasAdmissibleTargetEvidence(pkg["targetSnapshots"]) {
 			return true
 		}
 		if !requireCurrentSnapshot {
-			if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+			if len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(pkg["repairTargetSet"]))) > 0 {
 				return true
 			}
 			if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
@@ -3747,6 +3747,58 @@ func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]
 		}
 	}
 	return false
+}
+
+func repairContextHasAdmissibleTargetEvidence(value any) bool {
+	for _, item := range mapSliceFromValue(value) {
+		if runtimeRepairTargetRefAdmissible(stringFromMap(item, "targetRef")) && !boolValue(item["isBinary"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeRepairActionPackageTargetEvidence(pkg map[string]any) {
+	if len(pkg) == 0 {
+		return
+	}
+	if targets, ok := pkg["repairTargetSet"]; ok {
+		if filtered := filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(targets)); len(filtered) > 0 {
+			pkg["repairTargetSet"] = filtered
+		} else {
+			delete(pkg, "repairTargetSet")
+		}
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"rootCauseCandidateContext",
+	} {
+		items := mapSliceFromValue(pkg[key])
+		if len(items) == 0 {
+			continue
+		}
+		filtered := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if runtimeRepairTargetRefAdmissible(stringFromMap(item, "targetRef")) && !boolValue(item["isBinary"]) {
+				filtered = append(filtered, item)
+			}
+		}
+		if len(filtered) > 0 {
+			pkg[key] = filtered
+		} else {
+			delete(pkg, key)
+		}
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if compact := compactStructuredFailureSignalsForRepairActionPackage(signals); len(compact) > 0 {
+			pkg["structuredFailureSignals"] = compact
+		} else {
+			delete(pkg, "structuredFailureSignals")
+		}
+	}
 }
 
 func enrichRepairInputWithProgressFailureSignals(input map[string]any) {
@@ -4696,6 +4748,7 @@ func isRuntimeContractFieldTargetRef(cleanLower string) bool {
 	for _, prefix := range []string{
 		"dodcoverage.",
 		"dodassessment.",
+		"validationevidence.",
 		"governance.",
 		"executiongraph.",
 		"llmexecutiondecision.",
@@ -4703,6 +4756,8 @@ func isRuntimeContractFieldTargetRef(cleanLower string) bool {
 		"repairactionpackage.",
 		"strategyreassessment.",
 		"runtimecontext.",
+		"runtimediagnostics.",
+		"currentexecutionprogress.",
 		"contextbudget.",
 		"llmusage.",
 	} {
@@ -5378,7 +5433,8 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 }
 
 func coverageVerificationGapPresent(input map[string]any, failedStep *runModel.Step) bool {
-	if len(coverageTargetSetFromRepairInput(input)) > 0 ||
+	if len(mapSliceFromValue(input["coverageTargetSet"])) > 0 ||
+		len(coverageTargetSetFromRepairInput(input)) > 0 ||
 		len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
 		len(missingGoalCoverageFromInput(input)) > 0 ||
 		len(mapSliceFromValue(input["missingDeliverableCoverage"])) > 0 {

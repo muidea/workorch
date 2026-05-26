@@ -357,6 +357,69 @@ func TestBuildConvergenceContractUsesLatestActionEvidenceAsConcreteTarget(t *tes
 	}
 }
 
+func TestBuildConvergenceContractRequiresEvidenceWhenStateChangeOnlyHasRuntimeFieldTargets(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":       "dod",
+			"targetText": "unresolved requirement",
+			"state":      "failed",
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"validationEvidence.mode", "validationevidence.observ"},
+			"messages": []string{
+				"concrete validation nodes must declare validationEvidence.mode and validationEvidence.observationType",
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"repairTargetSet": []string{
+				"validationEvidence.mode",
+				"validationevidence.observ",
+			},
+			"targetSnapshots": []map[string]any{{
+				"targetRef": "validationEvidence.mode",
+				"exists":    false,
+				"error":     "no such file or directory",
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/repair-invalid-targets",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan",
+			"error":                   "concrete validation nodes must declare validationEvidence.mode and validationEvidence.observationType",
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("contract.StateChangingOutputRequired = true, want false")
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if boolValue(applied["stateChangingOutputRequired"]) {
+		t.Fatalf("stateChangingOutputRequired still set in applied input: %+v", applied)
+	}
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want bounded evidence acquisition without patch/apply", required)
+	}
+	pkg := mapFromValue(applied["repairActionPackage"])
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 || len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		t.Fatalf("repairActionPackage = %+v, want invalid runtime-field target evidence removed", pkg)
+	}
+}
+
 func TestDecisionResolutionInputAppliesConvergenceContract(t *testing.T) {
 	ticket := &decisionmodel.Ticket{
 		ID:           "ticket-resolved-continue",

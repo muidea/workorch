@@ -27647,6 +27647,8 @@ func TestRuntimeRepairTargetAdmissionRejectsRuntimeAndAbsoluteTargets(t *testing
 		"home/user/workorch/.workorch-workspaces/ws-1/main.go",
 		".workorch-data/internal/run.json",
 		"llmexecutiondecision.plan",
+		"validationEvidence.mode",
+		"validationevidence.observationType",
 		"runs/run-1/request.json",
 		"../escape.go",
 	}

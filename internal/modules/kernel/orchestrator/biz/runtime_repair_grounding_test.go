@@ -77,7 +77,7 @@ func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t
 func TestStructuredFailureSignalsDoNotPromoteSchemaFieldPathsAsTargetRefs(t *testing.T) {
 	output := map[string]any{
 		"stage":               "llm_schema_invalid",
-		"error":               "invalid argument: invalid llm decision json: json: cannot unmarshal string into Go struct field DoDCoverage.dodAssessment.acceptanceDimensions.items of type models.DoDCoverageItem",
+		"error":               "invalid argument: invalid llm decision json: json: cannot unmarshal string into Go struct field DoDCoverage.dodAssessment.acceptanceDimensions.items of type models.DoDCoverageItem; concrete validation nodes must declare validationEvidence.mode and validationEvidence.observationType",
 		failureOutputKeyClass: failureClassLLMDecisionInvalid,
 	}
 
@@ -87,6 +87,8 @@ func TestStructuredFailureSignalsDoNotPromoteSchemaFieldPathsAsTargetRefs(t *tes
 	for _, forbidden := range []string{
 		"dodcoverage.dodassessment.acceptancedimensions.items",
 		"DoDCoverage.dodAssessment.acceptanceDimensions.items",
+		"validationevidence.mode",
+		"validationEvidence.observationType",
 	} {
 		if stringSliceContains(targets, forbidden) {
 			t.Fatalf("targetRefs = %#v, want schema field path %q filtered", targets, forbidden)
@@ -174,7 +176,7 @@ func TestRuntimeRepairActionPackageDoesNotUseRuntimeContractFieldsAsRepairTarget
 		"failureReason":               "invalid argument: strategyReassessment.required=true requires failedSurface/rootCauseTarget/repairTargetDecision/forbiddenRepair/verificationPlan",
 		"repairObjective":             repairObjectiveStateChangingOutput,
 		"structuredFailureSignals": map[string]any{
-			"targetRefs": []string{"strategyReassessment.required", "strategyreassessment.required"},
+			"targetRefs": []string{"strategyReassessment.required", "strategyreassessment.required", "validationEvidence.mode", "validationevidence.observ"},
 			"identifiers": []string{
 				"strategyReassessment",
 				"failedSurface",

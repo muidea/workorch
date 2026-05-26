@@ -219,6 +219,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
 		pkg["requiredOutput"] = required
 		pkg["evidenceAcquisitionRequired"] = true
+		sanitizeRepairActionPackageTargetEvidence(pkg)
 		input["repairActionPackage"] = pkg
 	case convergenceStateNeedStateChange:
 		setRuntimeStage(input, runtimeStageRepair)
@@ -397,11 +398,31 @@ func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) b
 	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
 		return true
 	}
+	if convergenceStateChangeCannotAdvanceWithoutTarget(input, failedStep) {
+		return true
+	}
 	if boolValue(input["concreteFailureEvidenceRequired"]) ||
 		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveAcquireFailureEvidence {
 		return true
 	}
 	return repairActionPackageRequiresEvidenceAcquisition(mapFromValue(input["repairActionPackage"]))
+}
+
+func convergenceStateChangeCannotAdvanceWithoutTarget(input map[string]any, failedStep *runModel.Step) bool {
+	if !convergenceNeedsStateChange(input, failedStep) {
+		return false
+	}
+	if !coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if repairHasImplementationTargetEvidence(input, pkg) {
+		return false
+	}
+	if failedStep != nil && repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		return false
+	}
+	return true
 }
 
 func convergenceConcreteValidationCannotAdvanceWithoutTarget(input map[string]any, failedStep *runModel.Step) bool {
