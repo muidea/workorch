@@ -13983,8 +13983,8 @@ func TestNoActionableContinuationFailedAssessmentBuildsCoverageRepairInput(t *te
 	}
 	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-failed-assessment-coverage-follow-up", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
 
-	if !shouldDispatchNoActionableContinuationFollowUp(run, step, step.Output) {
-		t.Fatalf("failed assessment with actionable coverage gaps should dispatch continuation follow-up")
+	if shouldDispatchNoActionableContinuationFollowUp(run, step, step.Output) {
+		t.Fatalf("failed assessment with actionable coverage gaps should enter runtime repair directly")
 	}
 	input := noActionableContinuationFollowUpStepInput(run, step)
 	if !boolValue(input["actionableFailedAssessmentContinuation"]) || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {

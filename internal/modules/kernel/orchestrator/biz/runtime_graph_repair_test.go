@@ -37,6 +37,62 @@ func TestLatestFailedRepairableGraphStepSkipsSupersededFailure(t *testing.T) {
 	}
 }
 
+func TestNoActionableFollowUpSkipsFailedAssessmentWithActionableGap(t *testing.T) {
+	run := &runModel.Run{DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runModel.Step{
+		ID:    "run-actionable-assessment/follow-up",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{},
+	}
+	output := map[string]any{
+		"completionState": "failed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "coverage gap remains",
+			"items": []map[string]any{{
+				"item":  "required behavior",
+				"state": "failed",
+			}},
+		},
+	}
+
+	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
+		t.Fatalf("shouldDispatchNoActionableContinuationFollowUp = true, want direct runtime repair for actionable failed assessment")
+	}
+}
+
+func TestCurrentProgressDigestClearsFailureSupersededByRepairSuccess(t *testing.T) {
+	runID := common.RunID("run-progress-superseded-failure")
+	failedStepID := string(runID) + "/graph-001/002-check-target"
+	timeline := []map[string]any{
+		{
+			"order":            1,
+			"stepId":           failedStepID,
+			"kind":             "shell/command",
+			"state":            string(common.StepStateFailed),
+			"failureClass":     failureClassShellCommand,
+			"failureReason":    "target check failed",
+			"evidenceValidity": "actionable_failure",
+		},
+		{
+			"order":                    2,
+			"stepId":                   string(runID) + "/graph-002/001-verify-target",
+			"kind":                     "shell/command",
+			"state":                    string(common.StepStateCompleted),
+			stepInputKeyRepairOfStepID: failedStepID,
+			"summary":                  "target check passed",
+		},
+	}
+
+	digest := currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	if failure := mapFromValue(digest["lastObservedFailure"]); len(failure) > 0 {
+		t.Fatalf("lastObservedFailure = %+v, want superseded failure cleared", failure)
+	}
+	if digest["nextRequiredAction"] != "continue_current_stage_contract" {
+		t.Fatalf("digest = %+v, want continuation after superseding success", digest)
+	}
+}
+
 func TestProcessEvidenceTimelineOmitsRejectedLLMDecisionSummary(t *testing.T) {
 	runID := common.RunID("run-rejected-llm-summary")
 	step := &runModel.Step{

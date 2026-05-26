@@ -4679,10 +4679,38 @@ func runtimeRepairTargetRefAdmissible(value string) bool {
 	if runtimeRepairTargetLooksLikeLocalAbsolutePath(lower) {
 		return false
 	}
+	if isRuntimeContractFieldTargetRef(lower) {
+		return false
+	}
 	if isReservedWorkspacePatchTarget(clean) || isRuntimeDecisionArtifactTarget(clean) {
 		return false
 	}
 	return true
+}
+
+func isRuntimeContractFieldTargetRef(cleanLower string) bool {
+	cleanLower = strings.TrimSpace(filepath.ToSlash(cleanLower))
+	if cleanLower == "" || strings.Contains(cleanLower, "/") {
+		return false
+	}
+	for _, prefix := range []string{
+		"dodcoverage.",
+		"dodassessment.",
+		"governance.",
+		"executiongraph.",
+		"llmexecutiondecision.",
+		"convergencecontract.",
+		"repairactionpackage.",
+		"strategyreassessment.",
+		"runtimecontext.",
+		"contextbudget.",
+		"llmusage.",
+	} {
+		if strings.HasPrefix(cleanLower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeRepairTargetLooksLikeLocalAbsolutePath(cleanLower string) bool {

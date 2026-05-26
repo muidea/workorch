@@ -74,6 +74,30 @@ func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t
 	}
 }
 
+func TestStructuredFailureSignalsDoNotPromoteSchemaFieldPathsAsTargetRefs(t *testing.T) {
+	output := map[string]any{
+		"stage":               "llm_schema_invalid",
+		"error":               "invalid argument: invalid llm decision json: json: cannot unmarshal string into Go struct field DoDCoverage.dodAssessment.acceptanceDimensions.items of type models.DoDCoverageItem",
+		failureOutputKeyClass: failureClassLLMDecisionInvalid,
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, nil, failureClassLLMDecisionInvalid, "")
+
+	targets := stringSliceFromValue(signals["targetRefs"])
+	for _, forbidden := range []string{
+		"dodcoverage.dodassessment.acceptancedimensions.items",
+		"DoDCoverage.dodAssessment.acceptanceDimensions.items",
+	} {
+		if stringSliceContains(targets, forbidden) {
+			t.Fatalf("targetRefs = %#v, want schema field path %q filtered", targets, forbidden)
+		}
+	}
+	identifiers := stringSliceFromValue(signals["identifiers"])
+	if !stringSliceContains(identifiers, "DoDCoverage") || !stringSliceContains(identifiers, "DoDCoverageItem") {
+		t.Fatalf("identifiers = %#v, want schema names retained diagnostically", identifiers)
+	}
+}
+
 func TestPrimaryDiagnosticRepairRequiresConcreteTargetEvidence(t *testing.T) {
 	signals := map[string]any{
 		"identifiers": []string{

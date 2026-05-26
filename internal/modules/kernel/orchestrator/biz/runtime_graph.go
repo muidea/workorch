@@ -850,7 +850,7 @@ func shouldDispatchNoActionableContinuationFollowUp(run *runModel.Run, step *run
 	if doDAssessmentFromOutput(output) == nil {
 		return true
 	}
-	return failedAssessmentHasActionableCoverageGap(output)
+	return false
 }
 
 func failedAssessmentHasActionableCoverageGap(output map[string]any) bool {
@@ -1943,6 +1943,9 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	if rootStepID := graphRootStepID(step); rootStepID != "" && rootStepID != step.ID {
 		item["graphRootStepId"] = string(rootStepID)
 	}
+	if repairOfStepID := strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRepairOfStepID)); repairOfStepID != "" {
+		item[stepInputKeyRepairOfStepID] = repairOfStepID
+	}
 	if branch := graphBranch(step); branch != "" {
 		item["graphBranch"] = branch
 	}
@@ -2279,6 +2282,12 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 			} else if stepID := strings.TrimSpace(stringFromMap(item, "stepId")); stepID != "" {
 				existingOutputs = append(existingOutputs, stepID)
 			}
+			if lastActionableFailureSupersededByCompletedItem(lastActionableFailure, item) {
+				lastActionableFailure = nil
+			}
+			if lastFailureSupersededByCompletedItem(lastFailure, item) {
+				lastFailure = nil
+			}
 		}
 		if strings.TrimSpace(stringFromMap(item, "state")) == string(common.StepStateFailed) {
 			lastFailure = item
@@ -2313,6 +2322,32 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 		digest["nextRequiredAction"] = "continue_current_stage_contract"
 	}
 	return digest
+}
+
+func lastActionableFailureSupersededByCompletedItem(failure map[string]any, completed map[string]any) bool {
+	if !processEvidenceItemIsActionableFailure(failure) {
+		return false
+	}
+	return lastFailureSupersededByCompletedItem(failure, completed)
+}
+
+func lastFailureSupersededByCompletedItem(failure map[string]any, completed map[string]any) bool {
+	if len(failure) == 0 || len(completed) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(completed, "state")) != string(common.StepStateCompleted) {
+		return false
+	}
+	failedStepID := strings.TrimSpace(stringFromMap(failure, "stepId"))
+	if failedStepID != "" && strings.TrimSpace(stringFromMap(completed, stepInputKeyRepairOfStepID)) == failedStepID {
+		return true
+	}
+	failedNodeID := strings.TrimSpace(stringFromMap(failure, "graphNodeId"))
+	completedNodeID := strings.TrimSpace(stringFromMap(completed, "graphNodeId"))
+	if failedNodeID != "" && completedNodeID != "" && failedNodeID == completedNodeID {
+		return true
+	}
+	return false
 }
 
 func processEvidenceItemIsActionableFailure(item map[string]any) bool {

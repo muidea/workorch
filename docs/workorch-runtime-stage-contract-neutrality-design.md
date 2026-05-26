@@ -704,7 +704,11 @@ Runtime 在处理 `completionState=failed|continue|incomplete` 且输出包含 f
 - 若已存在 `coverageTargetSet`、target refs、target snapshots 或等价当前证据，进入 `need_state_change`。
 - 只有 assessment 明确声明无法自动推进，或缺少 runtime 无法获取的人工信息/权限/外部配置，才允许 `need_governance` / blocker。
 
-该转换只依据中立 assessment 结构、coverage gap、evidence refs/candidates、manifest、target refs、nextActions 和当前 evidence，不得按软件开发、具体文件名、供应商、语言或测试框架做 core 特判。连续多次相同 coverage target 的 failed assessment 必须消耗同一 coverage repair budget；step ID 或 follow-up 包装变化不得重置预算。
+该转换只依据中立 assessment 结构、coverage gap、evidence refs/candidates、manifest、target refs、nextActions 和当前 evidence，不得按软件开发、具体文件名、供应商、语言或测试框架做 core 特判。连续多次相同 coverage target 的 failed assessment 必须消耗同一 coverage repair budget；step ID 或 follow-up 包装变化不得重置预算。若 failed assessment 已经包含可行动 coverage gap，runtime 不应再派发额外的 `no-actionable` LLM continuation 来解释同一个失败，而应直接进入 runtime repair / evidence acquisition 闭环；`no-actionable` continuation 只适用于没有 assessment 或没有结构化 coverage gap 的 completion failure。
+
+LLM schema invalid、runtime contract invalid、provider retry 或其他框架级失败中的 JSON field path / schema path / contract path 只能作为诊断标识，不得被提升为 workspace targetRef、failureTargetRepairContext 或 patch target。例如 `dodCoverage.dodAssessment.acceptanceDimensions.items`、`executionGraph.nodes`、`repairActionPackage.requiredOutput`、`convergenceContract.state` 这类路径表达的是 runtime 决策结构，不是交付物文件。runtime 可以保留这些名称作为 `identifiers` / `messages`，但必须从 `targetRefs`、`repairTargetSet`、当前目标快照和 patch 准入目标中过滤，避免 LLM 尝试修复不存在的 schema 文件。
+
+`currentExecutionProgress` 必须反映“最新仍未关闭的缺口”。当后续 completed action 通过 `repairOfStepId`、相同 graph node 或等价中立证据关系明确覆盖某个早先 failed action 时，该早先 failure 不得继续作为 `lastObservedFailure` 或 `currentGap` 传给 LLM；它只能作为 superseded / historical evidence。若仍需保留历史失败，必须显式标记已被后续成功证据覆盖，避免 prompt 同时呈现“已通过”和“仍失败”的冲突语义。
 
 所有 state-changing artifact 的合同校验必须发生在副作用执行之前。`patchRequests`、`patch/apply` graph node、`nextStep=patch/apply` 和 runtime patch output 在写入 workspace、创建 applied patch evidence、记录 completed step evidence 之前，都必须先通过适用的 coverage target、target relevance、state-changing graph、bounded verification 等中立合同校验。只有 coverage-bound 输入缺少或不匹配 `coverageTargets` 时，runtime 才应 fail-fast 并进入 repair/provider retry/schema recovery；普通诊断修复不得被提升为 coverage target violation。`coverageTargets` 属于 patch 的中立治理元数据，必须从 LLM decision schema、top-level `patchRequests`、`executionGraph.nodes[].input`、patch evidence、runtime validator 与后续 `repairActionPackage` 全链路保留；任何 schema normalization、decision mapping、evidence compaction 或 provider retry 都不得静默丢弃该字段。
 
