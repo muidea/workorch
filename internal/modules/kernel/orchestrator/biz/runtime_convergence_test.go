@@ -110,6 +110,56 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCorrection(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-assessment-only",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		"missingDeliverableCoverage": []map[string]any{{
+			"id":    "version_control_snapshot",
+			"kind":  "deliverableExpectation",
+			"state": "missing",
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-assessment-only/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: dodAssessment.deliverableCoverage missing required deliverables: version_control_snapshot"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want profile-required git/write commit", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyAssessmentOnly] != nil || applied["repairObjective"] != repairObjectiveStateChangingOutput || applied["stateChangingOutputRequired"] != true {
+		t.Fatalf("applied input = %+v, want state-changing repair not assessment-only", applied)
+	}
+}
+
 func TestBuildConvergenceContractMatchesAnnotatedCoverageTargetScope(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-annotated-target",

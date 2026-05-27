@@ -10635,6 +10635,14 @@ func TestRuntimeRepairInputForSchemaInvalidPreservesConcreteValidationContract(t
 				"targetText": "verify external contract",
 			}},
 			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"exists":           true,
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"contentHash":      "hash-target",
+					"source":           "concrete_failure_evidence",
+				}},
 				"requiredOutput": map[string]any{
 					"mustProduceConcreteValidationEvidence": true,
 					"acceptedKinds":                         []string{"shell/command", "mcp/tool_call"},

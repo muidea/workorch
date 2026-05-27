@@ -103,6 +103,10 @@ func BuildConvergenceContract(
 		contract.GovernanceReason = governanceReason
 		return contract
 	}
+	if convergenceMustPreserveConcreteValidationSchemaRepair(input, failedStep) {
+		populateConcreteValidationConvergenceContract(input, &contract)
+		return contract
+	}
 	if convergenceTargetEvidenceReadyForStateChange(input, failedStep) {
 		contract.State = convergenceStateNeedStateChange
 		contract.RuntimeStage = runtimeStageRepair
@@ -152,33 +156,7 @@ func BuildConvergenceContract(
 			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 			return contract
 		}
-		contract.State = convergenceStateNeedValidation
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
-		ensureCoverageRepairTargetSet(input)
-		contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
-		if len(contract.RepairActionPackage) == 0 {
-			contract.RepairActionPackage = map[string]any{}
-		}
-		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
-			contract.RepairActionPackage["coverageRepairRequired"] = true
-			contract.RepairActionPackage["coverageTargetSet"] = targets
-		}
-		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
-		if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) > 0 {
-			required["mustDeclareCoverageTargets"] = true
-			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
-		}
-		contract.RepairActionPackage["requiredOutput"] = required
-		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
-		return contract
-	}
-	if convergenceAssessmentOnly(input, failedStep) {
-		contract.State = convergenceStateNeedAssessment
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = strings.TrimSpace(stringFromMap(input, "repairObjective"))
+		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
 	}
 	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
@@ -189,6 +167,13 @@ func BuildConvergenceContract(
 		contract.StateChangingOutputRequired = true
 		contract.RepairActionPackage = pkg
 		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return contract
+	}
+	if convergenceAssessmentOnly(input, failedStep) {
+		contract.State = convergenceStateNeedAssessment
+		contract.RuntimeStage = runtimeStageVerification
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = strings.TrimSpace(stringFromMap(input, "repairObjective"))
 		return contract
 	}
 	if convergenceNeedsEvidence(input, failedStep) {
@@ -223,6 +208,46 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || failedStep == nil || !stateChangingSchemaInvalidRepair(failedStep) {
+		return false
+	}
+	if inputRequiresConcreteValidationEvidence(input) || inputRequiresConcreteValidationEvidence(failedStep.Input) {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+		strings.TrimSpace(stringFromMap(failedStep.Input, "repairObjective")) == repairObjectiveConcreteValidationEvidence {
+		return true
+	}
+	return false
+}
+
+func populateConcreteValidationConvergenceContract(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedValidation
+	contract.RuntimeStage = runtimeStageVerification
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+	ensureCoverageRepairTargetSet(input)
+	contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if len(contract.RepairActionPackage) == 0 {
+		contract.RepairActionPackage = map[string]any{}
+	}
+	if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+		contract.RepairActionPackage["coverageRepairRequired"] = true
+		contract.RepairActionPackage["coverageTargetSet"] = targets
+	}
+	required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+	if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) > 0 {
+		required["mustDeclareCoverageTargets"] = true
+		required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	}
+	contract.RepairActionPackage["requiredOutput"] = required
+	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 }
 
 func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[string]any, failedStep *runModel.Step) map[string]any {
