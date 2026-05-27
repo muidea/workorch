@@ -4748,7 +4748,7 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverage
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesRepeatedValidationOnlyCoverageGap(t *testing.T) {
+func TestRuntimeOrchestrator_RuntimeRepairInputKeepsRepeatedValidationGapAsEvidenceWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()
 	orch := &RuntimeOrchestrator{
@@ -4813,21 +4813,104 @@ func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesRepeatedValidationOnlyCo
 
 	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
 
-	if input["validationRepairEscalatedToImplementation"] != true {
-		t.Fatalf("repair input = %+v, want repeated validation-only escalation marker", input)
+	if input["validationRepairEscalatedToImplementation"] != nil || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want no state-changing escalation without concrete implementation target evidence", input)
 	}
-	if input["repairObjective"] == repairObjectiveConcreteValidationEvidence || boolValue(input["boundedValidationRequired"]) {
-		t.Fatalf("repair input = %+v, want escalation away from bounded validation-only repair", input)
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || !boolValue(input["boundedValidationRequired"]) {
+		t.Fatalf("repair input = %+v, want bounded validation evidence repair without target evidence", input)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if required["mustProduceConcreteValidationEvidence"] == true {
-		t.Fatalf("requiredOutput = %+v, want no repeated concrete-validation-only contract", required)
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustIncludeStateChangingNode"] == true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract and no patch/apply", required)
 	}
-	if !boolValue(input["stateChangingOutputRequired"]) && input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
-		t.Fatalf("repair input = %+v, want state-changing repair path or implementation-target evidence acquisition", input)
+	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "Do not return patch/apply unless a later validation failure provides concrete target refs") {
+		t.Fatalf("repairGuidance = %+v, want no-target validation guidance", input["repairGuidance"])
 	}
-	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "Repeated validation-only repair") {
-		t.Fatalf("repairGuidance = %+v, want repeated validation-only guidance", input["repairGuidance"])
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesRepeatedValidationGapWithTargetEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:      stepRepo,
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-repeated-validation-target-gap")
+	failedStepID := common.StepID(string(runID) + "/verify")
+	signature := "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment"
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfStepID:        string(failedStepID),
+			stepInputKeyRepairOfRootStepID:    string(failedStepID),
+			stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+			stepInputKeyRepairOfFailureSig:    signature,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+		},
+	}); err != nil {
+		t.Fatalf("seed prior repair step: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+			"patchRepairContext": []map[string]any{{
+				"targetRef":        "target.go",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "Coverage is still missing after validation attempts.",
+				"items": []map[string]any{
+					{"item": "deliver implemented behavior", "state": "failed"},
+				},
+			},
+			"missingDoDItems": []map[string]any{
+				{"item": "deliver implemented behavior", "state": "failed"},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-repeated-validation-target-gap",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	if input["validationRepairEscalatedToImplementation"] != true ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true {
+		t.Fatalf("repair input = %+v, want target-backed state-changing escalation", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
 	}
 }
 

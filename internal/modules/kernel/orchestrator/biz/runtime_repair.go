@@ -2625,20 +2625,21 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		Input:  input,
 		Output: failedStep.Output,
 	}) || assessmentOnlyFailedCoverageRepair)
-	coverageValidationEvidenceRepair := !assessmentOnlyCoverageRepair &&
+	coverageGapEligibleForValidationRepair := !assessmentOnlyCoverageRepair &&
 		coverageValidationEvidenceRepairEligible(failedStep) &&
-		coverageVerificationGapPresent(input, failedStep) &&
-		!repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) &&
-		!repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
-	validationRepairEscalatesToStateChanging := coverageValidationEvidenceRepair &&
+		coverageVerificationGapPresent(input, failedStep)
+	coverageValidationHasTargetEvidence := runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep)
+	coverageValidationEvidenceRepair := coverageGapEligibleForValidationRepair && !coverageValidationHasTargetEvidence
+	validationRepairEscalatesToStateChanging := coverageGapEligibleForValidationRepair &&
+		coverageValidationHasTargetEvidence &&
 		o.coverageValidationRepairShouldEscalateToStateChanging(ctx, run, failedStep, input)
 	if validationRepairEscalatesToStateChanging {
 		input["validationRepairEscalatedToImplementation"] = true
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"This coverage gap has already been repaired through validation-only attempts without concrete implementation target evidence.",
-			"Switch to a state-changing implementation repair before another verification pass; do not continue the validation-only loop.",
+			"This coverage gap has already been repaired through validation-only attempts and now has concrete implementation target evidence.",
+			"Switch to a state-changing implementation repair before another verification pass; do not continue the validation-only loop against the same target evidence.",
 			"Produce the smallest state-changing artifact that makes the next bounded verification meaningful.",
 		)
 		delete(input, stepInputKeyAssessmentOnly)
@@ -5789,17 +5790,21 @@ func (o *RuntimeOrchestrator) coverageValidationRepairShouldEscalateToStateChang
 	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) == 0 {
 		return false
 	}
-	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
-		return false
-	}
-	if repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
-		return false
-	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
 		return false
 	}
-	return true
+	return runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep)
+}
+
+func runtimeRepairHasConcreteImplementationTargetEvidence(input map[string]any, failedStep *runModel.Step) bool {
+	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
+		return true
+	}
+	if failedStep == nil {
+		return false
+	}
+	return repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
 }
 
 func runtimeRepairFailureIsTransientExecutionTimeout(step *runModel.Step, execErr error) bool {
