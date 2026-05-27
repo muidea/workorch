@@ -101,6 +101,72 @@ func TestDoDAssessmentItemMapsUnwrapsNestedItemsContainer(t *testing.T) {
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputRepairsContradictoryTopLevelSatisfied(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-dod-top-level-satisfied-normalize",
+		WorkspaceID:     "ws-dod-top-level-satisfied-normalize",
+		DoDID:           "dod-top-level-satisfied-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-dod-top-level-satisfied-normalize/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "All required items are structurally satisfied.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-dod-top-level-satisfied-normalize/graph-001/001-verify"},
+			}},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if assessment["satisfied"] != true {
+		t.Fatalf("dodAssessment.satisfied = %v, want normalized true", assessment["satisfied"])
+	}
+}
+
+func TestEvidenceQualityDiagnosticsUsesScopeSpecificCoverageGap(t *testing.T) {
+	err := evidenceKindRequirementError(profileEvidenceKindRequirement{
+		Scope:                "goal_coverage",
+		ID:                   "*",
+		RequireClaimEvidence: true,
+	}, "runtime behavior covered", "run-a/graph-001/001-verify, run-b/graph-001/002-test", "", "requires evidence text or coverageTargets aligned with the satisfied claim")
+	qualityErr, ok := err.(*doDAssessmentEvidenceQualityError)
+	if !ok {
+		t.Fatalf("error type = %T, want doDAssessmentEvidenceQualityError", err)
+	}
+	diagnostics := qualityErr.RuntimeFailureDiagnostics()
+	if diagnostics["scope"] != "goal_coverage" {
+		t.Fatalf("scope = %v, want goal_coverage", diagnostics["scope"])
+	}
+	if len(mapSliceFromValue(diagnostics["missingGoalCoverage"])) != 1 {
+		t.Fatalf("missingGoalCoverage = %+v, want scoped gap", diagnostics["missingGoalCoverage"])
+	}
+	if len(mapSliceFromValue(diagnostics["missingDoDItems"])) != 0 {
+		t.Fatalf("missingDoDItems = %+v, want no dod-item gap for goal coverage", diagnostics["missingDoDItems"])
+	}
+	refs := stringSliceFromValue(mapSliceFromValue(diagnostics["missingGoalCoverage"])[0]["evidenceRefs"])
+	if !reflect.DeepEqual(refs, []string{"run-a/graph-001/001-verify", "run-b/graph-001/002-test"}) {
+		t.Fatalf("evidenceRefs = %+v, want split refs", refs)
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputFillsGoalCoverageItemFromRunRequirementID(t *testing.T) {
 	goalText := "publish completion evidence"
 	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))

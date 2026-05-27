@@ -90,6 +90,7 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
 		normalized = normalizeDoDAssessmentGoalCoverageForRepairInput(normalized, step.Input)
 	}
+	normalized = normalizeDoDAssessmentTopLevelSatisfied(normalized)
 	if len(normalized) == 0 {
 		return output
 	}
@@ -108,6 +109,84 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	decision[stepOutputKeyDoDAssessment] = normalized
 	ret[stepOutputKeyLLMDecision] = decision
 	return ret
+}
+
+func normalizeDoDAssessmentTopLevelSatisfied(assessment map[string]any) map[string]any {
+	if len(assessment) == 0 {
+		return assessment
+	}
+	current, ok := assessment["satisfied"].(bool)
+	if ok && current {
+		return assessment
+	}
+	if !doDAssessmentStructurallySatisfied(assessment) {
+		return assessment
+	}
+	normalized := cloneStepPayload(assessment)
+	normalized["satisfied"] = true
+	return normalized
+}
+
+func doDAssessmentStructurallySatisfied(assessment map[string]any) bool {
+	if len(assessment) == 0 {
+		return false
+	}
+	if len(mapSliceFromValue(assessment["evidenceGaps"])) > 0 ||
+		len(mapSliceFromValue(assessment["verificationEvidenceGaps"])) > 0 {
+		return false
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) == 0 || !assessmentItemsAllSatisfied(items, false) {
+		return false
+	}
+	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "deliverableCoverage", "deliverables", "producedArtifacts", "branchCoverage"} {
+		value := assessment[key]
+		if value == nil {
+			continue
+		}
+		if !coverageContainerStructurallySatisfied(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func coverageContainerStructurallySatisfied(value any) bool {
+	if mapped := mapFromValue(value); len(mapped) > 0 {
+		if satisfied, ok := mapped["satisfied"].(bool); ok && !satisfied {
+			return false
+		}
+		items, ok := doDAssessmentItemMaps(mapped["items"])
+		if !ok || len(items) == 0 {
+			return false
+		}
+		return assessmentItemsAllSatisfied(items, true)
+	}
+	items, ok := doDAssessmentItemMaps(value)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	return assessmentItemsAllSatisfied(items, true)
+}
+
+func assessmentItemsAllSatisfied(items []map[string]any, allowDeliverableArtifactRefs bool) bool {
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		switch state {
+		case "satisfied":
+		case "available", "produced":
+			if !allowDeliverableArtifactRefs {
+				return false
+			}
+		default:
+			return false
+		}
+		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 &&
+			(!allowDeliverableArtifactRefs || len(stringSliceFromValue(item["artifactRefs"])) == 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeDoDAssessmentGoalCoverageForRun(assessment map[string]any, run *runModel.Run) map[string]any {

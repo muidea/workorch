@@ -53,12 +53,23 @@ func (e *doDAssessmentEvidenceQualityError) RuntimeFailureDiagnostics() map[stri
 	if e == nil || len(e.items) == 0 {
 		return nil
 	}
-	return map[string]any{
+	ret := map[string]any{
 		"kind":                       "dod_evidence_quality_gap",
 		"scope":                      firstNonEmptyString(e.scope, "dod_item"),
-		"missingDoDItems":            e.items,
+		"evidenceQualityGapItems":    e.items,
 		"claimAlignedEvidenceNeeded": evidenceQualityGapRequiresClaimAlignedEvidence(e.items),
 	}
+	switch normalizeEvidenceKindRequirementScope(e.scope) {
+	case "goal_coverage":
+		ret["missingGoalCoverage"] = e.items
+	case "deliverable":
+		ret["missingDeliverableCoverage"] = e.items
+	case "dod_item", "":
+		ret["missingDoDItems"] = e.items
+	default:
+		ret["missingDoDItems"] = e.items
+	}
+	return ret
 }
 
 func evidenceQualityGapRequiresClaimAlignedEvidence(items []map[string]any) bool {
@@ -639,7 +650,7 @@ func evidenceKindRequirementError(requirement profileEvidenceKindRequirement, it
 			"item":         itemName,
 			"state":        "failed",
 			"source":       source,
-			"evidenceRefs": []string{ref},
+			"evidenceRefs": evidenceRefsFromValue([]string{ref}),
 			"reason":       firstNonEmptyString(reason, requirement.Description, "Referenced evidence step kind cannot satisfy this claim."),
 			"impact":       "This claim cannot be marked satisfied until it is supported by evidence of an appropriate runtime action.",
 			"suggestedNextActions": []string{
