@@ -106,6 +106,8 @@ var workorchTopics = []string{
 	TopicApprovalCreated,
 	TopicApprovalResolved,
 	TopicResultAccepted,
+	TopicResultRejected,
+	TopicResultSuperseded,
 	TopicArtifactCreated,
 	TopicPatchPreviewed,
 	TopicPatchApplied,
@@ -208,7 +210,7 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 			return nil, false
 		}
 		return event, true
-	case TopicResultAccepted:
+	case TopicResultAccepted, TopicResultRejected, TopicResultSuperseded:
 		event, ok := DecodeResultEvent(envelope)
 		if !ok {
 			return nil, false
@@ -446,7 +448,7 @@ func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
 }
 
 func DecodeResultEvent(envelope Envelope) (ResultEvent, bool) {
-	if envelope.Topic != TopicResultAccepted {
+	if !isResultTopic(envelope.Topic) {
 		return ResultEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -461,6 +463,15 @@ func DecodeResultEvent(envelope Envelope) (ResultEvent, bool) {
 	envelope.Version = spec.CurrentVersion
 	envelope.Payload = ResultPayload(data.GoalID, data.DoDID, data.State, data.Title, data.Summary, data.SourceType, data.SourceRef, data.EvidenceRefs, data.ArtifactRefs)
 	return ResultEvent{envelope: envelope, Data: data}, true
+}
+
+func isResultTopic(topic string) bool {
+	switch topic {
+	case TopicResultAccepted, TopicResultRejected, TopicResultSuperseded:
+		return true
+	default:
+		return false
+	}
 }
 
 func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {

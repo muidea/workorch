@@ -106,6 +106,74 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractRestoresProfileRequiredStateChangingEvidenceWhenEvidenceAcquisitionWasStale(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-stale-need-evidence",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "version_control_snapshot",
+							"scope":                 "deliverable",
+							"acceptedStepKinds":     []string{gitcommon.StepKindWrite},
+							"acceptedOperations":    []string{gitcommon.OperationCommit},
+							"requireDirectEvidence": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"coverageRepairRequired":          true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "deliverable",
+			"item":                "version_control_snapshot",
+			"coverageTargetToken": "version_control_snapshot",
+			"targetText":          "version_control_snapshot",
+			"state":               "missing",
+		}},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "missing",
+			}},
+			"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-stale-need-evidence/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid llm decision json: no json object found"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want git/write commit state-changing evidence", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if boolValue(applied["concreteFailureEvidenceRequired"]) || stringFromMap(applied, "repairObjective") != repairObjectiveStateChangingOutput {
+		t.Fatalf("applied input = %+v, want stale evidence-acquisition flags replaced by state-changing repair", applied)
+	}
+}
+
 func TestBuildConvergenceContractKeepsGoalCoverageGapAsValidationWhenDirectEvidenceCanBeCommand(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-goal-coverage-validation",
@@ -396,6 +464,41 @@ func TestShouldCreateDecisionTicketBlocksMechanicalStateChangingDecision(t *test
 
 	if ShouldCreateDecisionTicket(input, output, contract) {
 		t.Fatalf("ShouldCreateDecisionTicket = true, want false for mechanically repairable state-changing contract")
+	}
+}
+
+func TestShouldCreateDecisionTicketBlocksProfileRequiredStateChangingEvidenceDecision(t *testing.T) {
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"coverageTargetSet": []map[string]any{{
+				"kind": "deliverable",
+				"item": "version_control_snapshot",
+			}},
+			"evidenceKindRequirements": []map[string]any{{
+				"scope":             "deliverable",
+				"id":                "version_control_snapshot",
+				"acceptedStepKinds": []string{gitcommon.StepKindWrite},
+			}},
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{gitcommon.StepKindWrite},
+				"acceptedOperations":           []string{gitcommon.OperationCommit},
+			},
+		},
+	}
+	output := decisionOutputFromSpec(runtimeDecisionBlockSpec{
+		Reason:       "need confirmation before version-control snapshot",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "Should the runtime create the declared snapshot?",
+	})
+
+	if ShouldCreateDecisionTicket(map[string]any{}, output, contract) {
+		t.Fatalf("ShouldCreateDecisionTicket = true, want false for profile-declared state-changing evidence contract")
 	}
 }
 

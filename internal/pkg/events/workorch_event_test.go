@@ -80,6 +80,35 @@ func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkorchEventReturnsTypedRejectedResultEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version: WorkorchEventVersion,
+		Topic:   TopicResultRejected,
+		RunID:   "run-1",
+		Payload: ResultPayload(
+			common.GoalID("goal-1"),
+			common.DoDID("dod-1"),
+			common.ResultStateRejected,
+			"Rejected Result",
+			"missing evidence",
+			"dod_assessment",
+			"run-1/step-1",
+			[]string{"run-1/step-1"},
+			nil,
+		),
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	resultEvent, ok := event.(ResultEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want ResultEvent", event)
+	}
+	if resultEvent.Envelope().Topic != TopicResultRejected || resultEvent.Data.State != common.ResultStateRejected {
+		t.Fatalf("result event = %+v topic=%s, want rejected result topic/state", resultEvent.Data, resultEvent.Envelope().Topic)
+	}
+}
+
 func TestDecodeWorkorchEventReturnsTypedLLMStreamProgressEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,

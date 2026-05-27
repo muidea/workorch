@@ -28,6 +28,8 @@ var (
 		TopicApprovalCreated:         newWorkorchEventContract(TopicApprovalCreated),
 		TopicApprovalResolved:        newWorkorchEventContract(TopicApprovalResolved),
 		TopicResultAccepted:          newWorkorchEventContract(TopicResultAccepted),
+		TopicResultRejected:          newWorkorchEventContract(TopicResultRejected),
+		TopicResultSuperseded:        newWorkorchEventContract(TopicResultSuperseded),
 		TopicArtifactCreated:         newWorkorchEventContract(TopicArtifactCreated),
 		TopicPatchPreviewed:          newWorkorchEventContract(TopicPatchPreviewed),
 		TopicPatchApplied:            newWorkorchEventContract(TopicPatchApplied),

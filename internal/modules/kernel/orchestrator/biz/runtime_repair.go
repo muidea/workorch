@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
@@ -20,6 +21,7 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const maxPatchRepairSnapshotBytes = 120 * 1024
@@ -3656,7 +3658,7 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	}
 	out["mustIncludeStateChangingNode"] = false
 	out["mustProduceConcreteFailureEvidence"] = true
-	out["acceptedKinds"] = []string{"file/list", "file/read", "shell/command", "mcp/tool_call"}
+	out["acceptedKinds"] = evidenceAcquisitionAcceptedKinds()
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
 		"llm_gated_graph",
@@ -3667,6 +3669,15 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	))
 	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available"
 	return out
+}
+
+func evidenceAcquisitionAcceptedKinds() []string {
+	kinds := []string{"file/list", "file/read", "shell/command", "mcp/tool_call"}
+	cfg, err := workorchconfig.Current()
+	if err != nil || workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git) {
+		kinds = append(kinds, gitcommon.StepKindRead)
+	}
+	return kinds
 }
 
 func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[string]any {

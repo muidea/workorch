@@ -17,6 +17,8 @@ const (
 	TopicApprovalCreated         = "/approval/created"
 	TopicApprovalResolved        = "/approval/resolved"
 	TopicResultAccepted          = "/result/accepted"
+	TopicResultRejected          = "/result/rejected"
+	TopicResultSuperseded        = "/result/superseded"
 	TopicArtifactCreated         = "/artifact/created"
 	TopicPatchPreviewed          = "/patch/previewed"
 	TopicPatchApplied            = "/patch/applied"

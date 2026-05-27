@@ -82,7 +82,7 @@ func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *r
 	return o.eventHub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", item.ID, resultEventStateSuffix(item.State)),
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicResultAccepted,
+		Topic:        resultEventTopic(item.State),
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "result",
 		SubjectID:    string(item.ID),
@@ -100,6 +100,17 @@ func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *r
 			artifactRefs,
 		),
 	})
+}
+
+func resultEventTopic(state common.ResultState) string {
+	switch state {
+	case common.ResultStateRejected:
+		return events.TopicResultRejected
+	case common.ResultStateSuperseded:
+		return events.TopicResultSuperseded
+	default:
+		return events.TopicResultAccepted
+	}
 }
 
 func resultEventStateSuffix(state common.ResultState) string {

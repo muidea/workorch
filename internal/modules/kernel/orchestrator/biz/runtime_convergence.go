@@ -152,6 +152,16 @@ func BuildConvergenceContract(
 		contract.RepairObjective = strings.TrimSpace(stringFromMap(input, "repairObjective"))
 		return contract
 	}
+	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return contract
+	}
 	if convergenceNeedsEvidence(input, failedStep) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -455,7 +465,23 @@ func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, 
 }
 
 func mechanicalStateChangingContractCanContinue(contract ConvergenceContract) bool {
-	return contract.StateChangingOutputRequired && len(contract.TargetEvidence) > 0
+	if !contract.StateChangingOutputRequired {
+		return false
+	}
+	if len(contract.TargetEvidence) > 0 {
+		return true
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || len(mapSliceFromValue(pkg["coverageTargetSet"])) == 0 || len(mapSliceFromValue(pkg["evidenceKindRequirements"])) == 0 {
+		return false
+	}
+	for _, kind := range stringSliceFromValue(required["acceptedKinds"]) {
+		if stepKindCanProduceStateChangingEvidence(kind) {
+			return true
+		}
+	}
+	return false
 }
 
 func mechanicalEvidenceAcquisitionContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
@@ -471,10 +497,12 @@ func mechanicalEvidenceAcquisitionContractCanContinue(input map[string]any, cont
 		return false
 	}
 	accepted := stringSliceFromValue(required["acceptedKinds"])
-	return stringSliceContains(accepted, "file/list") ||
-		stringSliceContains(accepted, "file/read") ||
-		stringSliceContains(accepted, "shell/command") ||
-		stringSliceContains(accepted, "mcp/tool_call")
+	for _, kind := range evidenceAcquisitionAcceptedKinds() {
+		if stringSliceContains(accepted, kind) {
+			return true
+		}
+	}
+	return false
 }
 
 func mechanicalConcreteValidationContractCanContinue(input map[string]any, contract ConvergenceContract) bool {
