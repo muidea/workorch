@@ -4418,7 +4418,7 @@ func allowPatchRepairValidationEvidenceGraph(step *runModel.Step, graph runtimem
 	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
 		return false
 	}
-	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+	if !inputRequiresStateChangingOutput(step.Input) {
 		return false
 	}
 	if len(mapSliceFromValue(step.Input["patchRepairContext"])) == 0 || !stepRepairsPatchCapabilityFailure(step) {
@@ -4431,7 +4431,7 @@ func allowDeclaredToolStateChangingRepairGraph(step *runModel.Step, graph runtim
 	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
 		return false
 	}
-	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+	if !inputRequiresStateChangingOutput(step.Input) {
 		return false
 	}
 	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
@@ -4446,7 +4446,7 @@ func allowAcceptedStateChangingEvidenceGraph(step *runModel.Step, graph runtimem
 	if step == nil || step.Input == nil || runtimeStageFromStepInput(step.Input) != runtimeStageRepair {
 		return false
 	}
-	if !boolValue(step.Input["stateChangingOutputRequired"]) || !repairObjectiveRequiresStateChange(stringFromMap(step.Input, "repairObjective")) {
+	if !inputRequiresStateChangingOutput(step.Input) {
 		return false
 	}
 	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])

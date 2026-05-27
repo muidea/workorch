@@ -1202,6 +1202,9 @@ func inputRequiresConcreteValidationEvidence(input map[string]any) bool {
 	if len(input) == 0 {
 		return false
 	}
+	if inputHasStateChangingOutputRequirement(input) {
+		return false
+	}
 	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
 		boolValue(input["boundedValidationRequired"]) ||
 		boolValue(input["evidenceRepairRequired"]) {
@@ -1209,6 +1212,14 @@ func inputRequiresConcreteValidationEvidence(input map[string]any) bool {
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 	return boolValue(required["mustProduceConcreteValidationEvidence"])
+}
+
+func inputHasStateChangingOutputRequirement(input map[string]any) bool {
+	if len(input) == 0 || !inputRequiresStateChangingOutput(input) {
+		return false
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	return boolValue(required["mustIncludeStateChangingNode"])
 }
 
 func cloneStepInputValue(value any) any {

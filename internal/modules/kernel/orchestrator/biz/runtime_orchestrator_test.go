@@ -21632,6 +21632,68 @@ func TestStateChangingRepairContractAcceptsSupportingWriteEvidenceGraphAfterVali
 	}
 }
 
+func TestStateChangingRepairContractOverridesStaleConcreteValidationEvidenceFlags(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-stale-validation", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-stale-validation/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":   true,
+			"evidenceRepairRequired":      true,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":          true,
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{gitcommon.StepKindWrite},
+					"acceptedOperations":                    []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "add",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+				{
+					"id":        "verify",
+					"kind":      shellcommon.StepKindCommand,
+					"dependsOn": []string{"commit"},
+					"input": map[string]any{
+						"command": "true",
+					},
+				},
+			},
+		},
+	}
+
+	if inputRequiresConcreteValidationEvidence(step.Input) {
+		t.Fatalf("stale validation flags still override accepted state-changing evidence contract: %+v", step.Input)
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want accepted state-changing evidence graph despite stale validation flags", err)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()
