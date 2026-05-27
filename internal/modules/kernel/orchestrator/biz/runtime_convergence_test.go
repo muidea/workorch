@@ -110,6 +110,212 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractMatchesAnnotatedCoverageTargetScope(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-annotated-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "version_control_snapshot",
+							"scope":                 "deliverable",
+							"acceptedStepKinds":     []string{gitcommon.StepKindWrite},
+							"acceptedOperations":    []string{gitcommon.OperationCommit},
+							"requireDirectEvidence": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"convergenceContract": map[string]any{
+			"targetEvidence": map[string]any{
+				"coverageTargetSet": []map[string]any{{
+					"kind":                "dod",
+					"item":                "version_control_snapshot（deliverableCoverage）",
+					"coverageTargetToken": "version_control_snapshot（deliverableCoverage）",
+					"targetText":          "version_control_snapshot（deliverableCoverage）",
+					"state":               "failed",
+					"source":              "dodAssessment",
+				}},
+				"repairTargetSet": []string{"usage.csv"},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "usage.csv",
+					"exists":           true,
+					"contentHash":      "hash-usage",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-annotated-target/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: dodAssessment is not satisfied"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want profile-required git/write commit", required)
+	}
+	requirements := mapSliceFromValue(contract.RepairActionPackage["evidenceKindRequirements"])
+	if len(requirements) != 1 || requirements[0]["id"] != "version_control_snapshot" {
+		t.Fatalf("evidenceKindRequirements = %+v, want annotated target matched to profile requirement", requirements)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	appliedRequired := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(appliedRequired["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("applied repairActionPackage.requiredOutput = %+v, want git/write preserved", appliedRequired)
+	}
+}
+
+func TestBuildConvergenceContractDoesNotCrossMatchAnnotatedCoverageTargetScope(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-annotated-target-scope-mismatch",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "dod",
+			"item":                "version_control_snapshot（goalCoverage）",
+			"coverageTargetToken": "version_control_snapshot（goalCoverage）",
+			"targetText":          "version_control_snapshot（goalCoverage）",
+			"state":               "failed",
+			"source":              "dodAssessment",
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-annotated-target-scope-mismatch/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: dodAssessment is not satisfied"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State == convergenceStateNeedStateChange {
+		t.Fatalf("contract = %+v, did not expect deliverable evidence requirement to match goalCoverage annotation", contract)
+	}
+}
+
+func TestBuildConvergenceContractDropsStaleProfileStateChangeWhenCurrentGoalCoverageNeedsValidation(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-stale-deliverable-target-current-goal-gap",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"evidenceRepairRequired":     true,
+		"missingGoalCoverage": []map[string]any{{
+			"goalRequirementId": "goal-req-usage",
+			"raw":               "usage must be validated",
+			"state":             "failed",
+		}},
+		"currentExecutionProgress": map[string]any{
+			"latestActionEvidence": []map[string]any{{
+				"kind":   gitcommon.StepKindWrite,
+				"stepId": "run-convergence-stale-deliverable-target-current-goal-gap/graph-001/003-commit",
+				"outputSummary": map[string]any{
+					"stage":   "git_write",
+					"summary": "git commit completed",
+					"stdout":  "[master abc123] commit\n 1 file changed, 1 insertion(+)",
+				},
+			}},
+		},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "dod",
+				"item":                "version_control_snapshot（deliverableCoverage）",
+				"coverageTargetToken": "version_control_snapshot（deliverableCoverage）",
+				"targetText":          "version_control_snapshot（deliverableCoverage）",
+				"state":               "failed",
+			}},
+			"evidenceKindRequirements": []map[string]any{{
+				"scope":              "deliverable",
+				"id":                 "version_control_snapshot",
+				"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+				"acceptedOperations": []string{gitcommon.OperationCommit},
+			}},
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{gitcommon.StepKindWrite},
+				"acceptedOperations":           []string{gitcommon.OperationCommit},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-stale-deliverable-target-current-goal-gap/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedValidation, contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) || stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput = %+v, want concrete validation contract without stale git/write requirement", required)
+	}
+	targets := mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])
+	if len(targets) != 1 || targets[0]["goalRequirementId"] != "goal-req-usage" {
+		t.Fatalf("coverageTargetSet = %+v, want current goal gap only", targets)
+	}
+}
+
 func TestBuildConvergenceContractRestoresProfileRequiredStateChangingEvidenceWhenEvidenceAcquisitionWasStale(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-stale-need-evidence",

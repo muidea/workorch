@@ -89,6 +89,7 @@ func BuildConvergenceContract(
 	}
 	enrichRepairInputWithProgressFailureSignals(input)
 	hydrateConvergenceTargetEvidence(input)
+	refreshConvergenceCoverageTargets(input)
 	contract := ConvergenceContract{
 		State:            convergenceStateBlocked,
 		RuntimeStage:     runtimeStageRepair,
@@ -108,7 +109,11 @@ func BuildConvergenceContract(
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveStateChangingOutput
 		contract.StateChangingOutputRequired = true
-		contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			contract.RepairActionPackage = pkg
+		} else {
+			contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		}
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
@@ -245,6 +250,71 @@ func hydrateConvergenceTargetEvidence(input map[string]any) {
 	}
 }
 
+func refreshConvergenceCoverageTargets(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	targets := coverageTargetSetFromRepairInput(input)
+	if len(targets) == 0 {
+		return
+	}
+	input["coverageRepairRequired"] = true
+	input["coverageTargetSet"] = targets
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	pkg["coverageRepairRequired"] = true
+	pkg["coverageTargetSet"] = targets
+	if profileStateChangingPackageMatchesCoverageTargets(pkg, targets) {
+		input["repairActionPackage"] = pkg
+		return
+	}
+	delete(pkg, "evidenceKindRequirements")
+	delete(pkg, "targetEvidence")
+	delete(pkg, "targetSnapshots")
+	delete(pkg, "currentTargetSnapshots")
+	delete(pkg, "repairTargetSet")
+	required := mapFromValue(pkg["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		delete(pkg, "requiredOutput")
+	}
+	input["repairActionPackage"] = pkg
+}
+
+func profileStateChangingPackageMatchesCoverageTargets(pkg map[string]any, targets []map[string]any) bool {
+	if len(pkg) == 0 || len(targets) == 0 {
+		return false
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		return true
+	}
+	requirements := make([]profileEvidenceKindRequirement, 0)
+	for _, item := range mapSliceFromValue(pkg["evidenceKindRequirements"]) {
+		requirement := profileEvidenceKindRequirement{
+			Scope:              stringFromMap(item, "scope"),
+			ID:                 stringFromMap(item, "id"),
+			AcceptedStepKinds:  stringSliceFromValue(item["acceptedStepKinds"]),
+			AcceptedOperations: stringSliceFromValue(item["acceptedOperations"]),
+		}
+		if requirement.ID != "" && requirement.Scope != "" {
+			requirements = append(requirements, requirement)
+		}
+	}
+	if len(requirements) == 0 {
+		return false
+	}
+	for _, requirement := range requirements {
+		for _, target := range targets {
+			if evidenceKindRequirementMatchesCoverageTarget(requirement, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedStep *runModel.Step) bool {
 	if len(input) == 0 {
 		return false
@@ -263,12 +333,48 @@ func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedSt
 		return false
 	}
 	pkg := mapFromValue(input["repairActionPackage"])
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence &&
+		len(coverageTargetSetFromRepairInput(input)) > 0 &&
+		!repairHasDirectImplementationTargetEvidence(input, pkg) {
+		return false
+	}
 	if !repairHasImplementationTargetEvidence(input, pkg) {
 		return false
 	}
 	return inputRequiresConcreteValidationEvidence(input) ||
 		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
 		stringFromMap(mapFromValue(input["convergenceContract"]), "state") == convergenceStateNeedValidation
+}
+
+func repairHasDirectImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if len(input) > 0 {
+		for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
+			if repairContextHasAdmissibleTargetEvidence(input[key]) {
+				return true
+			}
+		}
+		if len(repairActionTargetSnapshots(input)) > 0 {
+			return true
+		}
+		if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+			return true
+		}
+	}
+	if len(pkg) > 0 {
+		if repairContextHasAdmissibleTargetEvidence(pkg["targetSnapshots"]) {
+			return true
+		}
+		if len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(pkg["repairTargetSet"]))) > 0 {
+			return true
+		}
+		if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+			return true
+		}
+		if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+			return true
+		}
+	}
+	return false
 }
 
 func stateChangingRepairActionPackageForConvergence(input map[string]any, failedStep *runModel.Step) map[string]any {
@@ -659,14 +765,58 @@ func evidenceKindRequirementMatchesCoverageTarget(requirement profileEvidenceKin
 		return false
 	}
 	scope := normalizeEvidenceKindRequirementScope(requirement.Scope)
-	targetKind := normalizeEvidenceKindRequirementScope(firstNonEmptyString(
-		stringFromMap(target, "kind"),
-		stringFromMap(target, "source"),
-	))
-	if scope != "" && targetKind != "" && scope != targetKind {
-		return false
+	if scope != "" {
+		if annotatedScopes := coverageTargetAnnotatedScopes(target); len(annotatedScopes) > 0 {
+			if !annotatedScopes[scope] {
+				return false
+			}
+		} else if targetKind := coverageTargetExplicitScope(target); targetKind != "" && scope != targetKind {
+			return false
+		}
 	}
 	return evidenceKindRequirementMatchesItem(requirement, target)
+}
+
+func coverageTargetExplicitScope(target map[string]any) string {
+	if len(target) == 0 {
+		return ""
+	}
+	for _, key := range []string{"kind", "source"} {
+		scope := normalizeEvidenceKindRequirementScope(stringFromMap(target, key))
+		if knownEvidenceKindRequirementScope(scope) {
+			return scope
+		}
+	}
+	return ""
+}
+
+func coverageTargetAnnotatedScopes(target map[string]any) map[string]bool {
+	if len(target) == 0 {
+		return nil
+	}
+	ret := map[string]bool{}
+	for _, key := range []string{
+		"id",
+		"dimension",
+		"key",
+		"name",
+		"deliverable",
+		"goal",
+		"goalItem",
+		"item",
+		"raw",
+		"requirement",
+		"targetText",
+		"coverageTargetToken",
+	} {
+		if _, scope := coverageTargetScopeAnnotatedText(stringFromMap(target, key)); scope != "" {
+			ret[scope] = true
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func profileRequirementRequiresStateChangingEvidence(requirement profileEvidenceKindRequirement) bool {

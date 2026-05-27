@@ -4322,6 +4322,9 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if graphHasStateChangingPatchNode(graph) {
 		return validateStateChangingExecutionGraph(graph)
 	}
+	if graphHasUngatedStateChangingEvidenceNode(graph) {
+		return nil
+	}
 	if hasStateChangingLLMExecutionOutput(output) {
 		return nil
 	}
@@ -4332,6 +4335,20 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without patch output", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func graphHasUngatedStateChangingEvidenceNode(graph runtimemodel.BlockExecutionGraph) bool {
+	nodes := graphNodesByID(graph)
+	for _, node := range graph.Nodes {
+		if !stepKindCanProduceStateChangingEvidence(node.Kind) {
+			continue
+		}
+		if graphNodeHasAncestorKind(node, nodes, llmWorkspaceExecutionStepKind, map[string]bool{}) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func llmFollowUpGraphRequiresStateChangingPatch(step *runModel.Step) bool {

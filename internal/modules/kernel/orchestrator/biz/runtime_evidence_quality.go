@@ -337,11 +337,17 @@ func normalizeEvidenceKindRequirementScope(scope string) string {
 	switch scope {
 	case "acceptance_dimension", "acceptance_dimensions", "dimension", "dimension_coverage", "acceptancedimension":
 		return "acceptance_dimension"
+	case "acceptancedimensions", "dimensioncoverage":
+		return "acceptance_dimension"
 	case "deliverable", "deliverables", "deliverable_coverage", "produced_artifacts":
+		return "deliverable"
+	case "deliverablecoverage", "producedartifacts":
 		return "deliverable"
 	case "goal", "goal_coverage", "goalcoverage", "goal_outcome_coverage", "goaloutcomecoverage":
 		return "goal_coverage"
 	case "dod", "dod_item", "doditem", "items", "assessment_item", "assessmentitem":
+		return "dod_item"
+	case "dodassessment":
 		return "dod_item"
 	default:
 		return scope
@@ -356,12 +362,87 @@ func evidenceKindRequirementMatchesItem(requirement profileEvidenceKindRequireme
 	if want == "*" || strings.EqualFold(want, "all") {
 		return true
 	}
-	for _, key := range []string{"id", "dimension", "key", "name", "deliverable", "path", "goal", "goalItem", "item", "requirement"} {
-		if strings.TrimSpace(stringFromMap(item, key)) == want {
+	for _, value := range evidenceKindRequirementItemAliases(item) {
+		if value == want || strings.EqualFold(value, want) {
 			return true
 		}
 	}
 	return false
+}
+
+func evidenceKindRequirementItemAliases(item map[string]any) []string {
+	if len(item) == 0 {
+		return nil
+	}
+	ret := make([]string, 0)
+	seen := map[string]bool{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+		if base, _ := coverageTargetScopeAnnotatedText(value); base != "" && !seen[base] {
+			seen[base] = true
+			ret = append(ret, base)
+		}
+	}
+	for _, key := range []string{
+		"id",
+		"dimension",
+		"key",
+		"name",
+		"deliverable",
+		"path",
+		"goal",
+		"goalItem",
+		"item",
+		"raw",
+		"requirement",
+		"targetText",
+		"coverageTargetToken",
+	} {
+		add(stringFromMap(item, key))
+	}
+	return ret
+}
+
+func coverageTargetScopeAnnotatedText(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ""
+	}
+	type bracket struct {
+		open  string
+		close string
+	}
+	for _, pair := range []bracket{{open: "（", close: "）"}, {open: "(", close: ")"}} {
+		if !strings.HasSuffix(value, pair.close) {
+			continue
+		}
+		idx := strings.LastIndex(value, pair.open)
+		if idx <= 0 {
+			continue
+		}
+		base := strings.TrimSpace(value[:idx])
+		scopeText := strings.TrimSpace(strings.TrimSuffix(value[idx+len(pair.open):], pair.close))
+		scope := normalizeEvidenceKindRequirementScope(scopeText)
+		if base == "" || !knownEvidenceKindRequirementScope(scope) {
+			continue
+		}
+		return base, scope
+	}
+	return value, ""
+}
+
+func knownEvidenceKindRequirementScope(scope string) bool {
+	switch normalizeEvidenceKindRequirementScope(scope) {
+	case "acceptance_dimension", "deliverable", "goal_coverage", "dod_item":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context, requirement profileEvidenceKindRequirement, item map[string]any) error {
