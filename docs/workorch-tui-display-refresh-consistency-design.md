@@ -70,12 +70,21 @@ The status bar must be single-line and truncated to terminal width.
 
 ### Input Area
 
-The input area stays at the bottom. It must show the input semantic mode:
+The input area stays at the bottom. The default prompt must be neutral:
+`ws-xxx >`. Runtime state such as active run, terminal result, progress,
+current command, and available actions belongs in the status bar, main view,
+and slash-command suggestions rather than the prompt suffix.
 
-- `goal` when no active run context exists.
-- `continue` when normal input will continue/resume an active run.
+The only prompt suffixes are blocker contexts:
+
 - `decision` when answering a decision ticket.
 - `approval` when resolving approval.
+
+Plain text outside a decision/approval blocker must not create a goal, continue
+a run, or restart a run implicitly. Users must use explicit slash commands:
+`/goal`, `/run continue`, `/run restart`, `/dod`, `/memory`, `/result`, or
+other command entries. This prevents stale command-like prompts such as
+`continue >` from appearing after one-shot commands complete.
 
 Large multiline paste must be folded in display while preserving the original
 submitted content. Markdown-like paste should show both a head preview and a tail
@@ -86,7 +95,7 @@ handling must not quit the default agent session. The TUI must not use bare `q`,
 `ctrl+q`, or double `ctrl+c` as quit paths, because Chinese IME composition and
 normal text input can emit intermediate runes or control sequences before
 committing Chinese text. The only supported quit path is the slash command:
-`/exit` (with `/quit` and `/q` aliases accepted by the same command parser).
+`/exit`.
 
 ### Workspace List
 

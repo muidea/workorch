@@ -625,10 +625,6 @@ func (m AppModel) renderInput(width int) string {
 		prompt += " decision"
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
-	} else if m.activeRunID != "" {
-		prompt += " continue"
-	} else {
-		prompt += " goal"
 	}
 	input := m.renderInputBuffer(prompt, width)
 	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {
@@ -638,9 +634,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal: new goal | /continue: resume | /restart: rerun | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt"
+	help := "enter: submit command | /goal | /run continue | /run restart | /dod | /memory | /exit"
 	if width < 120 {
-		help = "enter | /goal | /continue | /restart | /dod | /memory | /exit"
+		help = "enter | /goal | /run continue | /run restart | /dod | /memory | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -652,7 +648,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 	lines := []string{
 		"WorkOrch Help",
 		"",
-		"Enter: submit response, continue intent, or plain goal",
+		"Enter: submit slash command; decision/approval prompts also accept plain answers",
 		"Alt+Enter: insert newline",
 		"Ctrl+P / Ctrl+N: input history",
 		"Tab: slash command completion",
@@ -661,7 +657,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Ctrl+C: interrupt active run; use /exit to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
-		"/help /clear /workspace /workspace create /goal /dod /memory /result /continue /restart /exit",
+		"/help /clear /workspace /workspace create /goal /dod /memory /result /run continue /run restart /exit",
 	}
 	panelWidth := min(width-4, 72)
 	if panelWidth < 30 {

@@ -378,8 +378,6 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 		{Command: "/result", Description: "refresh result"},
 		{Command: "/run continue", Description: "continue current run"},
 		{Command: "/run restart", Insert: "/run restart ", Description: "restart current workspace"},
-		{Command: "/continue", Description: "continue current run"},
-		{Command: "/restart", Insert: "/restart ", Description: "restart current workspace"},
 		{Command: "/exit", Description: "quit TUI"},
 	}
 }

@@ -65,6 +65,21 @@ func TestModelExitCommandQuits(t *testing.T) {
 	}
 }
 
+func TestModelOnlyExitSlashCommandQuits(t *testing.T) {
+	for _, input := range []string{"/q", "/quit"} {
+		m := NewAppModel(newFake(t), "ws-1", "")
+		m.setInput(input)
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = asModel(next)
+		if m.mode == modeQuit || cmd != nil {
+			t.Fatalf("%s should not quit: mode=%v cmd=%v", input, m.mode, cmd != nil)
+		}
+		if m.lastError == nil {
+			t.Fatalf("%s should report unknown command", input)
+		}
+	}
+}
+
 func TestModelWorkspaceList(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	msg := WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -161,7 +176,7 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{ID: "ws-1", Title: "Project", State: "active"}}})
 	m = asModel(next)
-	m.input = "finish task"
+	m.input = "/goal finish task"
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected submit command")
@@ -177,28 +192,26 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	}
 }
 
-func TestModelRunControlIntentDoesNotSubmitGoal(t *testing.T) {
+func TestModelPlainInputWithoutBlockerRequiresSlashCommand(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
 	m.setInput("继续处理")
 
 	next, cmd := m.submitInput()
-	if cmd == nil {
-		t.Fatal("expected continue command")
-	}
-	msg := cmd()
-	next, _ = next.(*AppModel).Update(msg)
 	m = asModel(next)
 
+	if cmd != nil {
+		t.Fatal("plain input without blocker should not return command")
+	}
 	if len(be.goals) != 0 {
-		t.Fatalf("goals = %v, want no goal created for run-control input", be.goals)
+		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
-		t.Fatalf("resumes = %v, want run-continue resumed", be.resumes)
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for plain input", be.resumes)
 	}
-	if m.progressText != "Continuing active run" {
-		t.Fatalf("progress text = %q, want continuing", m.progressText)
+	if m.lastError == nil || !strings.Contains(m.lastError.Error(), "slash command") {
+		t.Fatalf("lastError = %v, want slash command guidance", m.lastError)
 	}
 }
 
@@ -223,11 +236,11 @@ func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputDuringActiveRunQueuesOperatorInput(t *testing.T) {
+func TestModelRunContinueCommandQueuesOperatorInput(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
-	m.setInput("补充约束：优先修复当前失败项")
+	m.setInput("/run continue 补充约束：优先修复当前失败项")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -248,7 +261,7 @@ func TestModelPlainInputDuringActiveRunQueuesOperatorInput(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *testing.T) {
+func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateCompleted)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
@@ -256,7 +269,7 @@ func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *te
 	m.result = "old final result"
 	m.artifacts = []string{"old-artifact"}
 	m.runtimeEvents = []string{"old event"}
-	m.setInput("补充信息：继续基于现有目标修复")
+	m.setInput("/run restart 补充信息：继续基于现有目标修复")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -287,12 +300,12 @@ func TestModelPlainInputAfterTerminalRunRestartsWorkspaceWithOperatorInput(t *te
 	}
 }
 
-func TestModelRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testing.T) {
+func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
 	m.currentTask = "已有目标"
-	m.setInput("/restart 重新执行并纳入刚补充的信息")
+	m.setInput("/run restart 重新执行并纳入刚补充的信息")
 
 	next, cmd := m.submitInput()
 	if cmd == nil {
@@ -302,10 +315,10 @@ func TestModelRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testin
 	_, _ = next.(*AppModel).Update(msg)
 
 	if len(be.goals) != 0 {
-		t.Fatalf("goals = %v, want no goal created for /restart", be.goals)
+		t.Fatalf("goals = %v, want no goal created for /run restart", be.goals)
 	}
 	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want /restart to activate directly", be.resumes)
+		t.Fatalf("resumes = %v, want /run restart to activate directly", be.resumes)
 	}
 	if len(be.activations) != 1 {
 		t.Fatalf("activations = %d, want one activation", len(be.activations))
@@ -313,6 +326,24 @@ func TestModelRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *testin
 	latest, ok := be.activations[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
 	if !ok || latest["content"] != "重新执行并纳入刚补充的信息" {
 		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.activations[0].ExecutionContextPatch["latestOperatorInput"])
+	}
+}
+
+func TestModelTopLevelRunAliasesAreNotSupported(t *testing.T) {
+	for _, input := range []string{"/continue", "/resume", "/restart", "/rerun", "/run", "/run resume", "/run rerun"} {
+		m := NewAppModel(newFake(t), "ws-1", "")
+		m.activeRunID = "run-1"
+		m.progress = progressRunning
+		m.setInput(input)
+
+		next, cmd := m.submitInput()
+		m = asModel(next)
+		if cmd != nil {
+			t.Fatalf("%s returned command, want unsupported", input)
+		}
+		if m.lastError == nil || !strings.Contains(m.lastError.Error(), "unknown") {
+			t.Fatalf("%s error = %v, want unsupported command error", input, m.lastError)
+		}
 	}
 }
 
@@ -658,7 +689,7 @@ func TestModelInputRendersAtBottom(t *testing.T) {
 	if !strings.HasPrefix(lines[len(lines)-3], "Running - runtime status") {
 		t.Fatalf("expected runtime status immediately above input, got %q in:\n%s", lines[len(lines)-3], view)
 	}
-	if !strings.HasPrefix(lines[len(lines)-2], "ws-1 goal >") {
+	if !strings.HasPrefix(lines[len(lines)-2], "ws-1 >") {
 		t.Fatalf("expected bottom input above help, got %q in:\n%s", lines[len(lines)-2], view)
 	}
 }
@@ -668,22 +699,83 @@ func TestModelInputPromptUsesActiveWorkspace(t *testing.T) {
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-f2e4da0 goal >") {
+	if !strings.Contains(view, "ws-f2e4da0 >") {
 		t.Fatalf("view missing workspace input prompt:\n%s", view)
 	}
 }
 
-func TestModelInputPromptShowsContinueModeForActiveRun(t *testing.T) {
+func TestModelInputPromptStaysNeutralForLiveActiveRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeRunID = "run-1"
+	m.progress = progressRunning
+	m.running = true
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-1 continue >") {
-		t.Fatalf("view missing continue input prompt:\n%s", view)
+	if !strings.Contains(view, "ws-1 >") {
+		t.Fatalf("view missing neutral workspace input prompt:\n%s", view)
+	}
+	if strings.Contains(view, "ws-1 run >") || strings.Contains(view, "ws-1 continue >") {
+		t.Fatalf("view should not expose run command state as input prompt:\n%s", view)
 	}
 	if !strings.Contains(view, "run run-1") {
 		t.Fatalf("status bar missing active run:\n%s", view)
+	}
+}
+
+func TestModelTerminalRunWithRetainedRunIDReturnsGoalPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-97549a108e19d500", "")
+	next, _ := m.Update(RunControlMsg{
+		Run:         &backend.RunInfo{ID: "run-completed", WorkspaceID: "ws-97549a108e19d500", State: common.RunStateCompleted},
+		WorkspaceID: "ws-97549a108e19d500",
+		Message:     "Completed",
+	})
+	m = asModel(next)
+	m.width = 100
+	m.height = 14
+
+	if m.activeRunID != "run-completed" {
+		t.Fatalf("activeRunID = %q, want retained terminal run id for status context", m.activeRunID)
+	}
+	view := stripANSI(m.View())
+	if strings.Contains(view, "ws-97549a1 continue >") {
+		t.Fatalf("terminal run should not render continue prompt:\n%s", view)
+	}
+	if !strings.Contains(view, "ws-97549a1 > |") {
+		t.Fatalf("terminal run should return to neutral prompt:\n%s", view)
+	}
+}
+
+func TestModelRunContinueCommandClearsInputAndReturnsNeutralPrompt(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-97549a108e19d500", "")
+	m.activeRunID = "run-continue"
+	m.progress = progressRunning
+	m.running = true
+	m.setInput("/run continue")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected run continue command")
+	}
+	msg := cmd()
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+	m.width = 100
+	m.height = 14
+
+	if m.input != "" || m.inputCursor != 0 {
+		t.Fatalf("input = %q cursor=%d, want cleared", m.input, m.inputCursor)
+	}
+	view := stripANSI(m.View())
+	if strings.Contains(view, "ws-97549a1 continue >") {
+		t.Fatalf("view should not keep /run continue command text as prompt:\n%s", view)
+	}
+	if strings.Contains(view, "ws-97549a1 run >") {
+		t.Fatalf("live run should not add run prompt suffix after /run continue:\n%s", view)
+	}
+	if !strings.Contains(view, "ws-97549a1 > |") {
+		t.Fatalf("live run should return to neutral input prompt after /run continue:\n%s", view)
 	}
 }
 
@@ -709,7 +801,7 @@ func TestModelInputEditingSupportsSpacesAndArrowKeys(t *testing.T) {
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-1 goal > ab XcY|") {
+	if !strings.Contains(view, "ws-1 > ab XcY|") {
 		t.Fatalf("view missing edited input and cursor:\n%s", view)
 	}
 }
@@ -790,6 +882,7 @@ func TestModelLargeMultilinePasteRendersCollapsedInputPreview(t *testing.T) {
 		t.Fatalf("folded preview leaked hidden paste body:\n%s", view)
 	}
 
+	m.setInput("/goal " + text)
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected submit command")
@@ -1613,7 +1706,7 @@ func TestModelApprovalListClearsResolvedBlockingApproval(t *testing.T) {
 	if strings.Contains(view, "ws-1 approval >") {
 		t.Fatalf("view should allow normal goal input after rejected approval:\n%s", view)
 	}
-	if !strings.Contains(view, "ws-1 goal >") {
+	if !strings.Contains(view, "ws-1 >") {
 		t.Fatalf("view missing normal workspace input:\n%s", view)
 	}
 }
@@ -2293,7 +2386,7 @@ func TestModelWorkspaceSelectionDoesNotStealTypedSubmit(t *testing.T) {
 	m = asModel(next)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = asModel(next)
-	m.input = "run active workspace"
+	m.input = "/goal run active workspace"
 	m.inputCursor = len([]rune(m.input))
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = asModel(next)

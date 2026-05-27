@@ -562,36 +562,8 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("no active workspace")
 		return m, nil
 	}
-	if isRunControlIntent(text) {
-		m.clearInput()
-		m.cancelWorkspaceSelection()
-		m.clearRunDisplayState()
-		m.lastError = nil
-		m.progress = progressSubmitting
-		m.progressText = "Continuing active run"
-		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, "")
-	}
-	if m.activeRunID != "" {
-		m.clearInput()
-		m.cancelWorkspaceSelection()
-		m.clearRunDisplayState()
-		m.lastError = nil
-		m.appendTranscript("Input", text)
-		m.progress = progressSubmitting
-		m.progressText = "Queued input; continuing active run"
-		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, text)
-	}
-	if strings.TrimSpace(m.currentTask) != "" {
-		m.clearInput()
-		m.cancelWorkspaceSelection()
-		m.clearRunDisplayState()
-		m.lastError = nil
-		m.appendTranscript("Input", text)
-		m.progress = progressSubmitting
-		m.progressText = "Queued input; restarting workspace run"
-		return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, text)
-	}
-	return m.submitGoalText(text)
+	m.lastError = fmt.Errorf("plain input requires a slash command: use /goal, /run continue, /run restart, /decision, or /approval")
+	return m, nil
 }
 
 func (m *AppModel) submitGoalText(text string) (tea.Model, tea.Cmd) {
@@ -620,7 +592,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	}
 	name := strings.ToLower(strings.Fields(cmd)[0])
 	switch name {
-	case "exit", "quit", "q":
+	case "exit":
 		m.addInputHistory(text)
 		m.mode = modeQuit
 		m.unsubscribe()
@@ -668,7 +640,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
 		subcommand, rest := splitSlashSubcommand(args)
 		switch subcommand {
-		case "continue", "resume", "":
+		case "continue":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
 			m.clearRunDisplayState()
@@ -676,7 +648,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.progress = progressSubmitting
 			m.progressText = "Continuing active run"
 			return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, rest), true
-		case "restart", "rerun":
+		case "restart":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
 			m.clearRunDisplayState()
@@ -806,28 +778,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		}
 		next, submitCmd := m.submitGoalText(args)
 		return next, submitCmd, true
-	case "continue", "resume":
-		m.addInputHistory(text)
-		m.clearInput()
-		m.cancelWorkspaceSelection()
-		m.clearRunDisplayState()
-		m.lastError = nil
-		m.progress = progressSubmitting
-		m.progressText = "Continuing active run"
-		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, ""), true
-	case "restart", "rerun":
-		m.addInputHistory(text)
-		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
-		m.clearInput()
-		m.cancelWorkspaceSelection()
-		m.clearRunDisplayState()
-		m.lastError = nil
-		if args != "" {
-			m.appendTranscript("Input", args)
-		}
-		m.progress = progressSubmitting
-		m.progressText = "Restarting workspace run"
-		return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, args), true
 	case "result", "refresh":
 		m.addInputHistory(text)
 		m.clearInput()
@@ -1721,7 +1671,7 @@ func (m *AppModel) syncMainViewportToCurrentContent() {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help      Show commands\n  /goal      Submit a new goal\n  /dod       Set acceptance criteria\n  /continue  Resume active run\n  /exit      Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run continue  Resume active run\n  /exit          Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:

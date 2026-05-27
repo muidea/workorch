@@ -12,7 +12,7 @@
 ║  ── Result ──                                            ║             ║
 ║  天气查询完成：多云 +21°C                                  ║             ║
 ║                                                          ║             ║
-║  Goal > _                                                ║  0 decisions║
+║  ws-project > _                                          ║  0 decisions║
 ╚══════════════════════════════════════════════════════════╩═════════════╝
 ```
 
@@ -22,19 +22,21 @@
    completed, or failed
 3. **Result area**: terminal result and Artifact references after completion
 4. **Right panel**: bounded all-Workspace monitor + alert counts
-5. **Bottom input area**: current goal, decision answer, or approval response
+5. **Bottom input area**: slash command input; decision/approval answer context
 6. **Bottom bar**: keyboard shortcuts help
 
 ## Input Area Behavior
 
-- Accepts free-text goals when the active Workspace has no existing task
-  context.
-- During an active non-terminal Run, free text is queued as operator dialog
-  input and the Run is resumed with that context; it is not written as a new
-  Goal.
-- After the selected/latest Run is terminal, free text is queued as operator
-  dialog input and the Workspace execution is restarted using the existing
-  cumulative Goal and DoD definitions.
+- The normal prompt is neutral: `ws-xxx >`.
+- Normal-state input must use explicit slash commands such as `/goal`,
+  `/run continue`, `/run restart`, `/dod`, `/memory`, or `/result`.
+- Plain text outside decision/approval blocker state is rejected with slash
+  command guidance; it is not implicitly treated as a goal or run input.
+- During decision blocker state the prompt changes to `ws-xxx decision >` and
+  plain text is submitted as the current decision answer.
+- During approval blocker state the prompt changes to `ws-xxx approval >` and
+  plain text is parsed as approval/rejection intent; unclear text asks the user
+  to use `/approval approve` or `/approval reject`.
 - The input area is fixed near the bottom of the terminal, above the help bar.
 - Press Enter to submit.
 - Press Alt+Enter to insert a newline in the input buffer.
@@ -43,9 +45,10 @@
 - Press Ctrl+C to interrupt the active Run.
 - Press ESC to clear current input.
 - `/` commands supported in the default TUI: `/help`, `/clear`,
-  `/workspace`, `/goal`, `/dod`, `/result`, `/memory`, `/continue`,
-  `/restart`, `/exit`.
-- `/restart [message]` starts a new Workspace execution with the existing
+  `/workspace`, `/workspace create`, `/goal`, `/dod`, `/result`, `/memory`,
+  `/run continue`, `/run restart`, `/exit`.
+- `/run continue [message]` resumes the current active Run.
+- `/run restart [message]` starts a new Workspace execution with the existing
   cumulative Goal and DoD definitions. The optional message is injected as
   operator dialog input for the new Run.
 - `/dod item1; item2` sets the pending DoD for the next submitted Goal.
@@ -58,6 +61,29 @@
 - TUI does not provide a normal workspaceTemplate rebind command. Template
   selection is a Workspace creation-time concern; existing Workspace
   template migration must be handled as a separate advanced migration flow.
+
+### Slash Command Contract
+
+| Command | Usage |
+|---------|-------|
+| `/help` | Show the TUI help overlay. |
+| `/clear` | Clear current TUI display state. |
+| `/workspace` | Toggle workspace selection mode. |
+| `/workspace create <title> [--template <id>] [--dir <path>]` | Create and switch to a workspace. |
+| `/goal <text>` | Define a new goal and activate execution. |
+| `/dod [items]` | Show current DoD when empty, otherwise persist DoD items. |
+| `/result` or `/refresh` | Refresh the current workspace result/context. |
+| `/memory` or `/mem` | Show memory recall summary. |
+| `/run continue [message]` | Resume the selected active run, optionally with operator input. |
+| `/run restart [message]` | Start a new run using the current cumulative Goal/DoD, optionally with operator input. |
+| `/decision show` or `/decision list` | Show current/listed decision tickets. |
+| `/decision answer <text>` | Resolve current decision with an answer. |
+| `/decision replan [note]` | Resolve current decision by requesting replan. |
+| `/decision terminate [note]` | Resolve current decision by terminating the current path. |
+| `/approval show` or `/approval list` | Show current/listed approvals. |
+| `/approval approve` | Approve current approval request. |
+| `/approval reject` | Reject current approval request. |
+| `/exit` | Quit the TUI. No bare `q`, Ctrl+Q, `/q`, or `/quit` exit path is supported. |
 
 ## Progress Summary Display
 
@@ -117,7 +143,7 @@ User answer is sent via Enter. No modal dialog.
 | Ctrl+P / Ctrl+N | Previous/next input history |
 | Tab | Complete slash command |
 | PgUp / PgDn | Scroll main result area |
-| Ctrl+Q / q | Quit |
+| `/exit` | Quit |
 
 Mouse drag is reserved for the terminal emulator's native text selection and
 copy behavior. The TUI must not enable Bubble Tea mouse reporting by default,
