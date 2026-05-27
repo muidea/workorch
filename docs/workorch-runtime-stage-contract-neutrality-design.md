@@ -446,6 +446,14 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
   step kind，例如 `git/write`；必要时还可声明 `acceptedOperations`，例如
   `commit`。core 只校验 evidenceRefs 是否可追踪、step kind / operation 是否匹配，
   不判断提交内容是否满足具体业务。
+- `acceptedOperations` 只约束最终用于满足该 evidence requirement 的证据节点，不得
+  被解释为整条 graph 只能包含该 operation。若当前 Soul / capability contract 允许，
+  LLM 可以在同一 graph 中使用必要的中立支撑节点准备或验证该证据；这些支撑节点只有在
+  自身 kind / operation 同时匹配 requirement 时，才可作为满足该 requirement 的 evidenceRef。
+- 匹配 kind / operation 的证据节点仍必须是有效非零工作证据。若输出标记
+  `zeroWork=true`、`evidenceQuality=invalid/inconclusive` 或等价弱证据信号，
+  runtime 不得把它用于关闭 required deliverable / coverage target；应继续 repair、
+  validation 或返回 failed assessment。
 - 对应 Soul 必须说明何时读取状态、何时暂存路径、何时提交，以及无可提交变更时如何
   输出 zeroWork / skipped 原因。若 Soul 未声明该流程，即使模板初始化了 `.git`，也不能
   假设 LLM 会自动提交。

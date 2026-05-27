@@ -387,6 +387,10 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		delete(input, "concreteFailureEvidenceRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
 		if len(contract.RepairActionPackage) > 0 {
 			input["repairActionPackage"] = contract.RepairActionPackage
 		}
@@ -616,7 +620,8 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	}
 	required["mustDeclareCoverageTargets"] = true
 	required["coverageTargetMatchRule"] = "state-changing evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
-	required["evidenceKindRequirementRule"] = "when a coverage target has profile evidenceRequirements, include at least one accepted state-changing evidence node with the required kind and operation before claiming the target satisfied"
+	required["evidenceKindRequirementRule"] = "when a coverage target has profile evidenceRequirements, include at least one accepted state-changing evidence node with the required kind and operation before claiming the target satisfied; acceptedOperations constrains the required evidence node, not necessary supporting capability nodes"
+	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
 	pkg["requiredOutput"] = required
 	pkg["exitCriteria"] = []string{
 		"profile_required_state_changing_evidence_produced_then_verify",

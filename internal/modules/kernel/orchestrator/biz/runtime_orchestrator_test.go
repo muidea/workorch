@@ -21312,6 +21312,74 @@ func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraph(t *
 	}
 }
 
+func TestStateChangingRepairContractAcceptsSupportingWriteEvidenceGraphAfterValidationContract(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-supporting", InitialStepKind: llmWorkspaceExecutionStepKind}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageVerification,
+		"repairObjective":             repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":   true,
+		"stateChangingOutputRequired": true,
+	}
+	applied := ApplyConvergenceContract(input, ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{gitcommon.StepKindWrite},
+				"acceptedOperations":           []string{gitcommon.OperationCommit},
+			},
+		},
+	})
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-supporting/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: applied,
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "init",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationInit,
+					},
+				},
+				{
+					"id":        "add",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"init"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+			},
+		},
+	}
+
+	if inputRequiresConcreteValidationEvidence(step.Input) {
+		t.Fatalf("applied input still requires concrete validation evidence: %+v", step.Input)
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want supporting write graph accepted", err)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()
@@ -21354,6 +21422,55 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *te
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "requires evidence operation: commit") {
 		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want commit operation requirement", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsZeroWorkAcceptedEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable-zero-work")
+	commitStepID := common.StepID("run-dod-git-deliverable-zero-work/graph-001/002-git-commit")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    commitStepID,
+		RunID: runID,
+		Kind:  gitcommon.StepKindWrite,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"operation": gitcommon.OperationCommit},
+		Output: map[string]any{
+			"operation": gitcommon.OperationCommit,
+			"zeroWork":  true,
+			"summary":   "git commit completed with no staged changes",
+		},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": []map[string]any{{
+			"id":           "version_control_snapshot",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(commitStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "non-zero-work valid evidence") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want zero-work accepted evidence rejected", err)
 	}
 }
 

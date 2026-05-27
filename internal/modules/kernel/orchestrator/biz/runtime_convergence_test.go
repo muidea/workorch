@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
@@ -98,6 +99,9 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
 		t.Fatalf("requiredOutput = %+v, want git/write commit accepted state-changing evidence", required)
 	}
+	if strings.TrimSpace(stringFromMap(required, "supportingEvidenceNodeRule")) == "" {
+		t.Fatalf("requiredOutput = %+v, want supporting evidence node rule", required)
+	}
 	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("requiredOutput.acceptedKinds = %+v, should not introduce unrelated state-changing kinds", required["acceptedKinds"])
 	}
@@ -171,6 +175,43 @@ func TestBuildConvergenceContractRestoresProfileRequiredStateChangingEvidenceWhe
 	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
 	if boolValue(applied["concreteFailureEvidenceRequired"]) || stringFromMap(applied, "repairObjective") != repairObjectiveStateChangingOutput {
 		t.Fatalf("applied input = %+v, want stale evidence-acquisition flags replaced by state-changing repair", applied)
+	}
+}
+
+func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":  true,
+		"evidenceRepairRequired":     true,
+		stepInputKeyAssessmentOnly:   true,
+		"assessmentOnlyReason":       "previous assessment correction",
+	}
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{gitcommon.StepKindWrite},
+				"acceptedOperations":           []string{gitcommon.OperationCommit},
+			},
+		},
+	}
+
+	applied := ApplyConvergenceContract(input, contract)
+
+	if stringFromMap(applied, "repairObjective") != repairObjectiveStateChangingOutput || !boolValue(applied["stateChangingOutputRequired"]) {
+		t.Fatalf("applied = %+v, want state-changing contract", applied)
+	}
+	for _, key := range []string{"boundedValidationRequired", "evidenceRepairRequired", stepInputKeyAssessmentOnly, "assessmentOnlyReason"} {
+		if _, ok := applied[key]; ok {
+			t.Fatalf("applied[%s] still present in state-changing contract: %+v", key, applied)
+		}
 	}
 }
 

@@ -382,6 +382,7 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 	rejectedRefs := make([]string, 0)
 	rejectedKind := ""
 	acceptedKindWrongOperationRefs := make([]string, 0)
+	acceptedWeakRefs := make([]string, 0)
 	acceptedSteps := make([]*runModel.Step, 0)
 	itemName := evidenceKindRequirementItemName(requirement, item)
 	for _, ref := range refs {
@@ -408,6 +409,10 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 					continue
 				}
 			}
+			if !validationEvidenceCanSatisfyDoD(evidenceQualityFromRuntimeOutput(step.Output)) {
+				acceptedWeakRefs = append(acceptedWeakRefs, ref)
+				continue
+			}
 			hasAcceptedEvidence = true
 			acceptedSteps = append(acceptedSteps, step)
 		}
@@ -426,6 +431,9 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		if hasAcceptedRequirement && knownEvidenceRefs > 0 && !hasAcceptedEvidence {
 			if len(acceptedKindWrongOperationRefs) > 0 && len(acceptedOperations) > 0 {
 				return evidenceKindRequirementError(requirement, itemName, strings.Join(acceptedKindWrongOperationRefs, ", "), "", fmt.Sprintf("requires evidence operation: %s", strings.Join(requirement.AcceptedOperations, ", ")))
+			}
+			if len(acceptedWeakRefs) > 0 {
+				return evidenceKindRequirementError(requirement, itemName, strings.Join(acceptedWeakRefs, ", "), "", "requires non-zero-work valid evidence from an accepted step")
 			}
 			return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", fmt.Sprintf("requires evidence from step kinds: %s", strings.Join(requirement.AcceptedStepKinds, ", ")))
 		}
