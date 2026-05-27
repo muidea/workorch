@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -846,6 +847,99 @@ func TestModelSlashCompletionSuggestionsVisible(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Commands:") || !strings.Contains(view, "/workspace") {
 		t.Fatalf("slash completion suggestions missing:\n%s", view)
+	}
+}
+
+func TestModelDecisionSlashCompletionSuggestsContextSubcommands(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
+	m.progress = progressWaitingDecision
+	m.input = "/"
+	m.inputCursor = len([]rune(m.input))
+	m.width = 90
+	m.height = 16
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/decision answer") || !strings.Contains(view, "/decision replan") {
+		t.Fatalf("decision suggestions missing contextual subcommands:\n%s", view)
+	}
+
+	m.input = "/decision "
+	m.inputCursor = len([]rune(m.input))
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = asModel(next)
+	if m.input != "/decision answer " {
+		t.Fatalf("completion = %q, want /decision answer with trailing space", m.input)
+	}
+}
+
+func TestModelSlashCompletionArrowSelectionControlsCompletedCommand(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
+	m.progress = progressWaitingDecision
+	m.setInput("/decision ")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = asModel(next)
+	if m.slashCursor != 1 {
+		t.Fatalf("slashCursor = %d, want 1", m.slashCursor)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = asModel(next)
+	if m.input != "/decision replan " {
+		t.Fatalf("completion = %q, want selected /decision replan", m.input)
+	}
+
+	m.setInput("/decision ")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = asModel(next)
+	if m.slashCursor != 4 {
+		t.Fatalf("slashCursor = %d, want wrap to last suggestion", m.slashCursor)
+	}
+}
+
+func TestModelApprovalSlashCompletionSuggestsContextSubcommands(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", State: "pending", Reason: "run shell command"}
+	m.progress = progressWaitingApproval
+	m.input = "/"
+	m.inputCursor = len([]rune(m.input))
+	m.width = 90
+	m.height = 16
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/approval approve") || !strings.Contains(view, "/approval reject") {
+		t.Fatalf("approval suggestions missing contextual subcommands:\n%s", view)
+	}
+}
+
+func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
+	m.setInput("/decision replan 重新规划当前路径")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected decision resolve command")
+	}
+	msg := cmd()
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+
+	if len(be.decisions) != 1 {
+		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	}
+	req := be.decisions[0]
+	if req.TicketID != "ticket-1" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision request = %+v, want explicit replan for ticket-1", req)
+	}
+	if req.Payload["answer"] != "重新规划当前路径" {
+		t.Fatalf("payload = %+v, want note as answer", req.Payload)
+	}
+	if m.blockingDecision != nil {
+		t.Fatalf("blockingDecision = %+v, want cleared after resolution", m.blockingDecision)
 	}
 }
 
@@ -2717,6 +2811,31 @@ type recordingBE struct {
 func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
 	t.Helper()
 	return &recordingBE{fakeBE: newFake(t), runState: runState}
+}
+
+type decisionRecordingBE struct {
+	*fakeBE
+	decisions []backend.ResolveDecisionRequest
+}
+
+func (b *decisionRecordingBE) Decision() backend.DecisionBackend {
+	return &decisionRecordingBackend{parent: b}
+}
+
+type decisionRecordingBackend struct{ parent *decisionRecordingBE }
+
+func (f *decisionRecordingBackend) Resolve(ctx context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
+	f.parent.decisions = append(f.parent.decisions, req)
+	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
+}
+func (f *decisionRecordingBackend) BatchResolve(ctx context.Context, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (f *decisionRecordingBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
+	return nil, nil
+}
+func (f *decisionRecordingBackend) Get(ctx context.Context, id common.TicketID) (*backend.DecisionInfo, error) {
+	return &backend.DecisionInfo{ID: id, State: "open"}, nil
 }
 
 func (b *recordingBE) Goal() backend.GoalBackend { return &recordingGoal{parent: b} }

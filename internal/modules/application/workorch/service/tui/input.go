@@ -23,6 +23,7 @@ func (m *AppModel) insertInput(value string) {
 	m.input = string(next)
 	m.inputCursor += len(inserted)
 	m.historyCursor = -1
+	m.resetSlashSuggestionCursor()
 }
 
 func (m *AppModel) deleteBeforeCursor() {
@@ -36,6 +37,7 @@ func (m *AppModel) deleteBeforeCursor() {
 	next = append(next, runes[m.inputCursor:]...)
 	m.input = string(next)
 	m.inputCursor--
+	m.resetSlashSuggestionCursor()
 }
 
 func (m *AppModel) deleteAtCursor() {
@@ -48,6 +50,7 @@ func (m *AppModel) deleteAtCursor() {
 	next = append(next, runes[:m.inputCursor]...)
 	next = append(next, runes[m.inputCursor+1:]...)
 	m.input = string(next)
+	m.resetSlashSuggestionCursor()
 }
 
 func (m *AppModel) moveInputCursor(delta int) {
@@ -60,6 +63,7 @@ func (m *AppModel) clearInput() {
 	m.input = ""
 	m.inputCursor = 0
 	m.historyCursor = -1
+	m.resetSlashSuggestionCursor()
 }
 
 func (m *AppModel) clampInputCursor(length int) {
@@ -215,55 +219,203 @@ func (m *AppModel) nextInputHistory() {
 func (m *AppModel) setInput(value string) {
 	m.input = value
 	m.inputCursor = len([]rune(value))
+	m.resetSlashSuggestionCursor()
 }
 
 func (m *AppModel) completeSlashCommand() {
-	trimmed := strings.TrimSpace(m.input)
-	if !strings.HasPrefix(trimmed, "/") {
+	trimmedLeft := strings.TrimLeftFunc(m.input, unicode.IsSpace)
+	if !strings.HasPrefix(trimmedLeft, "/") {
 		return
 	}
-	matches := slashCommandMatches(trimmed)
+	matches := m.slashCommandSuggestions(m.input)
 	if len(matches) > 0 {
-		m.setInput(matches[0])
+		selected := m.clampedSlashSuggestionCursor(len(matches))
+		insert := matches[selected].Insert
+		if insert == "" {
+			insert = matches[selected].Command
+		}
+		m.setInput(insert)
 	}
 }
 
 func (m AppModel) renderSlashCommandSuggestions(width int) string {
-	trimmed := strings.TrimSpace(m.input)
-	if !strings.HasPrefix(trimmed, "/") {
+	trimmedLeft := strings.TrimLeftFunc(m.input, unicode.IsSpace)
+	if !strings.HasPrefix(trimmedLeft, "/") {
 		return ""
 	}
-	matches := slashCommandMatches(trimmed)
+	matches := m.slashCommandSuggestions(m.input)
 	if len(matches) == 0 {
 		return ""
 	}
 	limit := min(4, len(matches))
+	selected := m.clampedSlashSuggestionCursor(len(matches))
+	start := 0
+	if selected >= limit {
+		start = selected - limit + 1
+	}
+	end := min(len(matches), start+limit)
 	lines := make([]string, 0, limit+1)
 	lines = append(lines, Dim.Render("Commands:"))
-	for idx, command := range matches[:limit] {
-		line := "  " + command
-		if idx == 0 {
-			line = Selection.Render("  " + command + "  ")
+	for idx := start; idx < end; idx++ {
+		suggestion := matches[idx]
+		line := "  " + suggestion.Command
+		if suggestion.Description != "" {
+			line += "  " + Dim.Render(suggestion.Description)
+		}
+		if idx == selected {
+			selected := "  " + suggestion.Command
+			if suggestion.Description != "" {
+				selected += "  " + suggestion.Description
+			}
+			line = Selection.Render(selected + "  ")
 		}
 		lines = append(lines, truncateDisplay(line, width-2))
 	}
 	return strings.Join(lines, "\n")
 }
 
+func (m *AppModel) resetSlashSuggestionCursor() {
+	m.slashCursor = 0
+}
+
+func (m *AppModel) moveSlashSuggestionCursor(delta int) bool {
+	matches := m.slashCommandSuggestions(m.input)
+	if len(matches) == 0 {
+		m.resetSlashSuggestionCursor()
+		return false
+	}
+	m.slashCursor += delta
+	if m.slashCursor < 0 {
+		m.slashCursor = len(matches) - 1
+	}
+	if m.slashCursor >= len(matches) {
+		m.slashCursor = 0
+	}
+	return true
+}
+
+func (m AppModel) slashCommandSuggestionActive() bool {
+	return len(m.slashCommandSuggestions(m.input)) > 0
+}
+
+func (m AppModel) clampedSlashSuggestionCursor(length int) int {
+	if length <= 0 || m.slashCursor < 0 {
+		return 0
+	}
+	if m.slashCursor >= length {
+		return length - 1
+	}
+	return m.slashCursor
+}
+
+type slashCommandSuggestion struct {
+	Command     string
+	Insert      string
+	Description string
+	Contextual  bool
+}
+
+func (m AppModel) slashCommandSuggestions(input string) []slashCommandSuggestion {
+	return slashCommandSuggestionsForInput(input, m.contextualSlashCommandSuggestions())
+}
+
 func slashCommandMatches(input string) []string {
-	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(trimmed, "/") {
+	suggestions := slashCommandSuggestionsForInput(input, nil)
+	ret := make([]string, 0, len(suggestions))
+	for _, suggestion := range suggestions {
+		ret = append(ret, suggestion.Command)
+	}
+	return ret
+}
+
+func slashCommandSuggestionsForInput(input string, contextual []slashCommandSuggestion) []slashCommandSuggestion {
+	trimmedLeft := strings.TrimLeftFunc(input, unicode.IsSpace)
+	if !strings.HasPrefix(trimmedLeft, "/") {
 		return nil
 	}
-	prefix := strings.ToLower(strings.TrimPrefix(trimmed, "/"))
-	commands := []string{"/help", "/clear", "/workspace", "/workspace create", "/goal", "/dod", "/memory", "/result", "/continue", "/restart", "/exit"}
-	matches := make([]string, 0, len(commands))
+	prefix := normalizeSlashCommandPrefix(trimmedLeft)
+	commands := append([]slashCommandSuggestion{}, contextual...)
+	commands = append(commands, baseSlashCommandSuggestions()...)
+	seen := map[string]bool{}
+	matches := make([]slashCommandSuggestion, 0, len(commands))
 	for _, command := range commands {
-		if strings.HasPrefix(strings.TrimPrefix(command, "/"), prefix) {
+		key := strings.TrimSpace(command.Command)
+		if key == "" || seen[key] {
+			continue
+		}
+		commandKey := strings.ToLower(strings.TrimPrefix(key, "/"))
+		if prefix == "" || strings.HasPrefix(commandKey, prefix) {
+			seen[key] = true
+			if command.Insert == "" {
+				command.Insert = key
+			}
+			command.Command = key
 			matches = append(matches, command)
 		}
 	}
 	return matches
+}
+
+func normalizeSlashCommandPrefix(input string) string {
+	input = strings.TrimPrefix(input, "/")
+	hasTrailingSpace := strings.HasSuffix(input, " ") || strings.HasSuffix(input, "\t")
+	prefix := strings.ToLower(strings.Join(strings.Fields(input), " "))
+	if hasTrailingSpace && prefix != "" {
+		prefix += " "
+	}
+	return prefix
+}
+
+func baseSlashCommandSuggestions() []slashCommandSuggestion {
+	return []slashCommandSuggestion{
+		{Command: "/help", Description: "show help"},
+		{Command: "/clear", Description: "clear current display"},
+		{Command: "/workspace", Description: "select workspace"},
+		{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace"},
+		{Command: "/goal", Insert: "/goal ", Description: "submit a new goal"},
+		{Command: "/dod", Insert: "/dod ", Description: "set DoD items"},
+		{Command: "/memory", Description: "show memory recall"},
+		{Command: "/result", Description: "refresh result"},
+		{Command: "/run continue", Description: "continue current run"},
+		{Command: "/run restart", Insert: "/run restart ", Description: "restart current workspace"},
+		{Command: "/continue", Description: "continue current run"},
+		{Command: "/restart", Insert: "/restart ", Description: "restart current workspace"},
+		{Command: "/exit", Description: "quit TUI"},
+	}
+}
+
+func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
+	switch {
+	case m.blockingDecision != nil:
+		return []slashCommandSuggestion{
+			{Command: "/decision answer", Insert: "/decision answer ", Description: "answer current ticket", Contextual: true},
+			{Command: "/decision replan", Insert: "/decision replan ", Description: "request replan", Contextual: true},
+			{Command: "/decision terminate", Insert: "/decision terminate ", Description: "terminate current path", Contextual: true},
+			{Command: "/decision show", Description: "show current ticket", Contextual: true},
+			{Command: "/decision list", Description: "list open tickets", Contextual: true},
+		}
+	case m.blockingApproval != nil:
+		return []slashCommandSuggestion{
+			{Command: "/approval approve", Description: "approve current request", Contextual: true},
+			{Command: "/approval reject", Description: "reject current request", Contextual: true},
+			{Command: "/approval show", Description: "show current approval", Contextual: true},
+			{Command: "/approval list", Description: "list approvals", Contextual: true},
+		}
+	case m.activeRunID != "":
+		return []slashCommandSuggestion{
+			{Command: "/run continue", Description: "continue current run", Contextual: true},
+			{Command: "/run restart", Insert: "/run restart ", Description: "restart current workspace", Contextual: true},
+			{Command: "/result", Description: "refresh result", Contextual: true},
+			{Command: "/memory", Description: "show memory recall", Contextual: true},
+		}
+	case m.activeWorkspaceID == "":
+		return []slashCommandSuggestion{
+			{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace", Contextual: true},
+			{Command: "/workspace", Description: "select workspace", Contextual: true},
+		}
+	default:
+		return nil
+	}
 }
 
 func isRunControlIntent(input string) bool {

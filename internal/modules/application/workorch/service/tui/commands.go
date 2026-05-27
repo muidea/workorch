@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -396,10 +397,16 @@ func stringValueFromMap(input map[string]any, key string) string {
 }
 
 func ResolveDecision(be backend.Backend, ticketID string, answer string) tea.Cmd {
+	return ResolveDecisionWithType(be, ticketID, inferDecisionResolutionType(answer), answer)
+}
+
+func ResolveDecisionWithType(be backend.Backend, ticketID string, resolutionType string, answer string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		resolutionType := inferDecisionResolutionType(answer)
+		if !decisioncommon.IsSupportedResolutionType(resolutionType) {
+			resolutionType = inferDecisionResolutionType(answer)
+		}
 		decision, err := be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
 			TicketID:       common.TicketID(ticketID),
 			ResolutionType: resolutionType,

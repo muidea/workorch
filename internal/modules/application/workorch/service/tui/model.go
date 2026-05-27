@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
@@ -70,6 +71,7 @@ type AppModel struct {
 
 	input         string
 	inputCursor   int
+	slashCursor   int
 	inputHistory  []string
 	historyCursor int
 	currentTask   string
@@ -479,11 +481,15 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down":
 		if m.workspaceSelectMode {
 			m.nextWorkspace()
+		} else if m.slashCommandSuggestionActive() {
+			m.moveSlashSuggestionCursor(1)
 		}
 		return m, nil
 	case "up":
 		if m.workspaceSelectMode {
 			m.prevWorkspace()
+		} else if m.slashCommandSuggestionActive() {
+			m.moveSlashSuggestionCursor(-1)
 		}
 		return m, nil
 	case KeyDown:
@@ -657,6 +663,136 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.clearInput()
 		m.toggleWorkspaceSelectMode()
 		return m, nil, true
+	case "run":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		subcommand, rest := splitSlashSubcommand(args)
+		switch subcommand {
+		case "continue", "resume", "":
+			m.clearInput()
+			m.cancelWorkspaceSelection()
+			m.clearRunDisplayState()
+			m.lastError = nil
+			m.progress = progressSubmitting
+			m.progressText = "Continuing active run"
+			return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, rest), true
+		case "restart", "rerun":
+			m.clearInput()
+			m.cancelWorkspaceSelection()
+			m.clearRunDisplayState()
+			m.lastError = nil
+			if rest != "" {
+				m.appendTranscript("Input", rest)
+			}
+			m.progress = progressSubmitting
+			m.progressText = "Restarting workspace run"
+			return m, RestartWorkspaceRun(m.be, m.activeWorkspaceID, rest), true
+		default:
+			m.lastError = fmt.Errorf("unknown run subcommand: %s", subcommand)
+			return m, nil, true
+		}
+	case "decision":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		subcommand, rest := splitSlashSubcommand(args)
+		switch subcommand {
+		case "", "show":
+			m.clearInput()
+			m.result = renderDecisionCommandResult(m.blockingDecision, m.decisions)
+			m.resetMainViewport()
+			m.progressText = "Showing decision tickets"
+			m.lastError = nil
+			return m, nil, true
+		case "list":
+			m.clearInput()
+			m.result = renderDecisionListResult(m.decisions)
+			m.resetMainViewport()
+			m.progressText = "Showing decision tickets"
+			m.lastError = nil
+			return m, FetchDecisions(m.be, m.activeWorkspaceID), true
+		case "answer", "resolve":
+			if m.blockingDecision == nil {
+				m.lastError = fmt.Errorf("no blocking decision")
+				return m, nil, true
+			}
+			if rest == "" {
+				m.lastError = fmt.Errorf("decision answer requires text")
+				return m, nil, true
+			}
+			ticketID := string(m.blockingDecision.ID)
+			m.clearInput()
+			m.lastError = nil
+			m.appendTranscript("Decision", rest)
+			return m, ResolveDecision(m.be, ticketID, rest), true
+		case "replan":
+			if m.blockingDecision == nil {
+				m.lastError = fmt.Errorf("no blocking decision")
+				return m, nil, true
+			}
+			answer := nonEmpty(rest, "replan")
+			ticketID := string(m.blockingDecision.ID)
+			m.clearInput()
+			m.lastError = nil
+			m.appendTranscript("Decision", answer)
+			return m, ResolveDecisionWithType(m.be, ticketID, decisioncommon.ResolutionTypeReplan, answer), true
+		case "terminate", "reject":
+			if m.blockingDecision == nil {
+				m.lastError = fmt.Errorf("no blocking decision")
+				return m, nil, true
+			}
+			answer := nonEmpty(rest, "terminate current path")
+			ticketID := string(m.blockingDecision.ID)
+			m.clearInput()
+			m.lastError = nil
+			m.appendTranscript("Decision", answer)
+			return m, ResolveDecisionWithType(m.be, ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, answer), true
+		default:
+			m.lastError = fmt.Errorf("unknown decision subcommand: %s", subcommand)
+			return m, nil, true
+		}
+	case "approval":
+		m.addInputHistory(text)
+		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
+		subcommand, _ := splitSlashSubcommand(args)
+		switch subcommand {
+		case "", "show":
+			m.clearInput()
+			m.result = renderApprovalCommandResult(m.blockingApproval, m.approvals)
+			m.resetMainViewport()
+			m.progressText = "Showing approvals"
+			m.lastError = nil
+			return m, nil, true
+		case "list":
+			m.clearInput()
+			m.result = renderApprovalListResult(m.approvals)
+			m.resetMainViewport()
+			m.progressText = "Showing approvals"
+			m.lastError = nil
+			return m, FetchApprovals(m.be, m.activeWorkspaceID), true
+		case "approve", "yes":
+			if m.blockingApproval == nil {
+				m.lastError = fmt.Errorf("no blocking approval")
+				return m, nil, true
+			}
+			approvalID := string(m.blockingApproval.ID)
+			m.clearInput()
+			m.lastError = nil
+			m.appendTranscript("Approval", "approve")
+			return m, ResolveApproval(m.be, approvalID, true), true
+		case "reject", "no":
+			if m.blockingApproval == nil {
+				m.lastError = fmt.Errorf("no blocking approval")
+				return m, nil, true
+			}
+			approvalID := string(m.blockingApproval.ID)
+			m.clearInput()
+			m.lastError = nil
+			m.appendTranscript("Approval", "reject")
+			return m, ResolveApproval(m.be, approvalID, false), true
+		default:
+			m.lastError = fmt.Errorf("unknown approval subcommand: %s", subcommand)
+			return m, nil, true
+		}
 	case "goal":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
@@ -737,6 +873,127 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.lastError = fmt.Errorf("unknown slash command: /%s", name)
 		return m, nil, true
 	}
+}
+
+func splitSlashSubcommand(args string) (string, string) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return "", ""
+	}
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return "", ""
+	}
+	subcommand := strings.ToLower(fields[0])
+	rest := strings.TrimSpace(strings.TrimPrefix(args, fields[0]))
+	return subcommand, rest
+}
+
+func renderDecisionCommandResult(current *backend.DecisionInfo, items []backend.DecisionInfo) string {
+	if current != nil {
+		var b strings.Builder
+		b.WriteString("Current decision\n")
+		b.WriteString("- id: ")
+		b.WriteString(string(current.ID))
+		b.WriteString("\n")
+		if current.State != "" {
+			b.WriteString("- state: ")
+			b.WriteString(current.State)
+			b.WriteString("\n")
+		}
+		if current.Question != "" {
+			b.WriteString("- question: ")
+			b.WriteString(current.Question)
+			b.WriteString("\n")
+		}
+		if current.Reason != "" {
+			b.WriteString("- reason: ")
+			b.WriteString(current.Reason)
+			b.WriteString("\n")
+		}
+		b.WriteString("\nCommands\n")
+		b.WriteString("- /decision answer <text>\n")
+		b.WriteString("- /decision replan [note]\n")
+		b.WriteString("- /decision terminate [note]")
+		return b.String()
+	}
+	return renderDecisionListResult(items)
+}
+
+func renderDecisionListResult(items []backend.DecisionInfo) string {
+	if len(items) == 0 {
+		return "No decision tickets for the current workspace."
+	}
+	var b strings.Builder
+	b.WriteString("Decision tickets\n")
+	for _, item := range items {
+		b.WriteString("- ")
+		b.WriteString(string(item.ID))
+		if item.State != "" {
+			b.WriteString(" [")
+			b.WriteString(item.State)
+			b.WriteString("]")
+		}
+		if text := nonEmpty(item.Question, item.Reason); text != "" {
+			b.WriteString(": ")
+			b.WriteString(text)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderApprovalCommandResult(current *backend.ApprovalInfo, items []backend.ApprovalInfo) string {
+	if current != nil {
+		var b strings.Builder
+		b.WriteString("Current approval\n")
+		b.WriteString("- id: ")
+		b.WriteString(string(current.ID))
+		b.WriteString("\n")
+		if current.State != "" {
+			b.WriteString("- state: ")
+			b.WriteString(current.State)
+			b.WriteString("\n")
+		}
+		if current.Action != "" {
+			b.WriteString("- action: ")
+			b.WriteString(current.Action)
+			b.WriteString("\n")
+		}
+		if current.Reason != "" {
+			b.WriteString("- reason: ")
+			b.WriteString(current.Reason)
+			b.WriteString("\n")
+		}
+		b.WriteString("\nCommands\n")
+		b.WriteString("- /approval approve\n")
+		b.WriteString("- /approval reject")
+		return b.String()
+	}
+	return renderApprovalListResult(items)
+}
+
+func renderApprovalListResult(items []backend.ApprovalInfo) string {
+	if len(items) == 0 {
+		return "No approvals for the current workspace."
+	}
+	var b strings.Builder
+	b.WriteString("Approvals\n")
+	for _, item := range items {
+		b.WriteString("- ")
+		b.WriteString(string(item.ID))
+		if item.State != "" {
+			b.WriteString(" [")
+			b.WriteString(item.State)
+			b.WriteString("]")
+		}
+		if text := nonEmpty(item.Action, item.Reason); text != "" {
+			b.WriteString(": ")
+			b.WriteString(text)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func initialTranscript(initialGoal string) []transcriptItem {
