@@ -23170,6 +23170,75 @@ func TestCompletionGateCoverageRepairFollowUpCanContinue(t *testing.T) {
 	}
 }
 
+func TestCompletionGateAssessmentOnlySchemaInvalidRepairCanContinue(t *testing.T) {
+	runID := common.RunID("run-dod-coverage-assessment-schema-invalid")
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-002-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyAssessmentOnly:        true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			"repairObjective":                 "complete_dod_goal_coverage_assessment",
+			"assessmentOnlyReason":            "dod_coverage_contract_correction",
+			"convergenceContract": map[string]any{
+				"state":           convergenceStateNeedAssessment,
+				"runtimeStage":    runtimeStageVerification,
+				"repairObjective": "complete_dod_goal_coverage_assessment",
+			},
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-usage",
+				"raw":               "usage accounting",
+				"evidenceCandidates": []map[string]any{{
+					"stepId": string(runID) + "/graph-001/003-test",
+					"kind":   "shell/command",
+				}},
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"error":                   "invalid argument: invalid llm decision json: no json object found",
+			"reason":                  "invalid argument: invalid llm decision json: no json object found",
+		},
+	}
+
+	if shouldCloseCompletionGateFailureWithoutRepair("runtime completion gate failed", step, step.Output) {
+		t.Fatalf("assessment-only schema invalid repair should continue through runtime repair budget")
+	}
+	if terminalAssessmentOnlyDecisionContractFailure(step) {
+		t.Fatalf("assessment-only schema invalid repair should not be treated as terminal decision contract failure")
+	}
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-dod-coverage-assessment-schema-invalid", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, step, 2, errors.New("invalid llm decision json"))
+
+	if input[stepInputKeyAssessmentOnly] != true ||
+		input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
+		t.Fatalf("repair input = %+v, want assessment-only schema invalid recovery contract", input)
+	}
+	if input["stateChangingOutputRequired"] != nil || input["boundedValidationRequired"] != nil {
+		t.Fatalf("repair input = %+v, want no executable or validation contract", input)
+	}
+	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["goalRequirementId"] != "goal-req-usage" {
+		t.Fatalf("missingGoalCoverage = %+v, want carried forward assessment scope", input["missingGoalCoverage"])
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment", contract)
+	}
+	recovery := mapFromValue(input["assessmentSchemaInvalidRecovery"])
+	if recovery["required"] != true {
+		t.Fatalf("assessmentSchemaInvalidRecovery = %+v, want required", recovery)
+	}
+}
+
 func TestRuntimeRepairFailedCompletionStateWithAssessmentUsesDoDGate(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

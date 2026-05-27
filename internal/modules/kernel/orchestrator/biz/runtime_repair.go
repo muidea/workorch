@@ -149,6 +149,10 @@ func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runMode
 	if step != nil && boolValue(step.Input[stepInputKeyNoActionableFollowUp]) {
 		return false
 	}
+	if step != nil && boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) &&
+		assessmentOnlySchemaInvalidRepairRequired(step) {
+		return false
+	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		return true
@@ -196,6 +200,19 @@ func doDEvidenceQualityRepairRequired(step *runModel.Step) bool {
 	}
 	diagnostics := mapFromValue(step.Output["runtimeDiagnostics"])
 	return strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap"
+}
+
+func assessmentOnlySchemaInvalidRepairRequired(step *runModel.Step) bool {
+	if step == nil || !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
+		return false
+	}
+	if !repairActionIsSchemaInvalidRepair(step.Input, step.Output) {
+		return false
+	}
+	contract := mapFromValue(step.Input["convergenceContract"])
+	return strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" ||
+		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedAssessment ||
+		strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRuntimeStage)) == runtimeStageVerification
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
@@ -1453,6 +1470,9 @@ func isLLMProviderFailureStage(stage string) bool {
 
 func terminalAssessmentOnlyDecisionContractFailure(step *runModel.Step) bool {
 	if step == nil || !isLLMDecisionContractFailureStage(stringFromMap(step.Output, "stage")) {
+		return false
+	}
+	if assessmentOnlySchemaInvalidRepairRequired(step) {
 		return false
 	}
 	return boolValue(step.Input["providerRetryAssessmentOnly"]) ||
@@ -2899,10 +2919,67 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If concrete target evidence is still missing, acquire bounded implementation target evidence first; otherwise produce a state-changing repair before the next validation.",
 		)
 	}
+	preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
 	preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	return input
+}
+
+func preserveAssessmentOnlySchemaInvalidRepairContract(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || !assessmentOnlySchemaInvalidRepairRequired(failedStep) {
+		return false
+	}
+	setRuntimeStage(input, runtimeStageVerification)
+	input[stepInputKeySoulStage] = soulStageValidation
+	input[stepInputKeyAssessmentOnly] = true
+	input["completionFollowUp"] = true
+	input["repairObjective"] = firstNonEmptyString(
+		stringFromMap(input, "repairObjective"),
+		stringFromMap(failedStep.Input, "repairObjective"),
+		"complete_dod_goal_coverage_assessment",
+	)
+	if strings.TrimSpace(stringFromMap(input, "assessmentOnlyReason")) == "" {
+		input["assessmentOnlyReason"] = firstNonEmptyString(
+			stringFromMap(failedStep.Input, "assessmentOnlyReason"),
+			"assessment_schema_invalid_repair",
+		)
+	}
+	for _, key := range []string{
+		"missingDoDItems",
+		"missingGoalCoverage",
+		"missingDeliverableCoverage",
+		"requiredDeliverableCoverage",
+		"coverageTargetSet",
+		"latestClosureEvidence",
+		"supersededFailureEvidence",
+	} {
+		if _, ok := input[key]; !ok && failedStep.Input[key] != nil {
+			input[key] = cloneStepInputValue(failedStep.Input[key])
+		}
+	}
+	input["schemaInvalidRepairMode"] = "single_valid_json_decision"
+	input["assessmentSchemaInvalidRecovery"] = map[string]any{
+		"required": true,
+		"reason":   "previous_assessment_decision_json_invalid",
+		"requirements": []string{
+			"return exactly one valid JSON object",
+			"preserve the assessment-only contract",
+			"return dodAssessment or a real governance blocker only",
+			"do not include executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work",
+			"do not reuse rejected raw output previews",
+			"do not include markdown, comments, duplicate objects, trailing braces, or partial arrays",
+		},
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Previous assessment-only output was rejected because the LLM decision JSON was invalid; only fix the JSON/schema shape and preserve the assessment-only coverage contract.",
+		"Return one valid JSON object containing a completed or failed dodAssessment, or a real governance blocker; do not return executable work.",
+		"Do not copy rawContentPreview or repairRawContentPreview from the rejected output.",
+	)
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	delete(input, "boundedValidationRequired")
+	return true
 }
 
 func preserveConcreteValidationSchemaInvalidRepairContract(input map[string]any, failedStep *runModel.Step) bool {
