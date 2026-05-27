@@ -83,6 +83,24 @@ func TestNormalizeCompletionGateDoDAssessmentOutputCompletesAssessmentOnlyGoalCo
 	}
 }
 
+func TestDoDAssessmentItemMapsUnwrapsNestedItemsContainer(t *testing.T) {
+	items, ok := doDAssessmentItemMaps(map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{{
+			"id":           "source_change",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-nested-items/graph-001/001-verify"},
+		}},
+	})
+
+	if !ok || len(items) != 1 {
+		t.Fatalf("items = %+v ok=%v, want unwrapped nested items", items, ok)
+	}
+	if items[0]["id"] != "source_change" {
+		t.Fatalf("items[0] = %+v, want source_change", items[0])
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputFillsGoalCoverageItemFromRunRequirementID(t *testing.T) {
 	goalText := "publish completion evidence"
 	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))

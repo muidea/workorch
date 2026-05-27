@@ -23239,6 +23239,113 @@ func TestCompletionGateAssessmentOnlySchemaInvalidRepairCanContinue(t *testing.T
 	}
 }
 
+func TestAssessmentSchemaInvalidAfterValidationDriftRestoresAssessmentOnlyContract(t *testing.T) {
+	runID := common.RunID("run-assessment-schema-invalid-validation-drift")
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-003-of-assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":       true,
+			"evidenceRepairRequired":          true,
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-001",
+				"raw":               "publish verifiable completion evidence",
+			}},
+			"missingDeliverableCoverage": []map[string]any{{
+				"id":    "validation_report",
+				"state": "missing",
+			}},
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "goal",
+				"targetText": "goal-req-001",
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid|error=invalid argument: invalid llm decision json: no json object found",
+			"error":                   "invalid argument: invalid llm decision json: no json object found",
+			"rawContentPreview":       "{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"goalCoverage\":{\"items\":[]},\"deliverableCoverage\":{\"items\":[]}",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-assessment-schema-invalid-validation-drift", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failed, 3, errors.New("invalid llm decision json"))
+
+	if input[stepInputKeyAssessmentOnly] != true ||
+		input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
+		t.Fatalf("repair input = %+v, want assessment-only schema recovery after validation drift", input)
+	}
+	if input["boundedValidationRequired"] != nil || input["evidenceRepairRequired"] != nil {
+		t.Fatalf("repair input = %+v, want validation evidence contract removed", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment", contract)
+	}
+}
+
+func TestAssessmentSchemaInvalidBeforeBudgetDoesNotEscalateDuplicateDecision(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-assessment-schema-invalid-duplicate")
+	stepRepo := memory.NewStepRepository()
+	output := map[string]any{
+		"stage":                   "llm_schema_invalid",
+		failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+		failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid|error=invalid argument: invalid llm decision json: no json object found",
+		"error":                   "invalid argument: invalid llm decision json: no json object found",
+		"rawContentPreview":       "{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"deliverableCoverage\":",
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		stepInputKeyRuntimeStage:          runtimeStageVerification,
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+		"missingDeliverableCoverage": []map[string]any{{
+			"id": "validation_report",
+		}},
+	}
+	previous := &runmodel.Step{
+		ID:     common.StepID(runID + "/repair-001-of-assessment"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateFailed,
+		Input:  cloneStepPayload(input),
+		Output: cloneStepPayload(output),
+	}
+	current := &runmodel.Step{
+		ID:     common.StepID(runID + "/repair-002-of-assessment"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateFailed,
+		Input:  cloneStepPayload(input),
+		Output: cloneStepPayload(output),
+	}
+	if err := stepRepo.Create(ctx, previous); err != nil {
+		t.Fatalf("seed previous step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, current); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+
+	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-assessment-schema-invalid-duplicate", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, current) {
+		t.Fatalf("assessment schema invalid should continue schema recovery before duplicate decision escalation")
+	}
+}
+
 func TestRuntimeRepairFailedCompletionStateWithAssessmentUsesDoDGate(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

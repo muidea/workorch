@@ -1586,6 +1586,11 @@ func doDAssessmentItemMaps(value any) ([]map[string]any, bool) {
 			ret = append(ret, cloneStepPayload(mapped))
 		}
 		return ret, true
+	case map[string]any:
+		if nested, ok := doDAssessmentItemMaps(typed["items"]); ok {
+			return nested, true
+		}
+		return nil, false
 	default:
 		return nil, false
 	}

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -1308,6 +1309,55 @@ func TestRuntimeRepairFollowUpProviderNormalizedInvalidKeepsStateChangingContrac
 	}
 	if input["stateChangingOutputRequired"] != true || input["repairObjective"] != repairObjectiveStateChangingOutput {
 		t.Fatalf("repair input = %+v, want provider-normalized invalid to stay on state-changing repair contract", input)
+	}
+}
+
+func TestRuntimeRepairFollowUpAssessmentSchemaInvalidKeepsAssessmentContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-assessment-schema-invalid-contract",
+		WorkspaceID:     "ws-assessment-schema-invalid-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	failed := &runmodel.Step{
+		ID:    "run-assessment-schema-invalid-contract/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"repairObjective":                 "produce_concrete_validation_evidence",
+			"boundedValidationRequired":       true,
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-req-1",
+				"raw":               "coverage gap",
+			}},
+			"missingDeliverableCoverage": []map[string]any{{
+				"id":    "validation_report",
+				"state": "missing",
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid|error=invalid argument: invalid llm decision json: no json object found",
+			"error":                   "invalid argument: invalid llm decision json: no json object found",
+			"rawContentPreview":       "{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"goalCoverage\":{\"items\":[]},\"deliverableCoverage\":{\"items\":[]}}}",
+		},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, errors.New("invalid llm decision json"))
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
+		t.Fatalf("convergenceContract = %+v, want need_assessment for assessment schema invalid repair", contract)
+	}
+	if input[stepInputKeyAssessmentOnly] != true ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
+		t.Fatalf("repair input = %+v, want assessment-only schema invalid contract", input)
+	}
+	if input["boundedValidationRequired"] != nil || input["evidenceRepairRequired"] != nil {
+		t.Fatalf("repair input = %+v, want validation contract cleared", input)
 	}
 }
 

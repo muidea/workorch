@@ -203,16 +203,45 @@ func doDEvidenceQualityRepairRequired(step *runModel.Step) bool {
 }
 
 func assessmentOnlySchemaInvalidRepairRequired(step *runModel.Step) bool {
-	if step == nil || !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
+	if step == nil {
 		return false
 	}
 	if !repairActionIsSchemaInvalidRepair(step.Input, step.Output) {
+		return false
+	}
+	if schemaInvalidOutputLooksLikeAssessment(step.Output) &&
+		(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRuntimeStage)) == runtimeStageVerification ||
+			len(missingGoalCoverageFromInput(step.Input)) > 0 ||
+			len(mapSliceFromValue(step.Input["missingDeliverableCoverage"])) > 0 ||
+			len(mapSliceFromValue(step.Input["coverageTargetSet"])) > 0) {
+		return true
+	}
+	if !boolValue(step.Input[stepInputKeyAssessmentOnly]) {
 		return false
 	}
 	contract := mapFromValue(step.Input["convergenceContract"])
 	return strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" ||
 		strings.TrimSpace(stringFromMap(contract, "state")) == convergenceStateNeedAssessment ||
 		strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRuntimeStage)) == runtimeStageVerification
+}
+
+func schemaInvalidOutputLooksLikeAssessment(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if len(doDAssessmentFromOutput(output)) > 0 {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(output, "rawContentPreview"),
+		stringFromMap(output, "repairRawContentPreview"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}, "\n"))
+	return strings.Contains(text, "dodassessment") ||
+		strings.Contains(text, "\"goalcoverage\"") ||
+		strings.Contains(text, "\"deliverablecoverage\"") ||
+		strings.Contains(text, "\"acceptancedimensions\"")
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
@@ -1544,10 +1573,19 @@ func assessmentOutputContractRepairRequired(step *runModel.Step) bool {
 		stringFromMap(step.Output, failureOutputKeySignature),
 	}, " ")))
 	for _, marker := range []string{
+		"dodassessment does not cover all current goal requirements",
 		"dodassessment.goalcoverage item and state are required",
 		"dodassessment.goalcoverage.items are required",
 		"dodassessment.goalcoverage.satisfied is required",
 		"satisfied dodassessment.goalcoverage item requires evidencerefs",
+		"dodassessment.deliverablecoverage missing required deliverables",
+		"dodassessment.deliverablecoverage item",
+		"dodassessment.deliverablecoverage.items",
+		"satisfied dodassessment.deliverablecoverage item",
+		"dodassessment.acceptancedimensions missing required dimensions",
+		"dodassessment.acceptancedimensions item",
+		"dodassessment.acceptancedimensions.items",
+		"satisfied dodassessment.acceptancedimensions item",
 	} {
 		if strings.Contains(text, marker) {
 			return true
@@ -2919,8 +2957,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If concrete target evidence is still missing, acquire bounded implementation target evidence first; otherwise produce a state-changing repair before the next validation.",
 		)
 	}
-	preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
-	preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
+	assessmentOnlySchemaInvalidRepair := preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
+	if !assessmentOnlySchemaInvalidRepair {
+		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
+	}
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	return input
@@ -2934,11 +2974,7 @@ func preserveAssessmentOnlySchemaInvalidRepairContract(input map[string]any, fai
 	input[stepInputKeySoulStage] = soulStageValidation
 	input[stepInputKeyAssessmentOnly] = true
 	input["completionFollowUp"] = true
-	input["repairObjective"] = firstNonEmptyString(
-		stringFromMap(input, "repairObjective"),
-		stringFromMap(failedStep.Input, "repairObjective"),
-		"complete_dod_goal_coverage_assessment",
-	)
+	input["repairObjective"] = "complete_dod_goal_coverage_assessment"
 	if strings.TrimSpace(stringFromMap(input, "assessmentOnlyReason")) == "" {
 		input["assessmentOnlyReason"] = firstNonEmptyString(
 			stringFromMap(failedStep.Input, "assessmentOnlyReason"),
@@ -2979,6 +3015,8 @@ func preserveAssessmentOnlySchemaInvalidRepairContract(input map[string]any, fai
 	delete(input, "stateChangingOutputRequired")
 	delete(input, "concreteFailureEvidenceRequired")
 	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, "evidenceRepairSource")
 	return true
 }
 

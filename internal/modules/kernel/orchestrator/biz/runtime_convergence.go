@@ -103,6 +103,10 @@ func BuildConvergenceContract(
 		contract.GovernanceReason = governanceReason
 		return contract
 	}
+	if convergenceMustPreserveAssessmentSchemaRepair(input, failedStep) {
+		populateAssessmentSchemaConvergenceContract(input, &contract)
+		return contract
+	}
 	if convergenceMustPreserveConcreteValidationSchemaRepair(input, failedStep) {
 		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
@@ -224,6 +228,20 @@ func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any,
 	return false
 }
 
+func convergenceMustPreserveAssessmentSchemaRepair(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || failedStep == nil {
+		return false
+	}
+	if len(mapFromValue(input["assessmentSchemaInvalidRecovery"])) > 0 {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(input, "schemaInvalidRepairMode")) == "single_valid_json_decision" &&
+		strings.TrimSpace(stringFromMap(input, "assessmentOnlyReason")) == "assessment_schema_invalid_repair" {
+		return true
+	}
+	return assessmentOnlySchemaInvalidRepairRequired(failedStep)
+}
+
 func populateConcreteValidationConvergenceContract(input map[string]any, contract *ConvergenceContract) {
 	if contract == nil {
 		return
@@ -248,6 +266,16 @@ func populateConcreteValidationConvergenceContract(input map[string]any, contrac
 	}
 	contract.RepairActionPackage["requiredOutput"] = required
 	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+}
+
+func populateAssessmentSchemaConvergenceContract(input map[string]any, contract *ConvergenceContract) {
+	if contract == nil {
+		return
+	}
+	contract.State = convergenceStateNeedAssessment
+	contract.RuntimeStage = runtimeStageVerification
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
 }
 
 func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[string]any, failedStep *runModel.Step) map[string]any {
