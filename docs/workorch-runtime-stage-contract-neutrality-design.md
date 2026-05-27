@@ -1311,6 +1311,7 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 - repair-of-repair 必须保留原始 failure target context、workspace manifest 和 state-changing contract。
 - 当前失败 step 的 output failure signature 必须优先于继承的历史 repair signature，避免新失败被计入旧预算。
 - capability contract violation 必须被拒绝并形成 repair evidence；LLM prompt 必须包含该 capability 的中立限制。
+- 当失败来自 `capabilityUsagePolicies.requiredAfterKinds` 触发后的 follow-up 缺失时，repair 必须保持为中立 execution-graph contract repair：下一轮输出必须补一个依赖触发节点的匹配 `mcp/tool_call`，或声明结构化 `capabilityPolicySkips`（含 `policyId` 或 `category` 与非空 `reason`）。该类失败不得被降级为普通 `dodAssessment` / assessment-only 收口，也不得因为没有文件级 target snapshot 而伪造 workspace target；其 target 是执行图合同本身。
 - `contextBudget` 必须包含 protectedFields、integrityWarnings、included / omitted / redacted sections 和 source refs。
 - `processEvidenceTimeline` 必须按 step / event 顺序表达最近有效动作、验证结果、失败输出和当前缺口；缺 sourceRef 的进度文本不得作为 completion / repair / replan 的高置信依据。
 - profile-specific 检查只能放在 profile verifier 中，不能写入 core verifier。
@@ -1487,6 +1488,10 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - 已完成 CVC-01 第十批收口。
   - `ShouldCreateDecisionTicket` 已覆盖 `need_evidence`：当 bounded evidence acquisition 能力仍可用且无外部/runtime blocker 时，LLM 的 stage-choice / replan decision 会转为 continuable repair violation，不再把可自动取证路径阻塞为人工 ticket。
   - 新增回归测试覆盖 evidence acquisition decision 抑制和 runtime dependency 仍保留 ticket。
+- 2026-05-27：
+  - 已完成 capability policy repair 收口。
+  - `capabilityUsagePolicies.requiredAfterKinds` 触发后缺少匹配 follow-up 的失败会生成 `capabilityPolicyRepairContract`，要求 LLM 返回修正后的 executionGraph 或结构化 `capabilityPolicySkips`，不能用 failed/satisfied `dodAssessment` 替代该机械修复。
+  - 该规则只读取 policy id、category、preferredTools、requiredAfterKinds、capability kind、executionGraph 和 failure signature 等中立字段；具体工具名、profile 语义和 fallback 由 template / capability catalog 声明。
 
 ## 非兼容性说明
 

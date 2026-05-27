@@ -313,6 +313,10 @@ func refreshConvergenceCoverageTargets(input map[string]any) {
 	}
 	pkg["coverageRepairRequired"] = true
 	pkg["coverageTargetSet"] = targets
+	if boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		input["repairActionPackage"] = pkg
+		return
+	}
 	if profileStateChangingPackageMatchesCoverageTargets(pkg, targets) {
 		input["repairActionPackage"] = pkg
 		return
@@ -629,6 +633,9 @@ func mechanicalStateChangingContractCanContinue(contract ConvergenceContract) bo
 		return true
 	}
 	pkg := mapFromValue(contract.RepairActionPackage)
+	if boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		return true
+	}
 	required := mapFromValue(pkg["requiredOutput"])
 	if !boolValue(required["mustIncludeStateChangingNode"]) || len(mapSliceFromValue(pkg["coverageTargetSet"])) == 0 || len(mapSliceFromValue(pkg["evidenceKindRequirements"])) == 0 {
 		return false
@@ -711,6 +718,9 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 
 func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, input map[string]any) map[string]any {
 	if run == nil || len(input) == 0 {
+		return nil
+	}
+	if boolValue(mapFromValue(input["repairActionPackage"])["capabilityPolicyRepairRequired"]) {
 		return nil
 	}
 	targets := coverageTargetSetFromRepairInput(input)
@@ -916,10 +926,13 @@ func convergenceStateChangeCannotAdvanceWithoutTarget(input map[string]any, fail
 	if !convergenceNeedsStateChange(input, failedStep) {
 		return false
 	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		return false
+	}
 	if !coverageVerificationGapPresent(input, failedStep) {
 		return false
 	}
-	pkg := mapFromValue(input["repairActionPackage"])
 	if repairHasImplementationTargetEvidence(input, pkg) {
 		return false
 	}

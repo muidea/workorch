@@ -2683,6 +2683,19 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = stateChangingRepairGuidance()
 	}
+	if contract := capabilityPolicyRepairContractFromFailure(run, failedStep, execErr); len(contract) > 0 {
+		input["capabilityPolicyRepairRequired"] = true
+		input["repairObjective"] = "repair_capability_policy_follow_up"
+		input["stateChangingOutputRequired"] = true
+		input["capabilityPolicyRepairContract"] = contract
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"The previous execution graph violated a declared capability usage policy after a trigger node.",
+			"Repair the graph contract directly: for each triggered policy, add a dependent mcp/tool_call that matches the policy preferredTools, or declare a structured capabilityPolicySkips item with policyId/category and a non-empty reason.",
+			"Do not return assessment-only output for this repair; the failure is a mechanical execution-graph contract violation that can continue through a corrected graph or structured skip.",
+		)
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+	}
 	if boolValue(input["stateChangingOutputRequired"]) &&
 		(len(mapSliceFromValue(input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(input)) > 0) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -3562,6 +3575,14 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if mode := repairActionRequiredRepairMode(input, pkg, rawFailedOutput...); mode != "" {
 		pkg["requiredRepairMode"] = mode
 	}
+	if contract := mapFromValue(input["capabilityPolicyRepairContract"]); len(contract) > 0 {
+		pkg["capabilityPolicyRepairRequired"] = true
+		pkg["capabilityPolicyRepairContract"] = compactLLMContextMap(contract, 1)
+		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
+		requiredOutput["capabilityPolicyFollowUpRule"] = "when an execution graph includes a trigger kind from capabilityPolicyRepairContract.triggeredPolicies.requiredAfterKinds, it must include a dependent mcp/tool_call matching preferredTools or output a structured capabilityPolicySkips item with policyId/category and non-empty reason"
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
+		requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]), "assessment_only_capability_policy_repair"))
+	}
 	if budget := repairActionBudgetState(input, pkg); len(budget) > 0 {
 		pkg["repairBudget"] = budget
 	}
@@ -3671,6 +3692,68 @@ func stateChangingRepairAcceptedKinds() []string {
 	return []string{"patch/apply", "shell/command", "mcp/tool_call"}
 }
 
+func capabilityPolicyRepairContractFromFailure(run *runModel.Run, failedStep *runModel.Step, execErr error) map[string]any {
+	if run == nil || failedStep == nil {
+		return nil
+	}
+	failureText := strings.ToLower(strings.Join([]string{
+		errorString(execErr),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	if !strings.Contains(failureText, "capability usage policy") {
+		return nil
+	}
+	policies := capabilityUsagePoliciesForStep(run, failedStep)
+	if len(policies) == 0 {
+		return nil
+	}
+	triggered := make([]map[string]any, 0, len(policies))
+	for _, policy := range policies {
+		policyID := strings.TrimSpace(stringFromMap(policy, "id"))
+		if policyID != "" && !strings.Contains(failureText, strings.ToLower(policyID)) {
+			continue
+		}
+		item := map[string]any{}
+		for _, key := range []string{
+			"id",
+			"appliesToCategory",
+			"usageMode",
+			"triggerStages",
+			"preferredTools",
+			"requiredAfterKinds",
+			"fallbackPolicy",
+			"evidenceStrength",
+		} {
+			if value, ok := policy[key]; ok && value != nil {
+				item[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(item) > 0 {
+			triggered = append(triggered, item)
+		}
+	}
+	if len(triggered) == 0 {
+		return nil
+	}
+	contract := map[string]any{
+		"triggeredPolicies": triggered,
+		"requiredOutput": map[string]any{
+			"mustReturnCorrectedExecutionGraph": true,
+			"mustUseDependentFollowUpOrSkip":    true,
+			"acceptedKinds":                     []string{"mcp/tool_call", "patch/apply", "shell/command"},
+			"skipField":                         "capabilityPolicySkips",
+		},
+		"repairRule":              "for each triggered policy, any graph containing requiredAfterKinds must include a dependent mcp/tool_call matching preferredTools, or declare capabilityPolicySkips with policyId/category and non-empty reason",
+		"assessmentOnlyForbidden": true,
+	}
+	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
+		contract["rejectedExecutionGraph"] = rejectedGraphSummary(graph)
+	}
+	return contract
+}
+
 func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	out := map[string]any{}
 	for key, value := range existing {
@@ -3742,6 +3825,12 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 	if !boolValue(requiredOutput["mustIncludeStateChangingNode"]) {
 		return
 	}
+	if boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
+		return
+	}
 	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
 		requiredOutput["mustIncludeStateChangingNode"] = true
 		acceptedKinds := compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
@@ -3764,6 +3853,9 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 }
 
 func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if len(pkg) > 0 && boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		return true
+	}
 	return repairHasImplementationTargetEvidence(input, pkg)
 }
 
