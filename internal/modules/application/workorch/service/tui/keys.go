@@ -17,8 +17,8 @@ const (
 func HelpText(mode string) string {
 	switch mode {
 	case "workspace":
-		return Dim.Render("j/k: navigate | ctrl+d: back | ctrl+t: next ticket | q: quit")
+		return Dim.Render("j/k: navigate | ctrl+d: back | ctrl+t: next ticket | /exit quit")
 	default:
-		return Dim.Render("j/k: navigate | enter: select | ctrl+t: next ticket | q: quit")
+		return Dim.Render("j/k: navigate | enter: select | ctrl+t: next ticket | /exit quit")
 	}
 }

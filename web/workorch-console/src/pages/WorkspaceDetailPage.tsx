@@ -1211,13 +1211,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     >
       {snapshot ? (
         <>
-          <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.outcome?.state ?? snapshot.workspace.state)}>
+          <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
             <Descriptions
               column={2}
               items={[
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
-                { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : stateLabel(snapshot.outcome?.state ?? snapshot.workspace.state) },
+                { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
                 { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
                 { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },

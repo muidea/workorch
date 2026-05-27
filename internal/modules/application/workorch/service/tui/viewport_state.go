@@ -17,10 +17,14 @@ func (m *AppModel) ensureMainViewport() *viewport.Model {
 }
 
 func (m *AppModel) resetMainViewport() {
+	m.mainViewportUserScrolled = false
+	m.mainViewportPendingUpdate = false
 	m.ensureMainViewport().GotoTop()
 }
 
 func (m *AppModel) followMainViewportTail() {
+	m.mainViewportUserScrolled = false
+	m.mainViewportPendingUpdate = false
 	width, height := m.contentDimensions()
 	if width > 0 && height > 0 {
 		m.refreshMainViewport(width, height)
@@ -28,11 +32,21 @@ func (m *AppModel) followMainViewportTail() {
 	m.ensureMainViewport().GotoBottom()
 }
 
+func (m *AppModel) followMainViewportTailUnlessUserScrolled() {
+	if m.mainViewportUserScrolled {
+		m.mainViewportPendingUpdate = true
+		return
+	}
+	m.followMainViewportTail()
+}
+
 func (m *AppModel) scrollMain(delta int) {
 	vp := m.ensureMainViewport()
 	if delta < 0 {
 		vp.ScrollUp(-delta)
-		return
+	} else {
+		vp.ScrollDown(delta)
 	}
-	vp.ScrollDown(delta)
+	m.mainViewportUserScrolled = true
+	m.mainViewportPendingUpdate = false
 }

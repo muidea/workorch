@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,7 +50,6 @@ const (
 	maxInputHistory  = 100
 	maxResultLines   = 1000
 	maxRuntimeEvents = 80
-	ctrlCQuitWindow  = 750 * time.Millisecond
 )
 
 type AppModel struct {
@@ -93,10 +91,12 @@ type AppModel struct {
 	failureHint   string
 	running       bool
 
-	blockingDecision *backend.DecisionInfo
-	blockingApproval *backend.ApprovalInfo
-	helpOpen         bool
-	mainViewport     *viewport.Model
+	blockingDecision          *backend.DecisionInfo
+	blockingApproval          *backend.ApprovalInfo
+	helpOpen                  bool
+	mainViewport              *viewport.Model
+	mainViewportUserScrolled  bool
+	mainViewportPendingUpdate bool
 
 	workspaceListRefreshInFlight bool
 	workspaceListRefreshPending  bool
@@ -110,7 +110,6 @@ type AppModel struct {
 	height int
 
 	lastError error
-	lastCtrlC time.Time
 }
 
 func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal string) AppModel {
@@ -415,10 +414,6 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	width, contentHeight := m.contentDimensions()
 	switch key {
-	case KeyQuit, "ctrl+q":
-		m.mode = modeQuit
-		m.unsubscribe()
-		return m, tea.Quit
 	case KeyCtrlC:
 		if m.running {
 			m.running = false
@@ -426,16 +421,9 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.progressText = "Interrupted"
 			return m, nil
 		}
-		now := time.Now()
-		if m.lastCtrlC.IsZero() || now.Sub(m.lastCtrlC) > ctrlCQuitWindow {
-			m.lastCtrlC = now
-			m.progressText = "Press Ctrl+C again to quit, or use /exit"
-			m.lastError = nil
-			return m, nil
-		}
-		m.mode = modeQuit
-		m.unsubscribe()
-		return m, tea.Quit
+		m.progressText = "Use /exit to quit"
+		m.lastError = nil
+		return m, nil
 	case "esc":
 		if m.workspaceSelectMode {
 			m.cancelWorkspaceSelection()
@@ -1074,10 +1062,12 @@ func (m *AppModel) upsertApproval(item backend.ApprovalInfo) {
 
 func (m *AppModel) syncBlockingDecisionFromList() {
 	if m.blockingDecision != nil {
+		matched := false
 		for _, item := range m.decisions {
 			if item.ID == m.blockingDecision.ID {
+				matched = true
 				merged := mergeDecisionInfo(*m.blockingDecision, item)
-				if merged.State != "open" {
+				if merged.State != "open" || !m.decisionMatchesActiveScope(merged) {
 					m.blockingDecision = nil
 					return
 				}
@@ -1088,9 +1078,12 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 				return
 			}
 		}
+		if !matched {
+			m.blockingDecision = nil
+		}
 	}
 	for _, item := range filterOpenDecisions(m.decisions) {
-		if m.activeRunID == "" || item.RunID == common.RunID(m.activeRunID) {
+		if m.decisionMatchesActiveScope(item) {
 			m.blockingDecision = &item
 			if m.progress == progressWaitingDecision {
 				m.progressText = blockingDecisionLabel(m.blockingDecision)
@@ -1102,10 +1095,12 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 
 func (m *AppModel) syncBlockingApprovalFromList() {
 	if m.blockingApproval != nil {
+		matched := false
 		for _, item := range m.approvals {
 			if item.ID == m.blockingApproval.ID {
+				matched = true
 				merged := mergeApprovalInfo(*m.blockingApproval, item)
-				if merged.State != "pending" {
+				if merged.State != "pending" || !m.approvalMatchesActiveScope(merged) {
 					m.blockingApproval = nil
 					return
 				}
@@ -1116,9 +1111,12 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 				return
 			}
 		}
+		if !matched {
+			m.blockingApproval = nil
+		}
 	}
 	for _, item := range filterPendingApprovals(m.approvals) {
-		if m.activeRunID == "" || item.RunID == common.RunID(m.activeRunID) {
+		if m.approvalMatchesActiveScope(item) {
 			m.blockingApproval = &item
 			if m.progress == progressWaitingApproval {
 				m.progressText = blockingApprovalLabel(m.blockingApproval)
@@ -1126,6 +1124,26 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 			return
 		}
 	}
+}
+
+func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
+	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+		return false
+	}
+	if m.activeRunID != "" {
+		return item.RunID == common.RunID(m.activeRunID)
+	}
+	return true
+}
+
+func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
+	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+		return false
+	}
+	if m.activeRunID != "" {
+		return item.RunID == common.RunID(m.activeRunID)
+	}
+	return true
 }
 
 func (m *AppModel) markDecisionResolved(id common.TicketID) {
@@ -1218,7 +1236,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progress = progressRunning
 		m.progressText = stepProgressTextFromPayload("Working", evt.Payload, "Working; waiting for final result")
 		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTail()
+		m.followMainViewportTailUnlessUserScrolled()
 	case backend.EventStepCompleted:
 		if state := common.StepState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)); state == common.StepStateFailed {
 			m.rememberFailureHint(failureMessageFromPayload(evt.Payload))
@@ -1226,7 +1244,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		if m.progress == progressRunning {
 			m.progressText = stepProgressTextFromPayload("Step completed", evt.Payload, "Step completed; waiting for next update")
 			m.appendRuntimeEvent(m.progressText)
-			m.followMainViewportTail()
+			m.followMainViewportTailUnlessUserScrolled()
 		}
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
@@ -1296,7 +1314,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.progressText = string(evt.Type)
 		}
 		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTail()
+		m.followMainViewportTailUnlessUserScrolled()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryRecallRecorded:
 		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
@@ -1307,13 +1325,13 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.progressText = fmt.Sprintf("Memory recall: %s %d", nonEmpty(status, "selected"), len(ids))
 		}
 		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTail()
+		m.followMainViewportTailUnlessUserScrolled()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventLLMUsageRecorded:
 		m.progressText = llmUsageProgressText(evt.Payload)
 		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
-		m.followMainViewportTail()
+		m.followMainViewportTailUnlessUserScrolled()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
@@ -1542,6 +1560,9 @@ func workspacePanelLine(prefix string, ws backend.WorkspaceInfo, counts map[stri
 	}
 	id := shortID(string(ws.ID))
 	suffix := "  " + state
+	if ws.ActiveRunID != "" {
+		suffix += "  " + shortID(string(ws.ActiveRunID))
+	}
 	if counts[name] > 1 || name == id {
 		suffix = " " + id + suffix
 	}

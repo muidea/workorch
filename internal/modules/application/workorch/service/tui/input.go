@@ -134,6 +134,10 @@ func (m AppModel) renderCollapsedInputBuffer(prefix string, width int) string {
 	if cursor != runeCount {
 		summary += fmt.Sprintf(" [cursor %d/%d]", cursor, runeCount)
 	}
+	head := firstNonEmptyLine(lines)
+	if head == "" {
+		head = "(blank)"
+	}
 	tail := lastNonEmptyLine(lines)
 	if tail == "" {
 		tail = "(blank)"
@@ -144,8 +148,18 @@ func (m AppModel) renderCollapsedInputBuffer(prefix string, width int) string {
 	indent := strings.Repeat(" ", lipgloss.Width(prefix))
 	return strings.Join([]string{
 		truncateDisplay(prefix+summary, width-2),
-		truncateDisplay(indent+"... "+tail, width-2),
+		truncateDisplay(indent+"head: "+head, width-2),
+		truncateDisplay(indent+"tail: "+tail, width-2),
 	}, "\n")
+}
+
+func firstNonEmptyLine(lines []string) string {
+	for _, line := range lines {
+		if value := strings.TrimSpace(line); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func lastNonEmptyLine(lines []string) string {

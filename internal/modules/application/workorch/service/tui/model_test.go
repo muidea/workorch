@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,11 +31,24 @@ func TestModelInit(t *testing.T) {
 	}
 }
 
-func TestModelQuit(t *testing.T) {
+func TestModelCtrlQDoesNotQuit(t *testing.T) {
 	m := NewAppModel(newFake(t), "", "")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if asModel(next).mode != modeQuit {
-		t.Fatal("expected quit mode")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = asModel(next)
+	if m.mode == modeQuit || cmd != nil {
+		t.Fatalf("ctrl+q should not quit: mode=%v cmd=%v", m.mode, cmd != nil)
+	}
+}
+
+func TestModelPlainQIsInputNotQuit(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = asModel(next)
+	if m.mode == modeQuit || cmd != nil {
+		t.Fatalf("plain q should not quit: mode=%v cmd=%v", m.mode, cmd != nil)
+	}
+	if m.input != "q" {
+		t.Fatalf("input = %q, want q", m.input)
 	}
 }
 
@@ -101,6 +113,26 @@ func TestModelWorkspacePanelKeepsStateVisible(t *testing.T) {
 	}
 	if strings.Contains(view, "c...") {
 		t.Fatalf("workspace panel still truncates state:\n%s", view)
+	}
+}
+
+func TestModelWorkspacePanelShowsActiveRunWhenPresent(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:          "ws-1",
+		Title:       "Project",
+		State:       "running",
+		ActiveRunID: "run-016-replan-001",
+	}}})
+	m = asModel(next)
+	m.width = 120
+	m.height = 16
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "running  run-016-re") {
+		t.Fatalf("workspace panel missing active run:\n%s", view)
+	}
+	if !strings.Contains(view, "current ws: 0 decisions") || !strings.Contains(view, "current ws: 0 approvals") {
+		t.Fatalf("workspace panel blocker scope is unclear:\n%s", view)
 	}
 }
 
@@ -454,6 +486,46 @@ func TestModelStepProgressAutoScrollsToLatest(t *testing.T) {
 	}
 }
 
+func TestModelRuntimeUpdateDoesNotStealManuallyScrolledViewport(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 120
+	m.height = 16
+	lines := make([]string, 0, 80)
+	for i := 0; i < 80; i++ {
+		lines = append(lines, fmt.Sprintf("manual-scroll-line-%02d", i))
+	}
+	m.result = strings.Join(lines, "\n")
+	_ = m.View()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = asModel(next)
+	offsetAfterScroll := m.mainViewport.YOffset
+	if offsetAfterScroll == 0 {
+		t.Fatal("expected manual scroll to move viewport")
+	}
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"kind": "shell/command",
+			"input": map[string]any{
+				"summary": map[string]any{"command": "go", "args": []string{"test", "./..."}},
+			},
+		},
+	})
+	_ = m.View()
+	if m.mainViewport.YOffset != offsetAfterScroll {
+		t.Fatalf("runtime update stole viewport: before=%d after=%d", offsetAfterScroll, m.mainViewport.YOffset)
+	}
+	if !m.mainViewportPendingUpdate {
+		t.Fatal("expected pending update marker after runtime update while manually scrolled")
+	}
+	if !strings.Contains(stripANSI(m.View()), "new updates") {
+		t.Fatalf("status bar missing new update marker:\n%s", stripANSI(m.View()))
+	}
+}
+
 func TestModelRunStartedDoesNotOverwriteDecisionProgress(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.applyBackendEvent(backend.Event{
@@ -585,7 +657,7 @@ func TestModelInputRendersAtBottom(t *testing.T) {
 	if !strings.HasPrefix(lines[len(lines)-3], "Running - runtime status") {
 		t.Fatalf("expected runtime status immediately above input, got %q in:\n%s", lines[len(lines)-3], view)
 	}
-	if !strings.HasPrefix(lines[len(lines)-2], "ws-1 >") {
+	if !strings.HasPrefix(lines[len(lines)-2], "ws-1 goal >") {
 		t.Fatalf("expected bottom input above help, got %q in:\n%s", lines[len(lines)-2], view)
 	}
 }
@@ -595,8 +667,22 @@ func TestModelInputPromptUsesActiveWorkspace(t *testing.T) {
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-f2e4da0 >") {
+	if !strings.Contains(view, "ws-f2e4da0 goal >") {
 		t.Fatalf("view missing workspace input prompt:\n%s", view)
+	}
+}
+
+func TestModelInputPromptShowsContinueModeForActiveRun(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeRunID = "run-1"
+	m.width = 80
+	m.height = 12
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "ws-1 continue >") {
+		t.Fatalf("view missing continue input prompt:\n%s", view)
+	}
+	if !strings.Contains(view, "run run-1") {
+		t.Fatalf("status bar missing active run:\n%s", view)
 	}
 }
 
@@ -622,7 +708,7 @@ func TestModelInputEditingSupportsSpacesAndArrowKeys(t *testing.T) {
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-1 > ab XcY|") {
+	if !strings.Contains(view, "ws-1 goal > ab XcY|") {
 		t.Fatalf("view missing edited input and cursor:\n%s", view)
 	}
 }
@@ -696,7 +782,10 @@ func TestModelLargeMultilinePasteRendersCollapsedInputPreview(t *testing.T) {
 	if !strings.Contains(view, "[folded input: 20 lines") || !strings.Contains(view, "pasted-line-20") {
 		t.Fatalf("view missing folded paste preview:\n%s", view)
 	}
-	if strings.Contains(view, "pasted-line-01") || strings.Contains(view, "pasted-line-10") {
+	if !strings.Contains(view, "head: pasted-line-01") {
+		t.Fatalf("folded preview should include paste head:\n%s", view)
+	}
+	if strings.Contains(view, "pasted-line-10") {
 		t.Fatalf("folded preview leaked hidden paste body:\n%s", view)
 	}
 
@@ -760,21 +849,20 @@ func TestModelSlashCompletionSuggestionsVisible(t *testing.T) {
 	}
 }
 
-func TestModelCtrlCRequiresSecondPressToQuitWhenIdle(t *testing.T) {
+func TestModelCtrlCOnlyInterruptsOrHintsExitCommand(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = asModel(next)
 	if cmd != nil || m.mode == modeQuit {
-		t.Fatalf("first ctrl+c should not quit, cmd=%v mode=%v", cmd != nil, m.mode)
+		t.Fatalf("ctrl+c should not quit, cmd=%v mode=%v", cmd != nil, m.mode)
 	}
-	if !strings.Contains(m.progressText, "Press Ctrl+C again") {
-		t.Fatalf("first ctrl+c hint = %q", m.progressText)
+	if !strings.Contains(m.progressText, "Use /exit to quit") {
+		t.Fatalf("ctrl+c hint = %q", m.progressText)
 	}
-	m.lastCtrlC = time.Now()
 	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = asModel(next)
-	if cmd == nil || m.mode != modeQuit {
-		t.Fatalf("second ctrl+c should quit, cmd=%v mode=%v", cmd != nil, m.mode)
+	if cmd != nil || m.mode == modeQuit {
+		t.Fatalf("second ctrl+c should not quit, cmd=%v mode=%v", cmd != nil, m.mode)
 	}
 }
 
@@ -1428,7 +1516,7 @@ func TestModelApprovalListClearsResolvedBlockingApproval(t *testing.T) {
 	if strings.Contains(view, "ws-1 approval >") {
 		t.Fatalf("view should allow normal goal input after rejected approval:\n%s", view)
 	}
-	if !strings.Contains(view, "ws-1 >") {
+	if !strings.Contains(view, "ws-1 goal >") {
 		t.Fatalf("view missing normal workspace input:\n%s", view)
 	}
 }
@@ -1615,6 +1703,47 @@ func TestModelWorkspaceContextDoesNotRestoreOldOutcomeForLiveRun(t *testing.T) {
 	}
 	if m.result != "" {
 		t.Fatalf("workspace context restored stale result for live run: %q", m.result)
+	}
+}
+
+func TestModelWorkspaceContextDoesNotRestoreOldRunBlockersForLiveRun(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-old"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"}
+	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"}
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-new"},
+			Runs: []backend.RunInfo{
+				{ID: "run-old", WorkspaceID: "ws-a", GoalID: "goal-old", State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-old"},
+				{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+			},
+		},
+		ActiveRun: &backend.RunInfo{ID: "run-new", WorkspaceID: "ws-a", GoalID: "goal-new", State: common.RunStateRunning},
+		Decisions: []backend.DecisionInfo{{
+			ID:          "ticket-old",
+			WorkspaceID: "ws-a",
+			RunID:       "run-old",
+			Question:    "old question",
+			State:       "open",
+		}},
+		Approvals: []backend.ApprovalInfo{{
+			ID:          "approval-old",
+			WorkspaceID: "ws-a",
+			RunID:       "run-old",
+			Action:      "old action",
+			State:       "pending",
+		}},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if m.activeRunID != "run-new" || m.progress != progressRunning || !m.running {
+		t.Fatalf("live run state = %q/%s/%v, want running run-new", m.activeRunID, m.progress, m.running)
+	}
+	if m.blockingDecision != nil || m.blockingApproval != nil {
+		t.Fatalf("old blockers restored for live run: decision=%+v approval=%+v", m.blockingDecision, m.blockingApproval)
 	}
 }
 

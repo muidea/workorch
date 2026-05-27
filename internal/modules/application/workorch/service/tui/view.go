@@ -536,7 +536,23 @@ func (m AppModel) renderProgress(width int) string {
 }
 
 func (m AppModel) renderRuntimeStatusBar(width int) string {
-	return m.renderProgress(width)
+	parts := []string{strings.TrimSpace(m.renderProgress(width))}
+	if m.activeWorkspaceID != "" {
+		parts = append(parts, "ws "+shortID(m.activeWorkspaceID))
+	}
+	if m.activeRunID != "" {
+		parts = append(parts, "run "+shortID(m.activeRunID))
+	}
+	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
+		parts = append(parts, "decision "+shortID(string(m.blockingDecision.ID)))
+	}
+	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
+		parts = append(parts, "approval "+shortID(string(m.blockingApproval.ID)))
+	}
+	if m.mainViewportPendingUpdate {
+		parts = append(parts, "new updates")
+	}
+	return truncateDisplay(strings.Join(parts, " | "), width-2)
 }
 
 func (m AppModel) renderWorkspacePanel(width, height int) string {
@@ -572,9 +588,9 @@ func (m AppModel) renderWorkspacePanel(width, height int) string {
 	openDecisions := len(filterOpenDecisions(m.decisions))
 	pendingApprovals := len(filterPendingApprovals(m.approvals))
 	b.WriteString("\n")
-	b.WriteString(Warning.Render(fmt.Sprintf("%d decisions", openDecisions)))
+	b.WriteString(Warning.Render(fmt.Sprintf("current ws: %d decisions", openDecisions)))
 	b.WriteString("\n")
-	b.WriteString(Alert.Render(fmt.Sprintf("%d approvals", pendingApprovals)))
+	b.WriteString(Alert.Render(fmt.Sprintf("current ws: %d approvals", pendingApprovals)))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -588,6 +604,10 @@ func (m AppModel) renderInput(width int) string {
 		prompt += " decision"
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
+	} else if m.activeRunID != "" {
+		prompt += " continue"
+	} else {
+		prompt += " goal"
 	}
 	input := m.renderInputBuffer(prompt, width)
 	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {
@@ -597,9 +617,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal: new goal | /continue: resume | /restart: rerun | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt/quit x2"
+	help := "enter: submit | /goal: new goal | /continue: resume | /restart: rerun | /dod: update DoD | /memory: recall | /exit: quit | ctrl+c: interrupt"
 	if width < 120 {
-		help = "enter | /goal | /continue | /restart | /dod | /memory | /exit | ctrl+c x2 quit"
+		help = "enter | /goal | /continue | /restart | /dod | /memory | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -617,7 +637,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Tab: slash command completion",
 		"Ctrl+W: workspace selector",
 		"Ctrl+H: help",
-		"Ctrl+C: interrupt active run; press twice outside a run to quit",
+		"Ctrl+C: interrupt active run; use /exit to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
 		"/help /clear /workspace /workspace create /goal /dod /memory /result /continue /restart /exit",
