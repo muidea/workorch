@@ -1165,7 +1165,7 @@ func TestDetectThemeHonorsEnvironment(t *testing.T) {
 	}
 }
 
-func TestModelRunningEmptyResultText(t *testing.T) {
+func TestModelRunningWithoutResultDoesNotRenderEmptyResultSection(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
 	m = asModel(next)
@@ -1175,8 +1175,11 @@ func TestModelRunningEmptyResultText(t *testing.T) {
 	if !strings.Contains(view, "waiting for progress or final result") {
 		t.Fatalf("running progress text missing:\n%s", view)
 	}
-	if !strings.Contains(view, "Long tasks may stay quiet while backend works") {
-		t.Fatalf("running empty result text missing:\n%s", view)
+	if strings.Contains(view, "Result") {
+		t.Fatalf("empty result section should be hidden while run has no result:\n%s", view)
+	}
+	if strings.Contains(view, "Long tasks may stay quiet while backend works") {
+		t.Fatalf("empty result placeholder should be hidden while run has no result:\n%s", view)
 	}
 }
 

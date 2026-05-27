@@ -178,9 +178,18 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
 		b.WriteString(section)
 	}
-	b.WriteString(Dim.Render(strings.Repeat("-", max(10, width-2))))
-	b.WriteString("\n")
 
+	tail := m.renderMainTail(width, height, lineCount(b.String()))
+	if strings.TrimSpace(tail) != "" {
+		b.WriteString(Dim.Render(strings.Repeat("-", max(10, width-2))))
+		b.WriteString("\n")
+		b.WriteString(tail)
+	}
+	return b.String()
+}
+
+func (m AppModel) renderMainTail(width int, height int, usedLines int) string {
+	var b strings.Builder
 	if m.blockingDecision != nil {
 		b.WriteString(Warning.Render("Decision required"))
 		b.WriteString("\n")
@@ -194,23 +203,25 @@ func (m AppModel) renderMain(width, height int) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(Heading.Render("Result"))
-	b.WriteString("\n")
-	resultLines := m.resultLineLimit(height, lineCount(b.String()))
 	switch {
 	case m.result != "":
+		b.WriteString(Heading.Render("Result"))
+		b.WriteString("\n")
+		resultLines := m.resultLineLimit(height, usedLines+lineCount(b.String()))
 		b.WriteString(renderRichText(m.result, width-2, resultLines))
 		b.WriteString("\n")
 	case m.failureReason != "":
+		b.WriteString(Heading.Render("Result"))
+		b.WriteString("\n")
 		b.WriteString(Error.Render(truncateDisplay(m.failureReason, width-2)))
 		b.WriteString("\n")
-	default:
+	case m.shouldRenderEmptyWorkspaceGuidance():
 		b.WriteString(Dim.Render(m.emptyResultText()))
 		b.WriteString("\n")
 	}
 
 	if artifacts := m.visibleArtifacts(); len(artifacts) > 0 {
-		b.WriteString("\n")
+		writeMainTailSectionBreak(&b)
 		b.WriteString(Heading.Render("Artifacts"))
 		b.WriteString("\n")
 		for _, artifact := range artifacts {
@@ -219,7 +230,7 @@ func (m AppModel) renderMain(width, height int) string {
 		}
 	}
 	if sources := m.visibleSources(); len(sources) > 0 {
-		b.WriteString("\n")
+		writeMainTailSectionBreak(&b)
 		b.WriteString(Heading.Render("Sources"))
 		b.WriteString("\n")
 		for _, source := range sources {
@@ -228,7 +239,7 @@ func (m AppModel) renderMain(width, height int) string {
 		}
 	}
 	if patches := m.visiblePatches(); len(patches) > 0 {
-		b.WriteString("\n")
+		writeMainTailSectionBreak(&b)
 		b.WriteString(Heading.Render("Patches"))
 		b.WriteString("\n")
 		for _, patch := range patches {
@@ -237,11 +248,21 @@ func (m AppModel) renderMain(width, height int) string {
 		}
 	}
 	if m.lastError != nil {
-		b.WriteString("\n")
+		writeMainTailSectionBreak(&b)
 		b.WriteString(Error.Render("Error: " + m.lastError.Error()))
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func writeMainTailSectionBreak(b *strings.Builder) {
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+}
+
+func (m AppModel) shouldRenderEmptyWorkspaceGuidance() bool {
+	return len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == ""
 }
 
 func (m AppModel) resultLineLimit(height int, usedLines int) int {

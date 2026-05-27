@@ -106,6 +106,66 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractKeepsGoalCoverageGapAsValidationWhenDirectEvidenceCanBeCommand(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-goal-coverage-validation",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "*",
+							"scope":                 "goalCoverage",
+							"acceptedStepKinds":     []string{"shell/command", "patch/apply", "mcp/tool_call"},
+							"requireDirectEvidence": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "goal",
+			"goalRequirementId":   "goal-req-usage",
+			"coverageTargetToken": "goal-req-usage",
+			"targetText":          "usage field must be parsed",
+			"state":               "failed",
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence-goal-coverage-validation/follow-up",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": "invalid argument: dodAssessment does not cover all current Goal requirements",
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedValidation, contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("StateChangingOutputRequired = true, want false")
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "shell/command") {
+		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract", required)
+	}
+}
+
 func TestBuildConvergenceContractKeepsAssessmentOnlyOverRejectedContinuation(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-assessment-only",

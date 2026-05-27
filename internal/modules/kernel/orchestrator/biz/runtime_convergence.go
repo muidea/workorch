@@ -547,11 +547,12 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		if len(requirement.AcceptedStepKinds) == 0 {
 			continue
 		}
+		if !profileRequirementRequiresStateChangingEvidence(requirement) {
+			continue
+		}
+		requiresStateChange = true
 		acceptedKinds = append(acceptedKinds, requirement.AcceptedStepKinds...)
 		acceptedOperations = append(acceptedOperations, requirement.AcceptedOperations...)
-		if profileRequirementAcceptsStateChangingEvidence(requirement) {
-			requiresStateChange = true
-		}
 		requirementSummaries = append(requirementSummaries, map[string]any{
 			"scope":              normalizeEvidenceKindRequirementScope(requirement.Scope),
 			"id":                 requirement.ID,
@@ -635,13 +636,16 @@ func evidenceKindRequirementMatchesCoverageTarget(requirement profileEvidenceKin
 	return evidenceKindRequirementMatchesItem(requirement, target)
 }
 
-func profileRequirementAcceptsStateChangingEvidence(requirement profileEvidenceKindRequirement) bool {
+func profileRequirementRequiresStateChangingEvidence(requirement profileEvidenceKindRequirement) bool {
+	hasStateChangingKind := false
 	for _, kind := range requirement.AcceptedStepKinds {
 		if stepKindCanProduceStateChangingEvidence(kind) {
-			return true
+			hasStateChangingKind = true
+			continue
 		}
+		return false
 	}
-	return false
+	return hasStateChangingKind
 }
 
 func convergenceCoverageVerificationEvidenceGap(input map[string]any, failedStep *runModel.Step) bool {
