@@ -58,6 +58,9 @@ func BuildConvergenceContract(
 			(!replanContinuationCanDriveCurrentProgress(input, source) || convergenceRunHasRejectedContinuation(run)) {
 			continue
 		}
+		if sourceKey == "rejectedResultContinuation" && convergenceAssessmentOnly(input, failedStep) {
+			continue
+		}
 		if len(mapFromValue(input["repairActionPackage"])) == 0 {
 			if pkg := mapFromValue(source["repairActionPackage"]); len(pkg) > 0 {
 				input["repairActionPackage"] = pkg

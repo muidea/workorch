@@ -106,6 +106,100 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractKeepsAssessmentOnlyOverRejectedContinuation(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-assessment-only",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		"missingGoalCoverage": []map[string]any{{
+			"goalRequirementId": "goal-req-001",
+			"raw":               "current goal leaf",
+			"evidenceCandidates": []map[string]any{{
+				"stepId":          "run-convergence-assessment-only/graph-001/001-verify",
+				"kind":            "shell/command",
+				"state":           "completed",
+				"evidenceQuality": "direct",
+			}},
+		}},
+		"rejectedResultContinuation": map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+			"coverageGaps": map[string]any{
+				"missingDeliverableCoverage": []map[string]any{{
+					"kind":  "deliverable",
+					"item":  "version_control_snapshot",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence-assessment-only/follow-up",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage":               "llm_dod_assessment",
+			failureOutputKeyClass: failureClassDoDCoverageMissing,
+			"error":               "invalid argument: dodAssessment does not cover all current Goal requirements; missing: current goal leaf",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"summary":   "coverage correction needed",
+				"goalCoverage": map[string]any{
+					"satisfied": true,
+					"items": []map[string]any{{
+						"goalRequirementId": "goal-req-999",
+						"item":              "older goal leaf",
+						"state":             "satisfied",
+						"evidenceRefs":      []string{"run-convergence-assessment-only/graph-001/001-verify"},
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-001",
+					"raw":               "current goal leaf",
+				}},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedAssessment, contract)
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if boolValue(applied["stateChangingOutputRequired"]) {
+		t.Fatalf("stateChangingOutputRequired = true, want assessment-only contract: %+v", applied)
+	}
+	if pkg := mapFromValue(applied["repairActionPackage"]); len(pkg) > 0 {
+		required := mapFromValue(pkg["requiredOutput"])
+		if boolValue(required["mustIncludeStateChangingNode"]) {
+			t.Fatalf("repairActionPackage.requiredOutput = %+v, want no state-changing requirement", required)
+		}
+	}
+}
+
 func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
