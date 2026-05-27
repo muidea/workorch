@@ -69,6 +69,26 @@ func TestDoDRequiredEvidenceHintStaysProfileNeutral(t *testing.T) {
 	}
 }
 
+func TestEvidenceRefsFromValueSplitsCommaSeparatedRefs(t *testing.T) {
+	refs := evidenceRefsFromValue([]any{
+		"run-001/graph-001/verify-binary, run-001/graph-001/verify-tests",
+		"run-001/graph-001/commit",
+	})
+	want := []string{
+		"run-001/graph-001/verify-binary",
+		"run-001/graph-001/verify-tests",
+		"run-001/graph-001/commit",
+	}
+	if len(refs) != len(want) {
+		t.Fatalf("evidence refs = %#v, want %#v", refs, want)
+	}
+	for idx := range want {
+		if refs[idx] != want[idx] {
+			t.Fatalf("evidence refs = %#v, want %#v", refs, want)
+		}
+	}
+}
+
 func TestValidateDoDAssessmentCoversRunGoal_RequiresIndependentChangedGoalLeaf(t *testing.T) {
 	run := &runModel.Run{
 		ExecutionContext: map[string]any{

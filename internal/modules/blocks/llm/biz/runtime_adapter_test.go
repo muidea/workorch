@@ -2462,6 +2462,20 @@ func TestParseLLMExecutionDecisionAcceptsMarkdownFencedJSONObject(t *testing.T) 
 	}
 }
 
+func TestParseLLMExecutionDecisionNormalizesTopLevelReason(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"reason":"need bounded validation evidence",
+		"executionGraph":{"nodes":[{"id":"verify","kind":"shell/command","input":{"command":"true"}}]}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if decision.ThoughtSummary != "need bounded validation evidence" {
+		t.Fatalf("thoughtSummary = %q, want normalized reason", decision.ThoughtSummary)
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsUnknownFieldAfterNormalization(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte("Here is the json:\n{\"workspaceId\":\"ws-1\",\"completionState\":\"continue\"}"))
 	if !errors.Is(err, common.ErrInvalidArgument) {

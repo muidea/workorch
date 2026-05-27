@@ -1499,6 +1499,9 @@ func normalizedGoalCoverageTextMatches(actual string, required string) bool {
 	if actual == required {
 		return true
 	}
+	if normalizedGoalCoverageTextHasBoundedAffixMatch(actual, required) {
+		return true
+	}
 	shorter, longer := actual, required
 	if len([]rune(shorter)) > len([]rune(longer)) {
 		shorter, longer = longer, shorter
@@ -1516,6 +1519,39 @@ func normalizedGoalCoverageTextMatches(actual string, required string) bool {
 	}
 	lcs := longestCommonRuneSubsequenceLength(shorter, longer)
 	return float64(lcs)/float64(shorterLen) >= 0.9
+}
+
+func normalizedGoalCoverageTextHasBoundedAffixMatch(actual string, required string) bool {
+	actualLen := len([]rune(actual))
+	requiredLen := len([]rune(required))
+	if actualLen < 12 || requiredLen < 12 {
+		return false
+	}
+	shorter, longer := actual, required
+	shorterLen, longerLen := actualLen, requiredLen
+	if shorterLen > longerLen {
+		shorter, longer = longer, shorter
+		shorterLen, longerLen = longerLen, shorterLen
+	}
+	idx := strings.Index(longer, shorter)
+	if idx < 0 {
+		return false
+	}
+	prefix := longer[:idx]
+	suffix := longer[idx+len(shorter):]
+	prefixLen := len([]rune(prefix))
+	suffixLen := len([]rune(suffix))
+	maxAffixLen := max(16, shorterLen/2)
+	if prefixLen > maxAffixLen || suffixLen > maxAffixLen {
+		return false
+	}
+	affixText := prefix + suffix
+	for _, marker := range []string{"并", "以及", "或者", "或", "且", "同时"} {
+		if strings.Contains(affixText, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func longestCommonRuneSubsequenceLength(left string, right string) int {
@@ -1599,7 +1635,11 @@ func doDAssessmentItemMaps(value any) ([]map[string]any, bool) {
 func evidenceRefsFromValue(value any) []string {
 	switch typed := value.(type) {
 	case []string:
-		return append([]string(nil), typed...)
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			ret = appendEvidenceRefsFromString(ret, item)
+		}
+		return ret
 	case []any:
 		ret := make([]string, 0, len(typed))
 		for _, item := range typed {
@@ -1607,13 +1647,24 @@ func evidenceRefsFromValue(value any) []string {
 			if !ok {
 				return nil
 			}
-			text = strings.TrimSpace(text)
-			if text != "" {
-				ret = append(ret, text)
-			}
+			ret = appendEvidenceRefsFromString(ret, text)
 		}
 		return ret
 	default:
 		return nil
 	}
+}
+
+func appendEvidenceRefsFromString(ret []string, text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ret
+	}
+	for _, part := range strings.Split(text, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			ret = append(ret, part)
+		}
+	}
+	return ret
 }

@@ -17371,6 +17371,52 @@ func TestValidatedCompletionDoDAssessmentAcceptsExplicitGoalCoverage(t *testing.
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentAcceptsGoalCoverageWithSectionPrefix(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-goal-coverage-section-prefix",
+		WorkspaceID:     "ws-goal-coverage-section-prefix",
+		DoDID:           "dod-goal-coverage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "针对非流式响应，解析返回包中的 usage 字段。",
+			},
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+		},
+	}
+	_, summary, err := validatedCompletionDoDAssessment(run, map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD and Goal coverage passed",
+			"items": []map[string]any{
+				{
+					"item":         "build passes",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-goal-coverage-section-prefix/block/build"},
+				},
+			},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{
+					{
+						"item":         "Token 自动审计：针对非流式响应，解析返回包中的 usage 字段。",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-goal-coverage-section-prefix/block/test"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if summary != "DoD and Goal coverage passed" {
+		t.Fatalf("summary = %q, want Goal-aware summary", summary)
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentRejectsMissingRequiredAcceptanceDimension(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-required-dimension-missing",
