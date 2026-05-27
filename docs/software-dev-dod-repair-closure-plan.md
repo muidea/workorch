@@ -26,6 +26,7 @@
 | SDR-ISSUE-06 | repair 无效循环缺少收敛边界 | 多轮 DoD coverage missing 后仍继续泛化 repair | Run 长时间 `running`，用户难以判断下一步 |
 | SDR-ISSUE-07 | 证据质量校验仍偏弱 | `go test`、`go build` 通过容易被泛化覆盖多个 DoD | 无法证明配置、并发、控制台反馈等条目满足 |
 | SDR-ISSUE-08 | `software-dev` 实现细节缺口未被有效驱动 | 示例项目存在 `config.yaml`，但代码未读取该文件 | “配置管理” DoD 实际未满足 |
+| SDR-ISSUE-09 | validation-only repair 循环未升格 | 已反复执行测试/验证但未产生功能代码补全，coverage gap 仍未关闭 | LLM 持续补测试或重复验证，无法回到实现修复路径 |
 
 ## 任务清单
 
@@ -42,6 +43,7 @@
 | SDR-09 | 补充复杂软件开发 e2e 回归 | e2e | P0 | completed | `verify-software-dev-goal-dod-e2e.sh` 覆盖自动修复、修复耗尽升级、空 workspace 初始化、累积 Goal/DoD、弱证据拒绝等场景 | 已能稳定复现并阻断 `ws-e1e310fd02e4375e` 类回归 |
 | SDR-10 | Web/TUI 展示缺失 DoD 与 repair 下一步 | Web / TUI | P1 | completed | `repairLoop` 投影增加 `missingDoDItems/recentAttempts/recommendedNextSteps`，并从失败 step 与升级 ticket 上下文回填 | 用户可直接看到未完成原因与下一步建议，不再只看到泛化 running |
 | SDR-11 | 费用与上下文统计关联 repair 轮次 | Observability | P1 | completed | 保持现有 usage/context/repair attempt 观测链路，并在 repairLoop 中补齐 failure/missingDoD/recentAttempt 信息用于关联分析 | Workspace/Run 可按 repair attempt 与失败上下文对齐排查成本与收敛性 |
+| SDR-12 | validation-only repair 升格为实现修复路径 | 通用后端 | P0 | completed | 同一 coverage gap 已经过至少一轮 validation-only repair 仍未关闭，且仍无 implementation target evidence 时，runtime 标记 `validationRepairEscalatedToImplementation`，下一轮不再继续 bounded validation-only，而是进入 state-changing repair path；若仍缺目标证据，则先取 bounded implementation target evidence | 连续测试/验证无法关闭缺口时，下一轮不会继续 `produce_concrete_validation_evidence`，而会要求实现目标取证或状态变更修复 |
 
 ## 验收文档项
 

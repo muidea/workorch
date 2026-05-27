@@ -4748,6 +4748,89 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverage
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesRepeatedValidationOnlyCoverageGap(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:      stepRepo,
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-repeated-validation-only-gap")
+	failedStepID := common.StepID(string(runID) + "/verify")
+	signature := "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment"
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001-of-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			stepInputKeyRepairOfStepID:        string(failedStepID),
+			stepInputKeyRepairOfRootStepID:    string(failedStepID),
+			stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+			stepInputKeyRepairOfFailureSig:    signature,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+		},
+	}); err != nil {
+		t.Fatalf("seed prior repair step: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "Coverage is still missing after validation attempts.",
+				"items": []map[string]any{
+					{"item": "deliver implemented behavior", "state": "failed"},
+				},
+			},
+			"missingDoDItems": []map[string]any{
+				{"item": "deliver implemented behavior", "state": "failed"},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-repeated-validation-only-gap",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	if input["validationRepairEscalatedToImplementation"] != true {
+		t.Fatalf("repair input = %+v, want repeated validation-only escalation marker", input)
+	}
+	if input["repairObjective"] == repairObjectiveConcreteValidationEvidence || boolValue(input["boundedValidationRequired"]) {
+		t.Fatalf("repair input = %+v, want escalation away from bounded validation-only repair", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] == true {
+		t.Fatalf("requiredOutput = %+v, want no repeated concrete-validation-only contract", required)
+	}
+	if !boolValue(input["stateChangingOutputRequired"]) && input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("repair input = %+v, want state-changing repair path or implementation-target evidence acquisition", input)
+	}
+	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "Repeated validation-only repair") {
+		t.Fatalf("repairGuidance = %+v, want repeated validation-only guidance", input["repairGuidance"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

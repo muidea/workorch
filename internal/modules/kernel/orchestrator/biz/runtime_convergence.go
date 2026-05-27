@@ -117,6 +117,30 @@ func BuildConvergenceContract(
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
+	if boolValue(input["validationRepairEscalatedToImplementation"]) {
+		pkg := repeatedValidationRepairEscalationPackage(run, input, failedStep)
+		if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+			contract.State = convergenceStateNeedEvidence
+			contract.RuntimeStage = runtimeStageRepair
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+			contract.ConcreteFailureEvidenceRequired = true
+			contract.RepairActionPackage = pkg
+			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+			return contract
+		}
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		if len(pkg) == 0 {
+			pkg = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		}
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return contract
+	}
 	if convergenceNeedsValidation(input, failedStep) {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			contract.State = convergenceStateNeedStateChange
@@ -199,6 +223,29 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[string]any, failedStep *runModel.Step) map[string]any {
+	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+		return pkg
+	}
+	var rawFailedOutput []map[string]any
+	if failedStep != nil && len(failedStep.Output) > 0 {
+		rawFailedOutput = append(rawFailedOutput, failedStep.Output)
+	}
+	pkg := repairActionPackageFromRepairInput(input, rawFailedOutput...)
+	if len(pkg) == 0 {
+		pkg = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	}
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+		return pkg
+	}
+	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	addStrategyReassessmentRequiredOutputContract(pkg, required)
+	return pkg
 }
 
 func hydrateConvergenceTargetEvidence(input map[string]any) {

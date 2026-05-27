@@ -2572,6 +2572,23 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		coverageVerificationGapPresent(input, failedStep) &&
 		!repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) &&
 		!repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
+	validationRepairEscalatesToStateChanging := coverageValidationEvidenceRepair &&
+		o.coverageValidationRepairShouldEscalateToStateChanging(ctx, run, failedStep, input)
+	if validationRepairEscalatesToStateChanging {
+		input["validationRepairEscalatedToImplementation"] = true
+		input["repairObjective"] = repairObjectiveStateChangingOutput
+		input["stateChangingOutputRequired"] = true
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"This coverage gap has already been repaired through validation-only attempts without concrete implementation target evidence.",
+			"Switch to a state-changing implementation repair before another verification pass; do not continue the validation-only loop.",
+			"Produce the smallest state-changing artifact that makes the next bounded verification meaningful.",
+		)
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairSource")
+	}
+	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	if concreteEvidenceRepair {
 		claimAlignedEvidenceNeeded := false
@@ -2592,7 +2609,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
 	}
-	if assessmentOnlyCoverageRepair && !coverageNeedsConcreteEvidence {
+	if assessmentOnlyCoverageRepair && !coverageNeedsConcreteEvidence && !validationRepairEscalatesToStateChanging {
 		input[stepInputKeySoulStage] = soulStageValidation
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeyAssessmentOnly] = true
@@ -2862,6 +2879,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 				"If returning executionGraph, every node must be a complete JSON object and must follow repairActionPackage.requiredOutput acceptedKinds.",
 			)
 		}
+	}
+	if boolValue(input["validationRepairEscalatedToImplementation"]) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Repeated validation-only repair is no longer an acceptable next action for this coverage gap.",
+			"If concrete target evidence is still missing, acquire bounded implementation target evidence first; otherwise produce a state-changing repair before the next validation.",
+		)
 	}
 	preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
@@ -5541,6 +5564,35 @@ func coverageValidationEvidenceRepairEligible(failedStep *runModel.Step) bool {
 	return stateChangingReadOnlyGraphFailureText(text) ||
 		strings.Contains(text, "without patch/apply") ||
 		strings.Contains(text, "coverage")
+}
+
+func (o *RuntimeOrchestrator) coverageValidationRepairShouldEscalateToStateChanging(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	input map[string]any,
+) bool {
+	if o == nil || run == nil || failedStep == nil {
+		return false
+	}
+	if !coverageValidationEvidenceRepairEligible(failedStep) ||
+		!coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	if o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) == 0 {
+		return false
+	}
+	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
+		return false
+	}
+	if repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		return false
+	}
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
+		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+		return false
+	}
+	return true
 }
 
 func runtimeRepairFailureIsTransientExecutionTimeout(step *runModel.Step, execErr error) bool {
