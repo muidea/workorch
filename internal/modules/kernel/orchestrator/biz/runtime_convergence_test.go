@@ -111,6 +111,76 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractKeepsPrimaryStateChangeWhenProfileWriteEvidenceIsSupplementary(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-mixed",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-profile-evidence-mixed/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"coverageTargetSet": []map[string]any{
+				{
+					"kind":                "deliverable",
+					"item":                "source_change",
+					"coverageTargetToken": "source_change",
+					"targetText":          "source_change",
+					"state":               "failed",
+					"source":              "deliverableCoverage",
+				},
+				{
+					"kind":                "deliverable",
+					"item":                "version_control_snapshot",
+					"coverageTargetToken": "version_control_snapshot",
+					"targetText":          "version_control_snapshot",
+					"state":               "failed",
+					"source":              "deliverableCoverage",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!boolValue(required["mustIncludePrimaryStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want primary state-changing requirement preserved", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want primary patch/apply and supplementary git/write", required["acceptedKinds"])
+	}
+	if len(stringSliceFromValue(required["acceptedOperations"])) != 0 {
+		t.Fatalf("requiredOutput.acceptedOperations = %+v, want no global operation narrowing for mixed coverage targets", required["acceptedOperations"])
+	}
+	if !stringSliceContains(stringSliceFromValue(required["primaryAcceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.primaryAcceptedKinds = %+v, want default primary state-changing kinds", required["primaryAcceptedKinds"])
+	}
+}
+
 func TestBuildConvergenceContractUsesUnfocusedCoverageWorkItemStateChange(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-unfocused-cwi-state-change",

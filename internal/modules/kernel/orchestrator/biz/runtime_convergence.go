@@ -1127,6 +1127,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	acceptedOperations := make([]string, 0)
 	requirementSummaries := make([]map[string]any, 0, len(requirements))
 	requiresStateChange := false
+	matchedRequirements := make([]profileEvidenceKindRequirement, 0, len(requirements))
 	for _, requirement := range requirements {
 		if len(requirement.AcceptedStepKinds) == 0 {
 			continue
@@ -1135,6 +1136,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 			continue
 		}
 		requiresStateChange = true
+		matchedRequirements = append(matchedRequirements, requirement)
 		acceptedKinds = append(acceptedKinds, requirement.AcceptedStepKinds...)
 		acceptedOperations = append(acceptedOperations, requirement.AcceptedOperations...)
 		requirementSummaries = append(requirementSummaries, map[string]any{
@@ -1149,6 +1151,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if !requiresStateChange {
 		return nil
 	}
+	primaryStateChangeRequired := coverageTargetsRequirePrimaryStateChangingOutput(targets, matchedRequirements)
 	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
@@ -1166,20 +1169,58 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 			required[key] = value
 		}
 	}
+	if primaryStateChangeRequired {
+		acceptedKinds = append(acceptedKinds, stateChangingRepairAcceptedKinds()...)
+	}
 	required["acceptedKinds"] = compactUniqueStrings(acceptedKinds)
-	if len(acceptedOperations) > 0 {
+	if !primaryStateChangeRequired && len(acceptedOperations) > 0 {
 		required["acceptedOperations"] = compactUniqueStrings(lowerStringSlice(acceptedOperations))
+	} else {
+		delete(required, "acceptedOperations")
 	}
 	required["mustDeclareCoverageTargets"] = true
 	required["coverageTargetMatchRule"] = "state-changing evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	required["evidenceKindRequirementRule"] = "when a coverage target has profile evidenceRequirements, include at least one accepted state-changing evidence node with the required kind and operation before claiming the target satisfied; acceptedOperations constrains the required evidence node, not necessary supporting capability nodes"
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
+	if primaryStateChangeRequired {
+		required["mustIncludePrimaryStateChangingNode"] = true
+		required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
+		required["primaryStateChangingRule"] = "when unresolved coverage targets include general deliverable, goal, or DoD state change beyond profile-specific write evidence, include a primary state-changing artifact before any supplementary evidence-only write such as snapshot/commit"
+	}
 	pkg["requiredOutput"] = required
 	pkg["exitCriteria"] = []string{
 		"profile_required_state_changing_evidence_produced_then_verify",
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func coverageTargetsRequirePrimaryStateChangingOutput(targets []map[string]any, requirements []profileEvidenceKindRequirement) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	filtered := make([]profileEvidenceKindRequirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		if profileRequirementRequiresStateChangingEvidence(requirement) {
+			filtered = append(filtered, requirement)
+		}
+	}
+	if len(filtered) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		matched := false
+		for _, requirement := range filtered {
+			if evidenceKindRequirementMatchesCoverageTarget(requirement, target) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return true
+		}
+	}
+	return false
 }
 
 func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {

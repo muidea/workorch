@@ -21648,6 +21648,64 @@ func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraph(t *
 	}
 }
 
+func TestStateChangingRepairContractRejectsSupplementaryWriteOnlyGraphWhenPrimaryStateChangeRequired(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-mixed", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-mixed/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":        true,
+					"mustIncludePrimaryStateChangingNode": true,
+					"acceptedKinds":                       []string{"patch/apply", gitcommon.StepKindWrite},
+					"primaryAcceptedKinds":                []string{"patch/apply", "shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "init",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationInit,
+					},
+				},
+				{
+					"id":        "add",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"init"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "without patch/apply or declared auditable state-changing operation") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want primary state-changing contract rejection", err)
+	}
+}
+
 func TestStateChangingRepairContractAcceptsSupportingWriteEvidenceGraphAfterValidationContract(t *testing.T) {
 	run := &runmodel.Run{ID: "run-profile-write-evidence-supporting", InitialStepKind: llmWorkspaceExecutionStepKind}
 	input := map[string]any{

@@ -4473,6 +4473,9 @@ func allowAcceptedStateChangingEvidenceGraph(step *runModel.Step, graph runtimem
 	if !boolValue(required["mustIncludeStateChangingNode"]) {
 		return false
 	}
+	if boolValue(required["mustIncludePrimaryStateChangingNode"]) {
+		return false
+	}
 	accepted := mapStringSet(stringSliceFromValue(required["acceptedKinds"]))
 	if len(accepted) == 0 {
 		return false
