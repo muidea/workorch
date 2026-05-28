@@ -180,6 +180,74 @@ func TestBuildConvergenceContractUsesUnfocusedCoverageWorkItemStateChange(t *tes
 	}
 }
 
+func TestBuildConvergenceContractKeepsProfileWriteEvidenceAfterGitWriteFailure(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-git-write-failure",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":  true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "deliverable",
+			"item":                "version_control_snapshot",
+			"sourceRequirementId": "version_control_snapshot",
+			"coverageTargetToken": "version_control_snapshot",
+			"targetText":          "version_control_snapshot",
+			"state":               "failed",
+		}},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"sourceRequirementId": "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+			}},
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-git-write-failure/graph-001/003-stage-all",
+		Kind:   gitcommon.StepKindWrite,
+		Input:  map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []string{"."}},
+		Output: map[string]any{"operation": gitcommon.OperationAdd, "error": "invalid argument: broad pathspec is not allowed"},
+		State:  common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want git/write commit contract preserved after git/write failure", required)
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
+		t.Fatalf("requiredOutput = %+v, must not downgrade profile write evidence to shell/command", required)
+	}
+}
+
 func TestBuildConvergenceContractEscalatesValidationFailureWithDiagnosticsToStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:          runtimeStageVerification,

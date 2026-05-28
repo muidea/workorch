@@ -103,6 +103,16 @@ func BuildConvergenceContract(
 		contract.GovernanceReason = governanceReason
 		return contract
 	}
+	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 && convergenceFailedAcceptedStateChangingEvidenceStep(input, failedStep, pkg) {
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return contract
+	}
 	if convergenceMustPreserveAssessmentSchemaRepair(input, failedStep) {
 		populateAssessmentSchemaConvergenceContract(input, &contract)
 		return contract
@@ -337,6 +347,30 @@ func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evide
 		}
 	}
 	return false
+}
+
+func convergenceFailedAcceptedStateChangingEvidenceStep(input map[string]any, failedStep *runModel.Step, pkg map[string]any) bool {
+	if failedStep == nil || len(input) == 0 || len(pkg) == 0 {
+		return false
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		return false
+	}
+	acceptedKinds := mapStringSet(stringSliceFromValue(required["acceptedKinds"]))
+	if !acceptedKinds[strings.TrimSpace(failedStep.Kind)] {
+		return false
+	}
+	if len(stringSliceFromValue(required["acceptedOperations"])) > 0 {
+		operation := strings.ToLower(strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(failedStep.Input, "operation"),
+			stringFromMap(failedStep.Output, "operation"),
+		)))
+		if !mapStringSet(lowerStringSlice(stringSliceFromValue(required["acceptedOperations"])))[operation] {
+			return false
+		}
+	}
+	return true
 }
 
 func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[string]any) bool {
