@@ -114,7 +114,7 @@ func BuildConvergenceContract(
 	if populateCoverageWorkItemConvergenceContract(input, &contract) {
 		return contract
 	}
-	if convergenceTargetEvidenceReadyForStateChange(input, failedStep) {
+	if convergenceTargetEvidenceReadyForStateChange(run, input, failedStep) {
 		contract.State = convergenceStateNeedStateChange
 		contract.RuntimeStage = runtimeStageRepair
 		contract.RuntimeStageMode = "strict_convergence"
@@ -195,7 +195,7 @@ func BuildConvergenceContract(
 		}
 		return contract
 	}
-	if convergenceNeedsStateChange(input, failedStep) {
+	if convergenceNeedsStateChange(run, input, failedStep) {
 		contract.State = convergenceStateNeedStateChange
 		contract.RuntimeStage = runtimeStageRepair
 		contract.RuntimeStageMode = "strict_convergence"
@@ -582,7 +582,7 @@ func profileStateChangingPackageMatchesCoverageTargets(pkg map[string]any, targe
 	return false
 }
 
-func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedStep *runModel.Step) bool {
+func convergenceTargetEvidenceReadyForStateChange(run *runModel.Run, input map[string]any, failedStep *runModel.Step) bool {
 	if len(input) == 0 {
 		return false
 	}
@@ -595,6 +595,9 @@ func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedSt
 			boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"]) {
 			return false
 		}
+	}
+	if convertedReadableDecisionRepairRequiresAssessmentOnly(run, input, failedStep) {
+		return false
 	}
 	if !coverageVerificationGapPresent(input, failedStep) {
 		return false
@@ -611,6 +614,63 @@ func convergenceTargetEvidenceReadyForStateChange(input map[string]any, failedSt
 	return inputRequiresConcreteValidationEvidence(input) ||
 		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
 		stringFromMap(mapFromValue(input["convergenceContract"]), "state") == convergenceStateNeedValidation
+}
+
+func convertedReadableDecisionRepairRequiresAssessmentOnly(run *runModel.Run, input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || failedStep == nil {
+		return false
+	}
+	if !convertedDecisionGateFailure(failedStep.Output) {
+		return false
+	}
+	if len(missingGoalCoverageFromInput(input)) > 0 ||
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) > 0 {
+		return false
+	}
+	if (len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
+		len(mapSliceFromValue(input["coverageTargetSet"])) > 0) &&
+		!convertedReadableDecisionHasOnlySyntheticFallbackCoverage(run, input) {
+		return false
+	}
+	return len(mapSliceFromValue(input["readableResourceRepairContext"])) > 0
+}
+
+func convertedReadableDecisionHasOnlySyntheticFallbackCoverage(run *runModel.Run, input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(effectiveDoDItemTexts(run)) > 0 ||
+		len(normalizedRunGoalCoverageItems(run)) > 0 ||
+		len(requiredProfileDeliverableExpectations(run)) > 0 {
+		return false
+	}
+	for _, item := range mapSliceFromValue(input["missingDoDItems"]) {
+		if !syntheticFallbackDoDCoverageItem(item) {
+			return false
+		}
+	}
+	for _, item := range mapSliceFromValue(input["coverageTargetSet"]) {
+		if !syntheticFallbackDoDCoverageItem(item) {
+			return false
+		}
+	}
+	return len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
+		len(mapSliceFromValue(input["coverageTargetSet"])) > 0
+}
+
+func syntheticFallbackDoDCoverageItem(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	for _, key := range []string{"item", "targetText", "coverageTargetToken"} {
+		if text := strings.TrimSpace(stringFromMap(item, key)); text != "" && text != "effective DoD" {
+			return false
+		}
+	}
+	if kind := strings.TrimSpace(stringFromMap(item, "kind")); kind != "" && kind != "dod" && kind != "leaf" {
+		return false
+	}
+	return true
 }
 
 func repairHasDirectImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {
@@ -764,6 +824,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, "evidenceRepairRequired")
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
+		input["repairGuidance"] = stateChangingConvergenceGuidance(input["repairGuidance"])
 		if len(contract.RepairActionPackage) > 0 {
 			input["repairActionPackage"] = contract.RepairActionPackage
 		}
@@ -819,6 +880,53 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 	}
 	return input
+}
+
+func stateChangingConvergenceGuidance(existing any) []string {
+	return appendRepairGuidanceWithout(existing, []string{
+		"return only completed or failed dodassessment",
+		"do not return executiongraph",
+		"do not return execution graph",
+		"do not return shellcommands",
+		"do not return mcp/toolcalls",
+		"do not return patchrequests",
+		"do not return other executable work",
+	}, append(stateChangingRepairGuidance(),
+		"When stateChangingOutputRequired is true, a satisfied dodAssessment alone cannot satisfy the repair contract; first produce an accepted executable state-changing operation or return a failed dodAssessment/blocker.",
+	)...)
+}
+
+func appendRepairGuidanceWithout(existing any, blockedSubstrings []string, items ...string) []string {
+	ret := []string{}
+	seen := map[string]bool{}
+	blocked := make([]string, 0, len(blockedSubstrings))
+	for _, item := range blockedSubstrings {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item != "" {
+			blocked = append(blocked, item)
+		}
+	}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		lower := strings.ToLower(value)
+		for _, marker := range blocked {
+			if strings.Contains(lower, marker) {
+				return
+			}
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, item := range stringListFromValue(existing) {
+		add(item)
+	}
+	for _, item := range items {
+		add(item)
+	}
+	return ret
 }
 
 func ShouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, contract ConvergenceContract) bool {
@@ -1139,7 +1247,7 @@ func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) b
 }
 
 func convergenceStateChangeCannotAdvanceWithoutTarget(input map[string]any, failedStep *runModel.Step) bool {
-	if !convergenceNeedsStateChange(input, failedStep) {
+	if !convergenceNeedsStateChange(nil, input, failedStep) {
 		return false
 	}
 	pkg := mapFromValue(input["repairActionPackage"])
@@ -1215,7 +1323,10 @@ func convergenceRunHasRejectedContinuation(run *runModel.Run) bool {
 	return len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) > 0
 }
 
-func convergenceNeedsStateChange(input map[string]any, failedStep *runModel.Step) bool {
+func convergenceNeedsStateChange(run *runModel.Run, input map[string]any, failedStep *runModel.Step) bool {
+	if convertedReadableDecisionRepairRequiresAssessmentOnly(run, input, failedStep) {
+		return false
+	}
 	if boolValue(input["stateChangingOutputRequired"]) ||
 		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveStateChangingOutput {
 		return true

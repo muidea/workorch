@@ -433,7 +433,7 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && assessmentOnlySchemaInvalidRepairRequired(failedStep) && attempts < o.maxRuntimeRepairAttempts() {
+	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < o.maxRuntimeRepairAttempts() {
 		return false
 	}
 	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, o.maxRuntimeRepairAttempts()) {

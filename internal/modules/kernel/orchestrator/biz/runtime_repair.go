@@ -212,6 +212,9 @@ func assessmentOnlySchemaInvalidRepairRequired(step *runModel.Step) bool {
 	if !repairActionIsSchemaInvalidRepair(step.Input, step.Output) {
 		return false
 	}
+	if schemaInvalidRepairMustPreserveExecutableContract(step.Input) {
+		return false
+	}
 	if schemaInvalidOutputLooksLikeAssessment(step.Output) &&
 		(strings.TrimSpace(stringFromMap(step.Input, stepInputKeyRuntimeStage)) == runtimeStageVerification ||
 			len(missingGoalCoverageFromInput(step.Input)) > 0 ||
@@ -245,6 +248,29 @@ func schemaInvalidOutputLooksLikeAssessment(output map[string]any) bool {
 		strings.Contains(text, "\"goalcoverage\"") ||
 		strings.Contains(text, "\"deliverablecoverage\"") ||
 		strings.Contains(text, "\"acceptancedimensions\"")
+}
+
+func schemaInvalidRepairMustPreserveExecutableContract(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if inputRequiresConcreteValidationEvidence(input) ||
+		inputRequiresStateChangingOutput(input) ||
+		boolValue(input["concreteFailureEvidenceRequired"]) ||
+		strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveAcquireFailureEvidence ||
+		repairActionPackageRequiresEvidenceAcquisition(mapFromValue(input["repairActionPackage"])) {
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	return boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"])
+}
+
+func schemaInvalidRepairCanContinueWithinBudget(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return repairActionIsSchemaInvalidRepair(step.Input, step.Output)
 }
 
 func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(

@@ -137,8 +137,8 @@ func TestShouldBlockOnDuplicateRuntimeFailureForRepeatedLLMDecisionInvalid(t *te
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
-	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
-		t.Fatalf("expected repeated llm decision invalid failure to block early")
+	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
+		t.Fatalf("expected repeated llm decision invalid failure to continue schema recovery before repair budget is exhausted")
 	}
 }
 

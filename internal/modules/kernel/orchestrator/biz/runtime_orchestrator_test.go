@@ -18054,6 +18054,44 @@ func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairReadOnlyGra
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairSatisfiedAssessmentOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-assessment-only",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-assessment-only/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_dod_assessment",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "claimed state change without executable evidence",
+			"items": []map[string]any{{
+				"item":         "required state change",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-state-changing-repair-assessment-only/graph-001/001-claimed"},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "satisfied dodAssessment without executable state-changing output") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want satisfied assessment-only rejection", err)
+	}
+	output[stepOutputKeyDoDAssessment].(map[string]any)["satisfied"] = false
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract failed assessment err = %v, want allowed blocker/failure assessment", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsDeclaredStateChangingShellGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-shell-graph",
@@ -23430,7 +23468,7 @@ func TestCompletionGateAssessmentOnlySchemaInvalidRepairCanContinue(t *testing.T
 	}
 }
 
-func TestAssessmentSchemaInvalidAfterValidationDriftRestoresAssessmentOnlyContract(t *testing.T) {
+func TestAssessmentSchemaInvalidAfterValidationDriftPreservesValidationEvidenceContract(t *testing.T) {
 	runID := common.RunID("run-assessment-schema-invalid-validation-drift")
 	failed := &runmodel.Step{
 		ID:    common.StepID(runID + "/repair-003-of-assessment"),
@@ -23470,18 +23508,76 @@ func TestAssessmentSchemaInvalidAfterValidationDriftRestoresAssessmentOnlyContra
 		workspaces: memory.NewWorkspaceRepository(),
 	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-assessment-schema-invalid-validation-drift", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failed, 3, errors.New("invalid llm decision json"))
 
-	if input[stepInputKeyAssessmentOnly] != true ||
+	if input[stepInputKeyAssessmentOnly] != nil ||
 		input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
-		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
+		input["evidenceRepairRequired"] != true ||
 		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
-		t.Fatalf("repair input = %+v, want assessment-only schema recovery after validation drift", input)
-	}
-	if input["boundedValidationRequired"] != nil || input["evidenceRepairRequired"] != nil {
-		t.Fatalf("repair input = %+v, want validation evidence contract removed", input)
+		t.Fatalf("repair input = %+v, want concrete validation schema recovery after validation drift", input)
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
-		t.Fatalf("convergenceContract = %+v, want need_assessment", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+}
+
+func TestConcreteValidationSchemaInvalidPreservesValidationEvidenceContract(t *testing.T) {
+	runID := common.RunID("run-concrete-validation-schema-invalid")
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-planning"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":       true,
+			"evidenceRepairRequired":          true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "deliverable",
+				"targetText": "version_control_snapshot",
+				"state":      "failed",
+			}},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid|error=invalid argument: invalid llm decision json: no json object found",
+			"error":                   "invalid argument: invalid llm decision json: no json object found",
+			"rawContentPreview":       "{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"deliverableCoverage\":{\"items\":[]}",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-concrete-validation-schema-invalid", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failed, 2, errors.New("invalid llm decision json"))
+
+	if input[stepInputKeyAssessmentOnly] != nil ||
+		input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
+		input["evidenceRepairRequired"] != true {
+		t.Fatalf("repair input = %+v, want concrete validation schema recovery contract preserved", input)
+	}
+	if input["assessmentSchemaInvalidRecovery"] != nil || input["assessmentOnlyReason"] != nil {
+		t.Fatalf("repair input = %+v, want no assessment-only schema recovery fields", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		!boolValue(required["mustReturnValidJSON"]) ||
+		!boolValue(required["mustNotReuseRejectedJSON"]) {
+		t.Fatalf("requiredOutput = %+v, want valid-json concrete validation contract", required)
+	}
+	guidance := strings.Join(stringListFromValue(input["repairGuidance"]), "\n")
+	if strings.Contains(guidance, "Return one valid JSON object containing a completed or failed dodAssessment") ||
+		strings.Contains(guidance, "do not return executable work") {
+		t.Fatalf("repairGuidance = %s, want executable validation contract not assessment-only", guidance)
 	}
 }
 
@@ -27629,6 +27725,41 @@ func TestRuntimeOrchestrator_ResumeProviderConfigRecoveryContinueDispatchesExpli
 	}
 	if retry.Input["repairObjective"] != repairObjectiveStateChangingOutput || retry.Input["stateChangingOutputRequired"] != true {
 		t.Fatalf("retry repair input = %+v, want state-changing repair contract preserved", retry.Input)
+	}
+}
+
+func TestMergeResumeInputPreservesProviderRetryRecoveryContract(t *testing.T) {
+	specs := []stepDispatchSpec{{
+		ID:   "run-provider-retry-merge/provider-retry-003-of-repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyProviderRetryFollowUp: true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"repairGuidance":                  []string{"retry existing state-changing contract"},
+		},
+	}}
+	resumeInput := map[string]any{
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"repairGuidance":                  []string{"stale convergence wrapper"},
+		"convergenceContract":             map[string]any{"state": convergenceStateNeedEvidence},
+		"decisionResolution":              map[string]any{"resolutionId": "resolution-provider-retry-merge"},
+	}
+
+	mergeResumeInput(specs, resumeInput)
+
+	if specs[0].Input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		specs[0].Input["stateChangingOutputRequired"] != true ||
+		specs[0].Input["concreteFailureEvidenceRequired"] != nil ||
+		mapFromValue(specs[0].Input["convergenceContract"]) != nil {
+		t.Fatalf("provider retry input = %+v, want retry contract preserved over resume wrapper", specs[0].Input)
+	}
+	if got := stringSliceFromValue(specs[0].Input["repairGuidance"]); len(got) != 1 || got[0] != "retry existing state-changing contract" {
+		t.Fatalf("repairGuidance = %+v, want provider retry guidance preserved", specs[0].Input["repairGuidance"])
+	}
+	if mapFromValue(specs[0].Input["decisionResolution"]) == nil {
+		t.Fatalf("decisionResolution missing from merged provider retry input: %+v", specs[0].Input)
 	}
 }
 

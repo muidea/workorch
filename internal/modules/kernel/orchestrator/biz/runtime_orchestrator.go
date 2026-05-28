@@ -1737,7 +1737,13 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			}
 			return nil
 		}
-		if hasStateChangingLLMExecutionOutput(output) || doDAssessmentFromOutput(output) != nil {
+		if hasStateChangingLLMExecutionOutput(output) {
+			return nil
+		}
+		if assessment := doDAssessmentFromOutput(output); assessment != nil {
+			if boolValue(assessment["satisfied"]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+				return fmt.Errorf("%w: state-changing llm repair step returned satisfied dodAssessment without executable state-changing output", common.ErrInvalidArgument)
+			}
 			return nil
 		}
 		if spec := decisionBlockSpec(output); spec.Reason != "" {
@@ -5790,6 +5796,21 @@ func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
 }
 
 func resumeInputShouldPreserveExistingStage(key string, input map[string]any) bool {
+	if boolValue(input[stepInputKeyProviderRetryFollowUp]) {
+		switch strings.TrimSpace(key) {
+		case "repairObjective",
+			"stateChangingOutputRequired",
+			"repairGuidance",
+			"repairActionPackage",
+			"convergenceContract",
+			"concreteFailureEvidenceRequired",
+			"boundedValidationRequired",
+			"evidenceRepairRequired",
+			stepInputKeyAssessmentOnly,
+			"assessmentOnlyReason":
+			return true
+		}
+	}
 	switch strings.TrimSpace(key) {
 	case stepInputKeySoulStage, stepInputKeyRuntimeStage, stepInputKeyRuntimeStageMode:
 	default:

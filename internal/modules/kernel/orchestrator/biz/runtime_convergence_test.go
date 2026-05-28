@@ -188,6 +188,10 @@ func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCo
 	input := map[string]any{
 		stepInputKeyAssessmentOnly: true,
 		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		"repairGuidance": []string{
+			"Return only completed or failed dodAssessment, or a real governance blocker.",
+			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
+		},
 		"missingDeliverableCoverage": []map[string]any{{
 			"id":    "version_control_snapshot",
 			"kind":  "deliverableExpectation",
@@ -214,6 +218,15 @@ func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCo
 	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
 	if applied[stepInputKeyAssessmentOnly] != nil || applied["repairObjective"] != repairObjectiveStateChangingOutput || applied["stateChangingOutputRequired"] != true {
 		t.Fatalf("applied input = %+v, want state-changing repair not assessment-only", applied)
+	}
+	guidance := strings.Join(stringListFromValue(applied["repairGuidance"]), "\n")
+	for _, forbidden := range []string{"Return only completed or failed dodAssessment", "Do not return executionGraph"} {
+		if strings.Contains(guidance, forbidden) {
+			t.Fatalf("repairGuidance contains stale assessment-only instruction %q: %s", forbidden, guidance)
+		}
+	}
+	if !strings.Contains(guidance, "satisfied dodAssessment alone cannot satisfy") {
+		t.Fatalf("repairGuidance = %s, want executable state-changing guidance", guidance)
 	}
 }
 
@@ -500,6 +513,11 @@ func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange
 		"evidenceRepairRequired":     true,
 		stepInputKeyAssessmentOnly:   true,
 		"assessmentOnlyReason":       "previous assessment correction",
+		"repairGuidance": []string{
+			"Return only completed or failed dodAssessment, or a real governance blocker.",
+			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
+			"Preserve existing coverage.",
+		},
 	}
 	contract := ConvergenceContract{
 		State:                       convergenceStateNeedStateChange,
@@ -525,6 +543,48 @@ func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange
 		if _, ok := applied[key]; ok {
 			t.Fatalf("applied[%s] still present in state-changing contract: %+v", key, applied)
 		}
+	}
+	guidance := strings.Join(stringListFromValue(applied["repairGuidance"]), "\n")
+	for _, forbidden := range []string{"Return only completed or failed dodAssessment", "Do not return executionGraph"} {
+		if strings.Contains(guidance, forbidden) {
+			t.Fatalf("repairGuidance contains stale assessment-only instruction %q: %s", forbidden, guidance)
+		}
+	}
+	if !strings.Contains(guidance, "satisfied dodAssessment alone cannot satisfy") {
+		t.Fatalf("repairGuidance = %s, want explicit executable state-changing guidance", guidance)
+	}
+}
+
+func TestBuildConvergenceContractKeepsConvertedReadableDecisionAssessmentOnlyWithoutCoverageGap(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-readable-decision-assessment-only",
+		DoDID:           "dod-readable-decision-assessment-only",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID: "run-readable-decision-assessment-only/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"readableResourceRepairContext": []map[string]any{{
+				"targetRef": "current.txt",
+				"content":   "current content",
+			}},
+		},
+		Output: map[string]any{
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecisionGate":                "convergence_contract",
+			"convertedDecision": map[string]any{
+				"question": "Please provide current.txt.",
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State == convergenceStateNeedStateChange {
+		t.Fatalf("contract = %+v, want readable resource repair without coverage gap not forced into state change", contract)
 	}
 }
 
@@ -1404,16 +1464,18 @@ func TestRuntimeRepairFollowUpAssessmentSchemaInvalidKeepsAssessmentContract(t *
 
 	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, errors.New("invalid llm decision json"))
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedAssessment {
-		t.Fatalf("convergenceContract = %+v, want need_assessment for assessment schema invalid repair", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation for concrete validation schema invalid repair", contract)
 	}
-	if input[stepInputKeyAssessmentOnly] != true ||
-		input["repairObjective"] != "complete_dod_goal_coverage_assessment" ||
+	if input[stepInputKeyAssessmentOnly] != nil ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
 		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
-		t.Fatalf("repair input = %+v, want assessment-only schema invalid contract", input)
+		t.Fatalf("repair input = %+v, want concrete validation schema invalid contract", input)
 	}
-	if input["boundedValidationRequired"] != nil || input["evidenceRepairRequired"] != nil {
-		t.Fatalf("repair input = %+v, want validation contract cleared", input)
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) || !boolValue(required["mustReturnValidJSON"]) {
+		t.Fatalf("requiredOutput = %+v, want valid-json concrete validation contract", required)
 	}
 }
 
