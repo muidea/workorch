@@ -121,23 +121,6 @@ func BuildConvergenceContract(
 		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
 	}
-	if populateCoverageWorkItemConvergenceContract(run, input, &contract) {
-		return contract
-	}
-	if convergenceTargetEvidenceReadyForStateChange(run, input, failedStep) {
-		contract.State = convergenceStateNeedStateChange
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveStateChangingOutput
-		contract.StateChangingOutputRequired = true
-		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
-			contract.RepairActionPackage = pkg
-		} else {
-			contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
-		}
-		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
-		return contract
-	}
 	if boolValue(input["validationRepairEscalatedToImplementation"]) {
 		pkg := repeatedValidationRepairEscalationPackage(run, input, failedStep)
 		if repairActionPackageRequiresEvidenceAcquisition(pkg) {
@@ -160,6 +143,23 @@ func BuildConvergenceContract(
 		}
 		contract.RepairActionPackage = pkg
 		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return contract
+	}
+	if populateCoverageWorkItemConvergenceContract(run, input, &contract) {
+		return contract
+	}
+	if convergenceTargetEvidenceReadyForStateChange(run, input, failedStep) {
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			contract.RepairActionPackage = pkg
+		} else {
+			contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		}
+		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
 	if convergenceNeedsValidation(input, failedStep) {

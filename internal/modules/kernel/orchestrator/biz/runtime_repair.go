@@ -4017,6 +4017,9 @@ func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[
 	if len(pkg) > 0 && boolValue(pkg["capabilityPolicyRepairRequired"]) {
 		return true
 	}
+	if boolValue(input["validationRepairEscalatedToImplementation"]) {
+		return true
+	}
 	return repairHasImplementationTargetEvidence(input, pkg)
 }
 
@@ -5839,15 +5842,22 @@ func (o *RuntimeOrchestrator) coverageValidationRepairShouldEscalateToStateChang
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
 		return false
 	}
-	return runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep)
+	return runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep) ||
+		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
 }
 
 func runtimeRepairHasConcreteImplementationTargetEvidence(input map[string]any, failedStep *runModel.Step) bool {
 	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
 		return true
 	}
+	if repairInputHasEmptyWorkspaceSurfaceEvidence(input) {
+		return true
+	}
 	if failedStep == nil {
 		return false
+	}
+	if runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep) {
+		return true
 	}
 	return repairHasImplementationTargetEvidence(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"]))
 }
@@ -7168,6 +7178,147 @@ func runtimeRepairInputHasResourceEvidence(failedStep *runModel.Step) bool {
 		}
 	}
 	return false
+}
+
+func runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	if repairInputHasEmptyWorkspaceSurfaceEvidence(failedStep.Input) {
+		return true
+	}
+	return repairInputHasEmptyWorkspaceSurfaceEvidence(failedStep.Output)
+}
+
+func repairInputHasEmptyWorkspaceSurfaceEvidence(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if graphEvidenceHasEmptyWorkspaceSurface(input) {
+		return true
+	}
+	for _, evidence := range mapSliceFromValue(input[stepInputKeyGraphEvidence]) {
+		if graphEvidenceHasEmptyWorkspaceSurface(evidence) {
+			return true
+		}
+		if graphEvidenceHasEmptyWorkspaceSurface(evidence["output"]) {
+			return true
+		}
+	}
+	if nested := mapFromValue(input["failedStepInput"]); len(nested) > 0 && repairInputHasEmptyWorkspaceSurfaceEvidence(nested) {
+		return true
+	}
+	if nested := mapFromValue(input["failedStepOutput"]); len(nested) > 0 && repairInputHasEmptyWorkspaceSurfaceEvidence(nested) {
+		return true
+	}
+	return false
+}
+
+func graphEvidenceHasEmptyWorkspaceSurface(value any) bool {
+	item := mapFromValue(value)
+	if len(item) == 0 {
+		return false
+	}
+	kind := strings.TrimSpace(stringFromMap(item, "kind"))
+	output := mapFromValue(item["output"])
+	stage := strings.TrimSpace(stringFromMap(item, "stage"))
+	if stage == "" {
+		stage = strings.TrimSpace(stringFromMap(output, "stage"))
+	}
+	if kind != "file/list" && stage != "file_list" {
+		return false
+	}
+	path := strings.TrimSpace(stringFromMap(output, "path"))
+	if path == "" {
+		path = strings.TrimSpace(stringFromMap(item, "path"))
+	}
+	if path != "" && path != "." {
+		return false
+	}
+	if boolValue(item["truncated"]) || boolValue(output["truncated"]) {
+		return false
+	}
+	for _, entriesValue := range []any{
+		item["entries"],
+		item["items"],
+		output["entries"],
+		output["items"],
+	} {
+		if count, ok := graphEvidenceEntryCount(entriesValue); ok && count == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func graphEvidenceEntryCount(value any) (int, bool) {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return len(typed), true
+	case []any:
+		return len(typed), true
+	case map[string]any:
+		for _, key := range []string{"items", "entries", "count", "total"} {
+			if raw, ok := typed[key]; ok {
+				switch nested := raw.(type) {
+				case []map[string]any:
+					return len(nested), true
+				case []any:
+					return len(nested), true
+				case map[string]any:
+					if count, ok := graphEvidenceEntryCount(nested); ok {
+						return count, true
+					}
+				default:
+					if count, ok := graphEvidenceNumericCount(raw); ok {
+						return count, true
+					}
+				}
+			}
+		}
+	default:
+		if count, ok := graphEvidenceNumericCount(value); ok {
+			return count, true
+		}
+	}
+	return 0, false
+}
+
+func graphEvidenceNumericCount(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case uint:
+		return int(typed), true
+	case uint8:
+		return int(typed), true
+	case uint16:
+		return int(typed), true
+	case uint32:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case string:
+		count, err := strconv.Atoi(strings.TrimSpace(typed))
+		return count, err == nil
+	case fmt.Stringer:
+		count, err := strconv.Atoi(strings.TrimSpace(typed.String()))
+		return count, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func missingDoDItemsFromFailureOutput(output map[string]any) []map[string]any {

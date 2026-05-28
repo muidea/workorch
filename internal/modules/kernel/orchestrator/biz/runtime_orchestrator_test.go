@@ -23871,6 +23871,101 @@ func TestCompletionGateAssessmentOnlyFailedCoverageCorrectionSwitchesToConcreteE
 	}
 }
 
+func TestRuntimeRepairInputEscalatesRepeatedValidationAfterResourceSurfaceEvidence(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-repeated-validation-resource-surface")
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/graph-001/001-list-workspace"),
+		RunID: runID,
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(runID) + "/step-1",
+			stepInputKeyGraphNodeID:     "list-workspace",
+		},
+		Output: map[string]any{
+			"status":    "completed",
+			"stage":     "file_list",
+			"path":      ".",
+			"entries":   []map[string]any{},
+			"truncated": false,
+		},
+	}); err != nil {
+		t.Fatalf("seed file/list step: %v", err)
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-002-of-planning-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageVerification,
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+			"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+			"evidenceRepairRequired":          true,
+			stepInputKeyGraphEvidence: []map[string]any{{
+				"stepId": string(runID) + "/graph-001/001-list-workspace",
+				"kind":   "file/list",
+				"output": map[string]any{
+					"status":    "completed",
+					"stage":     "file_list",
+					"path":      ".",
+					"entries":   []map[string]any{},
+					"truncated": false,
+				},
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|error=invalid argument: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executiongraph; plain failed dodassessment does not satisfy repairactionpackage.requiredoutput",
+			"error":                   "invalid argument: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "coverage still missing after validation-only repair",
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDoDItems": []map[string]any{{
+					"item":  "deliver source artifact",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, failedStep); err != nil {
+		t.Fatalf("seed failed repair step: %v", err)
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      stepRepo,
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-repeated-validation-resource-surface",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}, failedStep, 3, errors.New("plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput"))
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
+		t.Fatalf("repair input = %+v, want repeated validation repair to escalate to state-changing output", input)
+	}
+	if input["validationRepairEscalatedToImplementation"] != true {
+		t.Fatalf("validationRepairEscalatedToImplementation = %v, want true", input["validationRepairEscalatedToImplementation"])
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch/apply contract", required)
+	}
+}
+
 func TestCompletionGateEvidenceQualityGapRepairFollowUpContinuesToConcreteEvidenceRepair(t *testing.T) {
 	runID := common.RunID("run-dod-evidence-quality-repair-follow-up")
 	step := &runmodel.Step{
