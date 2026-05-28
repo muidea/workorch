@@ -864,7 +864,7 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 	if len(payload) == 0 {
 		return nil
 	}
-	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD"
+	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD; missing evidence binding means the runtime ledger still needs accepted evidence refs, not that matching evidence is absent from history or memory"
 	return payload
 }
 

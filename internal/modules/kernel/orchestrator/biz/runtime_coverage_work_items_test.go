@@ -164,7 +164,7 @@ func TestCoverageWorkItemsTrackEvidenceByKind(t *testing.T) {
 	if missing["state_change"] || !missing["validation"] {
 		t.Fatalf("missingEvidenceKinds = %+v, want only validation missing", coverageMissingEvidenceKinds(item))
 	}
-	if got := stringFromMap(item, "currentGap"); got != "missing required evidence kind: validation" {
+	if got := stringFromMap(item, "currentGap"); got != "missing accepted evidence binding for required evidence kind: validation" {
 		t.Fatalf("currentGap = %q, want validation-only gap", got)
 	}
 }

@@ -785,7 +785,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
   "acceptedEvidenceRefs": [],
   "rejectedEvidenceRefs": [],
   "coverageBoundary": "must stay within source targetText and profile-declared evidence requirements",
-  "currentGap": "missing required evidence kind: state_change",
+  "currentGap": "missing accepted evidence binding for required evidence kind: state_change",
   "reason": "derived from failed goal coverage item"
 }
 ```
@@ -799,7 +799,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
 - `status` 只能表达中立进展：`open`、`in_progress`、`evidence_ready`、`satisfied`、`failed`、`blocked`。它不得替代 run / step 的 `planning`、`execution`、`repair`、`verification`、`acceptance` 等主状态。
 - `acceptedEvidenceRefs` / `rejectedEvidenceRefs` 必须引用可追踪 step / artifact / result / decision evidence；不可追踪的 run id、memory-only ref、自然语言总结或旧失败 wrapper 不得关闭 work item。
 - `coverageBoundary` 必须说明该 work item 的范围限制：只能关闭对应 source 与 profile 声明的 evidence requirement，不能扩张到相邻 Goal / DoD、历史失败、LLM 建议项或模板通用建议。
-- `currentGap` 只能描述缺失的中立 evidence kind、未满足的 coverage target、当前失败证据或缺少 target evidence；不得写入 profile 领域修复方案。
+- `currentGap` 只能描述缺失的中立 evidence kind 绑定、未满足的 coverage target、当前失败证据或缺少 target evidence；不得写入 profile 领域修复方案。对于 `missing accepted evidence binding ...` 类缺口，语义是 coverage ledger 尚未绑定 accepted evidence ref，不等价于历史 evidence、memory 或当前上下文中不存在候选证据；LLM 应优先把可追踪候选证据回链到 assessment / result，而不是把它解释成 governance 冲突。
 
 Core 可以基于 profile contract 为 work item 计算 `requiredEvidenceKinds`。例如 profile 声明某 scope 需要 direct evidence 或 state-changing evidence 时，runtime 可以把该需求表达为 `state_change` / `validation` 的中立组合；但“哪些文件、命令、测试、接口或业务流程能产生这些 evidence”只能由 workspaceTemplate / profile / Soul / skill / LLM 在当前上下文中决定。
 
@@ -869,7 +869,7 @@ LLM-facing 投影规则：
         "requiredEvidenceKinds": ["state_change", "validation"],
         "missingEvidenceKinds": ["state_change"],
         "status": "open",
-        "currentGap": "missing required evidence kind: state_change",
+        "currentGap": "missing accepted evidence binding for required evidence kind: state_change",
         "acceptedEvidenceRefs": [],
         "rejectedEvidenceRefs": [
           "run-028/graph-001/003-verify"

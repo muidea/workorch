@@ -748,7 +748,7 @@ func coverageCurrentGap(missingKinds []string) string {
 	if len(missingKinds) == 0 {
 		return ""
 	}
-	return "missing required evidence kind: " + strings.Join(missingKinds, ", ")
+	return "missing accepted evidence binding for required evidence kind: " + strings.Join(missingKinds, ", ")
 }
 
 func coverageEvidenceRefsByKind(existing map[string]any, key string, requiredKinds []string) map[string][]string {
