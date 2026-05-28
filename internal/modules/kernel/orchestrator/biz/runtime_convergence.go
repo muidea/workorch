@@ -257,6 +257,12 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RepairActionPackage = map[string]any{}
 	}
 	contract.RepairActionPackage[coverageWorkItemContextKey] = context
+	if len(mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])) == 0 {
+		if targets := coverageTargetSetFromWorkItemContext(context); len(targets) > 0 {
+			contract.RepairActionPackage["coverageRepairRequired"] = true
+			contract.RepairActionPackage["coverageTargetSet"] = targets
+		}
+	}
 	if missing["decision"] || missing["approval"] || missing["external_dependency"] || status == "blocked" {
 		contract.State = convergenceStateNeedGovernance
 		contract.RuntimeStage = runtimeStageDecision
@@ -278,6 +284,21 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		}
 	}
 	if missing["state_change"] {
+		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus) {
+			contract.State = convergenceStateNeedStateChange
+			contract.RuntimeStage = runtimeStageRepair
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveStateChangingOutput
+			contract.StateChangingOutputRequired = true
+			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage)
+			required["mustReferenceCoverageWorkItem"] = true
+			required["mustIncludePrimaryStateChangingNode"] = true
+			required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
+			required["primaryStateChangingRule"] = "when the current focus is a primary deliverable state change, produce the smallest state-changing artifact that directly maps to the focused coverage work item before validation"
+			contract.RepairActionPackage["requiredOutput"] = required
+			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+			return true
+		}
 		if repairHasImplementationTargetEvidence(input, contract.RepairActionPackage) ||
 			len(mapSliceFromValue(contract.RepairActionPackage["targetSnapshots"])) > 0 ||
 			len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(contract.RepairActionPackage["repairTargetSet"]))) > 0 {
@@ -329,6 +350,16 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	contract.RuntimeStageMode = "strict_convergence"
 	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
 	return true
+}
+
+func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus map[string]any) bool {
+	if len(focus) == 0 {
+		return false
+	}
+	return coverageSourceRequiresPrimaryStateChange(coverageWorkItemSource{
+		SourceScope:         stringFromMap(focus, "sourceScope"),
+		SourceRequirementID: stringFromMap(focus, "sourceRequirementId"),
+	})
 }
 
 func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evidenceKind string) bool {
@@ -844,6 +875,11 @@ func inheritRejectedResultCoverageContract(input map[string]any, source map[stri
 		return false
 	}
 	input["coverageRepairRequired"] = true
+	if inputRequiresStateChangingOutput(input) ||
+		coverageWorkItemContextHasMissingEvidenceKind(coverageWorkItemContextFromInput(input), "state_change") {
+		ensureCoverageRepairTargetSet(input)
+		return true
+	}
 	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 	input["boundedValidationRequired"] = true
 	input["evidenceRepairRequired"] = true

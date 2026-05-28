@@ -578,7 +578,22 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 			kinds = append(kinds, "validation")
 		}
 	}
+	if runExecutionContractRequiresStateChange(run) && coverageSourceRequiresPrimaryStateChange(source) {
+		kinds = append(kinds, "state_change")
+	}
 	return compactUniqueStrings(kinds)
+}
+
+func coverageSourceRequiresPrimaryStateChange(source coverageWorkItemSource) bool {
+	if strings.TrimSpace(source.SourceScope) != "deliverable" {
+		return false
+	}
+	switch strings.TrimSpace(source.SourceRequirementID) {
+	case "source_change", "user_deliverable":
+		return true
+	default:
+		return false
+	}
 }
 
 func coverageWorkItemContextFromItems(revision string, items []map[string]any, excludedSources []map[string]any, historicalItems []map[string]any) map[string]any {
@@ -591,6 +606,7 @@ func coverageWorkItemContextFromItems(revision string, items []map[string]any, e
 	unresolved := make([]map[string]any, 0)
 	ledgerSummary := make([]map[string]any, 0)
 	focusIDs := map[string]bool{}
+	openItems := make([]map[string]any, 0)
 	for _, item := range items {
 		status := strings.TrimSpace(stringFromMap(item, "status"))
 		if status == "" {
@@ -598,15 +614,21 @@ func coverageWorkItemContextFromItems(revision string, items []map[string]any, e
 		}
 		summary[status] = intFromAny(summary[status]) + 1
 		if !coverageWorkItemClosedForFocus(status) {
-			if currentFocus == nil {
-				currentFocus = coverageWorkItemFocus(item)
-			}
-			if len(currentFocusItems) < 3 {
-				focus := coverageWorkItemFocus(item)
-				currentFocusItems = append(currentFocusItems, focus)
-				focusIDs[stringFromMap(focus, "id")] = true
-			}
+			openItems = append(openItems, item)
 			unresolved = append(unresolved, coverageWorkItemSummary(item))
+		}
+	}
+	sort.SliceStable(openItems, func(i, j int) bool {
+		return coverageWorkItemFocusPriority(openItems[i]) < coverageWorkItemFocusPriority(openItems[j])
+	})
+	for idx, item := range openItems {
+		if idx == 0 {
+			currentFocus = coverageWorkItemFocus(item)
+		}
+		if len(currentFocusItems) < 3 {
+			focus := coverageWorkItemFocus(item)
+			currentFocusItems = append(currentFocusItems, focus)
+			focusIDs[stringFromMap(focus, "id")] = true
 		}
 	}
 	if currentFocus == nil {
@@ -660,6 +682,26 @@ func coverageWorkItemContextFromItems(revision string, items []map[string]any, e
 		context["currentFocus"] = currentFocus
 	}
 	return context
+}
+
+func coverageWorkItemFocusPriority(item map[string]any) int {
+	if len(item) == 0 {
+		return 100
+	}
+	missing := stringSet(coverageMissingEvidenceKinds(item))
+	switch {
+	case missing["state_change"] && coverageSourceRequiresPrimaryStateChange(coverageWorkItemSource{
+		SourceScope:         stringFromMap(item, "sourceScope"),
+		SourceRequirementID: stringFromMap(item, "sourceRequirementId"),
+	}):
+		return 0
+	case missing["state_change"]:
+		return 1
+	case missing["validation"] || missing["artifact"]:
+		return 2
+	default:
+		return 3
+	}
 }
 
 func coverageWorkItemClosedForFocus(status string) bool {
@@ -1099,6 +1141,65 @@ func coverageWorkItemPrimaryFocus(context map[string]any) map[string]any {
 		}
 	}
 	return nil
+}
+
+func coverageTargetSetFromWorkItemContext(context map[string]any) []map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0)
+	add := func(item map[string]any) {
+		if len(item) == 0 {
+			return
+		}
+		targetText := strings.TrimSpace(stringFromMap(item, "targetText"))
+		if targetText == "" {
+			return
+		}
+		sourceRequirementID := strings.TrimSpace(stringFromMap(item, "sourceRequirementId"))
+		key := firstNonEmptyString(sourceRequirementID, targetText)
+		key = stringFromMap(item, "sourceScope") + ":" + normalizeCoverageGapRepairToken(key)
+		if key == ":" || seen[key] {
+			return
+		}
+		seen[key] = true
+		target := map[string]any{
+			"kind":                coverageWorkItemTargetKind(item),
+			"targetText":          targetText,
+			"state":               firstNonEmptyString(stringFromMap(item, "status"), "open"),
+			"source":              stringFromMap(item, "source"),
+			"sourceScope":         stringFromMap(item, "sourceScope"),
+			"sourceRequirementId": sourceRequirementID,
+			"sourcePath":          stringFromMap(item, "sourcePath"),
+			"coverageWorkItemId":  stringFromMap(item, "id"),
+			"coverageTargetToken": firstNonEmptyString(sourceRequirementID, targetText),
+		}
+		ret = append(ret, target)
+	}
+	if focus := mapFromValue(context["currentFocus"]); len(focus) > 0 {
+		add(focus)
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		add(item)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func coverageWorkItemTargetKind(item map[string]any) string {
+	switch strings.TrimSpace(stringFromMap(item, "sourceScope")) {
+	case "goal_leaf":
+		return "goal"
+	case "dod_item":
+		return "dod"
+	case "deliverable":
+		return "deliverable"
+	default:
+		return firstNonEmptyString(stringFromMap(item, "source"), stringFromMap(item, "sourceScope"))
+	}
 }
 
 func applyCoverageWorkItemContext(input map[string]any, context map[string]any) {

@@ -406,6 +406,97 @@ func TestCoverageWorkItemContextDoesNotFocusSkippedItems(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemContextPrioritizesPrimaryStateChangeDeliverable(t *testing.T) {
+	revision := "rev-current"
+	items := []map[string]any{
+		{
+			"id":                    "cwi-001",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-001",
+			"sourcePath":            "goal.leaves[0]",
+			"targetText":            "observable behavior",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-001",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "open",
+		},
+		{
+			"id":                    "cwi-002",
+			"definitionRevision":    revision,
+			"source":                "deliverable",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "source_change",
+			"sourcePath":            "executionContract.profileContracts.neutral.deliverableExpectations[0]",
+			"targetText":            "source_change",
+			"normalizedSourceKey":   "deliverable:deliverable:source_change",
+			"requiredEvidenceKinds": []string{"validation", "state_change"},
+			"status":                "open",
+		},
+	}
+
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "id") != "cwi-002" {
+		t.Fatalf("currentFocus = %+v, want primary state-changing deliverable", focus)
+	}
+	focuses := mapSliceFromValue(context["currentFocusItems"])
+	if len(focuses) < 2 || stringFromMap(focuses[0], "id") != "cwi-002" || stringFromMap(focuses[1], "id") != "cwi-001" {
+		t.Fatalf("currentFocusItems = %+v, want state-changing deliverable before validation-only goal", focuses)
+	}
+	ledger := mapSliceFromValue(context["ledgerSummary"])
+	if len(ledger) != 2 || stringFromMap(ledger[0], "id") != "cwi-001" || stringFromMap(ledger[1], "id") != "cwi-002" {
+		t.Fatalf("ledgerSummary = %+v, want original ledger order preserved", ledger)
+	}
+}
+
+func TestCoverageWorkItemsRequirePrimaryStateChangeForSourceChangeDeliverable(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-source-change-state",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi-source-change",
+				"text": "deliver observable behavior",
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	}
+	var sourceChange map[string]any
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringFromMap(item, "sourceRequirementId") == "source_change" {
+			sourceChange = item
+			break
+		}
+	}
+	if len(sourceChange) == 0 {
+		t.Fatalf("coverageWorkItems = %+v, want source_change item", run.ExecutionContext[coverageWorkItemsKey])
+	}
+	missing := stringSet(coverageMissingEvidenceKinds(sourceChange))
+	if !missing["state_change"] || !missing["validation"] {
+		t.Fatalf("source_change missingEvidenceKinds = %+v, want state_change and validation", coverageMissingEvidenceKinds(sourceChange))
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "sourceRequirementId") != "source_change" {
+		t.Fatalf("currentFocus = %+v, want source_change before validation-only items", focus)
+	}
+}
+
 func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-advance",

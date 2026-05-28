@@ -1513,6 +1513,52 @@ func TestInitialStepInputCarriesReplanConvergenceContract(t *testing.T) {
 	}
 }
 
+func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverageFocus(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-primary-deliverable-cwi",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-primary-deliverable-cwi",
+				"text": "deliver observable behavior",
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	ensureRunCoverageWorkItems(run)
+	input := map[string]any{
+		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
+		stepInputKeyRuntimeStage:          runtimeStageVerification,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract = %+v, want primary deliverable state-changing contract", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludePrimaryStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want primary patch-capable state-changing output", required)
+	}
+	targets := mapSliceFromValue(mapFromValue(contract.RepairActionPackage)["coverageTargetSet"])
+	if len(targets) == 0 || stringFromMap(targets[0], "sourceRequirementId") != "source_change" {
+		t.Fatalf("coverageTargetSet = %+v, want source_change focus target", targets)
+	}
+}
+
 func TestBuildConvergenceContractNeedValidationWhenPatchAlreadySatisfied(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
@@ -1583,6 +1629,82 @@ func TestRuntimeRepairFollowUpSchemaInvalidKeepsStateChangingContract(t *testing
 
 	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
 		t.Fatalf("convergenceContract = %+v, want need_state_change for schema invalid repair", contract)
+	}
+}
+
+func TestRuntimeRepairFollowUpSchemaInvalidWithRejectedContinuationKeepsStateChangingContract(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-schema-invalid-rejected-continuation",
+		WorkspaceID:     "ws-schema-invalid-rejected-continuation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"coverageGaps": map[string]any{
+					"missingGoalCoverage": []map[string]any{{
+						"goalRequirementId": "goal-req-1",
+						"raw":               "coverage gap",
+					}},
+				},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-schema-invalid-rejected-continuation/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			stepInputKeySoulStage:         soulStageExecution,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"coverageTargetSet": []map[string]any{{
+				"targetText": "source_change",
+				"kind":       "deliverable",
+				"state":      "failed",
+			}},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                  "cwi-source-change",
+					"sourceScope":         "deliverable",
+					"sourceRequirementId": "source_change",
+					"missingEvidenceKinds": []string{
+						"validation",
+						"state_change",
+					},
+					"status": "open",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+				"coverageTargetSet": []map[string]any{{
+					"targetText": "source_change",
+					"kind":       "deliverable",
+					"state":      "failed",
+				}},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|stage=llm_schema_invalid",
+			"error":                   "invalid llm decision json",
+		},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, nil)
+	contract := mapFromValue(input["convergenceContract"])
+
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change even with rejected continuation", contract)
+	}
+	if input["stateChangingOutputRequired"] != true || input["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("repair input = %+v, want rejected continuation to preserve state-changing repair contract", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing requirement preserved", required)
 	}
 }
 

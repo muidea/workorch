@@ -2962,6 +2962,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		}
 	}
 	inheritPriorRepairContext(input, failedStep)
+	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)
 	if boolValue(input["stateChangingOutputRequired"]) {
 		if _, ok := input["lastFailureDiagnostics"]; !ok {
 			if fallback := runtimeRepairLastFailureDiagnostics(failedStep); len(fallback) > 0 {
@@ -3010,6 +3011,46 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
 	return input
+}
+
+func preserveStateChangingSchemaInvalidRepairContract(input map[string]any, failedStep *runModel.Step) bool {
+	if len(input) == 0 || failedStep == nil || !stateChangingSchemaInvalidRepair(failedStep) || !inputRequiresStateChangingOutput(failedStep.Input) {
+		return false
+	}
+	if boolValue(input["stateChangingOutputRequired"]) && strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveStateChangingOutput {
+		return false
+	}
+	input["schemaInvalidRepairMode"] = "single_valid_json_decision"
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	delete(input, "boundedValidationRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	pkg := stateChangingRepairActionPackageForConvergence(input, failedStep)
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["schemaInvalidRecovery"] = map[string]any{
+		"required": true,
+		"reason":   "previous_llm_decision_json_invalid",
+		"requirements": []string{
+			"return exactly one valid JSON object",
+			"do not reuse rejected raw output previews",
+			"do not include markdown, comments, duplicate objects, trailing braces, or partial arrays",
+			"make every executionGraph node a complete JSON object",
+		},
+	}
+	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Previous repair output was rejected because the LLM decision JSON was invalid; keep the existing state-changing repair objective and rebuild one valid JSON object from the current target snapshot.",
+		"Do not downgrade this repair to validation or assessment-only; preserve the state-changing contract until the target artifact is produced.",
+		"Do not copy any rawContentPreview or repairRawContentPreview from the rejected output; do not include markdown, comments, duplicate JSON objects, trailing braces, or partial arrays.",
+	)
+	return true
 }
 
 func preserveAssessmentOnlySchemaInvalidRepairContract(input map[string]any, failedStep *runModel.Step) bool {
@@ -3253,9 +3294,21 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 		input[key] = context
 		return true
 	}
+	inheritMap := func(key string) bool {
+		if len(mapFromValue(input[key])) > 0 {
+			return false
+		}
+		context := mapFromValue(failedStep.Input[key])
+		if len(context) == 0 {
+			return false
+		}
+		input[key] = cloneStepPayload(context)
+		return true
+	}
 	inheritedTarget := inherit("failureTargetRepairContext")
 	inheritedPatch := inherit("patchRepairContext")
 	inheritedReadable := inherit("readableResourceRepairContext")
+	inheritedCoverageContext := inheritMap(coverageWorkItemContextKey)
 	inheritedManifest := inherit(stepInputKeyWorkspaceFileManifest)
 	inheritedStrategy := false
 	if len(mapFromValue(input["strategyReassessment"])) == 0 {
@@ -3280,7 +3333,7 @@ func inheritPriorRepairContext(input map[string]any, failedStep *runModel.Step) 
 			input["failureTargetScope"] = scope
 		}
 	}
-	if inheritedTarget || inheritedPatch || inheritedReadable || inheritedManifest {
+	if inheritedTarget || inheritedPatch || inheritedReadable || inheritedCoverageContext || inheritedManifest {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Preserve inherited repair context from the previous repair attempt; it contains the current target snapshots needed for direct state-changing recovery.",
 			"Use inherited target snapshots and workspace manifest to produce accepted state-changing artifacts instead of retrying rejected undeclared tool or read-only recovery output.",
@@ -3990,6 +4043,13 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 		requiredOutput["mustIncludeStateChangingNode"] = true
 		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
 		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
+		return
+	}
+	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		requiredOutput["mustIncludePrimaryStateChangingNode"] = true
+		requiredOutput["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
 		return
 	}
 	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
