@@ -522,24 +522,26 @@ type WorkspaceSnapshot struct {
 }
 
 type RunSnapshot struct {
-	Workspace          Workspace           `json:"workspace"`
-	Run                Run                 `json:"run"`
-	Outcome            RunOutcome          `json:"outcome"`
-	TaskProgress       TaskProgress        `json:"taskProgress"`
-	RepairLoop         RepairLoop          `json:"repairLoop"`
-	Steps              []Step              `json:"steps,omitempty"`
-	ToolCalls          []ToolCall          `json:"toolCalls,omitempty"`
-	Patches            []Patch             `json:"patches,omitempty"`
-	ValidationResults  []ValidationResult  `json:"validationResults,omitempty"`
-	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
-	Results            []Result            `json:"results,omitempty"`
-	Artifacts          []Artifact          `json:"artifacts,omitempty"`
-	Decisions          []Decision          `json:"decisions,omitempty"`
-	Approvals          []Approval          `json:"approvals,omitempty"`
-	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
-	LLMUsageTraces     []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary    LLMUsageSummary     `json:"llmUsageSummary"`
-	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
+	Workspace               Workspace           `json:"workspace"`
+	Run                     Run                 `json:"run"`
+	Outcome                 RunOutcome          `json:"outcome"`
+	TaskProgress            TaskProgress        `json:"taskProgress"`
+	RepairLoop              RepairLoop          `json:"repairLoop"`
+	Steps                   []Step              `json:"steps,omitempty"`
+	ToolCalls               []ToolCall          `json:"toolCalls,omitempty"`
+	Patches                 []Patch             `json:"patches,omitempty"`
+	ValidationResults       []ValidationResult  `json:"validationResults,omitempty"`
+	RuntimeCheckpoints      []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
+	Results                 []Result            `json:"results,omitempty"`
+	Artifacts               []Artifact          `json:"artifacts,omitempty"`
+	Decisions               []Decision          `json:"decisions,omitempty"`
+	Approvals               []Approval          `json:"approvals,omitempty"`
+	MemoryRecallTraces      []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
+	LLMUsageTraces          []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary         LLMUsageSummary     `json:"llmUsageSummary"`
+	CoverageWorkItems       []map[string]any    `json:"coverageWorkItems,omitempty"`
+	CoverageWorkItemContext map[string]any      `json:"coverageWorkItemContext,omitempty"`
+	EventRecords            []EventRecord       `json:"eventRecords,omitempty"`
 }
 
 type Activation struct {

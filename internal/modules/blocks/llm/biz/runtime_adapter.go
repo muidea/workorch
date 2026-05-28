@@ -1518,6 +1518,7 @@ func validateLLMDecisionTopLevelFields(raw map[string]json.RawMessage) error {
 			"mcpToolCalls",
 			"shellCommands",
 			"memoryWrites",
+			"capabilityPolicySkips",
 			"dodAssessment",
 			"completionState":
 			continue
@@ -2147,6 +2148,8 @@ func repairMalformedKnownDecisionKeyJSON(payload []byte) []byte {
 		"completionState":       true,
 		"content":               true,
 		"context":               true,
+		"capabilityPolicySkips": true,
+		"category":              true,
 		"coverageTargets":       true,
 		"deliverable":           true,
 		"deliverableCoverage":   true,
@@ -2178,6 +2181,7 @@ func repairMalformedKnownDecisionKeyJSON(payload []byte) []byte {
 		"patchType":             true,
 		"path":                  true,
 		"plan":                  true,
+		"policyId":              true,
 		"reason":                true,
 		"requiredApproval":      true,
 		"requiredDecision":      true,
@@ -2509,6 +2513,9 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	}
 	if len(decision.MemoryWrites) > 0 {
 		output["memoryWrites"] = memoryWriteOutput(decision.MemoryWrites)
+	}
+	if len(decision.CapabilityPolicySkips) > 0 {
+		output["capabilityPolicySkips"] = capabilityPolicySkipOutput(decision.CapabilityPolicySkips)
 	}
 	if decision.CompletionState == "failed" && decision.DoDAssessment != nil {
 		output["stage"] = "llm_dod_assessment"
@@ -3765,6 +3772,29 @@ func executionGraphOutput(graph *llmmodels.BlockExecutionGraph) map[string]any {
 		nodes = append(nodes, item)
 	}
 	return map[string]any{"nodes": nodes}
+}
+
+func capabilityPolicySkipOutput(skips []llmmodels.CapabilityPolicySkip) []map[string]any {
+	ret := make([]map[string]any, 0, len(skips))
+	for _, skip := range skips {
+		item := map[string]any{}
+		if strings.TrimSpace(skip.PolicyID) != "" {
+			item["policyId"] = strings.TrimSpace(skip.PolicyID)
+		}
+		if strings.TrimSpace(skip.Category) != "" {
+			item["category"] = strings.TrimSpace(skip.Category)
+		}
+		if strings.TrimSpace(skip.Reason) != "" {
+			item["reason"] = strings.TrimSpace(skip.Reason)
+		}
+		if strings.TrimSpace(skip.FallbackPolicy) != "" {
+			item["fallbackPolicy"] = strings.TrimSpace(skip.FallbackPolicy)
+		}
+		if len(item) > 0 {
+			ret = append(ret, item)
+		}
+	}
+	return ret
 }
 
 func decisionMap(decision llmmodels.LLMExecutionDecision) map[string]any {

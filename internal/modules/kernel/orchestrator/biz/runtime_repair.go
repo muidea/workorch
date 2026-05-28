@@ -79,6 +79,9 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	}
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
 	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+	if updateRunCoverageWorkItemsFromFailedStep(run, step, errText) && o.runs != nil {
+		_ = o.runs.Update(ctx, run)
+	}
 	_ = o.steps.Update(ctx, step)
 	_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
 	if graphBatchStep(step) {

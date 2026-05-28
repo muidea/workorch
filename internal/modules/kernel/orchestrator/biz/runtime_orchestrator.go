@@ -898,9 +898,6 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["resolutionPayload"] = compactDecisionPayloadForRuntimeContext(resolution.Payload)
 	}
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
-	if contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": successorContext}, nil); contract.State != "" {
-		successorContext["convergenceContract"] = compactConvergenceContract(contract)
-	}
 	successor := &runModel.Run{
 		ID:               successorID,
 		WorkspaceID:      run.WorkspaceID,
@@ -913,6 +910,10 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	}
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
+	}
+	prepareCoverageWorkItemsForReplanSuccessor(successor)
+	if contract := BuildConvergenceContract(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); contract.State != "" {
+		successor.ExecutionContext["convergenceContract"] = compactConvergenceContract(contract)
 	}
 	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)
 	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
@@ -1459,6 +1460,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
+	if updateRunCoverageWorkItemsFromCompletedStep(run, step) && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return err
+		}
+	}
 	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
@@ -1591,6 +1597,14 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
+	}
+	if updateRunCoverageWorkItemsFromAssessment(run, step, assessment) && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return err
+		}
+	}
+	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
@@ -5080,6 +5094,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}
 		return nil, common.ErrConflict
 	}
+	if ensureRunCoverageWorkItems(run) && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return nil, err
+		}
+	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return nil, err
@@ -5201,6 +5220,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 	}
 	if run == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	if ensureRunCoverageWorkItems(run) && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return nil, err
+		}
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {

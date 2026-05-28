@@ -111,6 +111,62 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractEscalatesValidationFailureWithDiagnosticsToStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageVerification,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":       true,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			"lastFailureDiagnostics": map[string]any{
+				"failureTargets": []string{"target_test.txt"},
+				"stdoutPreview":  "target_test.txt: expected active=true",
+				"exitCode":       1,
+			},
+			"repairTargetSet": []string{"target.txt", "target_test.txt"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                   "cwi-001",
+				"status":               "open",
+				"sourceScope":          "dod_item",
+				"sourceRequirementId":  "dod-1",
+				"targetText":           "runtime validation must pass",
+				"missingEvidenceKinds": []string{"validation"},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:     "run-convergence/repair-validation",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  input,
+		Output: map[string]any{"error": "previous validation failed"},
+	}
+
+	contract := BuildConvergenceContract(nil, step, step, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	if !contract.StateChangingOutputRequired || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("contract = %+v, want state-changing repair objective", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!boolValue(required["mustReferenceCoverageWorkItem"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing coverage repair contract", required)
+	}
+}
+
 func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCorrection(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-assessment-only",

@@ -86,6 +86,255 @@ func TestEnforceProviderRequestBudgetCompactsLargeExecutionContext(t *testing.T)
 	}
 }
 
+func TestEnforceProviderRequestBudgetFailsWhenCoverageWorkItemFocusMissing(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-cwi-budget",
+		RunID:       "run-cwi-budget",
+		StepID:      "run-cwi-budget/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal": map[string]any{"text": "goal"},
+			"dod":  map[string]any{"items": []any{"dod"}},
+			"coverageWorkItemContext": map[string]any{
+				"summary": map[string]any{
+					"total": 1,
+					"open":  1,
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                   "cwi-001",
+					"targetText":           "goal",
+					"missingEvidenceKinds": []string{"validation"},
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         64 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil || got.ContextBudget.ContextGateAction != providerContextGateFailFast {
+		t.Fatalf("contextBudget = %+v, want fail_fast", got.ContextBudget)
+	}
+	if got.ContextBudget.ContextGateReason != "coverage_work_item_unresolved_without_current_focus" {
+		t.Fatalf("contextGateReason = %q, want coverage focus warning", got.ContextBudget.ContextGateReason)
+	}
+}
+
+func TestProviderCoverageWorkItemWarningsAcceptCurrentFocusItems(t *testing.T) {
+	input := map[string]any{
+		"coverageWorkItemContext": map[string]any{
+			"summary": map[string]any{
+				"total": 1,
+				"open":  1,
+			},
+			"currentFocusItems": []map[string]any{{
+				"id":                           "cwi-001",
+				"definitionRevision":           "rev-current",
+				"sourceScope":                  "goal_leaf",
+				"sourceRequirementId":          "goal-leaf-001",
+				"targetText":                   "goal leaf",
+				"status":                       "open",
+				"currentGap":                   "missing required evidence kind: validation",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{"validation"},
+				"acceptedEvidenceRefs":         []string{},
+				"rejectedEvidenceRefs":         []string{"run-001/001-verify"},
+				"nextAllowedConvergenceStates": []string{"need_validation"},
+			}},
+		},
+	}
+
+	if warnings := providerCoverageWorkItemWarnings(input); len(warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none for complete currentFocusItems projection", warnings)
+	}
+}
+
+func TestProviderBudgetCompactionPreservesCoverageWorkItemFocusFields(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-cwi-budget-compact",
+		RunID:       "run-cwi-budget-compact",
+		StepID:      "run-cwi-budget-compact/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal": map[string]any{"text": "goal"},
+			"dod":  map[string]any{"items": []any{"dod"}},
+			"coverageWorkItemContext": map[string]any{
+				"summary": map[string]any{"total": 1, "open": 1},
+				"currentFocus": map[string]any{
+					"acceptedEvidenceByKind":       map[string]any{},
+					"acceptedEvidenceRefs":         []string{},
+					"coverageBoundary":             "must stay within source targetText",
+					"currentGap":                   "missing required evidence kind: validation",
+					"definitionRevision":           "rev-current",
+					"id":                           "cwi-001",
+					"missingEvidenceKinds":         []string{"validation"},
+					"nextAllowedConvergenceStates": []string{"need_validation"},
+					"normalizedSourceKey":          "goal:goal_leaf:goal-leaf-001",
+					"rejectedEvidenceByKind":       map[string]any{},
+					"rejectedEvidenceRefs":         []string{"run-001/001-verify"},
+					"requiredEvidenceKinds":        []string{"validation"},
+					"source":                       "goal",
+					"sourcePath":                   "goal.leaves[0]",
+					"sourceRequirementId":          "goal-leaf-001",
+					"sourceScope":                  "goal_leaf",
+					"status":                       "open",
+					"targetText":                   "goal leaf",
+				},
+				"currentFocusItems": []map[string]any{{
+					"acceptedEvidenceByKind":       map[string]any{},
+					"acceptedEvidenceRefs":         []string{},
+					"coverageBoundary":             "must stay within source targetText",
+					"currentGap":                   "missing required evidence kind: validation",
+					"definitionRevision":           "rev-current",
+					"id":                           "cwi-001",
+					"missingEvidenceKinds":         []string{"validation"},
+					"nextAllowedConvergenceStates": []string{"need_validation"},
+					"normalizedSourceKey":          "goal:goal_leaf:goal-leaf-001",
+					"rejectedEvidenceByKind":       map[string]any{},
+					"rejectedEvidenceRefs":         []string{"run-001/001-verify"},
+					"requiredEvidenceKinds":        []string{"validation"},
+					"source":                       "goal",
+					"sourcePath":                   "goal.leaves[0]",
+					"sourceRequirementId":          "goal-leaf-001",
+					"sourceScope":                  "goal_leaf",
+					"status":                       "open",
+					"targetText":                   "goal leaf",
+				}},
+				"unresolvedItems": []map[string]any{{
+					"id":                    "cwi-001",
+					"definitionRevision":    "rev-current",
+					"sourceScope":           "goal_leaf",
+					"sourceRequirementId":   "goal-leaf-001",
+					"targetText":            strings.Repeat("goal leaf ", 200),
+					"status":                "open",
+					"currentGap":            "missing required evidence kind: validation",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{"validation"},
+				}},
+			},
+			"workspaceFileManifest": strings.Repeat("large manifest ", 2000),
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         8 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget missing")
+	}
+	if got.ContextBudget.ContextGateAction != providerContextGatePass {
+		t.Fatalf("contextBudget = %+v, want pass after preserving CWI focus fields", got.ContextBudget)
+	}
+	focus := recordFromAny(recordFromAny(got.Input["coverageWorkItemContext"])["currentFocus"])
+	if len(stringSliceFromAny(focus["missingEvidenceKinds"])) != 1 ||
+		len(stringSliceFromAny(focus["requiredEvidenceKinds"])) != 1 ||
+		len(stringSliceFromAny(focus["nextAllowedConvergenceStates"])) != 1 {
+		t.Fatalf("currentFocus = %+v, want preserved minimum array fields", focus)
+	}
+	for _, key := range []string{"sourceScope", "status", "targetText"} {
+		if strings.TrimSpace(stringValue(focus[key])) == "" {
+			t.Fatalf("currentFocus = %+v, want preserved minimum scalar field %q", focus, key)
+		}
+	}
+}
+
+func TestProviderBudgetPriorityCompactionRestoresCoverageWorkItemFocusFromOriginal(t *testing.T) {
+	cwiContext := map[string]any{
+		"summary": map[string]any{"total": 1, "open": 1},
+		"currentFocus": map[string]any{
+			"acceptedEvidenceByKind":       map[string]any{},
+			"acceptedEvidenceRefs":         []string{},
+			"coverageBoundary":             "must stay within source targetText",
+			"currentGap":                   "missing required evidence kind: validation",
+			"definitionRevision":           "rev-current",
+			"id":                           "cwi-001",
+			"missingEvidenceKinds":         []string{"validation"},
+			"nextAllowedConvergenceStates": []string{"need_validation"},
+			"normalizedSourceKey":          "goal:goal_leaf:goal-leaf-001",
+			"rejectedEvidenceByKind":       map[string]any{},
+			"rejectedEvidenceRefs":         []string{},
+			"requiredEvidenceKinds":        []string{"validation"},
+			"source":                       "goal",
+			"sourcePath":                   "goal.leaves[0]",
+			"sourceRequirementId":          "goal-leaf-001",
+			"sourceScope":                  "goal_leaf",
+			"status":                       "open",
+			"targetText":                   "goal leaf",
+		},
+	}
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-cwi-budget-priority",
+		RunID:       "run-cwi-budget-priority",
+		StepID:      "run-cwi-budget-priority/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal":                    map[string]any{"text": "goal"},
+			"dod":                     map[string]any{"items": []any{"dod"}},
+			"runtimeStage":            "decision",
+			"coverageWorkItemContext": cwiContext,
+			"executionContext": map[string]any{
+				"coverageWorkItemContext": cwiContext,
+				"governanceHistory":       []map[string]any{{"ticketId": "decision-1"}},
+			},
+			"executionContextPackage": map[string]any{
+				"coverageWorkItemContext": cwiContext,
+				"selectedContext":         strings.Repeat("large selected context ", 2000),
+			},
+			"workspaceFileManifest": strings.Repeat("large manifest ", 2000),
+			"previousResults":       strings.Repeat("large results ", 2000),
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    32768,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         8 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil || got.ContextBudget.ShrinkLevel < 3 {
+		t.Fatalf("contextBudget = %+v, want priority compaction path", got.ContextBudget)
+	}
+	if got.ContextBudget.ContextGateAction != providerContextGatePass {
+		t.Fatalf("contextBudget = %+v, want pass after protected CWI restore", got.ContextBudget)
+	}
+	focus := recordFromAny(recordFromAny(got.Input["coverageWorkItemContext"])["currentFocus"])
+	for _, key := range []string{"sourceScope", "status", "targetText"} {
+		if strings.TrimSpace(stringValue(focus[key])) == "" {
+			t.Fatalf("currentFocus = %+v, want preserved minimum scalar field %q", focus, key)
+		}
+	}
+}
+
 func TestPrioritizedProviderInputKeepsProcessEvidenceTimelineAsP2(t *testing.T) {
 	input := map[string]any{
 		"workspaceId": "ws-process-budget",
@@ -1096,6 +1345,75 @@ func TestEnforceProviderRequestBudgetMarksP0OverflowWhenGoalDoDContractDominates
 	}
 	if got.ContextBudget.GoalDoDCompressed {
 		t.Fatalf("contextBudget = %+v, want goal/dod preserved", got.ContextBudget)
+	}
+}
+
+func TestEnforceProviderRequestBudgetDoesNotTreatReplanContinuationAsProtectedGoalDoD(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-replan-budget",
+		RunID:       "run-replan-budget",
+		StepID:      "run-replan-budget/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeRepairFollowUp": true,
+			"runtimeStage":          "repair",
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "finish the current goal"},
+				"dod":  map[string]any{"items": []any{"validated"}},
+				"replanContinuation": map[string]any{
+					"predecessorRunId": "run-001",
+					"reason":           "decision_replan",
+					"processEvidenceTimeline": repeatedBudgetItems(300),
+					"currentProgressDigest": map[string]any{
+						"currentGap": strings.Repeat("historical gap ", 400),
+					},
+					"failureContext": map[string]any{
+						"failedStepId":  "run-001/repair-010",
+						"failureReason": strings.Repeat("historical failure ", 400),
+					},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustReturnCorrectedExecutionGraph": true,
+				},
+				"currentFailure": map[string]any{
+					"failureClass":  "runtime_failed",
+					"failureReason": "previous repair attempt failed",
+				},
+				"currentExecutionProgress": map[string]any{
+					"currentGap": "need a bounded repair graph",
+				},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         2048,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         14 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudgetLimit(req, 14*1024)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if got.ContextBudget.P0Overflow || got.ContextBudget.ContextGateAction == providerContextGateFailFast {
+		t.Fatalf("contextBudget = %+v, want replan continuation compacted without P0 overflow gate", got.ContextBudget)
+	}
+	pkg := recordFromAny(got.Input["executionContextPackage"])
+	if len(recordFromAny(pkg["goal"])) == 0 || len(recordFromAny(pkg["dod"])) == 0 {
+		t.Fatalf("executionContextPackage = %+v, want goal/dod preserved", pkg)
+	}
+	replan := recordFromAny(pkg["replanContinuation"])
+	if len(replan) != 0 {
+		t.Fatalf("executionContextPackage.replanContinuation = %+v, want omitted from protected Goal/DoD budget floor", replan)
 	}
 }
 

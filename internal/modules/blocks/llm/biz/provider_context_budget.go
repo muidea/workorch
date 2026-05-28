@@ -39,6 +39,7 @@ var providerP0InputKeys = []string{
 	"repairObjective", "stateChangingOutputRequired", "stateChangingRecoveryMode",
 	"providerTimeoutStateChangingRetry", "forbiddenRecoveryOutputs", "requiredRecoveryOutputs",
 	"decisionResolution", "approvalResolution",
+	"coverageWorkItemContext",
 }
 
 var providerP1InputKeys = []string{
@@ -77,12 +78,14 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 	protected := captureProtectedGoalDoD(request.Input)
 	protectedRepairTargets := captureProtectedProviderRepairTargets(request.Input)
 	protectedRuntimeContract := captureProtectedProviderRuntimeContract(request.Input)
+	protectedCoverageWorkItemContext := captureProtectedProviderCoverageWorkItemContext(request.Input)
 	if adaptiveLevel := adaptiveShrinkLevelFromInput(request.Input); adaptiveLevel > 0 {
 		sourceRefs = append(sourceRefs, providerInputSourceRefs(request.Input)...)
 		request.Input = applyAdaptiveShrinkLevel(request.Input, adaptiveLevel)
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
 		rules = append(rules, "adaptive shrink based on provider retry")
 		compressedSections = append(compressedSections, "adaptive")
 		shrinkLevel = adaptiveLevel
@@ -93,6 +96,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
 		rules = append(rules, "compact provider input")
 		compressedSections = append(compressedSections, "p2")
 		shrinkLevel = max(shrinkLevel, 1)
@@ -103,6 +107,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
 		rules = append(rules, "summarize execution context transport fields")
 		compressedSections = append(compressedSections, "p1")
 		shrinkLevel = max(shrinkLevel, 2)
@@ -113,6 +118,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
 		rules = append(rules, "apply priority compaction (P0/P1/P2)")
 		compressedSections = append(compressedSections, "p1", "p2")
 		shrinkLevel = max(shrinkLevel, 3)
@@ -123,6 +129,7 @@ func enforceProviderRequestBudgetLimit(request llmmodels.ProviderRequest, maxByt
 		request.Input = restoreProtectedGoalDoD(request.Input, protected)
 		request.Input = restoreProtectedProviderRepairTargets(request.Input, protectedRepairTargets)
 		request.Input = restoreProtectedProviderRuntimeContract(request.Input, protectedRuntimeContract)
+		request.Input = restoreProtectedProviderCoverageWorkItemContext(request.Input, protectedCoverageWorkItemContext)
 		rules = append(rules, "fallback to stage-aware minimal provider input (P0/P1)")
 		compressedSections = append(compressedSections, "p2", "older_p1")
 		shrinkLevel = max(shrinkLevel, 4)
@@ -281,18 +288,20 @@ func adaptiveShrinkLevelFromInput(input map[string]any) int {
 }
 
 func applyAdaptiveShrinkLevel(input map[string]any, level int) map[string]any {
+	var out map[string]any
 	switch {
 	case level >= 4:
-		return minimalProviderInput(input)
+		out = minimalProviderInput(input)
 	case level == 3:
-		return prioritizedProviderInput(input, true)
+		out = prioritizedProviderInput(input, true)
 	case level == 2:
-		return compactProviderExecutionContext(input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
+		out = compactProviderExecutionContext(input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries)
 	case level == 1:
-		return budgetProviderInput(input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
+		out = budgetProviderInput(input, providerBudgetStringBytes, providerBudgetSliceItems, providerBudgetMapEntries, 4)
 	default:
-		return input
+		out = input
 	}
+	return restoreProviderCoverageWorkItemContext(out)
 }
 
 func providerRequestJSONBytes(request llmmodels.ProviderRequest) int {
@@ -400,13 +409,151 @@ func compactProviderExecutionContext(input map[string]any, stringLimit, itemLimi
 		return nil
 	}
 	out := budgetProviderInput(input, stringLimit, itemLimit, entryLimit, 4)
+	out = restoreProviderCoverageWorkItemContext(out)
 	executionContext := recordFromAny(out["executionContext"])
 	if len(executionContext) > 0 {
 		compactSoulRouting(executionContext)
 		compactNamedMapSlice(executionContext, "governanceHistory", itemLimit)
+		if context := recordFromAny(executionContext["coverageWorkItemContext"]); len(context) > 0 {
+			executionContext["coverageWorkItemContext"] = compactProviderCoverageWorkItemContext(context)
+		}
 		out["executionContext"] = executionContext
 	}
 	compactSoulRouting(out)
+	return out
+}
+
+func restoreProviderCoverageWorkItemContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	if context := recordFromAny(input["coverageWorkItemContext"]); len(context) > 0 {
+		input["coverageWorkItemContext"] = compactProviderCoverageWorkItemContext(context)
+	}
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		if context := recordFromAny(executionContext["coverageWorkItemContext"]); len(context) > 0 {
+			executionContext["coverageWorkItemContext"] = compactProviderCoverageWorkItemContext(context)
+			input["executionContext"] = executionContext
+		}
+	}
+	if executionContextPackage := recordFromAny(input["executionContextPackage"]); len(executionContextPackage) > 0 {
+		if context := recordFromAny(executionContextPackage["coverageWorkItemContext"]); len(context) > 0 {
+			executionContextPackage["coverageWorkItemContext"] = compactProviderCoverageWorkItemContext(context)
+			input["executionContextPackage"] = executionContextPackage
+		}
+	}
+	if repairActionPackage := recordFromAny(input["repairActionPackage"]); len(repairActionPackage) > 0 {
+		if context := recordFromAny(repairActionPackage["coverageWorkItemContext"]); len(context) > 0 {
+			repairActionPackage["coverageWorkItemContext"] = compactProviderCoverageWorkItemContext(context)
+			input["repairActionPackage"] = repairActionPackage
+		}
+	}
+	return input
+}
+
+func compactProviderCoverageWorkItemContext(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"schemaVersion", "definitionRevision", "coverageBaselineHash", "fullLedgerRef"} {
+		if value, ok := context[key]; ok {
+			out[key] = value
+		}
+	}
+	if summary := recordFromAny(context["summary"]); len(summary) > 0 {
+		out["summary"] = summary
+	}
+	if focus := compactProviderCoverageWorkItemFocus(recordFromAny(context["currentFocus"])); len(focus) > 0 {
+		out["currentFocus"] = focus
+	}
+	if focuses := compactProviderCoverageWorkItemFocuses(mapSliceFromAny(context["currentFocusItems"]), 3); len(focuses) > 0 {
+		out["currentFocusItems"] = focuses
+	}
+	if unresolved := compactProviderCoverageWorkItemSummaries(mapSliceFromAny(context["unresolvedItems"]), 8); len(unresolved) > 0 {
+		out["unresolvedItems"] = unresolved
+	}
+	if ledger := compactProviderCoverageWorkItemSummaries(mapSliceFromAny(context["ledgerSummary"]), 12); len(ledger) > 0 {
+		out["ledgerSummary"] = ledger
+	}
+	for _, key := range []string{"omittedCount", "excludedCount", "historicalCount", "omittedStatusDistribution", "omittedSourceScopeDistribution"} {
+		if value, ok := context[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func compactProviderCoverageWorkItemFocuses(items []map[string]any, limit int) []map[string]any {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if focus := compactProviderCoverageWorkItemFocus(item); len(focus) > 0 {
+			ret = append(ret, focus)
+		}
+	}
+	return ret
+}
+
+func compactProviderCoverageWorkItemSummaries(items []map[string]any, limit int) []map[string]any {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if summary := compactProviderCoverageWorkItemSummary(item); len(summary) > 0 {
+			ret = append(ret, summary)
+		}
+	}
+	return ret
+}
+
+func compactProviderCoverageWorkItemFocus(item map[string]any) map[string]any {
+	focus := compactProviderCoverageWorkItemSummary(item)
+	if len(focus) == 0 {
+		return nil
+	}
+	for _, key := range []string{"acceptedEvidenceRefs", "rejectedEvidenceRefs", "requiredEvidenceKinds", "missingEvidenceKinds", "nextAllowedConvergenceStates"} {
+		focus[key] = stringSliceFromAny(item[key])
+	}
+	if value, ok := item["acceptedEvidenceByKind"]; ok {
+		focus["acceptedEvidenceByKind"] = value
+	}
+	if value, ok := item["rejectedEvidenceByKind"]; ok {
+		focus["rejectedEvidenceByKind"] = value
+	}
+	if value, ok := item["coverageBoundary"]; ok {
+		focus["coverageBoundary"] = value
+	}
+	return focus
+}
+
+func compactProviderCoverageWorkItemSummary(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"id", "definitionRevision", "source", "sourceScope", "sourceRequirementId", "sourcePath",
+		"normalizedSourceKey", "targetText", "status", "currentGap", "omittedFromCurrentFocus", "omittedReason",
+	} {
+		if value, ok := item[key]; ok {
+			out[key] = value
+		}
+	}
+	for _, key := range []string{"acceptedEvidenceRefs", "rejectedEvidenceRefs", "requiredEvidenceKinds", "missingEvidenceKinds"} {
+		if _, ok := item[key]; ok {
+			out[key] = stringSliceFromAny(item[key])
+		}
+	}
 	return out
 }
 
@@ -475,7 +622,11 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 	out := map[string]any{}
 	for _, key := range providerP0InputKeys {
 		if value, ok := input[key]; ok {
-			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 2)
+			maxDepth := 2
+			if key == "coverageWorkItemContext" {
+				maxDepth = 4
+			}
+			out[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, maxDepth)
 		}
 	}
 	for _, key := range providerP1InputKeys {
@@ -500,7 +651,11 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 		compact := map[string]any{}
 		for _, key := range stageAwareExecutionContextKeys(stage, includeP2) {
 			if value, ok := executionContext[key]; ok {
-				compact[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, 2)
+				maxDepth := 2
+				if key == "coverageWorkItemContext" {
+					maxDepth = 4
+				}
+				compact[key] = budgetProviderValue(value, 0, providerBudgetAggressiveBytes, providerBudgetAggressiveItems, providerBudgetAggressiveEntries, maxDepth)
 			}
 		}
 		compactNamedMapSlice(compact, "governanceHistory", providerBudgetAggressiveItems)
@@ -511,7 +666,7 @@ func prioritizedProviderInput(input map[string]any, includeP2 bool) map[string]a
 }
 
 func stageAwareExecutionContextKeys(stage string, includeP2 bool) []string {
-	keys := []string{"goal", "goals", "dod", "dods", "dialogLanguage", "goalDefinitionPolicy", "doDDefinitionPolicy"}
+	keys := []string{"goal", "goals", "dod", "dods", "dialogLanguage", "goalDefinitionPolicy", "doDDefinitionPolicy", "coverageWorkItemContext"}
 	switch stage {
 	case "planning":
 		keys = append(keys, "goals", "dods", "skillSelection", "memoryRetrieval", "workspaceManifest", "workspaceFileManifest")
@@ -582,14 +737,14 @@ func providerInputSourceRefs(input map[string]any) []string {
 		switch strings.TrimSpace(key) {
 		case "executionContext", "executionContextPackage", "workspaceFileManifest", "workspaceManifest",
 			"graphEvidence", "runEvidenceSummary", "processEvidenceTimeline", "currentProgressDigest", "failedExecutionGraph", "failedStepInput", "failedStepOutput",
-			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection":
+			"decisionResolution", "approvalResolution", "memoryRetrieval", "skillSelection", "coverageWorkItemContext":
 			refs = append(refs, "input."+key)
 		}
 	}
 	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
 		for key := range executionContext {
 			switch strings.TrimSpace(key) {
-			case "goal", "goals", "dod", "dods", "governanceHistory", "memoryRetrieval", "skillSelection":
+			case "goal", "goals", "dod", "dods", "governanceHistory", "memoryRetrieval", "skillSelection", "coverageWorkItemContext":
 				refs = append(refs, "input.executionContext."+key)
 			}
 		}
@@ -597,7 +752,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 	if executionContextPackage := recordFromAny(input["executionContextPackage"]); len(executionContextPackage) > 0 {
 		for key := range executionContextPackage {
 			switch strings.TrimSpace(key) {
-			case "processEvidenceTimeline", "currentProgressDigest", "recentFailureSummary", "selectedContext":
+			case "processEvidenceTimeline", "currentProgressDigest", "recentFailureSummary", "selectedContext", "coverageWorkItemContext":
 				refs = append(refs, "input.executionContextPackage."+key)
 			}
 		}
@@ -605,7 +760,7 @@ func providerInputSourceRefs(input map[string]any) []string {
 	if repairActionPackage := recordFromAny(input["repairActionPackage"]); len(repairActionPackage) > 0 {
 		for key := range repairActionPackage {
 			switch strings.TrimSpace(key) {
-			case "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "previousRejectedOutputSummary", "coverageTargetSet":
+			case "currentExecutionProgress", "currentFailure", "lastFailureDiagnostics", "previousRejectedOutputSummary", "coverageTargetSet", "coverageWorkItemContext":
 				refs = append(refs, "input.repairActionPackage."+key)
 			}
 		}
@@ -627,7 +782,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 		}
 	}
 	executionContextPackage := recordFromAny(input["executionContextPackage"])
-	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "stage", "stageMode"} {
 		if _, ok := executionContextPackage[key]; ok {
 			fields = append(fields, "input.executionContextPackage."+key)
 		}
@@ -642,6 +797,7 @@ func providerProtectedContextFields(input map[string]any) []string {
 		"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
 		"providerRetryAssessmentOnly",
 		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
+		"coverageWorkItemContext",
 	} {
 		if _, ok := input[key]; ok {
 			fields = append(fields, "input."+key)
@@ -653,6 +809,9 @@ func providerProtectedContextFields(input map[string]any) []string {
 				fields = append(fields, "input.repairActionPackage."+key)
 			}
 		}
+	}
+	if len(coverageWorkItemContextFromProviderInput(input)) > 0 {
+		fields = append(fields, "input.coverageWorkItemContext")
 	}
 	return uniqueStrings(fields)
 }
@@ -684,6 +843,7 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 	if providerInputRequiresProcessEvidence(input) && !providerInputHasProcessEvidence(input) {
 		warnings = append(warnings, "runtime_repair_process_evidence_missing")
 	}
+	warnings = append(warnings, providerCoverageWorkItemWarnings(input)...)
 	warnings = append(warnings, providerSemanticContextWarnings(input)...)
 	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
 	return uniqueStrings(warnings)
@@ -752,6 +912,8 @@ func providerContextGateDecision(goalDoDCompressed, overBudget, p0Overflow bool,
 			"runtime_repair_process_evidence_missing",
 			"selected_context_memories_without_selected_memory_ids",
 			"selected_context_memories_include_unselected_or_excluded_memory",
+			"coverage_work_item_unresolved_without_current_focus",
+			"coverage_work_item_current_focus_missing_minimum_fields",
 			"inadmissible_repair_target_set",
 			"inadmissible_repair_target_snapshot":
 			return providerContextGateFailFast, warning
@@ -854,6 +1016,102 @@ func coverageTargetsFromProviderInput(input map[string]any) []map[string]any {
 	return nil
 }
 
+func providerCoverageWorkItemWarnings(input map[string]any) []string {
+	context := coverageWorkItemContextFromProviderInput(input)
+	if len(context) == 0 {
+		return nil
+	}
+	warnings := []string{}
+	summary := recordFromAny(context["summary"])
+	unresolvedCount := 0
+	for _, key := range []string{"open", "in_progress", "evidence_ready", "failed"} {
+		unresolvedCount += intProviderValue(summary[key])
+	}
+	if unresolvedCount == 0 {
+		unresolvedCount = len(mapSliceFromAny(context["unresolvedItems"]))
+	}
+	focuses := providerCoverageWorkItemFocuses(context)
+	if unresolvedCount > 0 && len(focuses) == 0 {
+		warnings = append(warnings, "coverage_work_item_unresolved_without_current_focus")
+	}
+	for _, focus := range focuses {
+		missing := []string{}
+		for _, key := range []string{"id", "definitionRevision", "sourceScope", "targetText", "currentGap", "status"} {
+			if strings.TrimSpace(stringValue(focus[key])) == "" {
+				missing = append(missing, key)
+			}
+		}
+		if strings.TrimSpace(stringValue(focus["normalizedSourceKey"])) == "" &&
+			strings.TrimSpace(stringValue(focus["sourceRequirementId"])) == "" &&
+			strings.TrimSpace(stringValue(focus["sourcePath"])) == "" {
+			missing = append(missing, "sourceRef")
+		}
+		if len(stringSliceFromAny(focus["missingEvidenceKinds"])) == 0 && len(stringSliceFromAny(focus["requiredEvidenceKinds"])) == 0 {
+			missing = append(missing, "missingEvidenceKinds")
+		}
+		if _, ok := focus["acceptedEvidenceRefs"]; !ok {
+			missing = append(missing, "acceptedEvidenceRefs")
+		}
+		if _, ok := focus["rejectedEvidenceRefs"]; !ok {
+			missing = append(missing, "rejectedEvidenceRefs")
+		}
+		if len(stringSliceFromAny(focus["nextAllowedConvergenceStates"])) == 0 {
+			missing = append(missing, "nextAllowedConvergenceStates")
+		}
+		if len(missing) > 0 {
+			warnings = append(warnings, "coverage_work_item_current_focus_missing_minimum_fields")
+			break
+		}
+	}
+	return uniqueStrings(warnings)
+}
+
+func providerCoverageWorkItemFocuses(context map[string]any) []map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	if focus := recordFromAny(context["currentFocus"]); len(focus) > 0 {
+		return []map[string]any{focus}
+	}
+	if focuses := mapSliceFromAny(context["currentFocus"]); len(focuses) > 0 {
+		return focuses
+	}
+	if focuses := mapSliceFromAny(context["currentFocusItems"]); len(focuses) > 0 {
+		return focuses
+	}
+	return nil
+}
+
+func coverageWorkItemContextFromProviderInput(input map[string]any) map[string]any {
+	for _, source := range []map[string]any{
+		input,
+		recordFromAny(input["executionContext"]),
+		recordFromAny(input["executionContextPackage"]),
+		recordFromAny(input["repairActionPackage"]),
+	} {
+		if context := recordFromAny(source["coverageWorkItemContext"]); len(context) > 0 {
+			return context
+		}
+	}
+	return nil
+}
+
+func intProviderValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
 func missingProtectedRepairSnapshotWarnings(input map[string]any, protected protectedProviderRepairTargets) []string {
 	warnings := []string{}
 	if protected.FailureTargetRepairContext != nil && len(providerSafeRepairSnapshotsFromValue(input["failureTargetRepairContext"])) == 0 {
@@ -888,6 +1146,13 @@ type protectedProviderRuntimeContract struct {
 	TopLevel map[string]any
 }
 
+type protectedProviderCoverageWorkItemContext struct {
+	TopLevel         map[string]any
+	ExecutionContext map[string]any
+	Package          map[string]any
+	RepairPackage    map[string]any
+}
+
 func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 	ret := protectedGoalDoD{
 		TopLevel:         map[string]any{},
@@ -910,11 +1175,37 @@ func captureProtectedGoalDoD(input map[string]any) protectedGoalDoD {
 		}
 	}
 	executionContextPackage := recordFromAny(input["executionContextPackage"])
-	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
+	for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "stage", "stageMode"} {
 		if value, ok := executionContextPackage[key]; ok {
 			if cloned, success := cloneAny(value); success {
 				ret.Package[key] = cloned
 			}
+		}
+	}
+	return ret
+}
+
+func captureProtectedProviderCoverageWorkItemContext(input map[string]any) protectedProviderCoverageWorkItemContext {
+	ret := protectedProviderCoverageWorkItemContext{}
+	if len(input) == 0 {
+		return ret
+	}
+	if context := recordFromAny(input["coverageWorkItemContext"]); len(context) > 0 {
+		ret.TopLevel = compactProviderCoverageWorkItemContext(context)
+	}
+	if executionContext := recordFromAny(input["executionContext"]); len(executionContext) > 0 {
+		if context := recordFromAny(executionContext["coverageWorkItemContext"]); len(context) > 0 {
+			ret.ExecutionContext = compactProviderCoverageWorkItemContext(context)
+		}
+	}
+	if executionContextPackage := recordFromAny(input["executionContextPackage"]); len(executionContextPackage) > 0 {
+		if context := recordFromAny(executionContextPackage["coverageWorkItemContext"]); len(context) > 0 {
+			ret.Package = compactProviderCoverageWorkItemContext(context)
+		}
+	}
+	if repairActionPackage := recordFromAny(input["repairActionPackage"]); len(repairActionPackage) > 0 {
+		if context := recordFromAny(repairActionPackage["coverageWorkItemContext"]); len(context) > 0 {
+			ret.RepairPackage = compactProviderCoverageWorkItemContext(context)
 		}
 	}
 	return ret
@@ -993,6 +1284,40 @@ func restoreProtectedProviderRuntimeContract(input map[string]any, protected pro
 		input[key] = value
 	}
 	return input
+}
+
+func restoreProtectedProviderCoverageWorkItemContext(input map[string]any, protected protectedProviderCoverageWorkItemContext) map[string]any {
+	if len(input) == 0 {
+		input = map[string]any{}
+	}
+	if len(protected.TopLevel) > 0 {
+		input["coverageWorkItemContext"] = protected.TopLevel
+	}
+	if len(protected.ExecutionContext) > 0 {
+		executionContext := recordFromAny(input["executionContext"])
+		if executionContext == nil {
+			executionContext = map[string]any{}
+		}
+		executionContext["coverageWorkItemContext"] = protected.ExecutionContext
+		input["executionContext"] = executionContext
+	}
+	if len(protected.Package) > 0 {
+		executionContextPackage := recordFromAny(input["executionContextPackage"])
+		if executionContextPackage == nil {
+			executionContextPackage = map[string]any{}
+		}
+		executionContextPackage["coverageWorkItemContext"] = protected.Package
+		input["executionContextPackage"] = executionContextPackage
+	}
+	if len(protected.RepairPackage) > 0 {
+		repairActionPackage := recordFromAny(input["repairActionPackage"])
+		if repairActionPackage == nil {
+			repairActionPackage = map[string]any{}
+		}
+		repairActionPackage["coverageWorkItemContext"] = protected.RepairPackage
+		input["repairActionPackage"] = repairActionPackage
+	}
+	return restoreProviderCoverageWorkItemContext(input)
 }
 
 func providerSafeRepairSnapshotsFromValue(value any) []any {
@@ -1111,7 +1436,7 @@ func withoutProtectedGoalDoD(input map[string]any) map[string]any {
 	}
 	executionContextPackage := recordFromAny(clonedInput["executionContextPackage"])
 	if len(executionContextPackage) > 0 {
-		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "replanContinuation", "stage", "stageMode"} {
+		for _, key := range []string{"goal", "goals", "dod", "dods", "goalDefinitionPolicy", "doDDefinitionPolicy", "definitionChangeImpact", "executionContract", "stage", "stageMode"} {
 			delete(executionContextPackage, key)
 		}
 		clonedInput["executionContextPackage"] = executionContextPackage

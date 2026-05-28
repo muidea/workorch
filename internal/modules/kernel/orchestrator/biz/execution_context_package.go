@@ -170,6 +170,12 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stageMode":   stringFromMap(step.Input, stepInputKeyRuntimeStageMode),
 	}
 	mergeExecutionDefinitionsIntoPackage(ret, executionContext)
+	if context := mapFromValue(executionContext[coverageWorkItemContextKey]); len(context) > 0 {
+		ret[coverageWorkItemContextKey] = context
+	}
+	if items := mapSliceFromValue(executionContext[coverageWorkItemsKey]); len(items) > 0 {
+		ret[coverageWorkItemsKey] = items
+	}
 	stableContext := stableExecutionContextPackageFromStep(step)
 
 	var (

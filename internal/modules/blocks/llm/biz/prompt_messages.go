@@ -505,6 +505,7 @@ func repairActionPackagePromptSection(input map[string]any) string {
 		"workspaceFileManifest",
 		"currentExecutionProgress",
 		"coverageTargetSet",
+		"coverageWorkItemContext",
 		"recentRepairAttempts",
 		"previousRejectedOutputSummary",
 		"forbiddenActions",
@@ -587,6 +588,9 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	}
 	if progress := currentProgressSignalPayload(request.Input); len(progress) > 0 {
 		appendEvent("C4.current-progress", "Current Progress Signal", progress)
+	}
+	if coverageWorkItems := coverageWorkItemSignalPayload(request.Input); len(coverageWorkItems) > 0 {
+		appendEvent("C4.coverage-work-items", "Coverage Work Item Signal", coverageWorkItems)
 	}
 	if timeline := processEvidenceTimelineSignalPayload(request.Input); len(timeline) > 0 {
 		appendEvent("C4.process-evidence-timeline", "Process Evidence Timeline", timeline)
@@ -819,6 +823,48 @@ func currentProgressSignalPayload(input map[string]any) map[string]any {
 		copyMapValue(payload, "requiredOutput", repairPkg["requiredOutput"])
 		copyMapValue(payload, "exitCriteria", repairPkg["exitCriteria"])
 	}
+	return payload
+}
+
+func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
+	context := recordFromAny(input["coverageWorkItemContext"])
+	if len(context) == 0 {
+		context = recordFromAny(recordFromAny(input["executionContext"])["coverageWorkItemContext"])
+	}
+	if len(context) == 0 {
+		context = recordFromAny(recordFromAny(input["executionContextPackage"])["coverageWorkItemContext"])
+	}
+	if len(context) == 0 {
+		context = recordFromAny(recordFromAny(input["repairActionPackage"])["coverageWorkItemContext"])
+	}
+	if len(context) == 0 {
+		return nil
+	}
+	payload := map[string]any{}
+	for _, key := range []string{
+		"schemaVersion",
+		"definitionRevision",
+		"coverageBaselineHash",
+		"summary",
+		"currentFocus",
+		"currentFocusItems",
+		"unresolvedItems",
+		"ledgerSummary",
+		"omittedCount",
+		"omittedStatusDistribution",
+		"omittedSourceScopeDistribution",
+		"excludedCount",
+		"excludedSources",
+		"historicalCount",
+		"historicalItems",
+		"fullLedgerRef",
+	} {
+		copyMapValue(payload, key, context[key])
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD"
 	return payload
 }
 

@@ -754,6 +754,304 @@ LLM schema invalid、runtime contract invalid、provider retry 或其他框架�
 
 Runtime 必须维护中立 coverage ledger 或等价的 coverage 状态视图。每个 coverage target 至少包含 `kind`、`targetText`、可选 `goalRequirementId` / `coverageTargetToken`、`state`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs` 与 `reason`。Core 只记录结构关系和证据质量，不判断业务正确性。证据质量至少分为 `direct`、`indirect`、`smoke`、`unrelated`、`invalid`：只有 `direct` / 合理 `indirect` evidence 可以进入相应 coverage target 的 `evidenceCandidates` 或关闭 evidence 链；`smoke` evidence 只能证明基础可执行或环境可用，不得进入功能 Goal / DoD / deliverable coverage candidates；`unrelated` / `invalid` 必须记录 rejected reason 并从后续候选中过滤。
 
+### Coverage Work Items
+
+`coverageWorkItems` 是 coverage ledger 的可执行投影，用于把当前有效 Goal / DoD / deliverable coverage 中需要被证明或关闭的叶子要求拆成可跟踪的中立收敛项。它不是新的业务需求定义，不是新的 orchestrator 状态机，也不得写回或覆盖 workspace 的正式 Goal / DoD。
+
+严格定义：
+
+- 一个 `coverageWorkItem` 只能来源于当前 effective definition baseline 中的一个可追踪 coverage source，coverage source 包括：Goal 叶子需求、DoD 条目、profile 声明的 required acceptance dimension、profile 声明的 required deliverable expectation，或这些 source 在当前 assessment / rejected result 中形成的 failed coverage item。
+- 一个 `coverageWorkItem` 只能表达“该 coverage source 当前还缺哪些中立 evidence / governance / artifact 事实才能关闭”，不能表达新的功能、额外质量要求、实现方案、测试方案、技术栈选择或业务解释。
+- `coverageWorkItem` 的 `targetText` 必须等于 source 原文、source 的规范化叶子文本，或 profile 已声明的 coverage target 文本；runtime 不得用 LLM 自由总结、历史 memory、失败 reason、nextActions 或自然语言推断生成超出 source 文本范围的新 target。
+- LLM 可以建议拆分、合并或澄清 work item，但 core 只能在这些建议能机械映射回当前 effective Goal / DoD / profile coverage source 时采纳；无法映射的建议只能作为 planning note / blocker candidate，不能成为 active work item。
+- 当 source 本身是父级标题、章节名、分组项、纯说明段或以冒号引出子项的容器项时，它只能作为 parent context，不得成为必须单独 satisfied 的 work item；只有可判定的叶子项进入 active work item。
+
+Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage 中生成或更新 `coverageWorkItems`，但只能保留中立结构：
+
+```json
+{
+  "id": "cwi-001",
+  "source": "goal",
+  "sourceScope": "goal_leaf",
+  "sourceGoalId": "goal-xxx",
+  "sourceDoDId": "dod-xxx",
+  "definitionRevision": "rev-xxx",
+  "sourceRequirementId": "goal-req-001",
+  "sourcePath": "goal.leaves[0]",
+  "targetText": "leaf requirement text",
+  "normalizedSourceKey": "goal:goal-req-001",
+  "requiredEvidenceKinds": ["state_change", "validation"],
+  "status": "open",
+  "acceptedEvidenceRefs": [],
+  "rejectedEvidenceRefs": [],
+  "coverageBoundary": "must stay within source targetText and profile-declared evidence requirements",
+  "currentGap": "missing required evidence kind: state_change",
+  "reason": "derived from failed goal coverage item"
+}
+```
+
+字段规则：
+
+- `source` / `sourceScope` 必须使用中立枚举，例如 `goal` / `goal_leaf`、`dod` / `dod_item`、`acceptance_dimension`、`deliverable`、`result_gap`。它们只表达 coverage 来源，不表达业务类型。
+- `sourceGoalId`、`sourceDoDId`、`definitionRevision`、`sourceRequirementId`、`sourcePath`、`normalizedSourceKey` 必须指向当前有效定义或其可追踪叶子项；不得基于历史 superseded Goal / DoD 继续生成新的 active work item。
+- `targetText` 只保存叶子要求文本或 profile 已声明的 coverage target 文本，不解释业务含义。
+- `requiredEvidenceKinds` 只能使用中立 evidence kind，例如 `state_change`、`validation`、`artifact`、`decision`、`approval`、`external_dependency`。Core 不得把这些 kind 解释为代码、测试、文档、数据集、天气查询或任何具体业务对象。
+- `status` 只能表达中立进展：`open`、`in_progress`、`evidence_ready`、`satisfied`、`failed`、`blocked`。它不得替代 run / step 的 `planning`、`execution`、`repair`、`verification`、`acceptance` 等主状态。
+- `acceptedEvidenceRefs` / `rejectedEvidenceRefs` 必须引用可追踪 step / artifact / result / decision evidence；不可追踪的 run id、memory-only ref、自然语言总结或旧失败 wrapper 不得关闭 work item。
+- `coverageBoundary` 必须说明该 work item 的范围限制：只能关闭对应 source 与 profile 声明的 evidence requirement，不能扩张到相邻 Goal / DoD、历史失败、LLM 建议项或模板通用建议。
+- `currentGap` 只能描述缺失的中立 evidence kind、未满足的 coverage target、当前失败证据或缺少 target evidence；不得写入 profile 领域修复方案。
+
+Core 可以基于 profile contract 为 work item 计算 `requiredEvidenceKinds`。例如 profile 声明某 scope 需要 direct evidence 或 state-changing evidence 时，runtime 可以把该需求表达为 `state_change` / `validation` 的中立组合；但“哪些文件、命令、测试、接口或业务流程能产生这些 evidence”只能由 workspaceTemplate / profile / Soul / skill / LLM 在当前上下文中决定。
+
+生成规则必须同时满足“不越界”和“全覆盖”：
+
+- Baseline 构造：每次 activation、Goal/DoD 变更、replan successor、rejected result continuation 或 acceptance repair 前，runtime 必须先构造当前 effective coverage baseline。baseline 至少包含当前有效 Goal 叶子需求、DoD 条目、profile required acceptance dimensions、profile required deliverable expectations，以及当前 rejected / failed assessment 中仍未关闭的 coverage source。
+- 叶子化：Goal / DoD 文本的拆分只能做结构性叶子化，例如 Markdown list item、编号条目、明确子项、profile 已声明 coverage target；不得按业务关键词继续扩展出额外隐含目标。父级标题和分组项保留为 `parentContext`，不得重复生成 active item。
+- 一源一项：同一个 `normalizedSourceKey` 在同一 `definitionRevision` 内最多只能有一个 active work item；若一个 source 需要多种 evidence，用 `requiredEvidenceKinds` 表达，不得拆成多个语义重复的 work item。
+- 多源不合并：不同 Goal leaf / DoD item / deliverable expectation 即使文本相似，也不得默认合并；只有它们具有相同 canonical source key 或 profile 明确声明等价映射时，才允许共享 evidence refs，但仍要保留各自的 work item 状态。
+- 不从 reason 扩张：failed assessment 的 `reason`、`nextActions`、`knownLimitations`、`residualRisks` 可以帮助描述 `currentGap`，但不能单独生成新的 work item；只有其中存在可机械回链到 baseline source 的 `goalRequirementId`、DoD item、deliverable id 或 coverage target 时，才能更新对应 work item。
+- 不从实现方案扩张：计划、patch summary、测试名、文件名、工具输出、memory、LLM 自述或历史 ticket 不能成为新的 active coverage source；它们只能成为 evidence candidate、diagnostic 或 target evidence。
+- 完整性门禁：进入 acceptance 前，runtime 必须能证明 baseline 中每个 required source 都有 active / satisfied / blocked / skipped-with-reason work item，或者有明确 `excludedReason`。若缺失 work item，必须先补齐账本或 fail-fast，不得让 LLM 基于不完整 coverage 直接 accepted。
+- 排除原因：允许排除的 source 仅限 superseded definition、父级容器项、profile 声明 optional 且未被 Goal/DoD 激活、用户明确移除或治理决策明确放弃。排除必须保留 `excludedReason` 与 source ref，不能静默丢弃。
+- 顺序稳定：work item 顺序必须按 baseline source 顺序稳定生成；后续状态变化不得重排 source 顺序，避免 LLM request 与 Web/TUI 显示在多轮执行中来回漂移。
+
+阶段拆分与更新规则：
+
+| 阶段 / 入口 | 允许动作 | 禁止动作 | 输出要求 |
+| --- | --- | --- | --- |
+| activation / definition changed | 构造新的 effective coverage baseline；基于当前 Goal / DoD / profile required coverage 生成或重建 work item 基线；标记旧 revision item 为 superseded / historical | 复用旧 revision 的 active item 作为当前目标；把新增 work item 写回正式 Goal / DoD | `coverageWorkItems` 带新的 `definitionRevision`、稳定顺序、`normalizedSourceKey`、`excludedReason` |
+| `planning` | 将 baseline source 投影为计划单元；补齐缺失的 work item；给 work item 绑定计划级 expected evidence kind | 根据计划、方案或 LLM 推测扩张出超出 baseline 的 active item；关闭 work item | plan / executionGraph 必须能引用 work item 或 coverage target，未覆盖 source 必须显式说明 |
+| `execution` | 根据实际 state-changing step、tool action、artifact 生成 candidate evidence；把相关 work item 更新为 `in_progress` 或记录 `acceptedEvidenceRefs` / `rejectedEvidenceRefs` | 新建超出 baseline 的 work item；仅凭执行摘要标记 satisfied；绕过 required evidence kind | state-changing output 必须通过 `coverageTargets` / target evidence 与 work item 对齐 |
+| `verification` | 将验证 step 与 work item 对齐；满足验证要求时补 `validation` evidence；不足时更新 `currentGap` / `rejectedEvidenceRefs` | 因总体验证通过而批量关闭无直接对齐的 work item；修改 work item 的 source / targetText | verification evidence 必须保留 step ref、quality、claim alignment 结果 |
+| `acceptance` | 执行完整性门禁；把 evidence kinds 齐备且质量通过的 item 标记为 `evidence_ready` / `satisfied`；为未关闭项生成 failed coverage / rejected result scope | 在 baseline 不完整时 accepted；用自然语言 summary / memory-only ref 关闭 item；静默跳过 required source | accepted result 必须引用所有 required work item 的关闭证据或排除原因 |
+| `repair` | 针对 failed / open work item 的 `currentGap` 生成 `need_evidence` / `need_state_change` / `need_validation`；继承 work item、coverage target 和 latest evidence | 重新拆分正式 Goal/DoD；把 repair reason 扩张成新 work item；丢弃原 source lineage | repair input 必须带 unresolved work items、required evidence kinds、current gap、latest accepted/rejected evidence |
+| `follow-up` / provider retry / schema repair | 继承上轮 work item 账本，修复输出结构或补上下文；只允许更新诊断、rejected evidence 和当前 gap | 因 wrapper failure 清空 work items；把 schema/path 字段当成 coverage source | 下一轮 LLM input 必须继续看到原 unresolved work item scope |
+| `replan` / successor run | 从 predecessor 的 unresolved work items 与当前 effective definition baseline 重建 successor scope；保留 evidence lineage | 直接复制旧 run 的 active item 而不校验 definition revision；扩大到历史已 superseded source | successor 初始 input 必须包含 unresolved work item summary 与 source refs |
+| `blocked_on_decision` / approval | 将无法自动推进的 work item 标记为 `blocked` 或等待 governance evidence；记录 blocker scope | 把 blocker 文案追加为新 Goal/DoD 或新 active item | ticket / approval 必须引用受影响 work item 与缺失的中立信息 |
+
+更新权限规则：
+
+- `source`、`sourceScope`、`sourceGoalId`、`sourceDoDId`、`definitionRevision`、`sourceRequirementId`、`sourcePath`、`targetText`、`normalizedSourceKey` 只允许在 baseline 构造 / definition changed / successor scope rebuild 时写入；普通 execution / verification / repair 只能读取，不得修改。
+- `requiredEvidenceKinds` 只允许由 profile contract、Goal/DoD definition baseline 或治理决策的结构化结果更新；不得由 LLM 自由文本直接改写。
+- `status`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs`、`currentGap`、`reason` 可以在 execution / verification / acceptance / repair 中更新，但必须保留 `updatedByStepId` 或等价 source ref。
+- 若某阶段发现 work item source 错误或遗漏，必须回到 baseline rebuild / planning correction，而不是在 repair 中临时改写 source 字段。
+- 任意阶段更新 work item 后，都必须保持同一 `normalizedSourceKey` 的单 active item 约束，并保留 superseded / historical lineage。
+
+LLM-facing 投影规则：
+
+`coverageWorkItems` 必须以独立、稳定、可行动的 section 进入 LLM-facing context，不能只隐藏在 runtime 内部 ledger、自然语言 summary 或 failed assessment reason 中。投影目标是让 LLM 在每一轮 strict convergence 中直观看到：
+
+1. 当前仍需关闭哪些 Goal / DoD / deliverable source。
+2. 每个 source 已有哪些 accepted / rejected evidence。
+3. 每个 source 仍缺哪些中立 evidence kind。
+4. 本轮应该优先处理哪个 work item，以及允许输出什么。
+
+推荐 LLM-facing 结构：
+
+```json
+{
+  "coverageWorkItemContext": {
+    "definitionRevision": "rev-xxx",
+    "coverageBaselineHash": "sha256:...",
+    "summary": {
+      "total": 7,
+      "open": 2,
+      "inProgress": 1,
+      "satisfied": 4,
+      "blocked": 0
+    },
+    "currentFocus": [
+      {
+        "id": "cwi-002",
+        "sourceScope": "goal_leaf",
+        "sourceRequirementId": "goal-req-002",
+        "targetText": "leaf requirement text",
+        "requiredEvidenceKinds": ["state_change", "validation"],
+        "missingEvidenceKinds": ["state_change"],
+        "status": "open",
+        "currentGap": "missing required evidence kind: state_change",
+        "acceptedEvidenceRefs": [],
+        "rejectedEvidenceRefs": [
+          "run-028/graph-001/003-verify"
+        ],
+        "nextAllowedConvergenceStates": ["need_evidence", "need_state_change"],
+        "forbiddenClosure": [
+          "do not mark satisfied with summary-only evidence",
+          "do not create new Goal/DoD text"
+        ]
+      }
+    ],
+    "ledgerSummary": [
+      {
+        "id": "cwi-001",
+        "sourceScope": "goal_leaf",
+        "status": "satisfied",
+        "acceptedEvidenceRefs": ["run-028/graph-001/001-change"]
+      }
+    ]
+  }
+}
+```
+
+投影分层：
+
+- `coverageWorkItemContext.summary` 必须始终进入 P2 Coverage Scope，提供总体数量和状态，避免 LLM 误以为只剩最近失败项。
+- `currentFocus` 必须包含本轮可行动的 top-k unresolved work items。严格收敛阶段至少包含 1 个 unresolved item；若没有 unresolved item，应说明进入 acceptance / result 的原因。
+- `currentFocus[].targetText`、`requiredEvidenceKinds`、`missingEvidenceKinds`、`currentGap`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs` 是指导 LLM 正向收口的最小必要字段，不能被 summary 替代。
+- `ledgerSummary` 只保留非 focus work item 的 id、sourceScope、status、关键 evidence refs 和 omitted reason；不得把全量历史 reason、raw output 或长 evidence body 放入 LLM request。
+- full ledger 可以落盘并通过 raw payload ref 引用；LLM request 默认只带 summary + currentFocus + 必要 ledgerSummary，避免单 JSON 膨胀。
+
+按阶段投影：
+
+- `planning`：投影完整 baseline summary、所有 required source 的 work item id / targetText / expected evidence kinds；要求计划覆盖每个 required work item 或给出结构化排除原因。
+- `execution`：投影当前 focus work items、允许的 state-changing / tool / artifact evidence kind、coverageTargets 要求和已拒绝 evidence；要求输出的 state-changing artifact 绑定 work item 或 coverage target。
+- `verification`：投影已产生 state-changing evidence 但缺 validation 的 work items；要求验证输出显式引用 work item id / coverage target，并说明 evidence quality。
+- `acceptance`：投影全部 required work item 的状态矩阵；要求 accepted / rejected result 逐项引用 work item closure evidence 或 blocker / excludedReason。
+- `repair`：投影 failed / open work items、currentGap、latest accepted/rejected evidence、nextAllowedConvergenceStates 和 forbiddenClosure；要求 repair 输出只针对这些 unresolved work item，不能扩张新目标。
+- `follow-up` / provider retry / schema repair：投影上一轮 unresolved work item scope 与 wrapper failure 摘要；要求 LLM 修复输出结构时不丢失原 work item 目标。
+- `replan`：投影 predecessor unresolved work item summary 与当前 definition baseline diff；要求 successor plan 明确保留、关闭或排除每个 unresolved item。
+
+Current action 合同必须由 work item 派生，而不是由自由文本失败摘要单独派生：
+
+- 若 `currentFocus` 缺少 `state_change` 且没有 concrete target evidence，current action 应是 `need_evidence`，要求有界取证 / target discovery。
+- 若 `currentFocus` 缺少 `state_change` 且已有 concrete target evidence，current action 应是 `need_state_change`，要求 state-changing artifact 或真实 blocker。
+- 若 `currentFocus` 已有 state-changing evidence 但缺少 validation，current action 应是 `need_validation`，要求 bounded validation evidence。
+- 若 `currentFocus` evidence kinds 齐备但 assessment 不完整，current action 应是 `need_assessment`，要求结构化 DoD / Goal / deliverable coverage assessment。
+- 若 `currentFocus` 依赖用户信息、外部权限、审批或 runtime 依赖，current action 才能是 `need_governance` / `blocked`。
+
+LLM 输出回写规则：
+
+- LLM 输出中的 `coverageTargets`、`evidenceRefs`、`dodAssessment.goalCoverage`、`deliverableCoverage`、`acceptanceDimensions` 或 result coverage 必须能映射到 `coverageWorkItemContext.currentFocus` 或 baseline 中的 work item；无法映射的 claim 只能作为 note / residual risk，不能关闭 work item。
+- LLM 可以在 plan / assessment 中提出 `coverageWorkItemSuggestions`，但 runtime 必须先执行“不越界”和“全覆盖”校验，确认建议映射到 baseline source 后才能成为 active item。
+- 若 LLM 输出忽略 `currentFocus`，转而处理无关目标、只重复测试/验证而不补缺失 evidence kind，或声称 satisfied 但未引用 work item evidence，runtime 必须把该输出归为 contract violation / failed assessment，并在下一轮 repair 中明确指出未关闭 work item。
+
+LLM 阶段业务语义装配：
+
+`coverageWorkItem` 本身只表达中立 coverage source 与 evidence 缺口。实际业务语义装配发生在 LLM 当前阶段决策中，由以下输入共同完成：
+
+- `coverageWorkItemContext.currentFocus`：说明当前要关闭的 Goal / DoD / deliverable 叶子项、缺失 evidence kind 和当前 gap。
+- `executionContract.profileContracts`：说明当前 workspaceTemplate/profile 对 evidence、acceptance dimension、deliverable expectation 的领域映射要求。
+- 当前 stage Soul / skill / capability catalog：说明该领域允许如何理解目标、选择工具、设计实现和验证方式。
+- `processEvidenceTimeline` / `currentProgressDigest`：说明已经做过什么、哪些证据被接受或拒绝、当前失败是否只是 wrapper / contract failure。
+- `repairActionPackage` / `targetSnapshots` / `workspaceFileManifest`：说明当前是否具备可行动目标、当前资源形状和 state-changing artifact 的准入边界。
+
+装配流程必须保持分层：
+
+1. Core 只生成中立 work item 与 current action，例如 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment`。
+2. Runtime request builder 把 work item、profile contract、Soul、capability、当前证据和 target snapshot 放在同一 stage bundle 中，并保持字段分层，不把它们合并成自然语言大摘要。
+3. LLM 根据 profile / Soul 做业务语义装配：判断该 work item 在当前领域下应通过哪类 state-changing artifact、验证动作、交付证据或治理信息关闭。
+4. LLM 输出必须把业务动作重新绑定回中立字段：`coverageTargets` / `workItemIds`、`targetRef` / `relatedFailureTargets`、`evidenceRefs`、`dodAssessment.goalCoverage`、`deliverableCoverage` 或 `acceptanceDimensions`。
+5. Runtime 只校验这些输出是否回链到 work item、是否满足 required evidence kind、是否有可追踪 evidence 和 capability contract；不判断业务实现是否语义正确，业务正确性由后续 profile validation evidence 和 acceptance assessment 证明。
+
+示例：在 software-dev profile 中，某个 `coverageWorkItem` 的 `requiredEvidenceKinds=["state_change","validation"]` 并不让 core 理解“功能代码”或“测试代码”。Core 只要求存在 state-changing evidence 与 validation evidence。software-dev Soul 可以在 LLM 阶段进一步装配为“先核对现有源码和测试，若实现缺失则补生产实现并补验证，若实现已存在但证据不足则补针对性测试断言”。该策略属于 software-dev profile / Soul，不得写入 core runtime。
+
+业务语义装配输出必须满足以下回链要求：
+
+- 每个 state-changing graph node 或 patch/tool action 若用于关闭 work item，必须声明 `coverageTargets` 或等价 `workItemIds`，并引用 currentFocus 中的 item。
+- 每个 validation graph node 若用于关闭 work item，必须声明 `verificationScope`、`targetRef`、`relatedFailureTargets`、`coverageTargets` 或依赖一个已绑定 work item 的 state-changing node。
+- 每个 satisfied assessment item 必须引用能够回链到 work item 的 evidence refs；不能只引用总体 run、泛化测试通过、memory 或自然语言摘要。
+- 若 LLM 判断当前 work item 无法自动推进，必须输出真实 blocker / governance scope，并说明缺失的是信息、权限、外部依赖还是 profile 能力；不得把 blocker 文案追加为新 Goal / DoD。
+
+禁止项：
+
+- Core 不得预装配领域语义，例如不得在 core 中把 `state_change` 翻译成“修改功能代码”、把 `validation` 翻译成“补测试”，或根据文件名判断 action 是否符合业务目标。
+- LLM 不得把 profile 通用建议、测试名、文件名、错误 reason、历史 memory 或工具输出扩张为新的 work item。
+- LLM 不得在没有回链到 `currentFocus` 的情况下输出看似合理的领域修复；这类输出只能作为 rejected evidence 或 planning note。
+- Request builder 不得把 work item、profile contract、Soul 和 current evidence 混成一段无结构文本；否则 runtime 无法验证 LLM 是否沿着 Goal / DoD 正向收口。
+
+持久化与读模型：
+
+- `coverageWorkItems` 的权威数据属于 run-scoped runtime state，必须落在当前 run 的 coverage ledger / runtime state 中；workspace 的正式 Goal / DoD 定义仍由 goal / DoD 管理模块持久化。不得把 work item 作为新的 Goal / DoD 写入 `goals.json`、`dods.json` 或等价正式定义文件。
+- workspace 级 read model 可以投影“当前 active run 的 coverage work item 摘要”，用于 Web / TUI / API 展示，但该投影不是权威定义。投影缺失时只能影响展示，不得影响 run 内收敛判断；run 内判断必须回到 run-scoped ledger。
+- full ledger 必须保留完整 source refs、definitionRevision、status history、accepted / rejected evidence refs、superseded lineage、excludedReason 和更新 step refs；LLM-facing request 默认只读取 summary / currentFocus / compact ledgerSummary。
+- `coverageTargetSet` 是当前收敛范围的目标集合，`coverageWorkItems` 是该集合在当前 definition baseline 下的逐项账本。`coverageTargetSet` 可以作为 patch / validation / assessment 的 scope，不能替代 work item 的 evidence 状态；work item satisfied 也不能绕过 `coverageTargetSet` 的准入边界。
+- `missingGoalCoverage`、`missingDoDItems`、`missingDeliverableCoverage` 是 assessment / rejected result 的缺口视图。它们必须被 rehydrate 到对应 work item 的 `currentGap`、`missingEvidenceKinds`、`rejectedEvidenceRefs` 或 `status=failed`，不得作为另一套长期状态并行推进。
+- `repairActionPackage` 只携带当前 action 所需的 work item 投影，例如 unresolved ids、required evidence kinds、current gap、target snapshots、latest evidence refs 和 required output。它不得成为新的 work item 存储，也不得在 repair-of-repair 中覆盖 source identity。
+- result artifacts / run summary / memory 只能引用 work item closure evidence 或 rejected fact，不能复制 full ledger 作为长期 memory 主体；memory recall 中出现的旧 work item 只作为 historical reference，不能驱动当前 revision 的 active scope。
+- Web / TUI 展示必须区分 formal definition、runtime coverage ledger 和 current LLM-facing projection：Formal Goal / DoD 表示用户目标，coverage work items 表示当前 run 的收敛账本，currentFocus 表示下一轮 LLM 最小行动面。三者不得在界面文案或 API 字段中混为同一概念。
+
+上下文预算裁剪规则：
+
+- `coverageWorkItemContext` 归属 P2 Coverage Scope，但其内部字段也必须分级保护。裁剪顺序为：先保留 `currentFocus` 最小行动字段，其次保留 `summary`，再保留 compact `ledgerSummary`；full ledger 永远通过 ref / payloadRef 访问。
+- `currentFocus` 的最小不可裁剪字段包括：`id`、`definitionRevision`、`normalizedSourceKey` 或等价 source ref、`sourceScope`、`targetText`、`requiredEvidenceKinds`、`missingEvidenceKinds`、`status`、`currentGap`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs`、`nextAllowedConvergenceStates`。strict convergence 中缺少任一字段都必须记录 `contextBudget.integrityWarnings`。
+- top-k 选择必须稳定且可解释。优先级为：当前 failed / blocked blocker 所指向 item、缺少 `state_change` 且已有 target evidence 的 item、缺少 `state_change` 但需要取证的 item、缺少 `validation` 的 item、缺少 assessment 的 item、其他 open item。相同优先级按 baseline source 顺序排序。
+- 当 unresolved work item 数量超过 top-k 时，`ledgerSummary` 必须包含 omitted counts、omitted status distribution、omitted source scopes 和 `omittedReason=context_budget_top_k`；不得让 LLM 误以为未展示的 item 已关闭。
+- 若预算裁剪导致存在 unresolved item 但没有任何 actionable `currentFocus`，runtime 必须 fail-fast 或进入 context required / evidence acquisition；不得提交只包含泛化 summary 的 strict convergence request。
+- 若当前 focus item 的 `targetText` 超出预算，应保留 source ref、短摘要、contentHash / normalizedSourceKey、omitted reason，并优先引用 formal Goal / DoD payloadRef；但 `requiredEvidenceKinds`、`missingEvidenceKinds`、`currentGap` 和 evidence refs 仍不可裁剪。
+- `acceptedEvidenceRefs` / `rejectedEvidenceRefs` 在 LLM-facing context 中可以 top-k 摘要，但必须保留最新 accepted、最新 rejected、当前 failure 对应 rejected，以及所有用于关闭 required evidence kind 的 refs。被省略的 evidence 必须记录 count 与 payloadRef。
+- provider request audit 必须能说明 `coverageWorkItemContext` 的 included / omitted / redacted sections、top-k 策略、protected focus ids 与 full ledger ref，便于离线核对 cache 退化或上下文缺失。
+
+与 `ConvergenceContract` 的精确映射：
+
+| Work item 状态 / 缺口 | 必要条件 | `ConvergenceContract` 状态 | 下一步要求 |
+| --- | --- | --- | --- |
+| `open` / `failed` 且缺 `state_change`，无 concrete target evidence | `missingEvidenceKinds` 包含 `state_change`，但 target snapshot / targetRef / lineRef / manifest evidence 不足 | `need_evidence` | 有界读取、取证、列举 manifest、运行允许的诊断能力，不能直接要求 state-changing artifact |
+| `open` / `failed` 且缺 `state_change`，已有 concrete target evidence | 具备 target snapshot、targetRef、lineRef、repairTargetSet 或等价当前目标证据 | `need_state_change` | 生成 state-changing artifact、真实 blocker 或 failed assessment；输出必须绑定 work item / coverage target |
+| 已有可接受 `state_change`，缺 `validation` | `acceptedEvidenceRefs` 中存在 state-changing evidence，`missingEvidenceKinds` 包含 `validation` | `need_validation` | 生成 bounded validation evidence；不得只返回泛化 summary 或只读 inspection |
+| required evidence kinds 齐备，但 coverage assessment / claim alignment 不完整 | evidence refs 存在但 result / DoD / Goal / deliverable coverage 字段缺失或无法对齐 | `need_assessment` | 输出结构化 assessment，逐项引用 work item evidence refs |
+| 缺少用户信息、审批、权限、外部依赖或 runtime 能力配置 | blocker scope 指向 work item，且无法由 runtime 能力机械获取 | `need_governance` | 创建 decision / approval / dependency ticket，并绑定受影响 work item |
+| 预算耗尽、重复失败达到治理阈值或不可恢复合同冲突 | 已无法自动推进，且不是 provider transient / context 可补齐问题 | `blocked` | 终止当前自动闭环，保留 rejected result / blocker evidence |
+| 所有 required evidence kinds 齐备且 claim-to-evidence 通过 | item 状态可进入 `evidence_ready` / `satisfied` | 不再作为 primary contract focus | 进入 acceptance 或处理下一个 unresolved item |
+
+primary focus 选择规则：
+
+- 同一 run 同一时刻只能有一个 primary convergence state，但可以有多个 current focus item。若多个 item 对应不同缺口，按 `need_state_change`、`need_evidence`、`need_validation`、`need_assessment`、`need_governance` 的顺序选择 primary state；这是为了优先处理能改变状态或获取目标证据的缺口，而不是先做总结性 assessment。
+- 若多个 unresolved item 可被同一个 state-changing 或 validation action 覆盖，可以同时进入 `currentFocus`，但 LLM 输出必须逐项声明 `coverageTargets` / `workItemIds`。runtime 不得因为一个 action 提到了多个 item 就自动关闭未满足 evidence kind 的 item。
+- 若当前 latest failure 明确指向某个 work item，该 item 优先成为 primary focus；否则按 top-k 稳定顺序选择。历史失败只在仍未被 accepted evidence 覆盖时参与排序。
+- `ConvergenceContract` 的 `repairActionPackage` 必须记录 primary focus id、secondary focus ids、primary state、required evidence kinds、current gap 和 allowed output。任一恢复入口若无法恢复这些字段，必须重新从 run ledger 构造，而不是从历史 LLM summary 猜测。
+
+更新冲突与一致性规则：
+
+- 一个 step 可以更新多个 work item，但必须为每个 item 单独记录 alignment 结果、evidence kind、quality、accepted / rejected 状态和 reason；不得用 step-level completed 批量关闭所有关联 item。
+- 一个 evidenceRef 可以被多个 work item 共享，前提是该 evidence 的 declared scope、coverageTargets、workItemIds、targetRef 或 assessment item 能分别回链到每个 source。共享 evidence 不改变“一源一项”，也不允许合并 work item 状态。
+- candidate evidence 在产生时默认处于 pending / candidate 状态。只有经过 capability contract、target relevance、evidence quality、claim-to-evidence alignment 和 requiredEvidenceKinds 校验后，才能进入 `acceptedEvidenceRefs`；失败或不相关证据进入 `rejectedEvidenceRefs` 并带 reason。
+- 若同一 step 对某 work item 同时产生 accepted 与 rejected evidence，必须按 evidence kind 分开记录。例如 state-changing evidence accepted 但 validation rejected 时，item 只能推进到“缺 validation”，不能整体 satisfied。
+- schema repair、provider retry、runtime contract recovery 产生的 wrapper evidence 默认不能关闭 work item；它们只能解释为什么上一轮输出无效。只有 wrapper recovery 后的实际 action / validation / assessment evidence 才能更新 work item closure。
+- definitionRevision 变化时，successor run 必须先执行 baseline diff：相同 `normalizedSourceKey` 且 source 文本未变的 item 可以继承 accepted / rejected evidence lineage；source 文本或 profile evidence requirement 变化的 item 必须重新评估，不能直接继承 satisfied 状态。
+- 旧 revision unresolved item 不得与新 revision active item 混排进同一个 `currentFocus`。若旧 item 仍有参考价值，只能放入 historical / superseded summary，并标记不再驱动 current contract。
+- 并发或重复恢复路径同时更新同一 work item 时，必须按 run sequence / event sequence 应用；旧事件不得覆盖新状态。若出现状态回退，例如 `satisfied -> open`，必须有新的 rejected evidence 或 definitionRevision change 作为 source ref。
+- 当 runtime 发现 ledger 与 read model、LLM-facing projection 或 result artifact 不一致时，以 run-scoped ledger 为准，并记录 consistency repair event；不得让 Web/TUI 投影反向覆盖 ledger。
+
+回归测试矩阵要求：
+
+| 场景 | 必须断言 |
+| --- | --- |
+| baseline full coverage | 当前 effective Goal leaf、DoD item、required acceptance dimension、deliverable expectation 全部生成 active / satisfied / blocked / excluded item |
+| one-source-one-item | 同一 `normalizedSourceKey` 在同一 `definitionRevision` 内不会生成重复 active item；DoD 多次补充不会重复生成相同 item |
+| no cross-source merge | 文本相似但 source 不同的 Goal / DoD 不会被静默合并；共享 evidence 不合并状态 |
+| definition change rebuild | Goal / DoD 变更后生成新 `definitionRevision`，旧 item superseded，新 item 不继承不适用 satisfied 状态 |
+| currentFocus context gate | strict convergence 存在 unresolved item 时，缺少 `currentFocus` 最小字段会 fail-fast，不提交 provider |
+| context budget trimming | full ledger 超预算时仍保留 primary focus、summary、omitted counts、full ledger ref 和 protected evidence refs |
+| convergence mapping | 缺 target evidence -> `need_evidence`，有 target evidence -> `need_state_change`，缺 validation -> `need_validation`，缺 assessment -> `need_assessment`，真实外部依赖 -> `need_governance` |
+| output relink failure | LLM 输出没有 `coverageTargets` / `workItemIds` / evidence refs 回链时，不关闭 work item，只生成 rejected evidence |
+| wrapper failure inheritance | schema invalid / provider retry / repair-of-repair 不清空 unresolved work items 和 required evidence kinds |
+| evidence sharing | 一个 validation evidence 可关闭多个 item 的 validation kind，但每个 item 都必须有独立 alignment 记录 |
+| revision isolation | successor run 不把旧 revision unresolved item 和新 revision active item 混入同一个 currentFocus |
+| neutrality guard | 同一结构化输入下，目标文本中的语言、框架、业务关键词变化不改变 core work item 生成、状态映射或 contract state；领域语义只能影响 profile / Soul 输出 |
+
+`coverageWorkItems` 的状态推进必须遵守以下门禁：
+
+- work item 缺少 `state_change` evidence 时，后续 strict convergence 输入必须显式说明该 work item 仍缺少 state-changing evidence；若没有 concrete target evidence，则进入 `need_evidence`，不得直接强制 patch。
+- work item 已有可接受 `state_change` evidence 但缺少 `validation` evidence 时，后续输入应进入 `need_validation` 或 bounded validation evidence repair。
+- work item 已具备所有 required evidence kinds，且 claim-to-evidence alignment / evidence quality / result policy 通过时，才允许进入 `evidence_ready` 或 `satisfied`。
+- work item 失败或阻塞只能作为当前 coverage scope 的治理事实；不得自动把失败文本追加到正式 DoD，也不得生成重复 DoD。
+- Goal / DoD 运行期变更后，runtime 必须用新的 `definitionRevision` 重建 work item 基线：仍适用的 work item 继承 evidence lineage，已被新定义移除或替代的 work item 标记为 superseded / historical，不再驱动 repair。
+
+`coverageWorkItems` 对 orchestrator 的影响只限于决策条件，不改变业务流转模型：
+
+- `planning` 仍负责把当前 Goal / DoD 拆成可执行计划；work item 只是计划与 coverage ledger 的结构化桥接。
+- `execution` / `repair` 仍通过现有 step / graph / tool / patch capability 产生 state-changing evidence；work item 只说明哪个 coverage target 仍缺哪类 evidence。
+- `verification` 仍负责产生验证 evidence；work item 只要求验证 evidence 与目标叶子项可追踪对齐。
+- `acceptance` 仍对 Goal / DoD 做最终判定；work item 全部 satisfied 是 accepted 的必要输入之一，但不能绕过 result policy、deliverable coverage 或人工治理要求。
+- `replan` 仍创建 successor run 并保持 lineage；work item 可作为 successor 的 unresolved coverage scope 继承，但不得形成独立 run。
+
+该机制保持 core 业务中立的边界：
+
+- Core 管结构、状态、证据、顺序、一致性和准入。
+- Template / profile / Soul 管领域解释、实现策略、验证方式和 evidence 产生路径。
+- Core 不得根据文件名、命令名、测试框架、语言、协议、供应商、业务关键词或自然语言 summary 判断 work item 应该由“功能实现”还是“测试验证”关闭。
+- 当缺口被 profile 解释为软件开发能力时，`software-dev` template 可以要求先核对现有实现、再决定补功能代码或补测试断言；这个策略必须停留在 software-dev Soul / profile contract 中，不得下沉到 core runtime。
+
 Follow-up、repair、provider retry、replan successor 和 validation 输入必须从 coverage ledger / 等价状态视图重建上下文，至少包含未关闭 coverage targets、最近 accepted evidence、最近 rejected evidence 及原因、当前 failure surface、`repairObjective`、`stateChangingOutputRequired`、`requiredOutput`、`currentExecutionProgress` 与 `processEvidenceTimeline`。若 follow-up 输入只包含最近 step 摘要而缺少 Goal / DoD coverage contract，runtime 必须先补齐上下文或 fail-fast，不得让 LLM 基于低价值 smoke evidence 继续生成 state-changing 输出或 failed assessment。
 
 当上述 coverage repair 因 repair 输出合同违规而再次进入 repair-of-repair，例如 patch/apply 缺少 `coverageTargets`、返回只读 graph、返回未声明 state-changing intent 或缺少 bounded verification 的 shell/tool graph，或 LLM decision JSON 无效，runtime 必须继承上一轮 `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、候选 evidence、已完成 action evidence、当前失败信息和最近 repair 尝试摘要。`repairActionPackage` 必须携带中立 `coverageRepairRequired=true`、`coverageTargetSet`、`currentExecutionProgress` 与 `requiredOutput.mustDeclareCoverageTargets=true`。这里的 `currentExecutionProgress` 只保留 step id、kind、state、命令/patch 摘要、stdout/stderr 预览、覆盖缺口计数和失败摘要，不得复制大段 patch content、历史 raw LLM 输出或被拒绝的失败正文。该规则保证 LLM 能看到“已有内容、当前进展、遇到的问题和仍未关闭的覆盖目标”，同时避免单 JSON 膨胀和失败产物复用。
@@ -1013,7 +1311,7 @@ Runtime LLM 的结构化输出必须以完整 provider 响应为准。
 | --- | --- | --- |
 | P0 Contract | runtime contract、输出 schema、workspace/run/stage/step identity、当前 Goal / DoD、当前动作要求 | 不得静默删除；超预算必须 fail-fast、换更大上下文配置或进入治理 |
 | P1 Current Failure | failedStepId、failureClass、failureSignature、stage、error、runtimeDiagnostics、repairObjective、requiredOutput | 不得被 provider retry / repair-of-repair 外壳失败覆盖 |
-| P2 Coverage Scope | missingDoDItems、missingGoalCoverage、missingDeliverableCoverage、coverageTargetSet、evidenceCandidates | 不得因 contract violation 被清空 |
+| P2 Coverage Scope | missingDoDItems、missingGoalCoverage、missingDeliverableCoverage、coverageTargetSet、coverageWorkItemContext、evidenceCandidates | 不得因 contract violation 被清空；strict convergence 至少保留 summary + currentFocus |
 | P3 Current Evidence | latest action evidence、patch/tool/validation evidence、artifact refs、currentExecutionProgress | 保留 step/ref/摘要；大 stdout/stderr 使用 head/tail/preview + ref |
 | P4 Current Snapshots | failureTargetRepairContext、patchRepairContext、targetSnapshots、workspaceFileManifest | 小目标完整；大目标窗口化或 ref；安全完整快照不得误脱敏 |
 | P5 Recent Attempts | 最近 repair attempts、invalid strategy、duplicate failure、forbiddenActions | top-k 摘要；保留失败原因和避免重复策略 |
@@ -1261,6 +1559,10 @@ Context gate 的恢复必须由 runtime 结构化分流，而不是由普通 rep
 4. 用 `ShouldCreateDecisionTicket` 包住所有 ticket 创建路径，先判断可机械推进的 decision 是否应转换为 repair contract violation。
 5. 刷新 context gate，使 `currentRuntimeStage`、`currentProgressDigest`、`repairActionPackage`、`structuredFailureSignals`、`processEvidenceTimeline` 自洽成为发送 LLM 的必要条件。
 6. 补齐回归测试矩阵，再用实际 workspace 运行数据核对是否不再出现合同丢失、verification/repair 冲突、无效 ticket 和 stale patch 循环。
+7. 落地 `coverageWorkItems` run-scoped ledger，先只接入 baseline / read model / LLM projection，不改变正式 Goal / DoD 存储。
+8. 将 `coverageWorkItemContext.currentFocus` 接入 `ConvergenceContract` 构造，使 `need_*` 状态可由 work item 缺口稳定推导。
+9. 接入 execution / verification / acceptance / repair 的 work item evidence 更新，确保所有更新都有 source refs、alignment 和 evidence quality。
+10. 补齐 context budget、revision rebuild、wrapper inheritance、output relink 和 neutrality guard 的自动化回归，再用真实 workspace request log 核对 LLM-facing projection 是否完整且无业务语义下沉。
 
 ### Core / Profile Boundary
 
@@ -1317,6 +1619,14 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 - `contextBudget` 必须包含 protectedFields、integrityWarnings、included / omitted / redacted sections 和 source refs。
 - `processEvidenceTimeline` 必须按 step / event 顺序表达最近有效动作、验证结果、失败输出和当前缺口；缺 sourceRef 的进度文本不得作为 completion / repair / replan 的高置信依据。
 - profile-specific 检查只能放在 profile verifier 中，不能写入 core verifier。
+- `coverageWorkItems` baseline 必须覆盖当前 effective Goal leaf、DoD item、required acceptance dimension 与 required deliverable expectation；缺失 active / satisfied / blocked / excluded item 时不得进入 acceptance。
+- 同一 `definitionRevision` 内必须验证一源一项、多源不合并和 source key 稳定性；重复 DoD / Goal 补充不得生成重复 active item。
+- strict convergence 的 LLM request 必须包含 `coverageWorkItemContext.summary` 与 actionable `currentFocus`；缺 primary focus 最小字段时必须触发 context gate。
+- `coverageWorkItemContext` 超预算时必须保留 primary focus、summary、omitted counts、full ledger ref 和 protected evidence refs；不得只保留自然语言摘要。
+- LLM 输出关闭 coverage 时必须能回链到 work item / coverage target / evidence refs；无法回链时只能记录 rejected evidence，不得关闭 item。
+- provider retry、schema repair、runtime contract recovery、decision resolved、approval resolved、replan successor 必须继承 unresolved work item scope，不得因 wrapper failure 清空 required evidence kinds。
+- definition revision 变化后，旧 revision item 必须 superseded / historical，新 revision active item 必须重新构造；验证脚本应拒绝旧新 item 混入同一个 currentFocus。
+- core verifier 只能检查 work item 结构、evidence refs、状态映射、context gate 和 neutrality guard；profile-specific verifier 才能检查某个领域如何把 `state_change` / `validation` 装配为具体行为。
 
 ## 实施收口计划
 
@@ -1332,6 +1642,12 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
 | STG-08 | P2 | 清理旧的字符串匹配与领域化提示 | contract violation 使用结构化字段表达 |
 | STG-09 | P1 | 引入 Codex 启发的中立过程证据 timeline | LLM request 能看到按序排列的已有输出、最近动作、失败证据、当前缺口和下一步要求，且全部带 source refs |
 | CVC-01 | P0 | 引入统一 `ConvergenceContract` 与 decision ticket 门禁 | repair / validation / assessment / evidence acquisition / decision 写入路径先得到唯一 `need_*` 合同状态，再应用到 LLM input 或 ticket gate |
+| CWI-01 | P0 | 引入中立 `coverageWorkItems` 收敛账本 | 未关闭 Goal / DoD / deliverable 叶子项可被拆成中立 work item，驱动 `need_evidence` / `need_state_change` / `need_validation`，但不写回正式 Goal/DoD、不新增 orchestrator 状态机、不引入业务语义 |
+| CWI-02 | P0 | 定义 work item 的 run-scoped 持久化、读模型与 revision 隔离 | formal Goal/DoD、run ledger、LLM projection、Web/TUI read model 分层清晰；successor / revision change 不混旧 item |
+| CWI-03 | P0 | 定义 `coverageWorkItemContext` 的预算裁剪与 context gate | strict convergence 至少保留 primary focus 最小字段、summary、omitted counts 和 full ledger ref；无 actionable focus 时 fail-fast |
+| CWI-04 | P0 | 将 work item 缺口精确映射到统一 `ConvergenceContract` | `need_*` 状态只由 work item 缺口与 target evidence 决定，primary focus / state 稳定可追溯 |
+| CWI-05 | P1 | 定义多 item 更新、共享 evidence、wrapper failure 继承与冲突仲裁 | 同一步可多项更新但需逐项 alignment；共享 evidence 不等于合并 item；wrapper failure 不清空 unresolved ledger |
+| CWI-06 | P1 | 补齐 `coverageWorkItems` 回归矩阵 | baseline、revision、budget、relink、neutrality guard、wrapper inheritance 全覆盖 |
 
 ## 附录：当前落地记录
 
@@ -1494,6 +1810,20 @@ WorkspaceTemplate / profile / soul / skill 不可以做：
   - 已完成 capability policy repair 收口。
   - `capabilityUsagePolicies.requiredAfterKinds` 触发后缺少匹配 follow-up 的失败会生成 `capabilityPolicyRepairContract`，要求 LLM 返回修正后的 executionGraph 或结构化 `capabilityPolicySkips`，不能用 failed/satisfied `dodAssessment` 替代该机械修复。
   - 该规则只读取 policy id、category、preferredTools、requiredAfterKinds、capability kind、executionGraph 和 failure signature 等中立字段；具体工具名、profile 语义和 fallback 由 template / capability catalog 声明。
+- 2026-05-27：
+  - 已完成 CWI-01 设计固化，尚未开始代码收口。
+  - 新增 `coverageWorkItems` 中立收敛账本设计：从当前有效 Goal / DoD / deliverable coverage 叶子项生成运行期 work item，用于明确每个未关闭目标缺少哪类中立 evidence。
+  - 该设计明确 `coverageWorkItems` 不写回正式 Goal / DoD，不生成重复 DoD，不新增 orchestrator 业务状态机，只作为 `ConvergenceContract`、repair / validation / acceptance 输入的结构化决策条件。
+  - 业务中立边界已固化：core 只管理结构、状态、证据、顺序、一致性和准入；software-dev 等领域的“先核对实现、再决定补功能或补测试”必须留在 workspaceTemplate / profile / Soul / skill 中。
+  - 已补充 work item 定义边界与完整性规则：active item 必须回链到当前 effective coverage baseline，禁止从 failed reason、nextActions、文件名、测试名、memory 或 LLM 自述扩张出超出 Goal/DoD/profile 范围的目标；进入 acceptance 前必须证明 baseline source 全覆盖或显式排除。
+  - 已补充阶段拆分与更新规则：activation / definition changed / planning 负责 baseline 与计划投影，execution / verification / acceptance 只更新 evidence/status，repair / follow-up / provider retry / schema repair 必须继承未关闭 work item，replan successor 必须基于当前 definition revision 重建 scope。
+  - 已补充 LLM-facing 投影规则：`coverageWorkItemContext.summary/currentFocus/ledgerSummary` 必须进入 P2 Coverage Scope，strict convergence 通过 currentFocus 派生 current action，避免 LLM 只看到泛化失败摘要后继续偏离 Goal / DoD 收口。
+  - 已补充 LLM 阶段业务语义装配规则：core 只生成中立 work item 和 current action；profile / Soul / skill / capability 在 LLM 阶段完成领域语义解释，输出必须通过 `coverageTargets` / `workItemIds` / `evidenceRefs` 回链到 currentFocus。
+  - 已继续补齐剩余设计缺口：新增 run-scoped 持久化与读模型分层，明确 formal Goal / DoD、run coverage ledger、LLM-facing projection 和 Web/TUI read model 的职责边界，避免 work item 反写正式定义或被展示投影反向覆盖。
+  - 已新增 context budget 规则：`coverageWorkItemContext` 在 P2 内继续分层，strict convergence 至少保留 primary `currentFocus` 最小字段、summary、omitted counts 和 full ledger ref；若 unresolved item 存在但 actionable focus 被裁掉，必须 fail-fast。
+  - 已新增 work item 到 `ConvergenceContract` 的精确映射表和 primary focus 选择规则，要求 `need_evidence` / `need_state_change` / `need_validation` / `need_assessment` / `need_governance` / `blocked` 只由 work item 缺口与 target evidence 决定。
+  - 已新增一致性与冲突规则：同一步可更新多个 item 但需逐项 alignment；共享 evidence 不等于合并 item；wrapper failure 只产生 rejected / diagnostic evidence，不能关闭 work item；revision 变化时旧 item 不得混入新 revision currentFocus。
+  - 已新增回归测试矩阵要求：覆盖 baseline 全覆盖、一源一项、无跨源合并、revision rebuild、context gate、budget trim、output relink、wrapper inheritance 与 neutrality guard。
 
 ## 非兼容性说明
 
@@ -1684,3 +2014,40 @@ Memory 是参考知识，不是运行流水。LLM 输入中的 memory 必须满�
 18. Core runtime 的治理判断是否只读取结构化字段、枚举状态、capability kind、evidence refs、failure class / signature、target refs、runtime stage 与 contract flags；不得读取 `question`、`reason`、`summary`、stdout/stderr 自由文本中的业务/技术关键词来决定是否 repair、block、approve、replan 或选择具体策略。
 19. 若确实需要领域语义、技术栈语义、测试框架语义、业务对象语义或自然语言关键词，只能放在 workspaceTemplate、profile、soul、skill、capability adapter 或 profile verifier 中；进入 core 前必须先转换成中立结构字段，并有对应回归测试证明 core 不解析该领域词。
 20. 新增 core 规则必须至少补一组 neutrality guard test：同一结构化输入下，自由文本中出现或移除具体业务/技术词不得改变结果；结构化 blocker 字段存在时，必须优先于自由文本。
+21. 若引入或更新 `coverageWorkItems`，必须确认它只作为 coverage ledger 的运行期投影：不写回正式 Goal/DoD、不生成重复 DoD、不新增业务阶段、不绕过 run/step/repair/replan/result 状态流转。
+22. Work item 关闭必须引用满足 `requiredEvidenceKinds` 的可追踪 evidence refs；缺 `state_change` / `validation` 等 evidence kind 时，只能驱动对应 `need_*` 合同，不能用泛化测试通过、自然语言 summary 或 memory-only ref 直接关闭。
+23. `coverageWorkItems` 生成必须通过 baseline 完整性核对：当前 effective Goal leaf、DoD item、required acceptance dimension、required deliverable expectation 都必须有对应 active / satisfied / blocked / skipped-with-reason item 或明确 `excludedReason`；不得从 reason、nextActions、文件名、测试名、memory 或 LLM 自述扩张出超出 Goal/DoD/profile coverage source 的 active item。
+24. 同一 `definitionRevision` 内必须遵守一源一项与多源不合并：相同 `normalizedSourceKey` 不得重复生成 active work item，不同 source 不得因文本相似被静默合并；共享 evidence 不等于合并 coverage 状态。
+25. `coverageWorkItems` 更新必须符合阶段权限：activation / definition changed / planning / successor rebuild 可生成或重建 source baseline；execution / verification / acceptance / repair / follow-up 只能更新 status、evidence refs、currentGap、reason 等运行期字段，不得临时改写 source / targetText / normalizedSourceKey。
+26. provider retry、schema repair、repair-of-repair、decision resolved、approval resolved 等恢复入口不得清空 unresolved work items；若输出合同失败只发生在 wrapper 层，下一轮 LLM input 仍必须继承原 coverage work item scope 与 required evidence kinds。
+27. LLM-facing context 必须包含 `coverageWorkItemContext.summary` 与当前阶段可行动的 `currentFocus`；strict convergence 中若存在 unresolved work item，却没有把 `missingEvidenceKinds`、`currentGap`、accepted/rejected evidence refs 和 next allowed convergence state 传给 LLM，必须触发 context gate 或 fail-fast。
+28. LLM 输出关闭 Goal / DoD coverage 时，必须能映射到 `coverageWorkItemContext.currentFocus` 或 baseline work item；无法映射的 `coverageTargets`、evidenceRefs 或 satisfied claim 不得关闭 work item，只能作为 note / residual risk / rejected evidence。
+29. 业务语义装配必须发生在 LLM 阶段的 profile / Soul / skill / capability 层：core 只传递中立 work item、profile contract、current evidence 和 target evidence，不得把 `state_change` / `validation` 预翻译成具体领域动作。
+30. LLM 经过业务语义装配后输出的 state-changing、validation、assessment 或 result 必须回链到 `coverageWorkItemContext.currentFocus`；若无法通过 `coverageTargets`、`workItemIds`、`targetRef`、`relatedFailureTargets` 或 evidence refs 回链，runtime 不得用该输出关闭 work item。
+31. `coverageWorkItems` 的权威状态是否只存在于 run-scoped coverage ledger / runtime state；Web/TUI/API read model 是否只是投影，不能反向覆盖 run ledger，也不能写回 formal Goal / DoD。
+32. `coverageWorkItemContext` 在 context budget 裁剪后是否仍保留 primary focus 最小字段、summary、omitted counts、full ledger ref 和 protected evidence refs；若 unresolved item 存在但没有 actionable `currentFocus`，是否已 fail-fast。
+33. 当前 `ConvergenceContract` 状态是否可由 work item 的 `missingEvidenceKinds`、target evidence、assessment 完整性和 governance blocker 机械解释；不得由自由文本 failure summary 单独决定。
+34. 同一步更新多个 work item 或一个 evidenceRef 共享给多个 work item 时，是否为每个 item 保留独立 alignment、evidence kind、quality、accepted / rejected reason；不得批量 satisfied。
+35. provider retry、schema repair、runtime contract recovery 等 wrapper failure 是否只产生 rejected / diagnostic evidence，并继承 unresolved work item scope；不得把 wrapper failure 当作 work item closure evidence。
+36. definitionRevision 变化、successor run 或 replan 后，旧 revision item 是否已 superseded / historical，且没有和新 revision active item 混入同一个 `currentFocus`。
+
+## 当前 CWI 收口记录
+
+- 2026-05-27：
+  - CWI-02 已完成第一轮代码收口：core runtime 新增 run-scoped `coverageWorkItems` / `coverageWorkItemContext` 账本投影，来源限定为当前 effective Goal leaf、DoD item、profile required acceptance dimension、profile required deliverable expectation 与可回链的 failed coverage item；该投影只写入 run execution context，不写回正式 Goal / DoD。
+  - CWI-02 read model 已补齐：RunSnapshot 显式投影 `coverageWorkItems` 与 `coverageWorkItemContext`，Web/TUI/API 只能读取该投影，不能反向覆盖 run ledger 或 formal Goal / DoD。
+  - CWI-03 已完成第一轮代码收口：LLM provider context budget 将 `coverageWorkItemContext` 作为动态上下文保护；存在 unresolved work item 但缺少 actionable `currentFocus`，或 `currentFocus` 缺少最小字段时，触发 context gate fail-fast；prompt 渲染将其放在 `C4.coverage-work-items`，不污染 C0/C1/C2 稳定缓存前缀。
+  - CWI-04 已完成第一轮代码收口：strict repair / verification / coverage repair 路径可以从 work item 的 `missingEvidenceKinds` 机械映射到 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment` 或 `need_governance`。普通 activation / planning / replan continuation 初始阶段只投影上下文，不允许 work item 抢占原 stage contract。
+  - CWI-05 已完成第一轮代码收口：`coverageWorkItemContext` 会随 run execution context、step input、execution context package 与 repair action package 继承；wrapper failure / provider retry / schema repair 不应清空 unresolved work item scope。多 item 场景当前以稳定 `unresolvedItems` 摘要和单一 `currentFocus` 驱动本轮收敛，共享 evidence 的逐项 alignment 仍由后续 evidence quality / assessment gate 执行。
+  - CWI-06 已补充首批回归：baseline 生成不改写 Goal/DoD、work item state-change 缺口在缺少 target evidence 时进入 `need_evidence`、provider budget 对缺失 current focus 的 unresolved ledger fail-fast；同时回归 kernel orchestrator、LLM budget/prompt 与 appservice read model，确认普通 activation/planning 不被 CWI 改写为 validation。
+  - CWI-03/CWI-05 第二轮收口：`coverageWorkItems` 的缺口计算改为按 `requiredEvidenceKinds` 逐类判断，新增 `acceptedEvidenceByKind` / `rejectedEvidenceByKind` 投影，避免一个 evidence ref 批量关闭 `state_change` 与 `validation` 等不同证据要求。
+  - CWI-03 第二轮收口：`coverageWorkItemContext` 增加 `currentFocusItems`、`ledgerSummary`、`omittedCount`、omitted status/source-scope distribution 与 compact evidence refs；provider context gate 校验 focus 的 `definitionRevision`、source ref、evidence refs 与 next allowed convergence states。
+  - CWI-02 第二轮收口：容器型 source 进入 `excludedSources` 并记录 `excludedReason=container_source`；旧 definition revision 的 item 进入 `historicalItems` / `historicalCount`，不再静默丢失，也不混入当前 `currentFocus`。
+  - CWI-06 第二轮回归：补充 evidence-kind 独立缺口、旧 revision historical 隔离、top-k focus / ledgerSummary 投影、provider 对完整 `currentFocusItems` 的 gate 校验。
+  - CWI-05 第三轮收口：execution / verification / acceptance 的最小 evidence 回写链路已接入。完成的 state-changing / validation step 只有在显式声明 `coverageTargets` 或 `workItemIds` 时才写入对应 work item 的 accepted evidence；失败 step 写入 rejected evidence 与 `currentGap`；validated `dodAssessment` satisfied item 可把已满足全部 required evidence kind 的 work item 推进到 `satisfied`。
+  - CWI-06 第三轮回归：补充 completed step 推进 `state_change`、assessment 推进 `validation/satisfied`、failed step 写 rejected evidence、failed assessment item 写 rejected validation evidence 的中立回归。
+  - CWI-05 第四轮收口：accepted result 写入前新增 `coverageWorkItems` acceptance gate，只有所有 required work item 均 `satisfied` / `blocked` / `skipped` 且 satisfied item 带 accepted evidence refs 时才允许完成；`evidence_ready` 仍需 assessment 显式关闭。
+  - CWI-05 第四轮收口：validated assessment 中的 satisfied claim 若无法回链到 active work item，会作为当前 focus 的 rejected validation evidence 记录，并阻止 accepted result，避免自然语言 satisfied claim 绕过 coverage ledger。
+  - CWI-06 第四轮回归：补充 acceptance gate 拒绝 unresolved work item、允许 satisfied evidence、拒绝未回链 satisfied assessment 的测试。
+  - CWI-02/CWI-05 第五轮收口：replan successor 创建时会先按当前 effective definition baseline 重新归一化 `coverageWorkItems`，同 revision 且 source 仍存在的 item 保留 accepted/rejected evidence lineage；已移除 source 或旧 revision item 进入 `historicalItems`，不得继续成为 successor 的 `currentFocus`。
+  - CWI-06 第五轮回归：补充 replan successor 保留当前 revision evidence lineage、隔离 stale source 并保留既有 historical ledger 的测试，确认 replan / successor 路径不混入过期 coverage focus。

@@ -1,0 +1,658 @@
+package orchestrator
+
+import (
+	"strings"
+	"testing"
+
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-baseline",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi",
+				"text": "### Parent\n- first leaf\n- second leaf",
+			},
+			"dod": map[string]any{
+				"id":    "dod-cwi",
+				"items": []string{"first acceptance gate", "container:"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"acceptanceDimensions": []map[string]any{{
+							"id":       "dimension-required",
+							"required": true,
+						}},
+						"deliverableExpectations": []map[string]any{{
+							"id":       "deliverable-required",
+							"required": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want true")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 5 {
+		t.Fatalf("coverageWorkItems = %+v, want 5 leaf/profile items", items)
+	}
+	if run.ExecutionContext["goal"].(map[string]any)["text"] != "### Parent\n- first leaf\n- second leaf" {
+		t.Fatalf("formal goal was modified: %+v", run.ExecutionContext["goal"])
+	}
+	if got := stringFromMap(items[0], "targetText"); got != "first leaf" {
+		t.Fatalf("first targetText = %q, want first leaf", got)
+	}
+	for _, item := range items {
+		if source := stringFromMap(item, "source"); source == "" || source == "software_dev" || source == "test" {
+			t.Fatalf("coverage work item source = %q, want neutral source enum", source)
+		}
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	if focus := mapFromValue(context["currentFocus"]); stringFromMap(focus, "id") != "cwi-001" {
+		t.Fatalf("currentFocus = %+v, want first stable work item", focus)
+	}
+	if focuses := mapSliceFromValue(context["currentFocusItems"]); len(focuses) == 0 {
+		t.Fatalf("currentFocusItems = %+v, want top-k focus projection", context["currentFocusItems"])
+	}
+	if ledger := mapSliceFromValue(context["ledgerSummary"]); len(ledger) != len(items) {
+		t.Fatalf("ledgerSummary = %+v, want one compact entry per work item", context["ledgerSummary"])
+	}
+	if excluded := mapSliceFromValue(context["excludedSources"]); len(excluded) != 1 || stringFromMap(excluded[0], "excludedReason") != "container_source" {
+		t.Fatalf("excludedSources = %+v, want container exclusion recorded", context["excludedSources"])
+	}
+}
+
+func TestBuildConvergenceContractUsesCoverageWorkItemStateChangeGap(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-convergence",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "produce stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "goal-leaf-001",
+							"scope":              "goal_coverage",
+							"acceptedStepKinds":  []string{"artifact/write"},
+							"acceptedOperations": []string{"change"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	ensureRunCoverageWorkItems(run)
+	input := map[string]any{
+		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		stepInputKeyRuntimeRepairFollowUp: true,
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want need_evidence", contract.State)
+	}
+	if contract.RepairObjective != repairObjectiveAcquireFailureEvidence || !contract.ConcreteFailureEvidenceRequired {
+		t.Fatalf("contract = %+v, want evidence acquisition before state change without target evidence", contract)
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	if len(mapFromValue(pkg[coverageWorkItemContextKey])) == 0 {
+		t.Fatalf("repairActionPackage = %+v, want coverageWorkItemContext", pkg)
+	}
+}
+
+func TestCoverageWorkItemsTrackEvidenceByKind(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-kind",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"artifact/write"},
+						}},
+					},
+				},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"definitionRevision":     "rev-will-be-recomputed",
+				"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-001",
+				"status":                 "satisfied",
+				"acceptedEvidenceRefs":   []string{"legacy-step-ref"},
+				"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-001/001-change"}},
+			}},
+		},
+	}
+	revision := coverageDefinitionRevision(run.ExecutionContext)
+	run.ExecutionContext[coverageWorkItemsKey] = []map[string]any{{
+		"definitionRevision":     revision,
+		"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-001",
+		"status":                 "satisfied",
+		"acceptedEvidenceRefs":   []string{"legacy-step-ref"},
+		"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-001/001-change"}},
+	}}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want true because validation evidence is still missing")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one item", items)
+	}
+	item := items[0]
+	if got := stringFromMap(item, "status"); got != "open" {
+		t.Fatalf("status = %q, want open because validation evidence is missing", got)
+	}
+	missing := stringSet(coverageMissingEvidenceKinds(item))
+	if missing["state_change"] || !missing["validation"] {
+		t.Fatalf("missingEvidenceKinds = %+v, want only validation missing", coverageMissingEvidenceKinds(item))
+	}
+	if got := stringFromMap(item, "currentGap"); got != "missing required evidence kind: validation" {
+		t.Fatalf("currentGap = %q, want validation-only gap", got)
+	}
+}
+
+func TestCoverageWorkItemsKeepOldRevisionHistorical(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-revision",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal":               map[string]any{"text": "- current leaf"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                  "cwi-001",
+				"definitionRevision":  "rev-old",
+				"normalizedSourceKey": "goal:goal_leaf:old",
+				"sourceScope":         "goal_leaf",
+				"status":              "open",
+				"targetText":          "old leaf",
+			}},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want current revision rebuild")
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	if historical := mapSliceFromValue(context["historicalItems"]); len(historical) != 1 ||
+		stringFromMap(historical[0], "definitionRevision") != "rev-old" ||
+		stringFromMap(historical[0], "status") != "superseded" {
+		t.Fatalf("historicalItems = %+v, want old revision superseded summary", context["historicalItems"])
+	}
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "targetText") != "current leaf" || stringFromMap(focus, "definitionRevision") != "rev-current" {
+		t.Fatalf("currentFocus = %+v, want current revision only", focus)
+	}
+}
+
+func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-replan-lineage",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal":               map[string]any{"text": "stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"artifact/write"},
+						}},
+					},
+				},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-009",
+				"definitionRevision":     "rev-current",
+				"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-001",
+				"source":                 "goal",
+				"sourceScope":            "goal_leaf",
+				"sourceRequirementId":    "goal-leaf-001",
+				"sourcePath":             "goal.leaves[0]",
+				"targetText":             "stateful outcome",
+				"status":                 "in_progress",
+				"acceptedEvidenceRefs":   []string{"run-prev/001-change"},
+				"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-prev/001-change"}},
+				"rejectedEvidenceRefs":   []string{"run-prev/002-verify"},
+				"rejectedEvidenceByKind": map[string]any{"validation": []string{"run-prev/002-verify"}},
+			}},
+		},
+	}
+
+	if !prepareCoverageWorkItemsForReplanSuccessor(run) {
+		t.Fatalf("prepareCoverageWorkItemsForReplanSuccessor changed = false, want normalized successor ledger")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one inherited current item", items)
+	}
+	item := items[0]
+	if got := stringFromMap(item, "id"); got != "cwi-001" {
+		t.Fatalf("id = %q, want successor-local stable order id", got)
+	}
+	if got := stringFromMap(item, "status"); got != "in_progress" {
+		t.Fatalf("status = %q, want inherited in_progress", got)
+	}
+	accepted := mapStringSliceValue(item["acceptedEvidenceByKind"])
+	if len(accepted["state_change"]) != 1 || accepted["state_change"][0] != "run-prev/001-change" {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want state_change lineage", accepted)
+	}
+	rejected := mapStringSliceValue(item["rejectedEvidenceByKind"])
+	if len(rejected["validation"]) != 1 || rejected["validation"][0] != "run-prev/002-verify" {
+		t.Fatalf("rejectedEvidenceByKind = %+v, want validation rejection lineage", rejected)
+	}
+	focus := mapFromValue(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])["currentFocus"])
+	if stringFromMap(focus, "targetText") != "stateful outcome" ||
+		!stringSet(stringSliceFromValue(focus["acceptedEvidenceRefs"]))["run-prev/001-change"] ||
+		!stringSet(stringSliceFromValue(focus["rejectedEvidenceRefs"]))["run-prev/002-verify"] {
+		t.Fatalf("currentFocus = %+v, want inherited evidence lineage on current focus", focus)
+	}
+}
+
+func TestCoverageWorkItemsReplanSuccessorMovesStaleSourcesToHistory(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-replan-stale-source",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal":               map[string]any{"text": "current leaf"},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                  "cwi-001",
+				"definitionRevision":  "rev-current",
+				"normalizedSourceKey": "goal:goal_leaf:stale-leaf",
+				"source":              "goal",
+				"sourceScope":         "goal_leaf",
+				"sourceRequirementId": "stale-leaf",
+				"sourcePath":          "goal.leaves[9]",
+				"targetText":          "stale leaf",
+				"status":              "open",
+			}},
+			coverageWorkItemContextKey: map[string]any{
+				"historicalItems": []map[string]any{{
+					"id":                 "cwi-000",
+					"definitionRevision": "rev-older",
+					"historicalReason":   "already_historical",
+				}},
+			},
+		},
+	}
+
+	if !prepareCoverageWorkItemsForReplanSuccessor(run) {
+		t.Fatalf("prepareCoverageWorkItemsForReplanSuccessor changed = false, want stale source historical isolation")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 || stringFromMap(items[0], "targetText") != "current leaf" {
+		t.Fatalf("coverageWorkItems = %+v, want only current source active", items)
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "targetText") != "current leaf" {
+		t.Fatalf("currentFocus = %+v, want current source only", focus)
+	}
+	historical := mapSliceFromValue(context["historicalItems"])
+	if len(historical) != 2 {
+		t.Fatalf("historicalItems = %+v, want preserved previous history plus stale source", historical)
+	}
+	var foundStale bool
+	for _, item := range historical {
+		if stringFromMap(item, "historicalReason") == "superseded_coverage_source" &&
+			stringFromMap(item, "definitionRevision") == "rev-current" {
+			foundStale = true
+		}
+	}
+	if !foundStale {
+		t.Fatalf("historicalItems = %+v, want stale current-revision source marked superseded_coverage_source", historical)
+	}
+}
+
+func TestCoverageWorkItemsHistoricalSupersededSourcesAreStable(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-stable-history",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal":               map[string]any{"text": "current leaf"},
+			coverageWorkItemsKey: []map[string]any{
+				{
+					"id":                  "cwi-003",
+					"definitionRevision":  "rev-current",
+					"normalizedSourceKey": "goal:goal_leaf:stale-c",
+					"source":              "goal",
+					"sourceScope":         "goal_leaf",
+					"sourceRequirementId": "stale-c",
+					"targetText":          "stale C",
+					"status":              "open",
+				},
+				{
+					"id":                  "cwi-002",
+					"definitionRevision":  "rev-current",
+					"normalizedSourceKey": "goal:goal_leaf:stale-b",
+					"source":              "goal",
+					"sourceScope":         "goal_leaf",
+					"sourceRequirementId": "stale-b",
+					"targetText":          "stale B",
+					"status":              "open",
+				},
+			},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want stale sources moved to history")
+	}
+	historical := mapSliceFromValue(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])["historicalItems"])
+	if len(historical) != 2 {
+		t.Fatalf("historicalItems = %+v, want two stale source entries", historical)
+	}
+	if got := []string{stringFromMap(historical[0], "sourceRequirementId"), stringFromMap(historical[1], "sourceRequirementId")}; got[0] != "stale-b" || got[1] != "stale-c" {
+		t.Fatalf("historical source order = %+v, want stable normalized source key order", got)
+	}
+}
+
+func TestCoverageWorkItemContextDoesNotFocusSkippedItems(t *testing.T) {
+	revision := "rev-current"
+	items := []map[string]any{
+		{
+			"id":                    "cwi-001",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-001",
+			"sourcePath":            "goal.leaves[0]",
+			"targetText":            "skipped leaf",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-001",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "skipped",
+			"reason":                "explicitly excluded by governance",
+		},
+		{
+			"id":                    "cwi-002",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-002",
+			"sourcePath":            "goal.leaves[1]",
+			"targetText":            "open leaf",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-002",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "open",
+		},
+	}
+
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "id") != "cwi-002" {
+		t.Fatalf("currentFocus = %+v, want open item instead of skipped item", focus)
+	}
+	unresolved := mapSliceFromValue(context["unresolvedItems"])
+	if len(unresolved) != 1 || stringFromMap(unresolved[0], "id") != "cwi-002" {
+		t.Fatalf("unresolvedItems = %+v, want skipped item excluded", unresolved)
+	}
+}
+
+func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-advance",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"artifact/write"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	}
+	changeStep := &runmodel.Step{
+		ID:    "run-cwi-advance/001-change",
+		RunID: run.ID,
+		Kind:  "artifact/write",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"coverageTargets": []string{"stateful outcome"},
+		},
+	}
+	if !updateRunCoverageWorkItemsFromCompletedStep(run, changeStep) {
+		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed = false, want state_change evidence update")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "in_progress" {
+		t.Fatalf("status after state change = %q, want in_progress", got)
+	}
+	missing := stringSet(coverageMissingEvidenceKinds(item))
+	if missing["state_change"] || !missing["validation"] {
+		t.Fatalf("missing after state change = %+v, want validation only", coverageMissingEvidenceKinds(item))
+	}
+
+	assessmentStep := &runmodel.Step{
+		ID:    "run-cwi-advance/002-assess",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+	}
+	assessment := map[string]any{
+		"goalCoverage": map[string]any{
+			"items": []map[string]any{{
+				"goalRequirementId": "goal-leaf-001",
+				"goal":              "stateful outcome",
+				"state":             "satisfied",
+				"evidenceRefs":      []string{"run-cwi-advance/002-assess/validation/runtime-step"},
+			}},
+		},
+	}
+	if !updateRunCoverageWorkItemsFromAssessment(run, assessmentStep, assessment) {
+		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed = false, want validation closure")
+	}
+	item = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "satisfied" {
+		t.Fatalf("status after assessment = %q, want satisfied", got)
+	}
+	if missing := coverageMissingEvidenceKinds(item); len(missing) != 0 {
+		t.Fatalf("missing after assessment = %+v, want none", missing)
+	}
+}
+
+func TestCoverageWorkItemsRejectUnclosedAssessmentEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-cwi-reject",
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+	step := &runmodel.Step{ID: "run-cwi-reject/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{{
+			"item":          "acceptance gate",
+			"state":         "failed",
+			"failureReason": "validation evidence did not close the item",
+			"evidenceRefs":  []string{"run-cwi-reject/001-verify"},
+		}},
+	}
+
+	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
+		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed = false, want rejected evidence")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	rejected := mapStringSliceValue(item["rejectedEvidenceByKind"])
+	if len(rejected["validation"]) != 1 || rejected["validation"][0] != "run-cwi-reject/001-verify" {
+		t.Fatalf("rejectedEvidenceByKind = %+v, want validation rejected ref", rejected)
+	}
+	if got := stringFromMap(item, "currentGap"); got != "validation evidence did not close the item" {
+		t.Fatalf("currentGap = %q, want failure reason", got)
+	}
+}
+
+func TestCoverageWorkItemsRejectUnlinkedSatisfiedAssessment(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-cwi-unlinked-assessment",
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+	step := &runmodel.Step{ID: "run-cwi-unlinked-assessment/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{{
+			"item":         "unrelated satisfied claim",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-cwi-unlinked-assessment/001-assess/validation/runtime-step"},
+		}},
+	}
+
+	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
+		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want rejected unlinked assessment")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	if got := stringFromMap(item, "currentGap"); got != "satisfied assessment item did not relink to any active coverage work item" {
+		t.Fatalf("currentGap = %q, want unlinked assessment reason", got)
+	}
+}
+
+func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-failed-step",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "stateful outcome"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"artifact/write"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	ensureRunCoverageWorkItems(run)
+	step := &runmodel.Step{
+		ID:    "run-cwi-failed-step/001-change",
+		RunID: run.ID,
+		Kind:  "artifact/write",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"coverageTargets": []string{"stateful outcome"},
+			"error":           "state-changing evidence failed",
+		},
+	}
+
+	if !updateRunCoverageWorkItemsFromFailedStep(run, step, "") {
+		t.Fatalf("updateRunCoverageWorkItemsFromFailedStep changed = false, want rejected state_change evidence")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	rejected := mapStringSliceValue(item["rejectedEvidenceByKind"])
+	if len(rejected["state_change"]) == 0 {
+		t.Fatalf("rejectedEvidenceByKind = %+v, want rejected state_change evidence", rejected)
+	}
+	if got := stringFromMap(item, "currentGap"); got != "state-changing evidence failed" {
+		t.Fatalf("currentGap = %q, want failure reason", got)
+	}
+}
+
+func TestCoverageWorkItemsAcceptanceGateRequiresSatisfiedItems(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-cwi-acceptance-gate",
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+
+	err := validateRunCoverageWorkItemsReadyForAcceptance(run)
+
+	if err == nil || !strings.Contains(err.Error(), "coverageWorkItems not ready") {
+		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance err = %v, want unresolved work item failure", err)
+	}
+}
+
+func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-cwi-acceptance-ready",
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+	step := &runmodel.Step{ID: "run-cwi-acceptance-ready/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{{
+			"item":         "acceptance gate",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-cwi-acceptance-ready/001-assess/validation/runtime-step"},
+		}},
+	}
+	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
+		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want satisfied closure")
+	}
+
+	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
+		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance: %v", err)
+	}
+}
+
+func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:               "run-cwi-evidence-ready-close",
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"closure trace is exposed"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+	verify := &runmodel.Step{
+		ID:    "run-cwi-evidence-ready-close/001-verify",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"coverageTargets": []string{"closure trace is exposed"},
+		},
+	}
+	if !updateRunCoverageWorkItemsFromCompletedStep(run, verify) {
+		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed=false, want evidence_ready update")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "evidence_ready" {
+		t.Fatalf("status after evidence = %q, want evidence_ready", got)
+	}
+
+	assess := &runmodel.Step{ID: "run-cwi-evidence-ready-close/002-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{{
+			"item":         "closure trace is exposed",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-cwi-evidence-ready-close/001-verify"},
+		}},
+	}
+	if !updateRunCoverageWorkItemsFromAssessment(run, assess, assessment) {
+		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want satisfied closure")
+	}
+	item = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "satisfied" {
+		t.Fatalf("status after assessment = %q, want satisfied", got)
+	}
+	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
+		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance: %v", err)
+	}
+}

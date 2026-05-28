@@ -208,18 +208,19 @@ type ShellRuntimePolicy struct {
 }
 
 type LLMExecutionDecision struct {
-	ThoughtSummary   string               `json:"thoughtSummary,omitempty"`
-	Plan             []string             `json:"plan,omitempty"`
-	ExecutionGraph   *BlockExecutionGraph `json:"executionGraph,omitempty"`
-	NextAction       *LLMAction           `json:"nextAction,omitempty"`
-	RequiredDecision *RequiredDecision    `json:"requiredDecision,omitempty"`
-	RequiredApproval *RequiredApproval    `json:"requiredApproval,omitempty"`
-	PatchRequests    []PatchRequest       `json:"patchRequests,omitempty"`
-	MCPToolCalls     []MCPToolCallRequest `json:"mcpToolCalls,omitempty"`
-	ShellCommands    []ShellCommand       `json:"shellCommands,omitempty"`
-	MemoryWrites     []MemoryWriteRequest `json:"memoryWrites,omitempty"`
-	DoDAssessment    *DoDAssessment       `json:"dodAssessment,omitempty"`
-	CompletionState  string               `json:"completionState"`
+	ThoughtSummary        string                 `json:"thoughtSummary,omitempty"`
+	Plan                  []string               `json:"plan,omitempty"`
+	ExecutionGraph        *BlockExecutionGraph   `json:"executionGraph,omitempty"`
+	NextAction            *LLMAction             `json:"nextAction,omitempty"`
+	RequiredDecision      *RequiredDecision      `json:"requiredDecision,omitempty"`
+	RequiredApproval      *RequiredApproval      `json:"requiredApproval,omitempty"`
+	PatchRequests         []PatchRequest         `json:"patchRequests,omitempty"`
+	MCPToolCalls          []MCPToolCallRequest   `json:"mcpToolCalls,omitempty"`
+	ShellCommands         []ShellCommand         `json:"shellCommands,omitempty"`
+	MemoryWrites          []MemoryWriteRequest   `json:"memoryWrites,omitempty"`
+	CapabilityPolicySkips []CapabilityPolicySkip `json:"capabilityPolicySkips,omitempty"`
+	DoDAssessment         *DoDAssessment         `json:"dodAssessment,omitempty"`
+	CompletionState       string                 `json:"completionState"`
 }
 
 type BlockExecutionGraph struct {
@@ -283,6 +284,13 @@ type MemoryWriteRequest struct {
 	Summary    string   `json:"summary"`
 	Content    string   `json:"content,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
+}
+
+type CapabilityPolicySkip struct {
+	PolicyID       string `json:"policyId,omitempty"`
+	Category       string `json:"category,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	FallbackPolicy string `json:"fallbackPolicy,omitempty"`
 }
 
 type DoDAssessment struct {

@@ -2476,6 +2476,41 @@ func TestParseLLMExecutionDecisionNormalizesTopLevelReason(t *testing.T) {
 	}
 }
 
+func TestNormalizeDecisionOutputPreservesCapabilityPolicySkips(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"capabilityPolicySkips":[{
+			"policyId":"code-semantics-policy",
+			"category":"code_semantics",
+			"reason":"direct validation evidence is sufficient",
+			"fallbackPolicy":"fallback_to_file_read_and_build_output_without_blocking"
+		}],
+		"executionGraph":{"nodes":[
+			{"id":"patch","kind":"patch/apply","input":{"patchType":"file_write","targetRef":"main.go","content":"package main\n"}}
+		]}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	if len(decision.CapabilityPolicySkips) != 1 {
+		t.Fatalf("capabilityPolicySkips = %+v, want one skip", decision.CapabilityPolicySkips)
+	}
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-capability-skip"),
+		StepID: common.StepID("run-capability-skip/llm-1"),
+	}, decision)
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	skips, ok := output["capabilityPolicySkips"].([]map[string]any)
+	if !ok || len(skips) != 1 {
+		t.Fatalf("capabilityPolicySkips output = %#v, want one structured skip", output["capabilityPolicySkips"])
+	}
+	if skips[0]["policyId"] != "code-semantics-policy" || skips[0]["reason"] != "direct validation evidence is sufficient" {
+		t.Fatalf("capability policy skip = %+v, want policy id and reason", skips[0])
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsUnknownFieldAfterNormalization(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte("Here is the json:\n{\"workspaceId\":\"ws-1\",\"completionState\":\"continue\"}"))
 	if !errors.Is(err, common.ErrInvalidArgument) {

@@ -24,6 +24,7 @@ func initialStepKind(run *runModel.Run) string {
 }
 
 func initialStepInput(run *runModel.Run) map[string]any {
+	ensureRunCoverageWorkItems(run)
 	input := nextStepInput(run, "")
 	if input == nil {
 		return nil
@@ -389,6 +390,7 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if run == nil {
 		return nil
 	}
+	ensureRunCoverageWorkItems(run)
 	input := map[string]any{
 		"workspaceId":    string(run.WorkspaceID),
 		"previousStepId": string(previousStepID),
@@ -401,6 +403,9 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	}
 	if executionContext := slimExecutionContextForStepInput(run.ExecutionContext); len(executionContext) > 0 {
 		input["executionContext"] = executionContext
+	}
+	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
+		input[coverageWorkItemContextKey] = context
 	}
 	return input
 }
@@ -444,6 +449,9 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	}
 	if value := mapSliceFromValue(executionContext["governanceHistory"]); len(value) > 0 {
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(value, 6)
+	}
+	if value := mapFromValue(executionContext[coverageWorkItemContextKey]); len(value) > 0 {
+		ret[coverageWorkItemContextKey] = value
 	}
 	return ret
 }

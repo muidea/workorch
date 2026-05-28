@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -729,7 +730,13 @@ func parseStdioEndpoint(endpoint string) (string, []string, error) {
 	if len(fields) == 0 {
 		return "", nil, fmt.Errorf("%w: mcp stdio endpoint command is required", common.ErrInvalidArgument)
 	}
-	return fields[0], fields[1:], nil
+	command := fields[0]
+	if strings.ContainsAny(command, `/\`) && !filepath.IsAbs(command) {
+		if abs, err := filepath.Abs(command); err == nil {
+			command = abs
+		}
+	}
+	return command, fields[1:], nil
 }
 
 func stdioLaunchConfig(server *mcpmodel.Server, request runtimemodel.StepExecutionRequest) (string, []string, map[string]string, error) {

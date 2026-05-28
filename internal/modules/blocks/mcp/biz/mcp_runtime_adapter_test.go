@@ -359,6 +359,62 @@ func TestRuntimeAdapterStartsStdioInWorkspaceDeliverableDirectory(t *testing.T) 
 	}
 }
 
+func TestRuntimeAdapterResolvesRelativeStdioEndpointBeforeWorkspaceCWD(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	deliverableDir := filepath.Join(root, "workspace")
+	endpointDir := filepath.Join(root, "system", "mcp")
+	if err := os.MkdirAll(deliverableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(endpointDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	helperName := "mcp_helper.sh"
+	helperPath := filepath.Join(endpointDir, helperName)
+	if err := os.WriteFile(helperPath, []byte("#!/bin/sh\nWORKORCH_MCP_STDIO_HELPER=1 exec "+os.Args[0]+" -test.run=TestMCPStdioHelperProcess\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(endpointDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousWD); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-relative-endpoint"),
+		Name:          "stdio relative endpoint",
+		Transport:     "stdio",
+		Endpoint:      "." + string(os.PathSeparator) + helperName,
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   common.WorkspaceID("ws-mcp-relative-endpoint"),
+		WorkspaceDeliverableDirectory: deliverableDir,
+		Kind:                          "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-relative-endpoint",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	if result.Output["transport"] != "stdio" || result.Output["status"] != "completed" {
+		t.Fatalf("output = %+v, want completed stdio call from relative endpoint", result.Output)
+	}
+}
+
 func TestRuntimeAdapterPrefersEndpointOverStdioCommandArgsEnv(t *testing.T) {
 	ctx := context.Background()
 	service := newMCPService(t, kernelmcp.CreateServerCommand{
