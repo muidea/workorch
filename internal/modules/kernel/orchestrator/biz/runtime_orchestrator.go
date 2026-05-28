@@ -1865,7 +1865,7 @@ func nodeValidationEvidenceContractIsConcrete(node runtimemodel.BlockExecutionNo
 
 func validationEvidenceModeIsConcrete(mode string) bool {
 	switch strings.TrimSpace(mode) {
-	case "runtime_behavior", "controlled_substitute", "executable_contract", "dynamic_execution":
+	case "runtime_behavior", "runtime_observation", "controlled_substitute", "controlled_substitute_observation", "executable_contract", "executable_contract_observation", "dynamic_execution", "dynamic_execution_observation":
 		return true
 	default:
 		return false

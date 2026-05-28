@@ -19539,6 +19539,52 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsObservationModeAlias(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-observation-mode",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-observation-mode/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "verify-contract",
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_observation",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want runtime_observation mode alias allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsPatchRepairNoOpValidationGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-patch-repair-noop-validation",

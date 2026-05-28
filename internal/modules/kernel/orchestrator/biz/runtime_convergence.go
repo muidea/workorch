@@ -111,7 +111,7 @@ func BuildConvergenceContract(
 		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
 	}
-	if populateCoverageWorkItemConvergenceContract(input, &contract) {
+	if populateCoverageWorkItemConvergenceContract(run, input, &contract) {
 		return contract
 	}
 	if convergenceTargetEvidenceReadyForStateChange(run, input, failedStep) {
@@ -217,7 +217,7 @@ func BuildConvergenceContract(
 	return contract
 }
 
-func populateCoverageWorkItemConvergenceContract(input map[string]any, contract *ConvergenceContract) bool {
+func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[string]any, contract *ConvergenceContract) bool {
 	if contract == nil {
 		return false
 	}
@@ -253,6 +253,19 @@ func populateCoverageWorkItemConvergenceContract(input map[string]any, contract 
 		contract.RuntimeStageMode = "structured_governance"
 		contract.GovernanceReason = firstNonEmptyString(stringFromMap(focus, "currentGap"), "coverage work item requires governance evidence")
 		return true
+	}
+	if coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			contract.State = convergenceStateNeedStateChange
+			contract.RuntimeStage = runtimeStageRepair
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveStateChangingOutput
+			contract.StateChangingOutputRequired = true
+			contract.RepairActionPackage = pkg
+			contract.RepairActionPackage[coverageWorkItemContextKey] = context
+			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+			return true
+		}
 	}
 	if missing["state_change"] {
 		if repairHasImplementationTargetEvidence(input, contract.RepairActionPackage) ||
@@ -306,6 +319,24 @@ func populateCoverageWorkItemConvergenceContract(input map[string]any, contract 
 	contract.RuntimeStageMode = "strict_convergence"
 	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
 	return true
+}
+
+func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evidenceKind string) bool {
+	evidenceKind = strings.TrimSpace(evidenceKind)
+	if len(context) == 0 || evidenceKind == "" {
+		return false
+	}
+	for _, key := range []string{"currentFocus", "currentFocusItems", "unresolvedItems", "ledgerSummary"} {
+		if item := mapFromValue(context[key]); len(item) > 0 && stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))[evidenceKind] {
+			return true
+		}
+		for _, item := range mapSliceFromValue(context[key]) {
+			if stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))[evidenceKind] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[string]any) bool {

@@ -111,6 +111,75 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractUsesUnfocusedCoverageWorkItemStateChange(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-unfocused-cwi-state-change",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-unfocused-cwi-state-change/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+			}},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                   "cwi-001",
+					"sourceScope":          "goal_leaf",
+					"missingEvidenceKinds": []string{"validation"},
+					"status":               "open",
+				},
+				"unresolvedItems": []map[string]any{{
+					"id":                   "cwi-021",
+					"sourceScope":          "deliverable",
+					"sourceRequirementId":  "version_control_snapshot",
+					"targetText":           "version_control_snapshot",
+					"missingEvidenceKinds": []string{"validation", "state_change"},
+					"status":               "open",
+				}},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want git/write state-changing evidence requirement", required)
+	}
+	if context := mapFromValue(contract.RepairActionPackage[coverageWorkItemContextKey]); len(mapSliceFromValue(context["unresolvedItems"])) != 1 {
+		t.Fatalf("coverageWorkItemContext = %+v, want unresolved CWI preserved", context)
+	}
+}
+
 func TestBuildConvergenceContractEscalatesValidationFailureWithDiagnosticsToStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:          runtimeStageVerification,
