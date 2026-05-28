@@ -505,6 +505,8 @@ type WorkspaceSnapshot struct {
 	Workspace          Workspace           `json:"workspace"`
 	Outcome            RunOutcome          `json:"outcome"`
 	TaskProgress       TaskProgress        `json:"taskProgress"`
+	Goals              []Goal              `json:"goals,omitempty"`
+	DoDs               []DoD               `json:"dods,omitempty"`
 	Runs               []Run               `json:"runs,omitempty"`
 	Results            []Result            `json:"results,omitempty"`
 	Artifacts          []Artifact          `json:"artifacts,omitempty"`

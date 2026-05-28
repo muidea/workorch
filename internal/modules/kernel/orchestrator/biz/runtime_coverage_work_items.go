@@ -1112,6 +1112,29 @@ func applyCoverageWorkItemContext(input map[string]any, context map[string]any) 
 	}
 }
 
+func attachCoverageWorkItemFailureDiagnostics(run *runModel.Run, step *runModel.Step) {
+	if run == nil || step == nil || len(step.Output) == 0 {
+		return
+	}
+	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
+	if len(context) == 0 {
+		return
+	}
+	unresolved := mapSliceFromValue(context["unresolvedItems"])
+	if len(unresolved) == 0 {
+		return
+	}
+	step.Output[coverageWorkItemContextKey] = context
+	step.Output["unresolvedCoverageWorkItems"] = unresolved
+	diagnostics := mapFromValue(step.Output["runtimeDiagnostics"])
+	if diagnostics == nil {
+		diagnostics = map[string]any{}
+	}
+	diagnostics["coverageWorkItemContext"] = context
+	diagnostics["unresolvedCoverageWorkItems"] = unresolved
+	step.Output["runtimeDiagnostics"] = diagnostics
+}
+
 func coverageWorkItemSourceKey(source coverageWorkItemSource) string {
 	if strings.TrimSpace(source.Source) == "" || strings.TrimSpace(source.TargetText) == "" {
 		return ""

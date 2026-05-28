@@ -62,6 +62,8 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 						dod, _ = be.DoD().Get(ctx, displayRun.DoDID)
 					}
 				}
+				goal = resolveWorkspaceContextGoal(snapshot, displayRun, goal)
+				dod = resolveWorkspaceContextDoD(snapshot, displayRun, dod)
 				if dod == nil {
 					dod = latestDoDFromBackend(ctx, be, wsID)
 				}
@@ -150,6 +152,40 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 		items, err := be.Decision().List(ctx, common.WorkspaceID(workspaceID))
 		return DecisionListMsg{Decisions: items, Error: err}
 	}
+}
+
+func resolveWorkspaceContextGoal(snapshot *backend.WorkspaceSnapshotInfo, run *backend.RunInfo, current *backend.GoalInfo) *backend.GoalInfo {
+	if current != nil && strings.TrimSpace(current.Text) != "" {
+		return current
+	}
+	if snapshot == nil || len(snapshot.Goals) == 0 {
+		return current
+	}
+	if run != nil && run.GoalID != "" {
+		for i := range snapshot.Goals {
+			if snapshot.Goals[i].ID == run.GoalID {
+				return &snapshot.Goals[i]
+			}
+		}
+	}
+	return &snapshot.Goals[len(snapshot.Goals)-1]
+}
+
+func resolveWorkspaceContextDoD(snapshot *backend.WorkspaceSnapshotInfo, run *backend.RunInfo, current *backend.DoDInfo) *backend.DoDInfo {
+	if current != nil && len(current.Items) > 0 {
+		return current
+	}
+	if snapshot == nil || len(snapshot.DoDs) == 0 {
+		return current
+	}
+	if run != nil && run.DoDID != "" {
+		for i := range snapshot.DoDs {
+			if snapshot.DoDs[i].ID == run.DoDID {
+				return &snapshot.DoDs[i]
+			}
+		}
+	}
+	return &snapshot.DoDs[len(snapshot.DoDs)-1]
 }
 
 func latestDoDFromBackend(ctx context.Context, be backend.Backend, wsID common.WorkspaceID) *backend.DoDInfo {

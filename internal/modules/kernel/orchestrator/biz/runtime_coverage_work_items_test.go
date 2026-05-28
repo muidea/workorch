@@ -1,11 +1,15 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
@@ -654,5 +658,110 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 	}
 	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
 		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance: %v", err)
+	}
+}
+
+func TestCoverageWorkItemGateFailureProjectsUnresolvedItemsIntoRepairInput(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-gate-repair-input",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{"acceptance gate"}},
+		},
+	}
+	ensureRunCoverageWorkItems(run)
+	step := &runmodel.Step{
+		ID:    "run-cwi-gate-repair-input/001-assess",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+		},
+		Output: map[string]any{
+			"error": "invalid argument: coverageWorkItems not ready for accepted result; unresolved: cwi-001:validation",
+		},
+	}
+	attachCoverageWorkItemFailureDiagnostics(run, step)
+
+	input := (&RuntimeOrchestrator{}).runtimeRepairFollowUpStepInput(context.Background(), run, step, 1, nil)
+
+	if unresolved := mapSliceFromValue(input["unresolvedCoverageWorkItems"]); len(unresolved) != 1 || stringFromMap(unresolved[0], "id") != "cwi-001" {
+		t.Fatalf("unresolvedCoverageWorkItems = %+v, want cwi-001", input["unresolvedCoverageWorkItems"])
+	}
+	if context := mapFromValue(input[coverageWorkItemContextKey]); len(mapSliceFromValue(context["unresolvedItems"])) != 1 {
+		t.Fatalf("coverageWorkItemContext = %+v, want unresolved context", input[coverageWorkItemContextKey])
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(mapFromValue(pkg[coverageWorkItemContextKey])) == 0 {
+		t.Fatalf("repairActionPackage = %+v, want coverageWorkItemContext", pkg)
+	}
+	guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(guidance, "Resolve unresolvedCoverageWorkItems") {
+		t.Fatalf("repairGuidance = %q, want unresolved coverage guidance", guidance)
+	}
+}
+
+func TestGraphCompletionGateFailurePersistsCoverageWorkItemDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	run := &runmodel.Run{
+		ID:               "run-cwi-graph-gate",
+		WorkspaceID:      "ws-cwi-graph-gate",
+		State:            common.RunStateRunning,
+		InitialStepKind:  llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
+	}
+	ensureRunCoverageWorkItems(run)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: run.ID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    "run-cwi-graph-gate/001-assess",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{stepInputKeyRuntimeRepairFollowUp: true},
+		Output: map[string]any{
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"item":         "acceptance gate",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-cwi-graph-gate/unknown"},
+				}},
+			},
+		},
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{},
+		runs:       runRepo,
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		tickets:    memory.NewDecisionTicketRepository(),
+	}
+
+	_ = orch.handleGraphBatchCompletionGateFailure(ctx, run, step, step.Output, "runtime completion gate failed", errors.New("invalid argument: coverageWorkItems not ready for accepted result; unresolved: cwi-001:validation"))
+
+	stored, err := stepRepo.Get(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if unresolved := mapSliceFromValue(stored.Output["unresolvedCoverageWorkItems"]); len(unresolved) == 0 {
+		t.Fatalf("step output = %+v, want unresolved coverage work items", stored.Output)
+	}
+	updated, err := runRepo.Get(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	context := mapFromValue(updated.ExecutionContext[coverageWorkItemContextKey])
+	if len(mapSliceFromValue(context["unresolvedItems"])) == 0 {
+		t.Fatalf("run coverageWorkItemContext = %+v, want unresolved items", context)
 	}
 }

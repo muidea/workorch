@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -1974,6 +1975,74 @@ func TestModelWorkspaceContextUsesEffectiveGoalAndDoDFromRunContext(t *testing.T
 	}
 	if len(m.dodItems) != 2 || m.dodItems[0] != "验收项一满足" || m.dodItems[1] != "验收项二满足" {
 		t.Fatalf("dod items = %+v, want effective cumulative DoD", m.dodItems)
+	}
+}
+
+func TestModelWorkspaceContextShowsWorkspaceGoalAndDoDWithoutRun(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+			Goals:     []backend.GoalInfo{{ID: "goal-1", WorkspaceID: "ws-a", Text: "准备工作区目标"}},
+			DoDs:      []backend.DoDInfo{{ID: "dod-1", WorkspaceID: "ws-a", Items: []string{"验收项已定义"}, State: "ready"}},
+		},
+		Goal: &backend.GoalInfo{ID: "goal-1", WorkspaceID: "ws-a", Text: "准备工作区目标"},
+		DoD:  &backend.DoDInfo{ID: "dod-1", WorkspaceID: "ws-a", Items: []string{"验收项已定义"}, State: "ready"},
+	})
+	m = asModel(next)
+	if m.currentTask != "准备工作区目标" {
+		t.Fatalf("current task = %q, want workspace goal", m.currentTask)
+	}
+	if !reflect.DeepEqual(m.dodItems, []string{"验收项已定义"}) {
+		t.Fatalf("dod items = %+v, want workspace DoD", m.dodItems)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Goal: 准备工作区目标") || !strings.Contains(view, "验收项已定义") {
+		t.Fatalf("view missing workspace definitions:\n%s", view)
+	}
+}
+
+func TestModelWorkspaceContextPartialRefreshKeepsKnownGoalAndDoD(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.currentTask = "已确认目标"
+	m.transcript = []transcriptItem{{Kind: "Goal", Text: "已确认目标"}}
+	m.dodItems = []string{"已确认验收项"}
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		ActiveRun: &backend.RunInfo{
+			ID:          "run-a",
+			WorkspaceID: "ws-a",
+			State:       common.RunStateRunning,
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if m.currentTask != "已确认目标" {
+		t.Fatalf("current task = %q, want known goal retained", m.currentTask)
+	}
+	if !reflect.DeepEqual(m.dodItems, []string{"已确认验收项"}) {
+		t.Fatalf("dod items = %+v, want known DoD retained", m.dodItems)
+	}
+	if len(m.transcript) != 1 || m.transcript[0].Text != "已确认目标" {
+		t.Fatalf("transcript = %+v, want known transcript retained", m.transcript)
+	}
+}
+
+func TestModelWorkspaceContextCompleteSnapshotClearsMissingGoalAndDoD(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.currentTask = "旧目标"
+	m.transcript = []transcriptItem{{Kind: "Goal", Text: "旧目标"}}
+	m.dodItems = []string{"旧验收项"}
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
+		},
+	})
+	m = asModel(next)
+	if m.currentTask != "" || len(m.dodItems) != 0 || len(m.transcript) != 0 {
+		t.Fatalf("definitions = task:%q dod:%+v transcript:%+v, want cleared by complete empty snapshot", m.currentTask, m.dodItems, m.transcript)
 	}
 }
 

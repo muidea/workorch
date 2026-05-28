@@ -2630,6 +2630,22 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		}
 	}
+	coverageContext := mapFromValue(failedStep.Output[coverageWorkItemContextKey])
+	if len(coverageContext) == 0 {
+		coverageContext = mapFromValue(mapFromValue(failedStep.Output["runtimeDiagnostics"])[coverageWorkItemContextKey])
+	}
+	if len(coverageContext) > 0 {
+		applyCoverageWorkItemContext(input, coverageContext)
+		if unresolved := mapSliceFromValue(coverageContext["unresolvedItems"]); len(unresolved) > 0 {
+			input["unresolvedCoverageWorkItems"] = unresolved
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
+				"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
+				"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
+				"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
+			)
+		}
+	}
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
 	if assessmentOnlyCoverageRepair {
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {

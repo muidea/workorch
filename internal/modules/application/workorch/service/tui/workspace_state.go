@@ -209,6 +209,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if workspaceID == "" || workspaceID != m.activeWorkspaceID {
 		return
 	}
+	previousTask := m.currentTask
+	previousTranscript := append([]transcriptItem(nil), m.transcript...)
+	previousDoDItems := append([]string(nil), m.dodItems...)
 	m.upsertWorkspace(*msg.Workspace)
 	m.resetWorkspaceView()
 	m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
@@ -224,9 +227,15 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if run == nil {
 		m.activeRunID = ""
 		m.running = false
+		if msg.Goal != nil && strings.TrimSpace(msg.Goal.Text) != "" {
+			goalText := strings.TrimSpace(msg.Goal.Text)
+			m.currentTask = goalText
+			m.transcript = initialTranscript(goalText)
+		}
 		if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 			m.dodItems = append([]string(nil), msg.DoD.Items...)
 		}
+		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 		m.applyWorkspaceProgress(msg.Workspace.State)
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()
@@ -250,6 +259,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	} else if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 		m.dodItems = append([]string(nil), msg.DoD.Items...)
 	}
+	m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 	if msg.Snapshot != nil {
 		if runStateIsTerminal(run.State) {
 			m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
@@ -296,6 +306,19 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	m.syncBlockingApprovalFromList()
 	if strings.TrimSpace(m.result) != "" {
 		m.followMainViewportTail()
+	}
+}
+
+func (m *AppModel) restoreDefinitionsWhenPartialContext(msg WorkspaceContextMsg, previousTask string, previousTranscript []transcriptItem, previousDoDItems []string) {
+	if msg.Snapshot != nil {
+		return
+	}
+	if strings.TrimSpace(m.currentTask) == "" && strings.TrimSpace(previousTask) != "" {
+		m.currentTask = previousTask
+		m.transcript = append([]transcriptItem(nil), previousTranscript...)
+	}
+	if len(m.dodItems) == 0 && len(previousDoDItems) > 0 {
+		m.dodItems = append([]string(nil), previousDoDItems...)
 	}
 }
 
@@ -392,6 +415,7 @@ func contextGoalMaps(value any) []map[string]any {
 func (m *AppModel) resetWorkspaceView() {
 	m.activeRunID = ""
 	m.currentTask = ""
+	m.dodItems = nil
 	m.transcript = nil
 	m.result = ""
 	m.artifacts = nil

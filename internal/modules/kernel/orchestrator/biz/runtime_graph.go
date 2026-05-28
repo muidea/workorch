@@ -226,6 +226,10 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
 	errText := errorString(execErr)
+	if updateRunCoverageWorkItemsFromFailedStep(run, step, errText) && o.runs != nil {
+		_ = o.runs.Update(ctx, run)
+	}
+	attachCoverageWorkItemFailureDiagnostics(run, step)
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
 	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.steps.Update(ctx, step)

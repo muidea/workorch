@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
+)
 
 func TestDecodeSnapshotInfoPreservesRunExecutionContext(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
@@ -58,5 +62,47 @@ func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	}
 	if budget["maxTokens"] != float64(4096) {
 		t.Fatalf("contextBudget = %+v, want maxTokens preserved", budget)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesWorkspaceGoalsAndDoDs(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-1", "state": "active"},
+		"goals": []any{
+			map[string]any{"id": "goal-1", "workspaceId": "ws-1", "text": "goal text"},
+		},
+		"dods": []any{
+			map[string]any{"id": "dod-1", "workspaceId": "ws-1", "items": []any{"dod item"}, "state": "ready"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || len(snapshot.Goals) != 1 || snapshot.Goals[0].ID != "goal-1" || snapshot.Goals[0].Text != "goal text" {
+		t.Fatalf("goals = %+v, want decoded workspace goal", snapshot)
+	}
+	if len(snapshot.DoDs) != 1 || snapshot.DoDs[0].ID != "dod-1" || len(snapshot.DoDs[0].Items) != 1 || snapshot.DoDs[0].Items[0] != "dod item" {
+		t.Fatalf("dods = %+v, want decoded workspace DoD", snapshot.DoDs)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesClientSnapshotWorkspaceGoalsAndDoDs(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(client.WorkspaceSnapshot{
+		Workspace: client.Workspace{ID: "ws-1", State: "active"},
+		Goals: []client.Goal{
+			{ID: "goal-1", WorkspaceID: "ws-1", Text: "client goal"},
+		},
+		DoDs: []client.DoD{
+			{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"client dod"}, State: "ready"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || len(snapshot.Goals) != 1 || snapshot.Goals[0].Text != "client goal" {
+		t.Fatalf("goals = %+v, want decoded client snapshot goal", snapshot)
+	}
+	if len(snapshot.DoDs) != 1 || len(snapshot.DoDs[0].Items) != 1 || snapshot.DoDs[0].Items[0] != "client dod" {
+		t.Fatalf("dods = %+v, want decoded client snapshot DoD", snapshot.DoDs)
 	}
 }
