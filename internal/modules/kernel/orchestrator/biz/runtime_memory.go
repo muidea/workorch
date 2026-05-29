@@ -420,7 +420,7 @@ func appendMCPFailureToolMemoryWrite(requests []runtimeMemoryWriteRequest, _ *ru
 }
 
 func acceptedInputMemoryWriteRequests(run *runModel.Run, step *runModel.Step) []runtimeMemoryWriteRequest {
-	if run == nil || step == nil || step.Kind != llmWorkspaceExecutionStepKind {
+	if run == nil || step == nil || !isLLMWorkspaceStepKind(step.Kind) {
 		return nil
 	}
 	if !shouldCaptureAcceptedInputMemory(step) {

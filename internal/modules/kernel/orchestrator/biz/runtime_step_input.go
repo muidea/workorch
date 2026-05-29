@@ -18,7 +18,7 @@ func nextStepSpec(output map[string]any) (common.StepID, string) {
 
 func initialStepKind(run *runModel.Run) string {
 	if run != nil && strings.TrimSpace(run.InitialStepKind) != "" {
-		return strings.TrimSpace(run.InitialStepKind)
+		return canonicalLLMWorkspaceStepKind(run.InitialStepKind)
 	}
 	return defaultInitialStepKind
 }
@@ -262,7 +262,33 @@ func nextStepInputFromOutput(run *runModel.Run, previousStep *runModel.Step) map
 			input[key] = value
 		}
 	}
+	inheritDirectNextLLMStage(input, previousStep)
 	return input
+}
+
+func inheritDirectNextLLMStage(input map[string]any, previousStep *runModel.Step) {
+	if len(input) == 0 || previousStep == nil {
+		return
+	}
+	_, nextKind := nextStepSpec(previousStep.Output)
+	if !strings.HasPrefix(strings.TrimSpace(nextKind), "llm/") {
+		return
+	}
+	if strings.TrimSpace(stringFromMap(input, stepInputKeyRuntimeStage)) != "" ||
+		strings.TrimSpace(stringFromMap(input, stepInputKeySoulStage)) != "" {
+		return
+	}
+	if decisionBlockSpec(previousStep.Output).Reason != "" || approvalBlockSpec(previousStep.Output).Reason != "" {
+		return
+	}
+	stage := strings.TrimSpace(stringFromMap(previousStep.Input, stepInputKeyRuntimeStage))
+	if stage == "" {
+		return
+	}
+	setRuntimeStage(input, stage)
+	if soulStage := strings.TrimSpace(stringFromMap(previousStep.Input, stepInputKeySoulStage)); soulStage != "" {
+		input[stepInputKeySoulStage] = soulStage
+	}
 }
 
 func inheritRuntimeRepairLineage(input map[string]any, previousStep *runModel.Step) {

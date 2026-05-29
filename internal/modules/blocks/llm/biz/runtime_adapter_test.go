@@ -2047,6 +2047,38 @@ func TestRuntimeAdapterNormalizesPatchRequestsGraphNodeKind(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterNormalizesWorkspacePlanGraphNodeKind(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"executionGraph":{
+			"nodes":[
+				{"id":"plan-next","kind":"llm/workspace-plan","input":{"task":"continue planning"}}
+			]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	graph, ok := result.Output["executionGraph"].(map[string]any)
+	if result.Output["stage"] != "llm_execution_graph_plan" || !ok {
+		t.Fatalf("output = %+v, want execution graph plan", result.Output)
+	}
+	nodes, ok := graph["nodes"].([]map[string]any)
+	if !ok || len(nodes) != 1 {
+		t.Fatalf("nodes = %+v, want one graph node", graph["nodes"])
+	}
+	if nodes[0]["kind"] != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("first node kind = %v, want %s", nodes[0]["kind"], llmcommon.StepKindWorkspaceExecution)
+	}
+}
+
 func TestRuntimeAdapterReturnsErrorForFailedDecision(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"thoughtSummary":"DoD cannot be satisfied with current context",

@@ -5917,6 +5917,58 @@ func TestRuntimeOrchestrator_FollowUpInputInheritsStableExecutionContextPackage(
 	}
 }
 
+func TestNextStepInputFromOutputInheritsExplicitStageForDirectLLMContinuation(t *testing.T) {
+	runID := common.RunID("run-direct-llm-next-stage")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-direct-llm-next-stage"}
+	previousStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageRepair,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			stepInputKeySoulStage:        soulStageExecution,
+		},
+		Output: map[string]any{
+			stepOutputKeyNextStep: "follow-up",
+			stepOutputKeyNextKind: llmcommon.StepKindWorkspaceExecution,
+		},
+	}
+
+	input := nextStepInputFromOutput(run, previousStep)
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input[stepInputKeyRuntimeStageMode] != "strict_convergence" ||
+		input[stepInputKeySoulStage] != soulStageExecution {
+		t.Fatalf("nextStepInput = %+v, want inherited explicit repair stage", input)
+	}
+}
+
+func TestNextStepInputFromOutputDoesNotInferGovernanceStageFromBlockedLLMStep(t *testing.T) {
+	runID := common.RunID("run-direct-llm-next-governance")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-direct-llm-next-governance"}
+	previousStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/step-1"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStagePlanning,
+			stepInputKeySoulStage:    soulStagePlanning,
+		},
+		Output: map[string]any{
+			stepOutputKeyBlockDecisionReason: "decision required",
+			stepOutputKeyNextStep:            "after-decision",
+			stepOutputKeyNextKind:            llmcommon.StepKindWorkspaceExecution,
+		},
+	}
+
+	input := nextStepInputFromOutput(run, previousStep)
+
+	if input[stepInputKeyRuntimeStage] != nil || input[stepInputKeySoulStage] != nil {
+		t.Fatalf("nextStepInput = %+v, want governance continuation stage to remain unresolved until resume merge", input)
+	}
+}
+
 func TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks(t *testing.T) {
 	ctx := context.Background()
 	resultRepo := &countingResultRepository{inner: memory.NewResultRepository()}
@@ -14673,6 +14725,69 @@ func TestRuntimeOrchestrator_DirectNextStepUsesUniqueIDWhenTerminalStepExists(t 
 	}
 }
 
+func TestRuntimeOrchestrator_DirectNextLLMAliasCanonicalizesToWorkspaceExecution(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceID := common.WorkspaceID("ws-next-llm-alias")
+	runID := common.RunID("run-next-llm-alias")
+	runtime := &requestCapturingRuntimeAdapter{
+		fn: func(request runtimemodel.StepExecutionRequest) map[string]any {
+			switch request.StepID {
+			case common.StepID(runID + "/step-1"):
+				return map[string]any{
+					"status":   "completed",
+					"nextStep": string(runID) + "/llm-2",
+					"nextKind": llmcommon.StepKindWorkspacePlan,
+				}
+			case common.StepID(runID + "/llm-2"):
+				return map[string]any{
+					"status": "completed",
+				}
+			default:
+				return map[string]any{
+					"status": "completed",
+				}
+			}
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, memory.NewDecisionTicketRepository(), memory.NewApprovalRepository(), events.NewMemoryHub())
+
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		State:           common.RunStateCreated,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if len(runtime.requests) < 2 {
+		t.Fatalf("runtime requests = %+v, want direct llm alias continuation dispatched", runtime.requests)
+	}
+	second := runtime.requests[1]
+	if second.StepID != common.StepID(runID+"/llm-2") || second.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("second request = %+v, want canonical llm/workspace_execution continuation", second)
+	}
+	if mapFromValue(second.Input[stepInputKeyExecutionContextPackage]) == nil {
+		t.Fatalf("second request input = %+v, want enriched LLM execution context package", second.Input)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID(runID+"/llm-2"))
+	if err != nil {
+		t.Fatalf("get second step: %v", err)
+	}
+	if step.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("stored step kind = %q, want canonical llm/workspace_execution", step.Kind)
+	}
+}
+
 func TestRuntimeOrchestrator_RepairsRepeatedContinueWithoutActionableContinuation(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -18156,6 +18271,30 @@ func TestRuntimeOrchestrator_DispatchesConcreteGraphReturnedByExecutionLLMNode(t
 		if id != llmStepID && step.Input[stepInputKeyGraphRootStepID] != string(llmStepID) {
 			t.Fatalf("step %s graph root = %v, want nested root %s", id, step.Input[stepInputKeyGraphRootStepID], llmStepID)
 		}
+	}
+}
+
+func TestValidateStateChangingExecutionGraphTreatsWorkspacePlanAliasAsLLMAncestor(t *testing.T) {
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{
+			ID:   "plan-impl",
+			Kind: llmcommon.StepKindWorkspacePlan,
+		},
+		{
+			ID:        "write-config",
+			Kind:      "patch/apply",
+			DependsOn: []string{"plan-impl"},
+			Input: map[string]any{
+				"patchType": "file_write",
+				"targetRef": "config.json",
+				"content":   "{}",
+			},
+		},
+	}}
+
+	err := validateStateChangingExecutionGraph(graph)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "llm/workspace_execution before patch") {
+		t.Fatalf("validateStateChangingExecutionGraph err = %v, want canonical llm ancestor rejection", err)
 	}
 }
 
@@ -28218,6 +28357,116 @@ func TestMergeResumeInputPreservesProviderRetryRecoveryContract(t *testing.T) {
 	}
 	if mapFromValue(specs[0].Input["decisionResolution"]) == nil {
 		t.Fatalf("decisionResolution missing from merged provider retry input: %+v", specs[0].Input)
+	}
+}
+
+func TestMergeResumeInputPreservesExistingRepairContractAgainstDecisionWrapper(t *testing.T) {
+	specs := []stepDispatchSpec{{
+		ID:   "run-repair-merge/repair-004-of-step-1",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			stepInputKeySoulStage:         soulStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeExecutionGraph,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"outputMode":                   outputModeExecutionGraph,
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+			"convergenceContract": map[string]any{
+				"state":        convergenceStateNeedStateChange,
+				"runtimeStage": runtimeStageRepair,
+			},
+		},
+	}}
+	resumeInput := map[string]any{
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"outputMode":                      outputModeIncrementalArtifact,
+		"outputModeSelector": map[string]any{
+			"mode": outputModeIncrementalArtifact,
+		},
+		"artifactOutputContract": map[string]any{
+			"mode":  outputModeIncrementalArtifact,
+			"phase": artifactOutputPhasePlan,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"outputMode":             outputModeIncrementalArtifact,
+				"mustReturnArtifactPlan": true,
+			},
+		},
+		"convergenceContract": map[string]any{
+			"state":        convergenceStateNeedEvidence,
+			"runtimeStage": runtimeStageRepair,
+		},
+		"decisionResolution": map[string]any{
+			"resolutionId": "resolution-repair-merge",
+		},
+	}
+
+	mergeResumeInput(specs, resumeInput)
+
+	input := specs[0].Input
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["outputMode"] != outputModeExecutionGraph {
+		t.Fatalf("merged input = %+v, want existing repair contract preserved", input)
+	}
+	if input["concreteFailureEvidenceRequired"] != nil ||
+		mapFromValue(input["artifactOutputContract"]) != nil {
+		t.Fatalf("merged input = %+v, want stale wrapper contract ignored", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReturnArtifactPlan"] != nil || required["outputMode"] != outputModeExecutionGraph {
+		t.Fatalf("requiredOutput = %+v, want original executionGraph repair contract preserved", required)
+	}
+	if stringFromMap(mapFromValue(input["convergenceContract"]), "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want original state-changing contract preserved", input["convergenceContract"])
+	}
+	if mapFromValue(input["decisionResolution"]) == nil {
+		t.Fatalf("decisionResolution missing from merged repair input: %+v", input)
+	}
+}
+
+func TestMergeResumeInputDoesNotOverrideExistingStageWithResolutionStage(t *testing.T) {
+	specs := []stepDispatchSpec{{
+		ID:   "run-next-step-merge/next",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeySoulStage:        soulStageExecution,
+			stepInputKeyRuntimeStage:     runtimeStageExecution,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+		},
+	}}
+	resumeInput := map[string]any{
+		stepInputKeySoulStage:        soulStageDecision,
+		stepInputKeyRuntimeStage:     runtimeStageDecision,
+		stepInputKeyRuntimeStageMode: "structured_governance",
+		"decisionResolution": map[string]any{
+			"resolutionId": "resolution-next-step-merge",
+			"answer":       "continue",
+		},
+		"ticketContext": map[string]any{
+			"question": "continue?",
+		},
+	}
+
+	mergeResumeInput(specs, resumeInput)
+
+	input := specs[0].Input
+	if input[stepInputKeySoulStage] != soulStageExecution ||
+		input[stepInputKeyRuntimeStage] != runtimeStageExecution ||
+		input[stepInputKeyRuntimeStageMode] != "strict_convergence" {
+		t.Fatalf("merged input = %+v, want existing execution stage preserved", input)
+	}
+	if mapFromValue(input["decisionResolution"]) == nil || mapFromValue(input["ticketContext"]) == nil {
+		t.Fatalf("merged input = %+v, want governance envelope merged", input)
 	}
 }
 

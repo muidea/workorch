@@ -3,6 +3,7 @@ package events
 import (
 	"testing"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -50,6 +51,13 @@ func TestStepPayloadClonesMaps(t *testing.T) {
 	}
 }
 
+func TestStepPayloadCanonicalizesWorkspacePlanKind(t *testing.T) {
+	payload := StepPayload(llmcommon.StepKindWorkspacePlan, common.StepStateCompleted, nil, nil)
+	if payload[PayloadKeyKind] != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("kind = %v, want %s", payload[PayloadKeyKind], llmcommon.StepKindWorkspaceExecution)
+	}
+}
+
 func TestDecisionResolutionPayloadIncludesResolutionFields(t *testing.T) {
 	payload := DecisionResolutionPayload(
 		"manual gate",
@@ -88,6 +96,19 @@ func TestDecodeStepPayloadRejectsInvalidOutputType(t *testing.T) {
 	})
 	if ok {
 		t.Fatalf("DecodeStepPayload should reject non-map output")
+	}
+}
+
+func TestDecodeStepPayloadCanonicalizesWorkspacePlanKind(t *testing.T) {
+	decoded, ok := DecodeStepPayload(map[string]any{
+		PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
+		PayloadKeyState: string(common.StepStateCompleted),
+	})
+	if !ok {
+		t.Fatalf("DecodeStepPayload returned !ok")
+	}
+	if decoded.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("decoded.Kind = %q, want %q", decoded.Kind, llmcommon.StepKindWorkspaceExecution)
 	}
 }
 

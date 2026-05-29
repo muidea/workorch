@@ -954,6 +954,19 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 		stepInputKeyRuntimeStage:      runtimeStageRepair,
 		"repairObjective":             repairObjectiveStateChangingOutput,
 		"stateChangingOutputRequired": true,
+		"outputMode":                  outputModeIncrementalArtifact,
+		"outputModeSelector": map[string]any{
+			"mode": outputModeIncrementalArtifact,
+		},
+		"artifactOutputContract": map[string]any{
+			"mode":  outputModeIncrementalArtifact,
+			"phase": artifactOutputPhasePlan,
+		},
+		"artifactContinuationContext": map[string]any{
+			"id":         "artifact-continuation-001",
+			"artifactId": "artifact-001",
+		},
+		"artifactContinuationId": "artifact-continuation-001",
 		"repairActionPackage": map[string]any{
 			"requiredOutput":              evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
 			"evidenceAcquisitionRequired": true,
@@ -972,9 +985,88 @@ func TestApplyConvergenceContractNeedEvidenceRemovesStateChangingRequirement(t *
 	if !boolValue(output["concreteFailureEvidenceRequired"]) {
 		t.Fatalf("concreteFailureEvidenceRequired = false, want true")
 	}
+	for _, key := range []string{"outputMode", "outputModeSelector", "artifactOutputContract", "artifactContinuationContext", "artifactContinuationId"} {
+		if _, ok := output[key]; ok {
+			t.Fatalf("output[%s] still present in need_evidence contract: %+v", key, output[key])
+		}
+	}
 	required := mapFromValue(mapFromValue(output["repairActionPackage"])["requiredOutput"])
 	if !boolValue(required["mustProduceConcreteFailureEvidence"]) {
 		t.Fatalf("requiredOutput = %#v, want concrete evidence acquisition", required)
+	}
+}
+
+func TestApplyConvergenceContractNeedAssessmentStripsExecutableContract(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"boundedValidationRequired":   true,
+		"evidenceRepairRequired":      true,
+		"repairGuidance":              []string{"produce patch/apply before verification"},
+		"outputMode":                  outputModeIncrementalArtifact,
+		"outputModeSelector": map[string]any{
+			"mode": outputModeIncrementalArtifact,
+		},
+		"artifactOutputContract": map[string]any{
+			"mode":  outputModeIncrementalArtifact,
+			"phase": artifactOutputPhasePlan,
+		},
+		"artifactContinuationContext": map[string]any{
+			"id":         "artifact-continuation-001",
+			"artifactId": "artifact-001",
+		},
+		"artifactContinuationId": "artifact-continuation-001",
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustReturnArtifactPlan": true,
+				"outputMode":             outputModeIncrementalArtifact,
+			},
+			"coverageTargetSet": []map[string]any{{
+				"targetText": "coverage-gap",
+			}},
+			"currentFailure": map[string]any{
+				"reason": "coverage gap remains",
+			},
+		},
+	}
+	contract := ConvergenceContract{
+		State:            convergenceStateNeedAssessment,
+		RuntimeStage:     runtimeStageVerification,
+		RuntimeStageMode: "strict_convergence",
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+
+	if applied[stepInputKeyRuntimeStage] != runtimeStageVerification || applied[stepInputKeyAssessmentOnly] != true {
+		t.Fatalf("applied = %+v, want verification assessment-only contract", applied)
+	}
+	if applied["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repairObjective = %+v, want assessment-only coverage correction objective", applied["repairObjective"])
+	}
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"outputMode",
+		"outputModeSelector",
+		"artifactOutputContract",
+		"artifactContinuationContext",
+		"artifactContinuationId",
+	} {
+		if _, ok := applied[key]; ok {
+			t.Fatalf("applied[%s] still present in need_assessment contract: %+v", key, applied[key])
+		}
+	}
+	pkg := mapFromValue(applied["repairActionPackage"])
+	if len(pkg) == 0 {
+		t.Fatalf("repairActionPackage removed entirely, want contextual coverage/currentFailure retained")
+	}
+	if pkg["requiredOutput"] != nil {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want stripped for assessment-only contract", pkg["requiredOutput"])
+	}
+	if len(mapSliceFromValue(pkg["coverageTargetSet"])) == 0 || len(mapFromValue(pkg["currentFailure"])) == 0 {
+		t.Fatalf("repairActionPackage = %+v, want contextual fields retained", pkg)
 	}
 }
 

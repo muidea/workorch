@@ -566,7 +566,7 @@ func graphLLMNodeRequiresStateChangingOutput(run *runModel.Run, node runtimemode
 	if run == nil || !runExecutionContractRequiresStateChange(run) {
 		return false
 	}
-	return strings.TrimSpace(node.Kind) == initialStepKind(run)
+	return canonicalRuntimeGraphNodeKind(node.Kind) == initialStepKind(run)
 }
 
 var runtimeTemplatePattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*\}\}`)
@@ -2195,9 +2195,9 @@ func rejectedLLMDecisionOutputForProgress(step *runModel.Step) bool {
 }
 
 func processEvidenceActionKind(kind string) string {
-	kind = strings.TrimSpace(kind)
+	kind = canonicalLLMWorkspaceStepKind(kind)
 	switch {
-	case kind == llmWorkspaceExecutionStepKind:
+	case isLLMWorkspaceStepKind(kind):
 		return "llm_decision"
 	case kind == "patch/apply":
 		return "artifact_write"

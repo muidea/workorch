@@ -921,6 +921,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 	if contract.State == "" || contract.State == convergenceStateBlocked {
 		return input
 	}
+	clearConvergenceDerivedOutputModeFields(input)
 	input["convergenceContract"] = compactConvergenceContract(contract)
 	switch contract.State {
 	case convergenceStateNeedEvidence:
@@ -995,17 +996,63 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeySoulStage] = soulStageValidation
 		input[stepInputKeyAssessmentOnly] = true
+		if boolValue(input["assessmentOnlyContractCorrection"]) {
+			delete(input, "repairObjective")
+		} else {
+			input["repairObjective"] = firstNonEmptyString(contract.RepairObjective, "complete_dod_goal_coverage_assessment")
+		}
 		delete(input, "stateChangingOutputRequired")
 		delete(input, "concreteFailureEvidenceRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
+		stripRepairActionPackageExecutableOutputContract(input)
 	case convergenceStateNeedGovernance:
 		setRuntimeStage(input, runtimeStageDecision)
 		input[stepInputKeySoulStage] = soulStageDecision
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
+		delete(input, "repairObjective")
+		delete(input, "stateChangingOutputRequired")
+		delete(input, "concreteFailureEvidenceRequired")
+		delete(input, "boundedValidationRequired")
+		delete(input, "evidenceRepairRequired")
+		delete(input, "repairGuidance")
+		stripRepairActionPackageExecutableOutputContract(input)
 		input["governanceRequired"] = true
 		if contract.GovernanceReason != "" {
 			input["governanceReason"] = contract.GovernanceReason
 		}
 	}
 	return input
+}
+
+func clearConvergenceDerivedOutputModeFields(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	delete(input, "outputMode")
+	delete(input, "outputModeSelector")
+	delete(input, "artifactOutputContract")
+	delete(input, "artifactContinuationContext")
+	delete(input, "artifactContinuationId")
+}
+
+func stripRepairActionPackageExecutableOutputContract(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	for _, key := range []string{"requiredOutput", "forbiddenActions", "exitCriteria", "evidenceAcquisitionRequired"} {
+		delete(pkg, key)
+	}
+	if len(pkg) == 0 {
+		delete(input, "repairActionPackage")
+		return
+	}
+	input["repairActionPackage"] = pkg
 }
 
 func stateChangingConvergenceGuidance(existing any) []string {

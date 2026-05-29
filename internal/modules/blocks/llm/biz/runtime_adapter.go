@@ -2794,10 +2794,7 @@ func normalizeDecisionExecutionGraph(decision *llmmodels.LLMExecutionDecision) {
 		return
 	}
 	for idx := range decision.ExecutionGraph.Nodes {
-		switch strings.TrimSpace(decision.ExecutionGraph.Nodes[idx].Kind) {
-		case "patchRequests", "patch/request":
-			decision.ExecutionGraph.Nodes[idx].Kind = llmcommon.RuntimeBlockKindPatchApply
-		}
+		decision.ExecutionGraph.Nodes[idx].Kind = llmcommon.CanonicalRuntimeBlockKind(decision.ExecutionGraph.Nodes[idx].Kind)
 	}
 }
 
@@ -3779,7 +3776,7 @@ func executionGraphOutput(graph *llmmodels.BlockExecutionGraph) map[string]any {
 	for _, node := range graph.Nodes {
 		item := map[string]any{
 			"id":   node.ID,
-			"kind": node.Kind,
+			"kind": llmcommon.CanonicalRuntimeBlockKind(node.Kind),
 		}
 		if len(node.DependsOn) > 0 {
 			dependsOn := append([]string(nil), node.DependsOn...)

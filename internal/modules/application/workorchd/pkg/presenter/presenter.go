@@ -7,6 +7,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -167,7 +168,7 @@ func MapStep(item *runmodel.Step) *StepView {
 	}
 	return &StepView{
 		ID:     string(item.ID),
-		Kind:   item.Kind,
+		Kind:   llmcommon.CanonicalRuntimeBlockKind(item.Kind),
 		State:  string(item.State),
 		Input:  clonePresenterMap(item.Input),
 		Output: clonePresenterMap(item.Output),

@@ -3,6 +3,7 @@ package events
 import (
 	"encoding/json"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -339,7 +340,7 @@ func RunPayload(
 
 func StepPayload(kind string, state common.StepState, input, output map[string]any) map[string]any {
 	payload := map[string]any{
-		PayloadKeyKind:  kind,
+		PayloadKeyKind:  llmcommon.CanonicalRuntimeBlockKind(kind),
 		PayloadKeyState: string(state),
 	}
 	if input != nil {
@@ -737,7 +738,7 @@ func DecodeStepPayload(payload map[string]any) (StepPayloadData, bool) {
 		return StepPayloadData{}, false
 	}
 	return StepPayloadData{
-		Kind:   kind,
+		Kind:   llmcommon.CanonicalRuntimeBlockKind(kind),
 		State:  common.StepState(state),
 		Input:  input,
 		Output: output,

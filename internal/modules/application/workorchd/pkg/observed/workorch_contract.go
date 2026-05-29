@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -102,7 +103,7 @@ var (
 				return SnapshotItem{}, false
 			}
 			return normalizePublishedSnapshot(event.Envelope(), topicStepSnapshot, "step", StepPayload{
-				Kind:   event.Data.Kind,
+				Kind:   llmcommon.CanonicalRuntimeBlockKind(event.Data.Kind),
 				State:  string(event.Data.State),
 				Input:  cloneMap(event.Data.Input),
 				Output: cloneMap(event.Data.Output),

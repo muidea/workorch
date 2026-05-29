@@ -98,6 +98,23 @@ func TestHealthzReturnsOK(t *testing.T) {
 	}
 }
 
+func TestPprofRoutesAreExposed(t *testing.T) {
+	handler := newMux(Config{})
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200; body=%s", path, rec.Code, rec.Body.String())
+		}
+		if rec.Body.Len() == 0 {
+			t.Fatalf("%s body is empty", path)
+		}
+	}
+}
+
 func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
 	handlerStarted := make(chan struct{})
 	releaseHandler := make(chan struct{})
@@ -760,6 +777,7 @@ type routeSpec struct {
 
 func acceptedAPINativeRouteSpecs() []routeSpec {
 	return []routeSpec{
+		{method: http.MethodGet, pattern: "/debug/pprof/**"},
 		{method: http.MethodGet, pattern: "/healthz"},
 		{method: http.MethodGet, pattern: "/readyz"},
 		{method: http.MethodGet, pattern: "/metrics"},

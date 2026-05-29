@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"path"
 	"strconv"
@@ -1011,6 +1012,9 @@ func newMuxWithState(state *serverState) http.Handler {
 }
 
 func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/debug/pprof/**", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		http.DefaultServeMux.ServeHTTP(w, r)
+	})
 	router.AddHandler("/healthz", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.healthzRequests.Add(1)
 		writeJSON(w, http.StatusOK, statusResponse{

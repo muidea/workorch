@@ -57,6 +57,10 @@ const (
 	eventPayloadListLimit           = 16
 )
 
+func canonicalReadModelStepKind(kind string) string {
+	return llmcommon.CanonicalRuntimeBlockKind(kind)
+}
+
 type readModelDependencies struct {
 	workspaces            repository.WorkspaceRepository
 	goals                 repository.GoalRepository
@@ -1038,7 +1042,7 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 	}
 	if currentStep := currentRunStatusStep(item, steps, checkpoints, decisions, approvals); currentStep != nil {
 		ret.CurrentStepID = string(currentStep.ID)
-		ret.CurrentStepKind = currentStep.Kind
+		ret.CurrentStepKind = canonicalReadModelStepKind(currentStep.Kind)
 		ret.CurrentStepState = string(currentStep.State)
 	}
 	return ret, nil
@@ -3257,13 +3261,52 @@ func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
 			WorkspaceID:  string(item.WorkspaceID),
 			RunID:        string(item.RunID),
 			StepID:       string(item.StepID),
-			Payload:      cloneReadModelMap(item.Payload),
+			Payload:      canonicalizeEventRecordPayload(item.Topic, item.SubjectType, cloneReadModelMap(item.Payload)),
 		})
 	}
 	if len(ret) == 0 {
 		return nil
 	}
 	return ret
+}
+
+func canonicalizeEventRecordPayload(topic string, subjectType string, payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return payload
+	}
+	if strings.TrimSpace(topic) != events.TopicStepDispatched &&
+		strings.TrimSpace(topic) != events.TopicStepStateChanged &&
+		strings.TrimSpace(subjectType) != "step" {
+		return payload
+	}
+	if kind, ok := payload[events.PayloadKeyKind].(string); ok {
+		payload[events.PayloadKeyKind] = canonicalReadModelStepKind(kind)
+	}
+	for _, key := range []string{events.PayloadKeyInput, events.PayloadKeyOutput} {
+		if nested := readModelMapValue(payload[key]); len(nested) > 0 {
+			payload[key] = canonicalizeEventRecordStepMap(nested)
+		}
+	}
+	return payload
+}
+
+func canonicalizeEventRecordStepMap(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return payload
+	}
+	const eventRecordExecutionGraphKey = "executionGraph"
+	if graph := readModelMapValue(payload[eventRecordExecutionGraphKey]); len(graph) > 0 {
+		if nodes := readModelMapSliceValue(graph["nodes"]); len(nodes) > 0 {
+			for idx := range nodes {
+				if kind, ok := nodes[idx]["kind"].(string); ok {
+					nodes[idx]["kind"] = canonicalReadModelStepKind(kind)
+				}
+			}
+			graph["nodes"] = nodes
+			payload[eventRecordExecutionGraphKey] = graph
+		}
+	}
+	return payload
 }
 
 func pageRunSteps(items []*runmodel.Step, query StepQuery) StepPage {
@@ -3313,11 +3356,12 @@ func pageRunSteps(items []*runmodel.Step, query StepQuery) StepPage {
 }
 
 func projectStepView(item presenter.StepView) presenter.StepView {
+	kind := canonicalReadModelStepKind(item.Kind)
 	return presenter.StepView{
 		ID:     item.ID,
-		Kind:   item.Kind,
+		Kind:   kind,
 		State:  item.State,
-		Output: projectStepOutput(item.Kind, item.Output),
+		Output: projectStepOutput(kind, item.Output),
 	}
 }
 
@@ -4600,7 +4644,7 @@ func mapRunStatus(snapshot RunSnapshot) RunStatus {
 	}
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
-		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepKind = canonicalReadModelStepKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
 	}
 	return ret
@@ -4657,7 +4701,7 @@ func mapWorkspaceTaskProgress(snapshot WorkspaceSnapshot) TaskProgress {
 	}
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
-		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepKind = canonicalReadModelStepKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
 		if ret.Recovery.StepID == "" {
 			ret.Recovery.StepID = snapshot.Step.ID
@@ -4733,7 +4777,7 @@ func mapTaskProgress(snapshot RunSnapshot) TaskProgress {
 	}
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
-		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepKind = canonicalReadModelStepKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
 		ret.Recovery.StepID = snapshot.Step.ID
 	}
@@ -5109,7 +5153,7 @@ func closureTraceFromStep(step presenter.StepView) (ClosureTrace, bool) {
 	output := step.Output
 	trace := ClosureTrace{
 		StepID: step.ID,
-		Kind:   step.Kind,
+		Kind:   canonicalReadModelStepKind(step.Kind),
 		State:  step.State,
 	}
 	trace.GraphFollowUp = readModelBoolValue(input["graphFollowUp"])
@@ -5210,7 +5254,7 @@ func taskDecompositionNode(raw map[string]any, executedByNode map[string]present
 	input, _ := raw["input"].(map[string]any)
 	ret := TaskDecompositionNode{
 		ID:        nodeID,
-		Kind:      readModelStringValue(raw["kind"]),
+		Kind:      canonicalReadModelStepKind(readModelStringValue(raw["kind"])),
 		Title:     taskNodeTitle(raw),
 		State:     "pending",
 		DependsOn: readModelStringSliceValue(raw["dependsOn"]),
@@ -6946,7 +6990,7 @@ func runtimeProgress(snapshot RunSnapshot) RunProgress {
 	}
 	if snapshot.Step != nil {
 		ret.CurrentStepID = snapshot.Step.ID
-		ret.CurrentStepKind = snapshot.Step.Kind
+		ret.CurrentStepKind = canonicalReadModelStepKind(snapshot.Step.Kind)
 		ret.CurrentStepState = snapshot.Step.State
 	}
 	for _, step := range snapshot.Steps {

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -2533,7 +2534,7 @@ func stepProgressText(prefix string, kind string, fallback string) string {
 }
 
 func stepProgressTextFromPayload(prefix string, payload map[string]any, fallback string) string {
-	kind := firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind)
+	kind := llmcommon.CanonicalRuntimeBlockKind(firstPayloadString(payload, "kind", "Kind", events.PayloadKeyKind))
 	if strings.TrimSpace(kind) == "" {
 		return fallback
 	}

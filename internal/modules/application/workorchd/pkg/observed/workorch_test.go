@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -151,6 +152,53 @@ func TestBuildWorkorchSnapshotRequiresPublishedEvents(t *testing.T) {
 	assertTopicAbsent(t, items, "/step/snapshot")
 	assertTopicAbsent(t, items, "/decision/ticket/snapshot")
 	assertTopicAbsent(t, items, "/approval/snapshot")
+}
+
+func TestBuildWorkorchSnapshotCanonicalizesWorkspacePlanStepKind(t *testing.T) {
+	ws := &workspacemodel.Workspace{
+		ID:    common.WorkspaceID("ws-observed-alias"),
+		State: common.WorkspaceStateActive,
+	}
+	run := &runmodel.Run{
+		ID:          common.RunID("run-observed-alias"),
+		WorkspaceID: ws.ID,
+		State:       common.RunStateRunning,
+	}
+	step := &runmodel.Step{
+		ID:    common.StepID("run-observed-alias/step-1"),
+		RunID: run.ID,
+		Kind:  llmcommon.StepKindWorkspacePlan,
+		State: common.StepStateCompleted,
+	}
+
+	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
+		mustWorkorchEvent(t, events.Envelope{
+			Version:      events.WorkorchEventVersion,
+			Topic:        events.TopicStepStateChanged,
+			OccurredAt:   "2026-04-21T08:00:02Z",
+			SourceModule: "kernel/orchestrator",
+			SubjectType:  "step",
+			SubjectID:    string(step.ID),
+			WorkspaceID:  string(ws.ID),
+			RunID:        string(run.ID),
+			StepID:       string(step.ID),
+			Payload: map[string]any{
+				events.PayloadKeyKind:  step.Kind,
+				events.PayloadKeyState: string(step.State),
+			},
+		}),
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	payload, ok := items[0].Payload.(StepPayload)
+	if !ok {
+		t.Fatalf("payload = %#v, want StepPayload", items[0].Payload)
+	}
+	if payload.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("payload.Kind = %q, want %q", payload.Kind, llmcommon.StepKindWorkspaceExecution)
+	}
 }
 
 func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t *testing.T) {

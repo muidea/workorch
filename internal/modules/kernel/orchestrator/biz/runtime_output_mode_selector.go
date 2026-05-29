@@ -31,10 +31,12 @@ func (o *RuntimeOrchestrator) applyLLMOutputModeSelection(ctx context.Context, r
 	inheritOutputModeSignalsFromRunExecutionContext(input, run)
 	selection := o.selectOutputMode(ctx, run, input, failedStep, attempt)
 	if !selection.StateChangeNeeded {
+		clearIncrementalArtifactSelection(input)
 		return
 	}
 	if artifactContinuationContextTerminal(mapFromValue(input["artifactContinuationContext"])) {
 		delete(input, "artifactContinuationContext")
+		delete(input, "artifactContinuationId")
 	}
 	input["outputMode"] = selection.Mode
 	input["outputModeSelector"] = map[string]any{
@@ -348,6 +350,8 @@ func applyOutputModeRequiredOutput(input map[string]any, selection outputModeSel
 		required["artifactPlanSchema"] = artifactPlanRequiredOutputSchema()
 		delete(required, "mustIncludeStateChangingNode")
 	default:
+		clearIncrementalArtifactSelection(input)
+		clearIncrementalArtifactRequiredOutput(required)
 		required["mustIncludeStateChangingNode"] = true
 		if len(stringSliceFromValue(required["acceptedKinds"])) == 0 {
 			required["acceptedKinds"] = stateChangingRepairAcceptedKinds()
@@ -365,6 +369,44 @@ func applyOutputModeRequiredOutput(input map[string]any, selection outputModeSel
 			"stateChangingEvidenceStage": "artifact_apply",
 			"schema":                     artifactPlanRequiredOutputSchema(),
 		}
+	}
+}
+
+func clearIncrementalArtifactSelection(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	delete(input, "artifactOutputContract")
+	delete(input, "artifactContinuationContext")
+	delete(input, "artifactContinuationId")
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		return
+	}
+	clearIncrementalArtifactRequiredOutput(required)
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+}
+
+func clearIncrementalArtifactRequiredOutput(required map[string]any) {
+	if len(required) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"mustReturnArtifactPlan",
+		"mustReturnArtifactChunk",
+		"stateChangingEvidenceDeferredUntilApply",
+		"maxArtifactChunkBytes",
+		"previousChunkTailBytes",
+		"forbiddenTopLevelOutputs",
+		"artifactPlanSchema",
+		"artifactChunkSchema",
+	} {
+		delete(required, key)
 	}
 }
 

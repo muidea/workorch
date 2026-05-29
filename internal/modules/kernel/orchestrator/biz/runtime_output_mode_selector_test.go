@@ -243,6 +243,7 @@ func TestOutputModeSelectorReturnsTerminalArtifactContinuationToExecutionGraph(t
 	input := map[string]any{
 		"stateChangingOutputRequired": true,
 		"repairObjective":             repairObjectiveStateChangingOutput,
+		"artifactContinuationId":      "artifact-continuation-applied-001",
 		"artifactContinuationContext": map[string]any{
 			"id":         "artifact-continuation-applied-001",
 			"state":      string(common.ArtifactContinuationStateApplied),
@@ -260,9 +261,55 @@ func TestOutputModeSelectorReturnsTerminalArtifactContinuationToExecutionGraph(t
 	if _, ok := input["artifactContinuationContext"]; ok {
 		t.Fatalf("artifactContinuationContext still present for terminal continuation: %+v", input["artifactContinuationContext"])
 	}
+	if _, ok := input["artifactContinuationId"]; ok {
+		t.Fatalf("artifactContinuationId still present for terminal continuation: %+v", input["artifactContinuationId"])
+	}
 	selector := mapFromValue(input["outputModeSelector"])
 	if selector["reason"] != "terminal_artifact_continuation_returns_to_graph" {
 		t.Fatalf("outputModeSelector = %+v, want terminal continuation reason", selector)
+	}
+}
+
+func TestOutputModeSelectorClearsIncrementalArtifactContractWhenReturningToExecutionGraph(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"outputMode":                  outputModeIncrementalArtifact,
+		"artifactOutputContract": map[string]any{
+			"mode":  outputModeIncrementalArtifact,
+			"phase": artifactOutputPhasePlan,
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"outputMode":                              outputModeIncrementalArtifact,
+				"mustReturnArtifactPlan":                  true,
+				"stateChangingEvidenceDeferredUntilApply": true,
+				"forbiddenTopLevelOutputs": []string{
+					"executionGraph",
+					"dodAssessment",
+				},
+				"artifactPlanSchema": map[string]any{
+					"requiredFields": []string{"artifactPlan.artifacts[].artifactId"},
+				},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: "run-output-mode-cleanup", WorkspaceID: "ws-output-mode-cleanup"}, input, nil, 0)
+
+	if outputModeFromInput(input) != outputModeExecutionGraph {
+		t.Fatalf("outputMode = %v, want executionGraph", input["outputMode"])
+	}
+	if input["artifactOutputContract"] != nil {
+		t.Fatalf("artifactOutputContract = %+v, want nil after selector falls back to executionGraph", input["artifactOutputContract"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReturnArtifactPlan"] != nil || required["artifactPlanSchema"] != nil || required["forbiddenTopLevelOutputs"] != nil {
+		t.Fatalf("requiredOutput = %+v, want incrementalArtifact-only fields cleared", required)
+	}
+	if required["outputMode"] != outputModeExecutionGraph || required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("requiredOutput = %+v, want executionGraph state-changing contract restored", required)
 	}
 }
 

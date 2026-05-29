@@ -2751,6 +2751,46 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 	}
 }
 
+func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
+	items := []*eventstreammodel.EventRecord{{
+		ID:          common.EventRecordID("event-step-alias"),
+		Topic:       events.TopicStepStateChanged,
+		OccurredAt:  "2026-05-16T10:00:00Z",
+		WorkspaceID: common.WorkspaceID("ws-step-alias"),
+		RunID:       common.RunID("run-step-alias"),
+		StepID:      common.StepID("run-step-alias/step-1"),
+		SubjectType: "step",
+		Payload: map[string]any{
+			events.PayloadKeyKind:  llmcommon.StepKindWorkspacePlan,
+			events.PayloadKeyState: string(common.StepStateCompleted),
+			events.PayloadKeyOutput: map[string]any{
+				"executionGraph": map[string]any{
+					"nodes": []map[string]any{{
+						"id":   "plan-next",
+						"kind": llmcommon.StepKindWorkspacePlan,
+					}},
+				},
+			},
+		},
+	}}
+
+	mapped := mapEventRecords(items)
+
+	if len(mapped) != 1 {
+		t.Fatalf("mapped = %+v, want one event", mapped)
+	}
+	payload := mapped[0].Payload
+	if payload[events.PayloadKeyKind] != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("payload kind = %v, want %s", payload[events.PayloadKeyKind], llmcommon.StepKindWorkspaceExecution)
+	}
+	output := readModelMapValue(payload[events.PayloadKeyOutput])
+	graph := readModelMapValue(output["executionGraph"])
+	nodes := readModelMapSliceValue(graph["nodes"])
+	if len(nodes) != 1 || nodes[0]["kind"] != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("executionGraph nodes = %+v, want canonical workspace execution kind", nodes)
+	}
+}
+
 func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) {
 	summary := summarizeLLMUsage([]LLMUsageTrace{
 		{
@@ -3944,6 +3984,47 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 		snapshot.TaskProgress.CurrentStepKind != "llm/workspace_execution" ||
 		snapshot.TaskProgress.CurrentStepState != string(common.StepStateDispatched) {
 		t.Fatalf("taskProgress current step = %+v, want active run current step", snapshot.TaskProgress)
+	}
+}
+
+func TestReadWorkspaceSnapshotCanonicalizesWorkspacePlanCurrentStepKind(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-active-run-current-step-alias")
+	runID := common.RunID("run-active-run-current-step-alias")
+	stepID := common.StepID(string(runID) + "/graph-001/002-repair")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "active run current step alias",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspacePlan,
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("create current step: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithSession(ctx, session.Borrow(), string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithSession: %v", err)
+	}
+	if snapshot.TaskProgress.CurrentStepKind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("taskProgress current step kind = %q, want %q", snapshot.TaskProgress.CurrentStepKind, llmcommon.StepKindWorkspaceExecution)
 	}
 }
 

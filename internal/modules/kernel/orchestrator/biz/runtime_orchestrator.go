@@ -1425,6 +1425,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	input map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
+	kind = canonicalLLMWorkspaceStepKind(kind)
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {
 		if err != common.ErrNotFound {
@@ -4634,12 +4635,12 @@ func graphIsConcreteStateChangingContinuation(graph runtimemodel.BlockExecutionG
 }
 
 func graphHasNodeKind(graph runtimemodel.BlockExecutionGraph, kind string) bool {
-	kind = strings.TrimSpace(kind)
+	kind = canonicalRuntimeGraphNodeKind(kind)
 	if kind == "" {
 		return false
 	}
 	for _, node := range graph.Nodes {
-		if strings.TrimSpace(node.Kind) == kind {
+		if canonicalRuntimeGraphNodeKind(node.Kind) == kind {
 			return true
 		}
 	}
@@ -4695,7 +4696,7 @@ func allowAcceptedStateChangingEvidenceGraph(step *runModel.Step, graph runtimem
 	acceptedOperations := mapStringSet(lowerStringSlice(stringSliceFromValue(required["acceptedOperations"])))
 	nodes := graphNodesByID(graph)
 	for _, node := range graph.Nodes {
-		kind := strings.TrimSpace(node.Kind)
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
 		if !accepted[kind] || !stepKindCanProduceStateChangingEvidence(kind) {
 			continue
 		}
@@ -4738,7 +4739,7 @@ func graphIsConcreteValidationEvidenceGraph(graph runtimemodel.BlockExecutionGra
 	}
 	hasEvidenceProducer := false
 	for _, node := range graph.Nodes {
-		switch strings.TrimSpace(node.Kind) {
+		switch canonicalRuntimeGraphNodeKind(node.Kind) {
 		case "file/read", "file/list", "mcp/resource_read", "mcp/prompt_get":
 			continue
 		case "shell/command", "mcp/tool_call":
@@ -4867,7 +4868,7 @@ func graphHasUngatedStateChangingPatchNode(graph runtimemodel.BlockExecutionGrap
 		}
 	}
 	for _, node := range graph.Nodes {
-		if strings.TrimSpace(node.Kind) != "patch/apply" {
+		if canonicalRuntimeGraphNodeKind(node.Kind) != "patch/apply" {
 			continue
 		}
 		if _, err := runtimePatchRequestFromMap(node.Input); err != nil {
@@ -4881,6 +4882,7 @@ func graphHasUngatedStateChangingPatchNode(graph runtimemodel.BlockExecutionGrap
 }
 
 func graphNodeHasAncestorKind(node runtimemodel.BlockExecutionNode, nodes map[string]runtimemodel.BlockExecutionNode, kind string, seen map[string]bool) bool {
+	kind = canonicalRuntimeGraphNodeKind(kind)
 	for _, dep := range node.DependsOn {
 		dep = strings.TrimSpace(dep)
 		if dep == "" || seen[dep] {
@@ -4891,7 +4893,7 @@ func graphNodeHasAncestorKind(node runtimemodel.BlockExecutionNode, nodes map[st
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(parent.Kind) == kind {
+		if canonicalRuntimeGraphNodeKind(parent.Kind) == kind {
 			return true
 		}
 		if graphNodeHasAncestorKind(parent, nodes, kind, seen) {
@@ -6011,25 +6013,36 @@ func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
 }
 
 func resumeInputShouldPreserveExistingStage(key string, input map[string]any) bool {
-	if boolValue(input[stepInputKeyProviderRetryFollowUp]) {
-		switch strings.TrimSpace(key) {
-		case "repairObjective",
-			"stateChangingOutputRequired",
-			"repairGuidance",
-			"repairActionPackage",
-			"convergenceContract",
-			"concreteFailureEvidenceRequired",
-			"boundedValidationRequired",
-			"evidenceRepairRequired",
-			stepInputKeyAssessmentOnly,
-			"assessmentOnlyReason":
-			return true
-		}
+	if resumeInputContractKey(key) {
+		return true
 	}
 	switch strings.TrimSpace(key) {
 	case stepInputKeySoulStage, stepInputKeyRuntimeStage, stepInputKeyRuntimeStageMode:
+		return strings.TrimSpace(stringFromMap(input, key)) != ""
 	default:
 		return false
 	}
-	return strings.TrimSpace(stringFromMap(input, key)) != ""
+}
+
+func resumeInputContractKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "repairObjective",
+		"stateChangingOutputRequired",
+		"repairGuidance",
+		"repairActionPackage",
+		"convergenceContract",
+		"concreteFailureEvidenceRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		stepInputKeyAssessmentOnly,
+		"assessmentOnlyReason",
+		"outputMode",
+		"outputModeSelector",
+		"artifactOutputContract",
+		"artifactContinuationContext",
+		"artifactContinuationId":
+		return true
+	default:
+		return false
+	}
 }

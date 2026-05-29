@@ -1,8 +1,11 @@
 package common
 
+import "strings"
+
 const ModuleID = "blocks/llm"
 
 const StepKindWorkspaceExecution = "llm/workspace_execution"
+const StepKindWorkspacePlan = "llm/workspace-plan"
 const ExecutionContextLLMProviderID = "llmProviderId"
 const DefaultProviderID = "default"
 
@@ -59,3 +62,14 @@ const (
 	UsageSourceEstimated      = "estimated"
 	UsageSourceProviderNative = "provider_native"
 )
+
+func CanonicalRuntimeBlockKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case StepKindWorkspaceExecution, StepKindWorkspacePlan:
+		return StepKindWorkspaceExecution
+	case "patchRequests", "patch/request":
+		return RuntimeBlockKindPatchApply
+	default:
+		return strings.TrimSpace(kind)
+	}
+}

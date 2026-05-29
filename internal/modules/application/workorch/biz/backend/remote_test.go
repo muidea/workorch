@@ -152,7 +152,7 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 			"workspaceId":"ws-remote",
 			"state":"running",
 			"currentStepId":"run-remote/llm-after-decision",
-			"currentStepKind":"llm/workspace_execution",
+			"currentStepKind":"llm/workspace-plan",
 			"currentStepState":"dispatched",
 			"stepCount":6
 		}}`)

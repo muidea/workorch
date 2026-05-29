@@ -28,7 +28,7 @@ const (
 )
 
 func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) {
-	if o == nil || run == nil || step == nil || step.Kind != llmWorkspaceExecutionStepKind {
+	if o == nil || run == nil || step == nil || !isLLMWorkspaceStepKind(step.Kind) {
 		return
 	}
 	if step.Input == nil {

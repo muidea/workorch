@@ -5,6 +5,7 @@ import (
 
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -137,5 +138,19 @@ func TestMapStepDeepClonesNestedPayloads(t *testing.T) {
 	}
 	if step.Output["result"].(map[string]any)["status"] != "completed" {
 		t.Fatalf("source status = %v, want completed", step.Output["result"].(map[string]any)["status"])
+	}
+}
+
+func TestMapStepCanonicalizesWorkspacePlanKind(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "step-alias",
+		Kind:  llmcommon.StepKindWorkspacePlan,
+		State: common.StepStateCompleted,
+	}
+
+	mapped := MapStep(step)
+
+	if mapped.Kind != llmcommon.StepKindWorkspaceExecution {
+		t.Fatalf("mapped.Kind = %q, want %q", mapped.Kind, llmcommon.StepKindWorkspaceExecution)
 	}
 }

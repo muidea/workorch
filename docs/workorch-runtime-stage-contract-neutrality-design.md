@@ -279,6 +279,43 @@ state
 
 `incrementalArtifact` 不得作为新的 Workspace / Run 顶层状态。Workspace / Run 仍只使用既有治理状态，例如 `running`、`waiting_decision`、`waiting_approval`、`completed`、`failed`、`superseded`。分片增量输出只是 `running` 内部某个 Step / Continuation 的输出承载模式。
 
+### 统一状态层次
+
+为了稳定状态流转，runtime 必须把当前执行拆成四层中立状态，并保持“每层只负责一件事”：
+
+| 层级 | 字段 / 对象 | 负责内容 | 禁止负责内容 |
+| --- | --- | --- | --- |
+| Workspace / Run 治理状态 | `WorkspaceState`、`RunState` | 工作空间是否有活跃 run、run 是否运行中 / 阻塞 / 完成 / 失败 | 不表达当前 LLM 该输出 graph、assessment 还是 artifact chunk |
+| 收敛状态 | `ConvergenceContract.State` | 当前缺口属于 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment`、`need_governance` 还是 `blocked` | 不直接表达 provider prompt 的具体 JSON schema |
+| 阶段状态 | `runtimeStage`、`runtimeStageMode` | 当前轮次属于 `planning`、`execution`、`repair`、`verification`、`decision`、`approval` 等哪一类阶段，以及 `open_judgment` / `strict_convergence` / `structured_governance` 模式 | 不决定 artifact plan / chunk / graph 三选一 |
+| 输出承载模式 | `outputMode`、`artifactOutputContract`、`artifactContinuationContext` | 当前 `need_state_change` 具体采用 `executionGraph` 还是 `incrementalArtifact`，以及 artifact plan / chunk / apply continuation | 不得改变 `ConvergenceContract.State`，也不得单独把 run 推入 decision / approval |
+
+这四层的允许桥接方向只能是：
+
+```text
+RunState(running)
+  -> BuildConvergenceContract(...) = need_*
+  -> ApplyConvergenceContract(...) = runtimeStage + requiredOutput
+  -> selectOutputMode(...) = executionGraph | incrementalArtifact
+  -> LLM output / graph / artifact continuation
+  -> Validate / governance / next Dispatch
+  -> RunState(completed | blocked_on_decision | blocked_on_approval | failed)
+```
+
+禁止反向污染：
+
+- `outputMode` 不能覆盖 `ConvergenceContract.State`。例如 `incrementalArtifact` 只是 `need_state_change` 的一种输出方式，不能单独把流程改写成 `need_validation` 或 `need_governance`。
+- `runtimeStage` 不能替代 `RunState`。例如 `runtimeStage=decision` 只说明当前 step 输入是治理恢复上下文，不等于 run 已进入 `blocked_on_decision`；只有 ticket/approval 真正创建并写回 run 后，外层治理状态才改变。
+- `repairActionPackage.requiredOutput` 不能与 `outputMode` 冲突。若 `outputMode=executionGraph`，则 `requiredOutput` 中不得残留 `mustReturnArtifactPlan`、`mustReturnArtifactChunk`、`artifactPlanSchema`、`artifactChunkSchema`、`forbiddenTopLevelOutputs=[executionGraph,...]` 等 incremental-only 字段；若 `outputMode=incrementalArtifact`，则不得继续保留 `mustIncludeStateChangingNode=true` 这类 graph-only 强约束。
+- `artifactOutputContract`、`artifactContinuationContext`、`artifactContinuationId` 只允许在当前 `outputMode=incrementalArtifact` 时进入 LLM-facing stage contract。只要 selector 回落到 `executionGraph`，这些字段必须从当前 step input 清理，continuation 的真实恢复状态只保留在 runtime internal repository 中。
+
+实现上必须遵守“单一生效合同”规则：
+
+- 一个 step input 在同一时刻只能有一套生效的 state-changing 输出合同。
+- 若 selector 最终选择 `executionGraph`，LLM-facing 输入中只能出现 graph contract。
+- 若 selector 最终选择 `incrementalArtifact`，LLM-facing 输入中只能出现 artifact plan/chunk contract。
+- 任意 follow-up、repair-of-repair、resume、decision resolution、approval resolution、artifact assemble/apply 后回切 graph 时，都必须先做一次合同归一化，再进入下一轮 dispatch。
+
 Orchestrator 的主合同仍由 `ConvergenceContract` 决定：
 
 ```text
@@ -718,6 +755,18 @@ repair exhausted | plan invalid | repeated failure
 | `repair` | 原阶段 | 修复输出满足原阶段 contract |
 | `repair` | `replan` | 同一 failure scope 重复失败或 repair budget exhausted |
 
+### Direct NextStep 合同
+
+`nextStep` / `nextKind` / `nextInput` 只是 step lineage 的 continuation 指针，不是新的状态机。它们必须遵守以下中立规则：
+
+- direct `nextStep` 只能延续当前 run 的既有 `ConvergenceContract` / `runtimeStage` 语义，不能绕过统一合同直接创造一套新的隐式阶段。
+- workspace 级 LLM continuation kind 必须 canonicalize 到单一 step kind：`llm/workspace_execution`。历史或测试别名（如 `llm/workspace-plan`）若仍进入 orchestrator，runtime 必须在 dispatch 前折叠为 canonical kind，避免绕过 LLM step context enrichment、memory capture、failure classification、output contract gate 和 read model 统计。
+- 若 `nextKind` 是非 LLM capability（如 `shell/command`、`mcp/tool_call`、`patch/apply`、`git/*`、`file/*`），是否需要显式 `runtimeStage` 取决于后续 follow-up / repair 合同；该 capability 本身不是新的 LLM 阶段入口。
+- 若 `nextKind` 是 `llm/*`，且 `nextInput` 没有显式 `runtimeStage` / `runtimeStageMode` / `soulStage`，runtime 可以只在“普通 direct continuation”场景下继承上一 step 已显式存在的阶段：例如 `repair -> shell -> llm`、`execution -> tool -> llm`、`verification -> shell -> llm`。
+- 只有当上一 step 不是 decision / approval blocker 输出，且不是通过 governance wrapper 恢复出的 continuation 时，才允许做上述继承。blocker 之后的 LLM continuation 阶段必须由 decision / approval resolution、assessment-only builder、graph follow-up builder、runtime repair builder 或等价显式入口注入。
+- direct continuation 不得从 `blocked_on_decision` / `blocked_on_approval` 的 wrapper 语义中推断出新的执行阶段。例如前一步因为 decision/approval 被阻塞并声明了 `nextStep`，其后续 `llm/*` continuation 在恢复前应保持“阶段未决”；resolution 恢复链只能补充 governance envelope，真正的执行阶段由恢复链根据失败/contract 重新决定。
+- governance resolution merge 只允许携带 `decisionResolution`、`approvalResolution`、`ticketContext`、`recoveryAction` 等恢复封套字段。若目标 spec 已经显式拥有 `runtimeStage`、`runtimeStageMode`、`soulStage`、`convergenceContract`、`repairActionPackage.requiredOutput`、`outputMode` 或 `artifactOutputContract`，merge 不得覆盖这些字段。
+
 ## 全局收敛合同
 
 Runtime 必须把跨阶段、跨恢复路径的收敛约束实现为一条统一的中立 `ConvergenceContract`，而不是在 planning、graph follow-up、decision recovery、repair-of-repair、validation 和 replan 中分别拼接局部字段。该合同的目标是：只要当前 run 存在未关闭失败，且 runtime 已掌握 concrete target evidence，就持续维持可行动的 strict repair 合同，直到状态变更和验证成功、证据证明无法自动修复，或确实缺少外部决策/审批/配置。
@@ -737,7 +786,7 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 | `need_evidence` | 未关闭失败存在，但缺少 concrete target evidence | `runtimeStage=repair`，`repairObjective=acquire_concrete_failure_evidence`，`concreteFailureEvidenceRequired=true`，只允许有界 `file/list` / `file/read` / `shell/command` / `mcp/tool_call` 或等价取证能力 |
 | `need_state_change` | 未关闭失败存在，且已有 target refs / line refs / snapshots / patch repair context / failure target repair context / structured diagnostics 等 concrete implementation target evidence | `runtimeStage=repair`，`runtimeStageMode=strict_convergence`，`repairObjective=produce_state_changing_output`，`stateChangingOutputRequired=true`，`repairActionPackage.requiredOutput.acceptedKinds` 必须来自当前 capability contract。`patch/apply` 是首选 state-changing artifact；当状态变更只能由已声明 capability 表达时，可接受显式声明 state-changing intent 的 `shell/command` / `mcp/tool_call`，并必须带依赖其后的 bounded verification。 |
 | `need_validation` | 当前 state-changing artifact 已应用，下一步需要证明结果；或只存在 Goal / DoD / deliverable coverage gap、尚无 concrete implementation target evidence，且尚未证明 bounded validation evidence 无法继续推进 | `runtimeStage=verification`，只允许 bounded validation evidence graph；不得返回新的 LLM 嵌套、只读自检 graph 或 `patch/apply` |
-| `need_assessment` | 验证证据足以进入 DoD / Goal 覆盖判断，或 assessment-only contract correction | `runtimeStage=validation` 或 assessment-only correction，只允许 `dodAssessment` / coverage correction |
+| `need_assessment` | 验证证据足以进入 DoD / Goal 覆盖判断，或 assessment-only contract correction | `runtimeStage=verification` 且 `assessmentOnly=true`，只允许 `dodAssessment` / coverage correction |
 | `need_governance` | 真实缺少外部信息、权限、凭证、配置、审批、破坏性变更授权或无法自动获取的业务决策 | 创建 decision / approval ticket，并写明 missing field、source refs 与无法自动获取原因 |
 | `blocked` | 证据表明不可自动修复、取证失败且无可继续路径、预算耗尽或必须失败收口 | failed assessment / rejected result / blocker |
 
@@ -784,6 +833,7 @@ ShouldCreateDecisionTicket(input, llmOutput, contract) -> bool
 - `repairActionPackage.currentFailure` 与 `repairActionPackage.currentExecutionProgress` 是 canonical repair context 的组成部分。若顶层 `currentFailure` / `currentExecutionProgress` 缺失但 package 内存在有效字段，runtime 在 provider context gate 前必须提升或等价识别这些字段；不得误报 `runtime_repair_current_failure_missing`。
 - `shell/command` 的可行动失败不能只依赖进程退出码。若命令因管道、截断、wrapper 或 shell 组合返回 `exitCode=0`，但 stdout / stderr 中存在明确失败标记、断言失败、文件行号或测试失败摘要，`processEvidenceTimeline` 与 `currentProgressDigest` 必须把它记录为 actionable validation failure，并作为下一轮 repair 的当前 gap。
 - `repairActionPackage` 是唯一 primary actionable contract；不得让 `governanceHistory`、memory、旧 `executionGraph`、旧 rejected patch 或旧 decision question 与其竞争。
+- resolved `decisionResolution` / `approvalResolution` 只允许作为 governance recovery envelope 合并进下一轮 step input，用于携带 resolution id、operator answer、ticket/approval context 和 recovery action。若恢复后目标 spec 已经显式拥有 `runtimeStage`、`runtimeStageMode`、`convergenceContract`、`repairActionPackage.requiredOutput`、`outputMode` 或 `artifactOutputContract`，resolution envelope 不得覆盖这些已重建的当前合同；否则会把旧 decision wrapper 错误回灌为新的执行合同。
 
 `ShouldCreateDecisionTicket` 必须作为所有 decision ticket 写入前的统一门禁。若当前合同状态是 `need_state_change`，并且已经具备 concrete target evidence、required output 允许 state-changing artifact、缺口不涉及外部权限/凭证/部署/审批/破坏性变更/无法读取的业务信息，则 LLM 返回的 `blocked_on_decision` 必须被转换为 continuable repair contract violation，而不是直接创建人工 ticket。Runtime 应记录 converted decision 摘要，并继续派发 repair 或 bounded validation。只有合同状态为 `need_governance`，或证据门禁明确缺少 runtime 无法自行获得的信息时，才允许创建 ticket。
 

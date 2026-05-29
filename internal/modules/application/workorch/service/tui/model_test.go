@@ -450,7 +450,7 @@ func TestModelRunStartedDoesNotOverwriteStepProgress(t *testing.T) {
 		Type:        backend.EventStepDispatched,
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
-		Payload:     map[string]any{"kind": "llm/workspace_execution"},
+		Payload:     map[string]any{"kind": "llm/workspace-plan"},
 	})
 	next, _ := m.Update(RunStartedMsg{Run: &backend.RunInfo{ID: "run-1", State: common.RunStateRunning}})
 	m = asModel(next)

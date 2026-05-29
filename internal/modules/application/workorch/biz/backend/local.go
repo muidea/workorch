@@ -365,7 +365,7 @@ func (b *localRunBackend) Status(ctx context.Context, id common.RunID) (*RunStat
 		WorkspaceID:        common.WorkspaceID(r.WorkspaceID),
 		State:              common.RunState(r.State),
 		CurrentStepID:      common.StepID(r.CurrentStepID),
-		CurrentStepKind:    r.CurrentStepKind,
+		CurrentStepKind:    canonicalRuntimeStepKind(r.CurrentStepKind),
 		CurrentStepState:   common.StepState(r.CurrentStepState),
 		StepCount:          r.StepCount,
 		DecisionCount:      r.DecisionCount,

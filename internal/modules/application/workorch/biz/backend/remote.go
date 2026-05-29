@@ -270,7 +270,7 @@ func (b *remoteRunBackend) Status(ctx context.Context, id common.RunID) (*RunSta
 		ID: common.RunID(s.ID), WorkspaceID: common.WorkspaceID(s.WorkspaceID),
 		State: common.RunState(s.State), StepCount: s.StepCount,
 		CurrentStepID:    common.StepID(s.CurrentStepID),
-		CurrentStepKind:  s.CurrentStepKind,
+		CurrentStepKind:  canonicalRuntimeStepKind(s.CurrentStepKind),
 		CurrentStepState: common.StepState(s.CurrentStepState),
 		DecisionCount:    s.DecisionCount, ApprovalCount: s.ApprovalCount,
 		BlockingTicketID:   common.TicketID(s.BlockingTicketID),
