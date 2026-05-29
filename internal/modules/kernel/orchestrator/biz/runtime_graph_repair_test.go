@@ -226,6 +226,43 @@ func TestCurrentProgressDigestDoesNotPromoteSuccessfulActionEvidenceToFailure(t 
 	}
 }
 
+func TestProcessEvidenceTimelineIncludesArtifactContinuationMetadataOnly(t *testing.T) {
+	runID := common.RunID("run-artifact-timeline")
+	step := &runModel.Step{
+		ID:    common.StepID(runID + "/artifact-apply-001"),
+		RunID: runID,
+		Kind:  artifactApplyStepKind,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"artifactContinuationApply": map[string]any{
+				"id":                "artifact-continuation-001",
+				"artifactId":        "artifact-001",
+				"targetRef":         "deliverable/target.txt",
+				"state":             string(common.ArtifactContinuationStateApplied),
+				"bytes":             128,
+				"rollingHash":       "hash-001",
+				"applyEvidenceRefs": []string{string(runID) + "/artifact-apply-001/patch/1"},
+				"content":           "large content must not be projected",
+			},
+		},
+	}
+	run := &runModel.Run{ID: runID, WorkspaceID: "ws-artifact-timeline"}
+
+	item := processEvidenceTimelineItem(run, step, 1)
+	artifact := mapFromValue(item["artifactContinuation"])
+	if artifact["targetRef"] != "deliverable/target.txt" || artifact["rollingHash"] != "hash-001" {
+		t.Fatalf("artifactContinuation = %+v, want metadata", artifact)
+	}
+	if artifact["content"] != nil {
+		t.Fatalf("artifactContinuation = %+v, want no content", artifact)
+	}
+	compact := compactProcessEvidenceTimelineForRuntimeContext([]map[string]any{item})
+	compactArtifact := mapFromValue(compact[0]["artifactContinuation"])
+	if compactArtifact["targetRef"] != "deliverable/target.txt" || compactArtifact["content"] != nil {
+		t.Fatalf("compact artifactContinuation = %+v, want metadata only", compactArtifact)
+	}
+}
+
 func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 	runID := common.RunID("run-evidence-follow-up-current-failure")
 	source := &runModel.Step{

@@ -21,6 +21,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -1046,18 +1047,20 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 			}
 			return repo
 		}(),
-		steps:           &blockingStepRepository{base: baseSteps, started: stepStarted, release: release},
-		results:         memory.NewResultRepository(),
-		artifacts:       memory.NewArtifactRepository(),
-		eventRecords:    memory.NewEventRecordRepository(),
-		toolCalls:       memory.NewToolCallRepository(),
-		mcpCapabilities: memory.NewMCPCapabilityRepository(),
-		patches:         memory.NewPatchRepository(),
-		validations:     memory.NewValidationResultRepository(),
-		checkpoints:     memory.NewRuntimeCheckpointRepository(),
-		tickets:         memory.NewDecisionTicketRepository(),
-		resolutions:     memory.NewDecisionResolutionRepository(),
-		approvals:       memory.NewApprovalRepository(),
+		steps:                 &blockingStepRepository{base: baseSteps, started: stepStarted, release: release},
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		toolCalls:             memory.NewToolCallRepository(),
+		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
+		patches:               memory.NewPatchRepository(),
+		validations:           memory.NewValidationResultRepository(),
+		checkpoints:           memory.NewRuntimeCheckpointRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
 	}
 
 	done := make(chan error, 1)
@@ -1619,20 +1622,22 @@ func TestReadRunSnapshotLoadsCapabilityCatalogOnce(t *testing.T) {
 	}
 
 	snapshot, err := readRunSnapshot(ctx, readModelDependencies{
-		workspaces:      workspaceRepo,
-		runs:            runRepo,
-		steps:           stepRepo,
-		results:         memory.NewResultRepository(),
-		artifacts:       memory.NewArtifactRepository(),
-		eventRecords:    memory.NewEventRecordRepository(),
-		toolCalls:       toolCallRepo,
-		mcpCapabilities: capabilityRepo,
-		patches:         memory.NewPatchRepository(),
-		validations:     memory.NewValidationResultRepository(),
-		checkpoints:     memory.NewRuntimeCheckpointRepository(),
-		tickets:         memory.NewDecisionTicketRepository(),
-		resolutions:     memory.NewDecisionResolutionRepository(),
-		approvals:       memory.NewApprovalRepository(),
+		workspaces:            workspaceRepo,
+		runs:                  runRepo,
+		steps:                 stepRepo,
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		toolCalls:             toolCallRepo,
+		mcpCapabilities:       capabilityRepo,
+		patches:               memory.NewPatchRepository(),
+		validations:           memory.NewValidationResultRepository(),
+		checkpoints:           memory.NewRuntimeCheckpointRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
 	}, runID)
 	if err != nil {
 		t.Fatalf("readRunSnapshot: %v", err)
@@ -3942,6 +3947,57 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 	}
 }
 
+func TestReadRunSnapshotIncludesArtifactContinuationMetadata(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+	workspaceID := common.WorkspaceID("ws-artifact-continuation-read-model")
+	runID := common.RunID("run-artifact-continuation-read-model")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "artifact continuation read model",
+		State: common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.ArtifactContinuations.Create(ctx, &orchestratormodel.ArtifactContinuation{
+		ID:                "artifact-continuation-read-model-001",
+		WorkspaceID:       workspaceID,
+		RunID:             runID,
+		ArtifactID:        "artifact-001",
+		TargetRef:         "deliverable.txt",
+		Operation:         "replace",
+		State:             common.ArtifactContinuationStateChunking,
+		ExpectedSequence:  3,
+		ReceivedSequences: []int{1, 2},
+		BytesWritten:      256,
+		Metadata:          map[string]any{"content": "must not project"},
+	}); err != nil {
+		t.Fatalf("Create artifact continuation: %v", err)
+	}
+
+	snapshot, err := ReadRunSnapshotWithSession(ctx, session, string(runID))
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithSession: %v", err)
+	}
+	if len(snapshot.ArtifactContinuations) != 1 {
+		t.Fatalf("artifact continuations = %+v, want one", snapshot.ArtifactContinuations)
+	}
+	item := snapshot.ArtifactContinuations[0]
+	if item.TargetRef != "deliverable.txt" || item.State != string(common.ArtifactContinuationStateChunking) || item.ExpectedSequence != 3 || len(item.ReceivedSequences) != 2 {
+		t.Fatalf("artifact continuation = %+v, want metadata projection", item)
+	}
+	if item.Progress == nil || item.Progress["receivedCount"] != 2 {
+		t.Fatalf("progress = %+v, want received count", item.Progress)
+	}
+}
+
 func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-snapshot-goal-dod")
@@ -3960,22 +4016,24 @@ func TestReadWorkspaceSnapshotIncludesWorkspaceGoalsAndDoDs(t *testing.T) {
 		t.Fatalf("create dod: %v", err)
 	}
 	deps := readModelDependencies{
-		workspaces:      workspaceRepo,
-		goals:           goalRepo,
-		dods:            dodRepo,
-		runs:            memory.NewRunRepository(),
-		steps:           memory.NewStepRepository(),
-		results:         memory.NewResultRepository(),
-		artifacts:       memory.NewArtifactRepository(),
-		eventRecords:    memory.NewEventRecordRepository(),
-		toolCalls:       memory.NewToolCallRepository(),
-		mcpCapabilities: memory.NewMCPCapabilityRepository(),
-		patches:         memory.NewPatchRepository(),
-		validations:     memory.NewValidationResultRepository(),
-		checkpoints:     memory.NewRuntimeCheckpointRepository(),
-		tickets:         memory.NewDecisionTicketRepository(),
-		resolutions:     memory.NewDecisionResolutionRepository(),
-		approvals:       memory.NewApprovalRepository(),
+		workspaces:            workspaceRepo,
+		goals:                 goalRepo,
+		dods:                  dodRepo,
+		runs:                  memory.NewRunRepository(),
+		steps:                 memory.NewStepRepository(),
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		toolCalls:             memory.NewToolCallRepository(),
+		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
+		patches:               memory.NewPatchRepository(),
+		validations:           memory.NewValidationResultRepository(),
+		checkpoints:           memory.NewRuntimeCheckpointRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
 	}
 
 	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
@@ -4012,20 +4070,22 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 	runListStarted := make(chan string, 1)
 	release := make(chan struct{})
 	deps := readModelDependencies{
-		workspaces:      &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
-		runs:            &blockingRunListRepository{base: baseRuns, started: runListStarted, release: release},
-		steps:           memory.NewStepRepository(),
-		results:         memory.NewResultRepository(),
-		artifacts:       memory.NewArtifactRepository(),
-		eventRecords:    memory.NewEventRecordRepository(),
-		toolCalls:       memory.NewToolCallRepository(),
-		mcpCapabilities: memory.NewMCPCapabilityRepository(),
-		patches:         memory.NewPatchRepository(),
-		validations:     memory.NewValidationResultRepository(),
-		checkpoints:     memory.NewRuntimeCheckpointRepository(),
-		tickets:         memory.NewDecisionTicketRepository(),
-		resolutions:     memory.NewDecisionResolutionRepository(),
-		approvals:       memory.NewApprovalRepository(),
+		workspaces:            &blockingWorkspaceRepository{base: baseWorkspaces, started: workspaceStarted, release: release},
+		runs:                  &blockingRunListRepository{base: baseRuns, started: runListStarted, release: release},
+		steps:                 memory.NewStepRepository(),
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		memoryRecalls:         memory.NewMemoryRecallTraceRepository(),
+		toolCalls:             memory.NewToolCallRepository(),
+		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
+		patches:               memory.NewPatchRepository(),
+		validations:           memory.NewValidationResultRepository(),
+		checkpoints:           memory.NewRuntimeCheckpointRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
 	}
 
 	done := make(chan error, 1)

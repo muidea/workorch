@@ -30,6 +30,12 @@ func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
 		ret["repairActionPackage"] = compactRepairActionPackageForLLMContext(pkg)
 	}
+	if continuation := mapFromValue(input["artifactContinuationContext"]); len(continuation) > 0 {
+		ret["artifactContinuationContext"] = compactArtifactContinuationContextForLLMContext(continuation)
+	}
+	if contract := mapFromValue(input["artifactOutputContract"]); len(contract) > 0 {
+		ret["artifactOutputContract"] = compactArtifactOutputContractForLLMContext(contract)
+	}
 	return ret
 }
 
@@ -413,6 +419,7 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 			"failureSignature",
 			"failureReason",
 			"requiredEvidence",
+			"artifactContinuation",
 			"outputRef",
 			"payloadRef",
 		} {
@@ -763,7 +770,162 @@ func compactStepOutputForLLMContext(output map[string]any) map[string]any {
 		return stripRuntimeLLMBinding(compactLLMDecisionInvalidOutputForContext(output))
 	}
 	ret := compactLLMContextMap(output, 0)
+	if chunk := mapFromValue(output["artifactChunk"]); len(chunk) > 0 {
+		ret["artifactChunk"] = compactArtifactChunkForLLMContext(chunk)
+	}
+	if plan := mapFromValue(output["artifactPlan"]); len(plan) > 0 {
+		ret["artifactPlan"] = compactArtifactPlanForLLMContext(plan)
+	}
+	if repair := mapFromValue(output["artifactChunkRepair"]); len(repair) > 0 {
+		ret["artifactChunkRepair"] = compactArtifactChunkRepairForLLMContext(repair)
+	}
+	if decision := mapFromValue(output[stepOutputKeyLLMDecision]); len(decision) > 0 {
+		compactDecision := compactLLMContextMap(decision, 0)
+		if chunk := mapFromValue(decision["artifactChunk"]); len(chunk) > 0 {
+			compactDecision["artifactChunk"] = compactArtifactChunkForLLMContext(chunk)
+		}
+		if plan := mapFromValue(decision["artifactPlan"]); len(plan) > 0 {
+			compactDecision["artifactPlan"] = compactArtifactPlanForLLMContext(plan)
+		}
+		if repair := mapFromValue(decision["artifactChunkRepair"]); len(repair) > 0 {
+			compactDecision["artifactChunkRepair"] = compactArtifactChunkRepairForLLMContext(repair)
+		}
+		ret[stepOutputKeyLLMDecision] = compactDecision
+	}
 	return stripRuntimeLLMBinding(ret)
+}
+
+func compactArtifactContinuationContextForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"id",
+		"runId",
+		"rootStepId",
+		"state",
+		"artifactId",
+		"targetRef",
+		"operation",
+		"expectedSequence",
+		"finalReceived",
+		"bytesWritten",
+		"rollingHash",
+		"lastChunkHash",
+		"previousChunkTailBytes",
+		"previousChunkTailHash",
+		"coverageTargets",
+		"receivedSequences",
+		"receivedChunkHashes",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return ret
+}
+
+func compactArtifactOutputContractForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"mode",
+		"phase",
+		"mustReturnArtifactPlan",
+		"mustReturnArtifactChunk",
+		"mustReturnArtifactChunkRepair",
+		"maxArtifactChunkBytes",
+		"previousChunkTailBytes",
+		"stateChangingEvidenceStage",
+		"schema",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return ret
+}
+
+func compactArtifactPlanForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if items := mapSliceFromValue(input["artifacts"]); len(items) > 0 {
+		limit := min(len(items), maxLLMContextSliceItems)
+		artifacts := make([]map[string]any, 0, limit)
+		for idx := 0; idx < limit; idx++ {
+			item := items[idx]
+			next := map[string]any{}
+			for _, key := range []string{
+				"artifactId",
+				"targetRef",
+				"operation",
+				"coverageTargets",
+				"estimatedChunks",
+				"estimatedBytes",
+			} {
+				if value, ok := item[key]; ok && value != nil {
+					next[key] = compactLLMContextValue(value, 1)
+				}
+			}
+			if len(next) > 0 {
+				artifacts = append(artifacts, next)
+			}
+		}
+		if len(artifacts) > 0 {
+			ret["artifacts"] = artifacts
+		}
+	}
+	return ret
+}
+
+func compactArtifactChunkForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"artifactId",
+		"targetRef",
+		"sequence",
+		"isFinal",
+		"chunkHash",
+		"startsAfter",
+		"endsWith",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if content := strings.TrimSpace(stringFromMap(input, "content")); content != "" {
+		ret["contentOmitted"] = true
+		ret["contentBytes"] = len([]byte(content))
+	}
+	return ret
+}
+
+func compactArtifactChunkRepairForLLMContext(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"artifactId",
+		"targetRef",
+		"sequence",
+		"failureReason",
+		"nextAction",
+		"constraints",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	return ret
 }
 
 func compactWorkspaceFileManifest(manifest []map[string]any) []map[string]any {

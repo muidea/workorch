@@ -2511,6 +2511,99 @@ func TestNormalizeDecisionOutputPreservesCapabilityPolicySkips(t *testing.T) {
 	}
 }
 
+func TestNormalizeDecisionOutputPreservesArtifactPlan(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"artifactPlan":{"artifacts":[{
+			"artifactId":"artifact-001",
+			"targetRef":"deliverable/output.txt",
+			"operation":"replace",
+			"coverageTargets":["goal-1"],
+			"estimatedChunks":2,
+			"estimatedBytes":1024
+		}]}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-artifact-plan"),
+		StepID: common.StepID("run-artifact-plan/llm-1"),
+	}, decision)
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	if output["stage"] != "llm_artifact_plan" {
+		t.Fatalf("stage = %v, want llm_artifact_plan", output["stage"])
+	}
+	plan, ok := output["artifactPlan"].(map[string]any)
+	if !ok || len(plan) == 0 {
+		t.Fatalf("artifactPlan output = %#v, want structured plan", output["artifactPlan"])
+	}
+}
+
+func TestNormalizeDecisionOutputPreservesArtifactChunk(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"artifactChunk":{
+			"artifactId":"artifact-001",
+			"targetRef":"deliverable/output.txt",
+			"sequence":1,
+			"content":"hello\n",
+			"isFinal":true,
+			"chunkHash":"sha256:chunk-001"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-artifact-chunk"),
+		StepID: common.StepID("run-artifact-chunk/llm-1"),
+	}, decision)
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	if output["stage"] != "llm_artifact_chunk" {
+		t.Fatalf("stage = %v, want llm_artifact_chunk", output["stage"])
+	}
+	chunk, ok := output["artifactChunk"].(map[string]any)
+	if !ok || chunk["artifactId"] != "artifact-001" {
+		t.Fatalf("artifactChunk output = %#v, want structured chunk", output["artifactChunk"])
+	}
+}
+
+func TestNormalizeDecisionOutputPreservesArtifactChunkRepair(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"blocked",
+		"artifactChunkRepair":{
+			"artifactId":"artifact-001",
+			"targetRef":"deliverable/output.txt",
+			"sequence":2,
+			"failureReason":"hash mismatch",
+			"nextAction":"retry_current_sequence",
+			"constraints":["return only sequence 2"]
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse decision: %v", err)
+	}
+	output, err := NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-artifact-chunk-repair"),
+		StepID: common.StepID("run-artifact-chunk-repair/llm-1"),
+	}, decision)
+	if err != nil {
+		t.Fatalf("normalize decision output: %v", err)
+	}
+	if output["stage"] != "llm_artifact_chunk_repair" {
+		t.Fatalf("stage = %v, want llm_artifact_chunk_repair", output["stage"])
+	}
+	repair, ok := output["artifactChunkRepair"].(map[string]any)
+	if !ok || repair["artifactId"] != "artifact-001" {
+		t.Fatalf("artifactChunkRepair output = %#v, want structured repair", output["artifactChunkRepair"])
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsUnknownFieldAfterNormalization(t *testing.T) {
 	_, err := ParseLLMExecutionDecision([]byte("Here is the json:\n{\"workspaceId\":\"ws-1\",\"completionState\":\"continue\"}"))
 	if !errors.Is(err, common.ErrInvalidArgument) {

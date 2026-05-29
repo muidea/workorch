@@ -3,7 +3,7 @@ import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatBu
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
-import type { Approval, Artifact, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
+import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { createWorkorchEventStream, workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import * as helpers from '../helpers';
@@ -1143,6 +1143,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const runLLMUsageSummary = runObservability?.llmUsageSummary ?? runSnapshot?.llmUsageSummary ?? snapshot?.llmUsageSummary;
   const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
   const summaryLLMUsage = workspaceLLMUsageSummary ?? runLLMUsageSummary;
+  const currentArtifactContinuations = runSnapshot?.artifactContinuations ?? snapshot?.artifactContinuations ?? [];
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -1243,6 +1244,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               { key: 'step', label: modelLabels.step, value: runSnapshot?.steps?.length ?? 0 },
               { key: 'result', label: modelLabels.result, value: snapshot.results?.length ?? (runResultRecords.length || runSnapshot?.results?.length || 0), color: '#389e0d' },
               { key: 'artifact', label: modelLabels.artifact, value: snapshot.artifacts?.length ?? (runArtifactRecords.length || runSnapshot?.artifacts?.length || 0) },
+              { key: 'artifactContinuation', label: 'Artifact Continuation', value: currentArtifactContinuations.length, color: currentArtifactContinuations.length ? '#08979c' : undefined },
               { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
               { key: 'llmContext', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
               { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
@@ -1414,6 +1416,28 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                       />
                     ) : (
                       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}尚未形成${modelLabels.artifact}`} />
+                    )}
+                  </ProCard>
+                  <ProCard title="Artifact Continuation" colSpan={{ xs: 24, lg: 12 }}>
+                    {currentArtifactContinuations.length > 0 ? (
+                      <ProTable<ArtifactContinuation>
+                        rowKey="id"
+                        search={false}
+                        options={false}
+                        pagination={{ pageSize: 5 }}
+                        size="small"
+                        columns={[
+                          { title: '目标', dataIndex: 'targetRef', ellipsis: true },
+                          { title: '状态', dataIndex: 'state', width: 110, render: (_, item) => stateTag(item.state) },
+                          { title: '序列', width: 120, render: (_, item) => `${item.receivedSequences?.length ?? 0}/${item.expectedSequence || '-'}` },
+                          { title: '字节', dataIndex: 'bytesWritten', width: 110, render: (_, item) => numberText(item.bytesWritten) },
+                          { title: '覆盖目标', dataIndex: 'coverageTargets', ellipsis: true, render: (_, item) => compactTags(item.coverageTargets ?? [], 3) },
+                          { title: '最近失败', dataIndex: 'failureReason', ellipsis: true, render: (_, item) => item.failureReason || '-' }
+                        ]}
+                        dataSource={currentArtifactContinuations}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前运行未进入分片产物续写" />
                     )}
                   </ProCard>
                 </CardGrid>

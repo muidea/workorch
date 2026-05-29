@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -247,6 +248,15 @@ func (m AppModel) renderMainTail(width int, height int, usedLines int) string {
 			b.WriteString("\n")
 		}
 	}
+	if continuations := m.visibleArtifactContinuations(); len(continuations) > 0 {
+		writeMainTailSectionBreak(&b)
+		b.WriteString(Heading.Render("Artifact Continuations"))
+		b.WriteString("\n")
+		for _, item := range continuations {
+			b.WriteString(truncateDisplay("- "+artifactContinuationDisplayLabel(item), width-2))
+			b.WriteString("\n")
+		}
+	}
 	if m.lastError != nil {
 		writeMainTailSectionBreak(&b)
 		b.WriteString(Error.Render("Error: " + m.lastError.Error()))
@@ -476,6 +486,34 @@ func llmUsageProgressText(payload map[string]any) string {
 	return "LLM usage recorded: " + strings.TrimSpace(label+" "+status)
 }
 
+func artifactContinuationProgressText(payload map[string]any) string {
+	state := firstPayloadString(payload, "state", "State", events.PayloadKeyState)
+	targetRef := firstPayloadString(payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
+	artifactID := firstPayloadString(payload, "artifactId", "ArtifactID")
+	expected := payloadIntValue(payload, "expectedSequence", "ExpectedSequence")
+	received := len(payloadStringSliceValue(payload, "receivedSequences", "ReceivedSequences"))
+	bytesWritten := payloadIntValue(payload, "bytesWritten", "BytesWritten")
+	failure := firstPayloadString(payload, "failureReason", "FailureReason", "error", "Error")
+	target := nonEmpty(targetRef, artifactID, firstPayloadString(payload, "artifactContinuationId", "ID", "id"))
+	parts := []string{"Artifact"}
+	if state != "" {
+		parts = append(parts, state)
+	}
+	if target != "" {
+		parts = append(parts, target)
+	}
+	if expected > 0 || received > 0 {
+		parts = append(parts, fmt.Sprintf("seq %d/%s", received, artifactExpectedSequenceText(expected)))
+	}
+	if bytesWritten > 0 {
+		parts = append(parts, fmt.Sprintf("%dB", bytesWritten))
+	}
+	if failure != "" {
+		parts = append(parts, failure)
+	}
+	return strings.Join(parts, " ")
+}
+
 func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backend.ApprovalInfo, width int, limit int) string {
 	openDecisions := filterOpenDecisions(decisions)
 	pendingApprovals := filterPendingApprovals(approvals)
@@ -564,6 +602,9 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	if m.activeRunID != "" {
 		parts = append(parts, "run "+shortID(m.activeRunID))
 	}
+	if active := m.activeArtifactContinuationStatus(); active != "" {
+		parts = append(parts, active)
+	}
 	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
 		parts = append(parts, "decision "+shortID(string(m.blockingDecision.ID)))
 	}
@@ -574,6 +615,33 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 		parts = append(parts, "new updates")
 	}
 	return truncateDisplay(strings.Join(parts, " | "), width-2)
+}
+
+func (m AppModel) visibleArtifactContinuations() []backend.ArtifactContinuationInfo {
+	if len(m.artifactContinuations) == 0 {
+		return nil
+	}
+	limit := min(len(m.artifactContinuations), 5)
+	return append([]backend.ArtifactContinuationInfo(nil), m.artifactContinuations[:limit]...)
+}
+
+func (m AppModel) activeArtifactContinuationStatus() string {
+	for _, item := range m.artifactContinuations {
+		switch item.State {
+		case common.ArtifactContinuationStateApplied, common.ArtifactContinuationStateFailed:
+			continue
+		default:
+			target := strings.TrimSpace(item.TargetRef)
+			if target == "" {
+				target = strings.TrimSpace(item.ArtifactID)
+			}
+			if target == "" {
+				target = shortID(string(item.ID))
+			}
+			return truncateDisplay(fmt.Sprintf("artifact %s %d/%s", target, len(item.ReceivedSequences), artifactExpectedSequenceText(item.ExpectedSequence)), 36)
+		}
+	}
+	return ""
 }
 
 func (m AppModel) renderWorkspacePanel(width, height int) string {
@@ -634,9 +702,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit command | /goal | /run continue | /run restart | /dod | /memory | /exit"
+	help := "enter: submit command | /goal | /run continue | /run restart | /dod | /memory | /config | /exit"
 	if width < 120 {
-		help = "enter | /goal | /run continue | /run restart | /dod | /memory | /exit"
+		help = "enter | /goal | /run continue | /dod | /memory | /config | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -657,7 +725,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Ctrl+C: interrupt active run; use /exit to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
-		"/help /clear /workspace /workspace create /goal /dod /memory /result /run continue /run restart /exit",
+		"/help /clear /config /workspace /workspace create /goal /dod /memory /result /run continue /run restart /exit",
 	}
 	panelWidth := min(width-4, 72)
 	if panelWidth < 30 {

@@ -472,8 +472,19 @@ func stageContractPromptSection(input map[string]any) string {
 		"repairObjective",
 		"stateChangingRecoveryMode",
 		"providerTimeoutStateChangingRetry",
+		"outputMode",
+		"requestedOutputMode",
+		"outputModeSelector",
+		"llmOutputPolicy",
+		"artifactContinuationId",
+		"artifactContinuationContext",
+		"artifactOutputContract",
 	} {
 		copyMapValue(section, key, input[key])
+	}
+	if contract := recordFromAny(input["artifactOutputContract"]); len(contract) > 0 {
+		copyMapValue(section, "artifactOutputPhase", contract["phase"])
+		copyMapValue(section, "artifactOutputMode", contract["mode"])
 	}
 	if revision := promptDefinitionRevision(input); revision != "" {
 		section["definitionRevision"] = revision

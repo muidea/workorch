@@ -404,10 +404,33 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if executionContext := slimExecutionContextForStepInput(run.ExecutionContext); len(executionContext) > 0 {
 		input["executionContext"] = executionContext
 	}
+	inheritRuntimeContractSignalsFromExecutionContext(input, run.ExecutionContext)
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		input[coverageWorkItemContextKey] = context
 	}
 	return input
+}
+
+func inheritRuntimeContractSignalsFromExecutionContext(input map[string]any, executionContext map[string]any) {
+	if len(input) == 0 || len(executionContext) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"stateChangingOutputRequired",
+		"repairObjective",
+		"requestedOutputMode",
+		"llmOutputPolicy",
+	} {
+		if value, ok := executionContext[key]; ok && value != nil {
+			input[key] = cloneStepInputValue(value)
+		}
+	}
+	if pkg := mapFromValue(executionContext["repairActionPackage"]); len(pkg) > 0 {
+		input["repairActionPackage"] = cloneStepPayload(pkg)
+	}
+	if contract := mapFromValue(executionContext["executionContract"]); len(contract) > 0 {
+		input["executionContract"] = cloneStepPayload(contract)
+	}
 }
 
 func slimExecutionContextForStepInput(executionContext map[string]any) map[string]any {

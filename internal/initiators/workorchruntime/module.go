@@ -36,6 +36,7 @@ func init() {
 type Runtime struct {
 	repositories        common.RepositorySet
 	eventHub            workorchevents.Hub
+	runtimePolicy       orchestratorbiz.RuntimePolicy
 	fileRuntimeAdapter  orchestratorbiz.RuntimeAdapter
 	shellRuntimeAdapter orchestratorbiz.RuntimeAdapter
 	gitRuntimeAdapter   orchestratorbiz.RuntimeAdapter
@@ -78,6 +79,7 @@ func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.Background
 	}
 	r.repositories = repositories
 	r.eventHub = workorchevents.NewMagicHubWithHubOwner(eventHub, common.InitiatorID)
+	r.runtimePolicy = appbootstrap.RuntimePolicyFromConfig(cfg)
 	return nil
 }
 
@@ -91,6 +93,7 @@ func (r *Runtime) Run(ctx context.Context) *cd.Error {
 func (r *Runtime) Teardown(_ context.Context) {
 	r.repositories = common.RepositorySet{}
 	r.eventHub = nil
+	r.runtimePolicy = orchestratorbiz.RuntimePolicy{}
 	r.fileRuntimeAdapter = nil
 	r.shellRuntimeAdapter = nil
 	r.gitRuntimeAdapter = nil
@@ -121,6 +124,13 @@ func (r *Runtime) EventHub() workorchevents.Hub {
 		return nil
 	}
 	return r.eventHub
+}
+
+func (r *Runtime) RuntimePolicy() orchestratorbiz.RuntimePolicy {
+	if r == nil {
+		return orchestratorbiz.RuntimePolicy{}
+	}
+	return r.runtimePolicy
 }
 
 func (r *Runtime) FileRuntimeAdapter() orchestratorbiz.RuntimeAdapter {
@@ -349,57 +359,59 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 	switch backend {
 	case "memory":
 		return common.RepositorySet{
-			Souls:                memory.NewSoulRepository(),
-			WorkspaceTemplates:   memory.NewWorkspaceTemplateRepository(),
-			MemoryItems:          memory.NewMemoryItemRepository(),
-			MemoryRecallTraces:   memory.NewMemoryRecallTraceRepository(),
-			AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-			Skills:               memory.NewSkillRepository(),
-			MCPServers:           memory.NewMCPServerRepository(),
-			MCPCapabilities:      memory.NewMCPCapabilityRepository(),
-			Results:              memory.NewResultRepository(),
-			Artifacts:            memory.NewArtifactRepository(),
-			EventRecords:         memory.NewEventRecordRepository(),
-			Workspaces:           memory.NewWorkspaceRepository(),
-			Goals:                memory.NewGoalRepository(),
-			DoDs:                 memory.NewDoDRepository(),
-			Runs:                 memory.NewRunRepository(),
-			Steps:                memory.NewStepRepository(),
-			ToolCalls:            memory.NewToolCallRepository(),
-			Patches:              memory.NewPatchRepository(),
-			ValidationResults:    memory.NewValidationResultRepository(),
-			RuntimeCheckpoints:   memory.NewRuntimeCheckpointRepository(),
-			Tickets:              memory.NewDecisionTicketRepository(),
-			Resolutions:          memory.NewDecisionResolutionRepository(),
-			Approvals:            memory.NewApprovalRepository(),
+			Souls:                 memory.NewSoulRepository(),
+			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
+			MemoryItems:           memory.NewMemoryItemRepository(),
+			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
+			AutoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
+			Skills:                memory.NewSkillRepository(),
+			MCPServers:            memory.NewMCPServerRepository(),
+			MCPCapabilities:       memory.NewMCPCapabilityRepository(),
+			Results:               memory.NewResultRepository(),
+			Artifacts:             memory.NewArtifactRepository(),
+			EventRecords:          memory.NewEventRecordRepository(),
+			Workspaces:            memory.NewWorkspaceRepository(),
+			Goals:                 memory.NewGoalRepository(),
+			DoDs:                  memory.NewDoDRepository(),
+			Runs:                  memory.NewRunRepository(),
+			Steps:                 memory.NewStepRepository(),
+			ToolCalls:             memory.NewToolCallRepository(),
+			Patches:               memory.NewPatchRepository(),
+			ValidationResults:     memory.NewValidationResultRepository(),
+			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
+			Tickets:               memory.NewDecisionTicketRepository(),
+			Resolutions:           memory.NewDecisionResolutionRepository(),
+			Approvals:             memory.NewApprovalRepository(),
 		}, nil
 	case "file":
 		dataRoot = appbootstrap.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return common.RepositorySet{
-			Souls:                fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
-			WorkspaceTemplates:   fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
-			MemoryItems:          workspaceScopedRepos.MemoryItems,
-			MemoryRecallTraces:   workspaceScopedRepos.MemoryRecallTraces,
-			AutoGovernanceTraces: fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
-			Skills:               fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
-			MCPServers:           fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
-			MCPCapabilities:      fileRepo.NewMCPCapabilityRepository(filepath.Join(dataRoot, "system", "mcp_capability.json")),
-			Results:              workspaceScopedRepos.Results,
-			Artifacts:            workspaceScopedRepos.Artifacts,
-			EventRecords:         workspaceScopedRepos.EventRecords,
-			Workspaces:           workspaceScopedRepos.Workspaces,
-			Goals:                workspaceScopedRepos.Goals,
-			DoDs:                 workspaceScopedRepos.DoDs,
-			Runs:                 workspaceScopedRepos.Runs,
-			Steps:                workspaceScopedRepos.Steps,
-			ToolCalls:            workspaceScopedRepos.ToolCalls,
-			Patches:              workspaceScopedRepos.Patches,
-			ValidationResults:    workspaceScopedRepos.ValidationResults,
-			RuntimeCheckpoints:   workspaceScopedRepos.RuntimeCheckpoints,
-			Tickets:              workspaceScopedRepos.Tickets,
-			Resolutions:          workspaceScopedRepos.Resolutions,
-			Approvals:            workspaceScopedRepos.Approvals,
+			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
+			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
+			MemoryItems:           workspaceScopedRepos.MemoryItems,
+			MemoryRecallTraces:    workspaceScopedRepos.MemoryRecallTraces,
+			AutoGovernanceTraces:  fileRepo.NewAutoGovernanceTraceRepository(filepath.Join(dataRoot, "system", "auto_governance_trace.json")),
+			Skills:                fileRepo.NewSkillRepository(filepath.Join(dataRoot, "system", "skill.json")),
+			MCPServers:            fileRepo.NewMCPServerRepository(filepath.Join(dataRoot, "system", "mcp_server.json")),
+			MCPCapabilities:       fileRepo.NewMCPCapabilityRepository(filepath.Join(dataRoot, "system", "mcp_capability.json")),
+			Results:               workspaceScopedRepos.Results,
+			Artifacts:             workspaceScopedRepos.Artifacts,
+			EventRecords:          workspaceScopedRepos.EventRecords,
+			Workspaces:            workspaceScopedRepos.Workspaces,
+			Goals:                 workspaceScopedRepos.Goals,
+			DoDs:                  workspaceScopedRepos.DoDs,
+			Runs:                  workspaceScopedRepos.Runs,
+			Steps:                 workspaceScopedRepos.Steps,
+			ToolCalls:             workspaceScopedRepos.ToolCalls,
+			Patches:               workspaceScopedRepos.Patches,
+			ValidationResults:     workspaceScopedRepos.ValidationResults,
+			RuntimeCheckpoints:    workspaceScopedRepos.RuntimeCheckpoints,
+			ArtifactContinuations: workspaceScopedRepos.ArtifactContinuations,
+			Tickets:               workspaceScopedRepos.Tickets,
+			Resolutions:           workspaceScopedRepos.Resolutions,
+			Approvals:             workspaceScopedRepos.Approvals,
 		}, nil
 	default:
 		return common.RepositorySet{}, fmt.Errorf("unsupported repository backend: %s", backend)

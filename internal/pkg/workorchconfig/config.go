@@ -1,6 +1,7 @@
 package workorchconfig
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/muidea/magicCommon/framework/configuration"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -43,17 +45,30 @@ type RepositoryConfig struct {
 }
 
 type RuntimeConfig struct {
-	DefaultSoulID            string           `json:"defaultSoulId" toml:"defaultSoulId"`
-	MaxRuntimeRepairAttempts int              `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
-	MaxProviderRetryAttempts int              `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
-	ShellCommandTimeout      string           `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
-	Git                      GitRuntimeConfig `json:"git" toml:"git"`
+	DefaultSoulID            string                 `json:"defaultSoulId" toml:"defaultSoulId"`
+	MaxRuntimeRepairAttempts int                    `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
+	MaxProviderRetryAttempts int                    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
+	ShellCommandTimeout      string                 `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
+	Git                      GitRuntimeConfig       `json:"git" toml:"git"`
+	LLMOutput                LLMOutputRuntimeConfig `json:"llmOutput" toml:"llmOutput"`
 }
 
 type GitRuntimeConfig struct {
 	Enabled        *bool  `json:"enabled" toml:"enabled"`
 	WriteEnabled   *bool  `json:"writeEnabled" toml:"writeEnabled"`
 	DefaultTimeout string `json:"defaultTimeout" toml:"defaultTimeout"`
+}
+
+type LLMOutputRuntimeConfig struct {
+	MaxPatchContentBytes               int `json:"maxPatchContentBytes" toml:"maxPatchContentBytes"`
+	MaxGraphBytes                      int `json:"maxGraphBytes" toml:"maxGraphBytes"`
+	MaxGraphFileWrites                 int `json:"maxGraphFileWrites" toml:"maxGraphFileWrites"`
+	SchemaInvalidLargePreviewThreshold int `json:"schemaInvalidLargePreviewThreshold" toml:"schemaInvalidLargePreviewThreshold"`
+	MaxArtifactChunkBytes              int `json:"maxArtifactChunkBytes" toml:"maxArtifactChunkBytes"`
+	PreviousChunkTailBytes             int `json:"previousChunkTailBytes" toml:"previousChunkTailBytes"`
+	MaxChunkRetryAttempts              int `json:"maxChunkRetryAttempts" toml:"maxChunkRetryAttempts"`
+	MaxArtifactPlanAttempts            int `json:"maxArtifactPlanAttempts" toml:"maxArtifactPlanAttempts"`
+	MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts" toml:"maxArtifactReplanAttempts"`
 }
 
 type LLMConfig struct {
@@ -181,6 +196,9 @@ func Current() (Config, error) {
 	if err := loadSection("governance", &cfg.Governance); err != nil {
 		return Config{}, err
 	}
+	if err := normalizeConfig(&cfg); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -199,6 +217,9 @@ func ApplicationConfigPath() (string, error) {
 func Save(next Config) error {
 	if strings.TrimSpace(next.EndpointName) == "" {
 		next.EndpointName = "workorch"
+	}
+	if err := normalizeConfig(&next); err != nil {
+		return err
 	}
 	if next.LLM.Providers == nil {
 		next.LLM.Providers = map[string]LLMProviderConfig{}
@@ -224,6 +245,103 @@ func Save(next Config) error {
 		return err
 	}
 	return os.WriteFile(configPath, payload, 0o600)
+}
+
+func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {
+	return LLMOutputRuntimeConfig{
+		MaxPatchContentBytes:               12288,
+		MaxGraphBytes:                      32768,
+		MaxGraphFileWrites:                 3,
+		SchemaInvalidLargePreviewThreshold: 8192,
+		MaxArtifactChunkBytes:              8192,
+		PreviousChunkTailBytes:             300,
+		MaxChunkRetryAttempts:              3,
+		MaxArtifactPlanAttempts:            2,
+		MaxArtifactReplanAttempts:          2,
+	}
+}
+
+func NormalizeLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) (LLMOutputRuntimeConfig, error) {
+	defaults := DefaultLLMOutputRuntimeConfig()
+	applyDefault := func(value *int, fallback int) {
+		if value != nil && *value == 0 {
+			*value = fallback
+		}
+	}
+	applyDefault(&cfg.MaxPatchContentBytes, defaults.MaxPatchContentBytes)
+	applyDefault(&cfg.MaxGraphBytes, defaults.MaxGraphBytes)
+	applyDefault(&cfg.MaxGraphFileWrites, defaults.MaxGraphFileWrites)
+	applyDefault(&cfg.SchemaInvalidLargePreviewThreshold, defaults.SchemaInvalidLargePreviewThreshold)
+	applyDefault(&cfg.MaxArtifactChunkBytes, defaults.MaxArtifactChunkBytes)
+	applyDefault(&cfg.PreviousChunkTailBytes, defaults.PreviousChunkTailBytes)
+	applyDefault(&cfg.MaxChunkRetryAttempts, defaults.MaxChunkRetryAttempts)
+	applyDefault(&cfg.MaxArtifactPlanAttempts, defaults.MaxArtifactPlanAttempts)
+	applyDefault(&cfg.MaxArtifactReplanAttempts, defaults.MaxArtifactReplanAttempts)
+	if err := validateLLMOutputRuntimeConfig(cfg); err != nil {
+		return LLMOutputRuntimeConfig{}, err
+	}
+	return cfg, nil
+}
+
+func LLMOutputRuntimeConfigValues(cfg LLMOutputRuntimeConfig) map[string]any {
+	normalized, err := NormalizeLLMOutputRuntimeConfig(cfg)
+	if err != nil {
+		return nil
+	}
+	return map[string]any{
+		"maxPatchContentBytes":               normalized.MaxPatchContentBytes,
+		"maxGraphBytes":                      normalized.MaxGraphBytes,
+		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
+		"schemaInvalidLargePreviewThreshold": normalized.SchemaInvalidLargePreviewThreshold,
+		"maxArtifactChunkBytes":              normalized.MaxArtifactChunkBytes,
+		"previousChunkTailBytes":             normalized.PreviousChunkTailBytes,
+		"maxChunkRetryAttempts":              normalized.MaxChunkRetryAttempts,
+		"maxArtifactPlanAttempts":            normalized.MaxArtifactPlanAttempts,
+		"maxArtifactReplanAttempts":          normalized.MaxArtifactReplanAttempts,
+	}
+}
+
+func normalizeConfig(cfg *Config) error {
+	if cfg == nil {
+		return common.ErrInvalidArgument
+	}
+	normalized, err := NormalizeLLMOutputRuntimeConfig(cfg.Runtime.LLMOutput)
+	if err != nil {
+		return err
+	}
+	cfg.Runtime.LLMOutput = normalized
+	return nil
+}
+
+func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {
+	for _, item := range []struct {
+		name  string
+		value int
+	}{
+		{"maxPatchContentBytes", cfg.MaxPatchContentBytes},
+		{"maxGraphBytes", cfg.MaxGraphBytes},
+		{"maxGraphFileWrites", cfg.MaxGraphFileWrites},
+		{"schemaInvalidLargePreviewThreshold", cfg.SchemaInvalidLargePreviewThreshold},
+		{"maxArtifactChunkBytes", cfg.MaxArtifactChunkBytes},
+		{"previousChunkTailBytes", cfg.PreviousChunkTailBytes},
+		{"maxChunkRetryAttempts", cfg.MaxChunkRetryAttempts},
+		{"maxArtifactPlanAttempts", cfg.MaxArtifactPlanAttempts},
+		{"maxArtifactReplanAttempts", cfg.MaxArtifactReplanAttempts},
+	} {
+		if item.value <= 0 {
+			return fmt.Errorf("%w: runtime.llmOutput.%s must be positive", common.ErrInvalidArgument, item.name)
+		}
+	}
+	if cfg.MaxPatchContentBytes > cfg.MaxGraphBytes {
+		return fmt.Errorf("%w: runtime.llmOutput.maxPatchContentBytes must not exceed maxGraphBytes", common.ErrInvalidArgument)
+	}
+	if cfg.SchemaInvalidLargePreviewThreshold > cfg.MaxGraphBytes {
+		return fmt.Errorf("%w: runtime.llmOutput.schemaInvalidLargePreviewThreshold must not exceed maxGraphBytes", common.ErrInvalidArgument)
+	}
+	if cfg.PreviousChunkTailBytes > cfg.MaxArtifactChunkBytes {
+		return fmt.Errorf("%w: runtime.llmOutput.previousChunkTailBytes must not exceed maxArtifactChunkBytes", common.ErrInvalidArgument)
+	}
+	return nil
 }
 
 func Reload() error {

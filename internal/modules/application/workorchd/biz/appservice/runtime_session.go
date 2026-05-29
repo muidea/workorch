@@ -9,7 +9,6 @@ import (
 	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -96,10 +95,9 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 }
 
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
-	runtimePolicy := orchestratorbiz.RuntimePolicy{}
+	runtimePolicy := bootstrap.RuntimePolicyFromConfig(workorchconfig.Config{})
 	if cfg, err := workorchconfig.Current(); err == nil {
-		runtimePolicy.MaxRuntimeRepairAttempts = cfg.Runtime.MaxRuntimeRepairAttempts
-		runtimePolicy.MaxProviderRetryAttempts = cfg.Runtime.MaxProviderRetryAttempts
+		runtimePolicy = bootstrap.RuntimePolicyFromConfig(cfg)
 	}
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
 		return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
@@ -121,10 +119,7 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 		return bootstrap.NewWithBackendAndRuntimePolicy(
 			cfg.Repository.Backend,
 			cfg.Repository.DataDir,
-			orchestratorbiz.RuntimePolicy{
-				MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts,
-				MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts,
-			},
+			bootstrap.RuntimePolicyFromConfig(cfg),
 		)
 	})
 	if err != nil {
@@ -249,29 +244,30 @@ func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {
 	repos := runtime.Repositories()
 	return bootstrap.Exports{
 		Repositories: bootstrap.RepositoryExports{
-			Souls:                repos.Souls,
-			WorkspaceTemplates:   repos.WorkspaceTemplates,
-			MemoryItems:          repos.MemoryItems,
-			MemoryRecallTraces:   repos.MemoryRecallTraces,
-			AutoGovernanceTraces: repos.AutoGovernanceTraces,
-			Skills:               repos.Skills,
-			MCPServers:           repos.MCPServers,
-			MCPCapabilities:      repos.MCPCapabilities,
-			Workspaces:           repos.Workspaces,
-			Goals:                repos.Goals,
-			DoDs:                 repos.DoDs,
-			Results:              repos.Results,
-			Artifacts:            repos.Artifacts,
-			EventRecords:         repos.EventRecords,
-			Runs:                 repos.Runs,
-			Steps:                repos.Steps,
-			ToolCalls:            repos.ToolCalls,
-			Patches:              repos.Patches,
-			ValidationResults:    repos.ValidationResults,
-			RuntimeCheckpoints:   repos.RuntimeCheckpoints,
-			Tickets:              repos.Tickets,
-			Resolutions:          repos.Resolutions,
-			Approvals:            repos.Approvals,
+			Souls:                 repos.Souls,
+			WorkspaceTemplates:    repos.WorkspaceTemplates,
+			MemoryItems:           repos.MemoryItems,
+			MemoryRecallTraces:    repos.MemoryRecallTraces,
+			AutoGovernanceTraces:  repos.AutoGovernanceTraces,
+			Skills:                repos.Skills,
+			MCPServers:            repos.MCPServers,
+			MCPCapabilities:       repos.MCPCapabilities,
+			Workspaces:            repos.Workspaces,
+			Goals:                 repos.Goals,
+			DoDs:                  repos.DoDs,
+			Results:               repos.Results,
+			Artifacts:             repos.Artifacts,
+			ArtifactContinuations: repos.ArtifactContinuations,
+			EventRecords:          repos.EventRecords,
+			Runs:                  repos.Runs,
+			Steps:                 repos.Steps,
+			ToolCalls:             repos.ToolCalls,
+			Patches:               repos.Patches,
+			ValidationResults:     repos.ValidationResults,
+			RuntimeCheckpoints:    repos.RuntimeCheckpoints,
+			Tickets:               repos.Tickets,
+			Resolutions:           repos.Resolutions,
+			Approvals:             repos.Approvals,
 		},
 		Services: bootstrap.ServiceExports{
 			WorkspaceService:   runtime.WorkspaceService(),

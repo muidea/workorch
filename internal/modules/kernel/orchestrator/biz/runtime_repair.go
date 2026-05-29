@@ -2211,6 +2211,11 @@ func coverageTargetTokensFromStep(step *runModel.Step) []string {
 			add(value)
 		}
 	}
+	if apply := mapFromValue(step.Output["artifactContinuationApply"]); len(apply) > 0 {
+		for _, value := range patchNodeCoverageTargetTokens(apply) {
+			add(value)
+		}
+	}
 	if decision := mapFromValue(step.Output[stepOutputKeyLLMDecision]); len(decision) > 0 {
 		for _, request := range mapSliceFromValue(decision["patchRequests"]) {
 			for _, value := range patchNodeCoverageTargetTokens(request) {
@@ -2636,7 +2641,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	if len(coverageContext) > 0 {
 		applyCoverageWorkItemContext(input, coverageContext)
-		if unresolved := mapSliceFromValue(coverageContext["unresolvedItems"]); len(unresolved) > 0 {
+		if unresolved := coverageWorkItemUnresolvedItemsFromContext(coverageContext); len(unresolved) > 0 {
 			input["unresolvedCoverageWorkItems"] = unresolved
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 				"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
@@ -2805,6 +2810,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"When missingDoDItems or missingGoalCoverage are present, at least one patch/apply node must declare coverageTargets and each entry must match the exact missing DoD item text or goalRequirementId/item it is intended to close.",
 			"Do not return a generic skeleton patch. If a patch cannot be tied to a concrete missing coverage target, return a failed dodAssessment or blocker instead.",
+		)
+	}
+	if len(mapSliceFromValue(input["unresolvedCoverageWorkItems"])) > 0 {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
+			"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
+			"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
+			"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
 		)
 	}
 	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
@@ -3008,8 +3021,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
+	o.applyLLMOutputModeSelection(ctx, run, input, failedStep, attempt)
 	contract := BuildConvergenceContract(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
+	o.applyLLMOutputModeSelection(ctx, run, input, failedStep, attempt)
 	return input
 }
 
@@ -3768,6 +3783,9 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		requiredOutput["mustDeclareCoverageTargets"] = true
 		requiredOutput["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	}
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		pkg[coverageWorkItemContextKey] = context
+	}
 	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
 		pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
 	}
@@ -3794,6 +3812,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		pkg["capabilityPolicyRepairContract"] = compactLLMContextMap(contract, 1)
 		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
 		requiredOutput["capabilityPolicyFollowUpRule"] = "when an execution graph includes a trigger kind from capabilityPolicyRepairContract.triggeredPolicies.requiredAfterKinds, it must include a dependent mcp/tool_call matching preferredTools or output a structured capabilityPolicySkips item with policyId/category and non-empty reason"
+		requiredOutput["capabilityPolicyRepairScopeRule"] = "capabilityPolicySkips or dependent mcp/tool_call repairs the graph contract at top level; patch/apply coverageTargets repair Goal/DoD/deliverable state change and must not be forced to use the graph-contract failure as their business failedSurface"
 		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
 		requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]), "assessment_only_capability_policy_repair"))
 	}
@@ -3960,6 +3979,7 @@ func capabilityPolicyRepairContractFromFailure(run *runModel.Run, failedStep *ru
 			"skipField":                         "capabilityPolicySkips",
 		},
 		"repairRule":              "for each triggered policy, any graph containing requiredAfterKinds must include a dependent mcp/tool_call matching preferredTools, or declare capabilityPolicySkips with policyId/category and non-empty reason",
+		"scopeRule":               "top-level capabilityPolicySkips or dependent mcp/tool_call repairs this graph contract; patch/apply nodes remain bound to their own coverageTargets and state-change target",
 		"assessmentOnlyForbidden": true,
 	}
 	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
@@ -4582,6 +4602,13 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 			stringFromMap(item, "id"),
 			stringFromMap(item, "expectationId"),
 			stringFromMap(item, "requirement"),
+		))
+	}
+	for _, item := range coverageTargetSetFromWorkItemContext(coverageWorkItemContextFromInput(input)) {
+		add(firstNonEmptyString(stringFromMap(item, "kind"), stringFromMap(item, "sourceScope"), "coverage"), item, firstNonEmptyString(
+			stringFromMap(item, "targetText"),
+			stringFromMap(item, "coverageTargetToken"),
+			stringFromMap(item, "sourceRequirementId"),
 		))
 	}
 	if len(ret) == 0 {

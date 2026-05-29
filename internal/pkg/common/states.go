@@ -18,6 +18,7 @@ type EvidenceQuality string
 type CheckpointType string
 type ResultState string
 type ArtifactState string
+type ArtifactContinuationState string
 
 const (
 	WorkspaceStateActive          WorkspaceState = "active"
@@ -115,4 +116,13 @@ const (
 	ArtifactStateCreated   ArtifactState = "created"
 	ArtifactStateAvailable ArtifactState = "available"
 	ArtifactStateFailed    ArtifactState = "failed"
+)
+
+const (
+	ArtifactContinuationStatePlanning   ArtifactContinuationState = "planning"
+	ArtifactContinuationStateChunking   ArtifactContinuationState = "chunking"
+	ArtifactContinuationStateAssembling ArtifactContinuationState = "assembling"
+	ArtifactContinuationStateApplying   ArtifactContinuationState = "applying"
+	ArtifactContinuationStateApplied    ArtifactContinuationState = "applied"
+	ArtifactContinuationStateFailed     ArtifactContinuationState = "failed"
 )

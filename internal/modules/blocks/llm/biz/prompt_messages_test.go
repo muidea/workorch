@@ -764,6 +764,76 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 	}
 }
 
+func TestBuildProviderPromptMessagesCarriesIncrementalArtifactStageContract(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-artifact-contract",
+		RunID:          "run-artifact-contract",
+		StepID:         "step-artifact-contract",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"outputMode":                  "incrementalArtifact",
+			"requestedOutputMode":         "incrementalArtifact",
+			"outputModeSelector": map[string]any{
+				"priority": "P5",
+				"reason":   "requested_incremental_artifact_with_budget_signal",
+				"mode":     "incrementalArtifact",
+			},
+			"llmOutputPolicy": map[string]any{
+				"maxPatchContentBytes": 128,
+			},
+			"artifactContinuationId": "artifact-continuation-001",
+			"artifactContinuationContext": map[string]any{
+				"state":            "chunking",
+				"artifactId":       "artifact-001",
+				"targetRef":        "deliverable.txt",
+				"expectedSequence": 2,
+			},
+			"artifactOutputContract": map[string]any{
+				"mode":                  "incrementalArtifact",
+				"phase":                 "artifact_chunk",
+				"maxArtifactChunkBytes": 256,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"outputMode":                         "incrementalArtifact",
+					"mustUseArtifactPlanThenChunks":      true,
+					"mustNotReturnExecutionGraph":        true,
+					"mustIncludeStateChangingNode":       false,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "produce requested output"},
+				"dod":  map[string]any{"items": []any{"output exists"}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	stage, ok := promptContextSectionByID(context, "C3.stage-contract")
+	if !ok {
+		t.Fatalf("missing C3.stage-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"Stage Contract",
+		"incrementalArtifact",
+		"artifact_chunk",
+		"artifactContinuationContext",
+		"artifactOutputContract",
+		"artifactOutputPhase",
+		"maxArtifactChunkBytes",
+	} {
+		if !strings.Contains(stage.Content, want) {
+			t.Fatalf("stage contract missing %q: %s", want, stage.Content)
+		}
+	}
+}
+
 func TestBuildProviderPromptMessagesUsesConcreteValidationRepairAction(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-validation-repair",

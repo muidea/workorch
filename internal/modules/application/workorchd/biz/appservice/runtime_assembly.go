@@ -48,7 +48,9 @@ func hasWorkorchRuntimeExports(exports bootstrap.Exports) bool {
 		exports.Repositories.Steps != nil &&
 		exports.Repositories.Results != nil &&
 		exports.Repositories.Artifacts != nil &&
+		exports.Repositories.ArtifactContinuations != nil &&
 		exports.Repositories.EventRecords != nil &&
+		exports.Repositories.MemoryRecallTraces != nil &&
 		exports.Repositories.MCPCapabilities != nil &&
 		exports.Repositories.ToolCalls != nil &&
 		exports.Repositories.Patches != nil &&

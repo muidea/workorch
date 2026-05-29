@@ -989,7 +989,42 @@ func mcpServerIDStringSlice(input []common.MCPServerID) []string {
 type localConfigBackend struct{ parent *localBackend }
 
 func (b *localConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
-	return &ServiceConfig{}, nil
+	_ = ctx
+	cfg, err := appservice.ReadServiceConfiguration()
+	if err != nil {
+		return nil, err
+	}
+	providers := make([]LLMProvider, 0, len(cfg.LLM.Providers))
+	for _, item := range cfg.LLM.Providers {
+		providers = append(providers, LLMProvider{
+			ID:        item.ID,
+			Provider:  item.Provider,
+			BaseURL:   item.BaseURL,
+			Model:     item.Model,
+			Timeout:   item.Timeout,
+			Disabled:  item.Disabled,
+			Streaming: item.Streaming,
+		})
+	}
+	return &ServiceConfig{
+		ServerAddr:        cfg.Server.Addr,
+		Backend:           cfg.Repository.Backend,
+		DataDir:           cfg.Repository.DataDir,
+		DefaultProvider:   cfg.LLM.DefaultProviderID,
+		MaxConcurrentRuns: cfg.Server.MaxConcurrentRuns,
+		Providers:         providers,
+		LLMOutput: LLMOutputConfig{
+			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
+			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,
+			MaxGraphFileWrites:                 cfg.Runtime.LLMOutput.MaxGraphFileWrites,
+			SchemaInvalidLargePreviewThreshold: cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold,
+			MaxArtifactChunkBytes:              cfg.Runtime.LLMOutput.MaxArtifactChunkBytes,
+			PreviousChunkTailBytes:             cfg.Runtime.LLMOutput.PreviousChunkTailBytes,
+			MaxChunkRetryAttempts:              cfg.Runtime.LLMOutput.MaxChunkRetryAttempts,
+			MaxArtifactPlanAttempts:            cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts,
+			MaxArtifactReplanAttempts:          cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts,
+		},
+	}, nil
 }
 
 type localEventsBackend struct{ parent *localBackend }

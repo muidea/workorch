@@ -269,6 +269,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
 		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
 		m.patches = snapshotPatches(msg.Snapshot, run.ID)
+		m.artifactContinuations = snapshotArtifactContinuations(msg.Snapshot, run.ID)
 		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
@@ -420,6 +421,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.result = ""
 	m.artifacts = nil
 	m.patches = nil
+	m.artifactContinuations = nil
 	m.taskDecomp = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}

@@ -370,6 +370,7 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 	return []slashCommandSuggestion{
 		{Command: "/help", Description: "show help"},
 		{Command: "/clear", Description: "clear current display"},
+		{Command: "/config", Description: "show system configuration"},
 		{Command: "/workspace", Description: "select workspace"},
 		{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace"},
 		{Command: "/goal", Insert: "/goal ", Description: "submit a new goal"},

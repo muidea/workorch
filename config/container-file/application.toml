@@ -32,6 +32,17 @@ enabled = true
 writeEnabled = true
 defaultTimeout = "30s"
 
+[runtime.llmOutput]
+maxPatchContentBytes = 12288
+maxGraphBytes = 32768
+maxGraphFileWrites = 3
+schemaInvalidLargePreviewThreshold = 8192
+maxArtifactChunkBytes = 8192
+previousChunkTailBytes = 300
+maxChunkRetryAttempts = 3
+maxArtifactPlanAttempts = 2
+maxArtifactReplanAttempts = 2
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = ""

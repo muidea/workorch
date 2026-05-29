@@ -1,9 +1,12 @@
 package workorchconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestCurrentReadsMagicCommonApplicationConfig(t *testing.T) {
@@ -33,6 +36,17 @@ shellCommandTimeout = "90s"
 enabled = true
 writeEnabled = true
 defaultTimeout = "45s"
+
+[runtime.llmOutput]
+maxPatchContentBytes = 4096
+maxGraphBytes = 16384
+maxGraphFileWrites = 2
+schemaInvalidLargePreviewThreshold = 8192
+maxArtifactChunkBytes = 4096
+previousChunkTailBytes = 128
+maxChunkRetryAttempts = 4
+maxArtifactPlanAttempts = 3
+maxArtifactReplanAttempts = 2
 
 [llm]
 defaultProvider = "local"
@@ -115,6 +129,17 @@ maxRepeatedSamePrompt = 1
 		!GitRuntimeWriteEnabled(cfg.Runtime.Git) ||
 		cfg.Runtime.Git.DefaultTimeout != "45s" {
 		t.Fatalf("runtime git config = %+v, want configured git runtime settings", cfg.Runtime.Git)
+	}
+	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
+		cfg.Runtime.LLMOutput.MaxGraphBytes != 16384 ||
+		cfg.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
+		cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 8192 ||
+		cfg.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
+		cfg.Runtime.LLMOutput.PreviousChunkTailBytes != 128 ||
+		cfg.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
+		cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
+		cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
+		t.Fatalf("runtime llmOutput config = %+v, want configured thresholds", cfg.Runtime.LLMOutput)
 	}
 	if cfg.LLM.DefaultProvider != "local" {
 		t.Fatalf("default provider = %q, want local", cfg.LLM.DefaultProvider)
@@ -202,6 +227,17 @@ disabled = false
 	cfg.Runtime.MaxRuntimeRepairAttempts = 15
 	cfg.Runtime.MaxProviderRetryAttempts = 14
 	cfg.Runtime.ShellCommandTimeout = "120s"
+	cfg.Runtime.LLMOutput = LLMOutputRuntimeConfig{
+		MaxPatchContentBytes:               8192,
+		MaxGraphBytes:                      24576,
+		MaxGraphFileWrites:                 2,
+		SchemaInvalidLargePreviewThreshold: 4096,
+		MaxArtifactChunkBytes:              4096,
+		PreviousChunkTailBytes:             256,
+		MaxChunkRetryAttempts:              4,
+		MaxArtifactPlanAttempts:            3,
+		MaxArtifactReplanAttempts:          2,
+	}
 	disabled := false
 	cfg.LLM.DefaultProvider = "reasoning"
 	cfg.LLM.DefaultEmbeddingProvider = "reasoning"
@@ -284,6 +320,17 @@ disabled = false
 	if next.Runtime.MaxRuntimeRepairAttempts != 15 || next.Runtime.MaxProviderRetryAttempts != 14 || next.Runtime.ShellCommandTimeout != "120s" {
 		t.Fatalf("next runtime config = %+v, want saved runtime settings", next.Runtime)
 	}
+	if next.Runtime.LLMOutput.MaxPatchContentBytes != 8192 ||
+		next.Runtime.LLMOutput.MaxGraphBytes != 24576 ||
+		next.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
+		next.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 4096 ||
+		next.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
+		next.Runtime.LLMOutput.PreviousChunkTailBytes != 256 ||
+		next.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
+		next.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
+		next.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
+		t.Fatalf("next runtime llmOutput config = %+v, want saved thresholds", next.Runtime.LLMOutput)
+	}
 	if next.WebSearch.DefaultProvider != "search" ||
 		next.WebSearch.Providers["search"].FetchEndpoint != "https://search.example.test/fetch" {
 		t.Fatalf("next web search config = %+v, want saved web search provider", next.WebSearch)
@@ -294,6 +341,54 @@ disabled = false
 		len(next.Governance.AutoApproval.RequireHumanFor) != 2 ||
 		next.Governance.Budget.MaxConsecutiveFailures != 3 {
 		t.Fatalf("next governance config = %+v, want saved governance config", next.Governance)
+	}
+}
+
+func TestCurrentAppliesLLMOutputRuntimeDefaults(t *testing.T) {
+	configDir := writeApplicationConfig(t, `
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+	`)
+	_ = Close()
+	t.Setenv(EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = Close() })
+
+	cfg, err := Current()
+	if err != nil {
+		t.Fatalf("current config: %v", err)
+	}
+	if cfg.Runtime.LLMOutput != DefaultLLMOutputRuntimeConfig() {
+		t.Fatalf("llmOutput defaults = %+v, want %+v", cfg.Runtime.LLMOutput, DefaultLLMOutputRuntimeConfig())
+	}
+}
+
+func TestCurrentRejectsInvalidLLMOutputRuntimeConfig(t *testing.T) {
+	configDir := writeApplicationConfig(t, `
+endpointName = "workorch"
+
+[server]
+addr = "127.0.0.1:18080"
+
+[repository]
+backend = "file"
+dataDir = ".workorch-data"
+
+[runtime.llmOutput]
+maxPatchContentBytes = 50000
+maxGraphBytes = 32768
+	`)
+	_ = Close()
+	t.Setenv(EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = Close() })
+
+	if _, err := Current(); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Current error = %v, want invalid argument", err)
 	}
 }
 

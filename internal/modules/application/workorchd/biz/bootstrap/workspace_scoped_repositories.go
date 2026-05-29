@@ -14,6 +14,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -23,74 +24,77 @@ import (
 )
 
 const (
-	workspaceScopedWorkspaceFile         = "workspace.json"
-	workspaceScopedWorkspaceIndexFile    = "workspace_index.json"
-	workspaceScopedConfigDir             = "config"
-	workspaceScopedSoulBindingsFile      = "soul_bindings.json"
-	workspaceScopedGoalFile              = "goals.json"
-	workspaceScopedDoDFile               = "dods.json"
-	workspaceScopedMemoryItemFile        = "memory_item.json"
-	workspaceScopedMemoryRecallTraceFile = "memory_recall_trace.json"
-	workspaceScopedRunFile               = "run.json"
-	workspaceScopedStepFile              = "step.json"
-	workspaceScopedToolCallFile          = "tool_call.json"
-	workspaceScopedPatchFile             = "patch.json"
-	workspaceScopedValidationResultFile  = "validation_result.json"
-	workspaceScopedRuntimeCheckpointFile = "runtime_checkpoint.json"
-	workspaceScopedResultFile            = "result.json"
-	workspaceScopedArtifactFile          = "artifact.json"
-	workspaceScopedEventRecordFile       = "."
-	workspaceScopedTicketFile            = "ticket.json"
-	workspaceScopedResolutionFile        = "resolution.json"
-	workspaceScopedApprovalFile          = "approval.json"
+	workspaceScopedWorkspaceFile           = "workspace.json"
+	workspaceScopedWorkspaceIndexFile      = "workspace_index.json"
+	workspaceScopedConfigDir               = "config"
+	workspaceScopedSoulBindingsFile        = "soul_bindings.json"
+	workspaceScopedGoalFile                = "goals.json"
+	workspaceScopedDoDFile                 = "dods.json"
+	workspaceScopedMemoryItemFile          = "memory_item.json"
+	workspaceScopedMemoryRecallTraceFile   = "memory_recall_trace.json"
+	workspaceScopedRunFile                 = "run.json"
+	workspaceScopedStepFile                = "step.json"
+	workspaceScopedToolCallFile            = "tool_call.json"
+	workspaceScopedPatchFile               = "patch.json"
+	workspaceScopedValidationResultFile    = "validation_result.json"
+	workspaceScopedRuntimeCheckpointFile   = "runtime_checkpoint.json"
+	workspaceScopedArtifactContinuationDir = "artifact-continuations"
+	workspaceScopedResultFile              = "result.json"
+	workspaceScopedArtifactFile            = "artifact.json"
+	workspaceScopedEventRecordFile         = "."
+	workspaceScopedTicketFile              = "ticket.json"
+	workspaceScopedResolutionFile          = "resolution.json"
+	workspaceScopedApprovalFile            = "approval.json"
 )
 
 type workspaceScopedFileStore struct {
 	dataRoot string
 
-	indexMu            sync.Mutex
-	indexLoaded        bool
-	indexCache         workspaceIndex
-	mu                 sync.Mutex
-	runRootMu          sync.RWMutex
-	runRootsByID       map[common.RunID]string
-	workspaces         map[string]*fileRepo.WorkspaceRepository
-	goals              map[string]*fileRepo.GoalRepository
-	dods               map[string]*fileRepo.DoDRepository
-	memoryItems        map[string]*fileRepo.MemoryItemRepository
-	memoryRecallTraces map[string]*fileRepo.MemoryRecallTraceRepository
-	runs               map[string]*fileRepo.RunRepository
-	steps              map[string]*fileRepo.StepRepository
-	toolCalls          map[string]*fileRepo.ToolCallRepository
-	patches            map[string]*fileRepo.PatchRepository
-	validationResults  map[string]*fileRepo.ValidationResultRepository
-	runtimeCheckpoints map[string]*fileRepo.RuntimeCheckpointRepository
-	results            map[string]*fileRepo.ResultRepository
-	artifacts          map[string]*fileRepo.ArtifactRepository
-	eventRecords       map[string]*fileRepo.EventRecordRepository
-	tickets            map[string]*fileRepo.DecisionTicketRepository
-	resolutions        map[string]*fileRepo.DecisionResolutionRepository
-	approvals          map[string]*fileRepo.ApprovalRepository
+	indexMu               sync.Mutex
+	indexLoaded           bool
+	indexCache            workspaceIndex
+	mu                    sync.Mutex
+	runRootMu             sync.RWMutex
+	runRootsByID          map[common.RunID]string
+	workspaces            map[string]*fileRepo.WorkspaceRepository
+	goals                 map[string]*fileRepo.GoalRepository
+	dods                  map[string]*fileRepo.DoDRepository
+	memoryItems           map[string]*fileRepo.MemoryItemRepository
+	memoryRecallTraces    map[string]*fileRepo.MemoryRecallTraceRepository
+	runs                  map[string]*fileRepo.RunRepository
+	steps                 map[string]*fileRepo.StepRepository
+	toolCalls             map[string]*fileRepo.ToolCallRepository
+	patches               map[string]*fileRepo.PatchRepository
+	validationResults     map[string]*fileRepo.ValidationResultRepository
+	runtimeCheckpoints    map[string]*fileRepo.RuntimeCheckpointRepository
+	artifactContinuations map[string]*fileRepo.ArtifactContinuationRepository
+	results               map[string]*fileRepo.ResultRepository
+	artifacts             map[string]*fileRepo.ArtifactRepository
+	eventRecords          map[string]*fileRepo.EventRecordRepository
+	tickets               map[string]*fileRepo.DecisionTicketRepository
+	resolutions           map[string]*fileRepo.DecisionResolutionRepository
+	approvals             map[string]*fileRepo.ApprovalRepository
 }
 
 type WorkspaceScopedFileRepositorySet struct {
-	MemoryItems        repository.MemoryItemRepository
-	MemoryRecallTraces repository.MemoryRecallTraceRepository
-	Workspaces         repository.WorkspaceRepository
-	Goals              repository.GoalRepository
-	DoDs               repository.DoDRepository
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	EventRecords       repository.EventRecordRepository
-	Runs               repository.RunRepository
-	Steps              repository.StepRepository
-	ToolCalls          repository.ToolCallRepository
-	Patches            repository.PatchRepository
-	ValidationResults  repository.ValidationResultRepository
-	RuntimeCheckpoints repository.RuntimeCheckpointRepository
-	Tickets            repository.DecisionTicketRepository
-	Resolutions        repository.DecisionResolutionRepository
-	Approvals          repository.ApprovalRepository
+	MemoryItems           repository.MemoryItemRepository
+	MemoryRecallTraces    repository.MemoryRecallTraceRepository
+	Workspaces            repository.WorkspaceRepository
+	Goals                 repository.GoalRepository
+	DoDs                  repository.DoDRepository
+	Results               repository.ResultRepository
+	Artifacts             repository.ArtifactRepository
+	EventRecords          repository.EventRecordRepository
+	Runs                  repository.RunRepository
+	Steps                 repository.StepRepository
+	ToolCalls             repository.ToolCallRepository
+	Patches               repository.PatchRepository
+	ValidationResults     repository.ValidationResultRepository
+	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	ArtifactContinuations repository.ArtifactContinuationRepository
+	Tickets               repository.DecisionTicketRepository
+	Resolutions           repository.DecisionResolutionRepository
+	Approvals             repository.ApprovalRepository
 }
 
 type workspaceIndex struct {
@@ -118,47 +122,49 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 	tickets := newWorkspaceScopedDecisionTicketRepository(store)
 	artifacts := NewArtifactStorageRepository(newWorkspaceScopedArtifactRepository(store), dataRoot)
 	return WorkspaceScopedFileRepositorySet{
-		MemoryItems:        newWorkspaceScopedMemoryItemRepository(store),
-		MemoryRecallTraces: newWorkspaceScopedMemoryRecallTraceRepository(store),
-		Workspaces:         newWorkspaceScopedWorkspaceRepository(store),
-		Goals:              newWorkspaceScopedGoalRepository(store),
-		DoDs:               newWorkspaceScopedDoDRepository(store),
-		Results:            newWorkspaceScopedResultRepository(store),
-		Artifacts:          artifacts,
-		EventRecords:       newWorkspaceScopedEventRecordRepository(store),
-		Runs:               runs,
-		Steps:              newWorkspaceScopedStepRepository(store, runs),
-		ToolCalls:          newWorkspaceScopedToolCallRepository(store),
-		Patches:            newWorkspaceScopedPatchRepository(store),
-		ValidationResults:  newWorkspaceScopedValidationResultRepository(store),
-		RuntimeCheckpoints: newWorkspaceScopedRuntimeCheckpointRepository(store),
-		Tickets:            tickets,
-		Resolutions:        newWorkspaceScopedDecisionResolutionRepository(store, tickets),
-		Approvals:          newWorkspaceScopedApprovalRepository(store),
+		MemoryItems:           newWorkspaceScopedMemoryItemRepository(store),
+		MemoryRecallTraces:    newWorkspaceScopedMemoryRecallTraceRepository(store),
+		Workspaces:            newWorkspaceScopedWorkspaceRepository(store),
+		Goals:                 newWorkspaceScopedGoalRepository(store),
+		DoDs:                  newWorkspaceScopedDoDRepository(store),
+		Results:               newWorkspaceScopedResultRepository(store),
+		Artifacts:             artifacts,
+		EventRecords:          newWorkspaceScopedEventRecordRepository(store),
+		Runs:                  runs,
+		Steps:                 newWorkspaceScopedStepRepository(store, runs),
+		ToolCalls:             newWorkspaceScopedToolCallRepository(store),
+		Patches:               newWorkspaceScopedPatchRepository(store),
+		ValidationResults:     newWorkspaceScopedValidationResultRepository(store),
+		RuntimeCheckpoints:    newWorkspaceScopedRuntimeCheckpointRepository(store),
+		ArtifactContinuations: newWorkspaceScopedArtifactContinuationRepository(store),
+		Tickets:               tickets,
+		Resolutions:           newWorkspaceScopedDecisionResolutionRepository(store, tickets),
+		Approvals:             newWorkspaceScopedApprovalRepository(store),
 	}
 }
 
 func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 	return &workspaceScopedFileStore{
-		dataRoot:           dataRoot,
-		runRootsByID:       map[common.RunID]string{},
-		workspaces:         map[string]*fileRepo.WorkspaceRepository{},
-		goals:              map[string]*fileRepo.GoalRepository{},
-		dods:               map[string]*fileRepo.DoDRepository{},
-		memoryItems:        map[string]*fileRepo.MemoryItemRepository{},
-		memoryRecallTraces: map[string]*fileRepo.MemoryRecallTraceRepository{},
-		runs:               map[string]*fileRepo.RunRepository{},
-		steps:              map[string]*fileRepo.StepRepository{},
-		toolCalls:          map[string]*fileRepo.ToolCallRepository{},
-		patches:            map[string]*fileRepo.PatchRepository{},
-		validationResults:  map[string]*fileRepo.ValidationResultRepository{},
-		runtimeCheckpoints: map[string]*fileRepo.RuntimeCheckpointRepository{},
-		results:            map[string]*fileRepo.ResultRepository{},
-		artifacts:          map[string]*fileRepo.ArtifactRepository{},
-		eventRecords:       map[string]*fileRepo.EventRecordRepository{},
-		tickets:            map[string]*fileRepo.DecisionTicketRepository{},
-		resolutions:        map[string]*fileRepo.DecisionResolutionRepository{},
-		approvals:          map[string]*fileRepo.ApprovalRepository{},
+		dataRoot:              dataRoot,
+		runRootsByID:          map[common.RunID]string{},
+		workspaces:            map[string]*fileRepo.WorkspaceRepository{},
+		goals:                 map[string]*fileRepo.GoalRepository{},
+		dods:                  map[string]*fileRepo.DoDRepository{},
+		memoryItems:           map[string]*fileRepo.MemoryItemRepository{},
+		memoryRecallTraces:    map[string]*fileRepo.MemoryRecallTraceRepository{},
+		runs:                  map[string]*fileRepo.RunRepository{},
+		steps:                 map[string]*fileRepo.StepRepository{},
+		toolCalls:             map[string]*fileRepo.ToolCallRepository{},
+		patches:               map[string]*fileRepo.PatchRepository{},
+		validationResults:     map[string]*fileRepo.ValidationResultRepository{},
+		runtimeCheckpoints:    map[string]*fileRepo.RuntimeCheckpointRepository{},
+		artifactContinuations: map[string]*fileRepo.ArtifactContinuationRepository{},
+		results:               map[string]*fileRepo.ResultRepository{},
+		artifacts:             map[string]*fileRepo.ArtifactRepository{},
+		eventRecords:          map[string]*fileRepo.EventRecordRepository{},
+		tickets:               map[string]*fileRepo.DecisionTicketRepository{},
+		resolutions:           map[string]*fileRepo.DecisionResolutionRepository{},
+		approvals:             map[string]*fileRepo.ApprovalRepository{},
 	}
 }
 
@@ -377,6 +383,17 @@ func (s *workspaceScopedFileStore) runtimeCheckpointRepo(path string) *fileRepo.
 	if !ok {
 		repo = fileRepo.NewRuntimeCheckpointRepository(path)
 		s.runtimeCheckpoints[path] = repo
+	}
+	return repo
+}
+
+func (s *workspaceScopedFileStore) artifactContinuationRepo(path string) *fileRepo.ArtifactContinuationRepository {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	repo, ok := s.artifactContinuations[path]
+	if !ok {
+		repo = fileRepo.NewArtifactContinuationRepository(path)
+		s.artifactContinuations[path] = repo
 	}
 	return repo
 }
@@ -1608,6 +1625,171 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Delete(ctx context.Context,
 	return r.store.runtimeCheckpointRepo(r.store.runPath(r.store.runRoot(current.WorkspaceID, current.RunID), workspaceScopedRuntimeCheckpointFile)).Delete(ctx, id)
 }
 
+type workspaceScopedArtifactContinuationRepository struct {
+	store *workspaceScopedFileStore
+}
+
+func newWorkspaceScopedArtifactContinuationRepository(store *workspaceScopedFileStore) *workspaceScopedArtifactContinuationRepository {
+	return &workspaceScopedArtifactContinuationRepository{store: store}
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) Create(ctx context.Context, item *orchestratormodel.ArtifactContinuation) error {
+	if item == nil || item.ID == "" || item.WorkspaceID == "" || item.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	return r.repoForRun(item.WorkspaceID, item.RunID).Create(ctx, item)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) Get(ctx context.Context, id common.ArtifactContinuationID) (*orchestratormodel.ArtifactContinuation, error) {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	for _, root := range r.store.allRunRoots() {
+		item, err := r.store.artifactContinuationRepo(r.store.runPath(root, workspaceScopedArtifactContinuationDir)).Get(ctx, id)
+		if err == nil {
+			return item, nil
+		}
+		if err != common.ErrNotFound {
+			return nil, err
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
+	if root, ok := r.store.runRootByID(runID); ok {
+		return r.store.artifactContinuationRepo(r.store.runPath(root, workspaceScopedArtifactContinuationDir)).ListByRun(ctx, runID)
+	}
+	ret := []*orchestratormodel.ArtifactContinuation{}
+	for _, root := range r.store.allRunRoots() {
+		items, err := r.store.artifactContinuationRepo(r.store.runPath(root, workspaceScopedArtifactContinuationDir)).ListByRun(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortArtifactContinuations(ret)
+	return nilIfEmptyArtifactContinuations(ret), nil
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) ListOpenByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
+	items, err := r.ListByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	ret := items[:0]
+	for _, item := range items {
+		if item.State != common.ArtifactContinuationStateApplied && item.State != common.ArtifactContinuationStateFailed {
+			ret = append(ret, item)
+		}
+	}
+	return nilIfEmptyArtifactContinuations(ret), nil
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) Update(ctx context.Context, item *orchestratormodel.ArtifactContinuation) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if item.WorkspaceID != "" && item.RunID != "" {
+		err := r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+		if err == nil || err != common.ErrNotFound {
+			return err
+		}
+	}
+	current, err := r.Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	item.WorkspaceID = current.WorkspaceID
+	item.RunID = current.RunID
+	return r.repoForRun(item.WorkspaceID, item.RunID).Update(ctx, item)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) Delete(ctx context.Context, id common.ArtifactContinuationID) error {
+	if id == "" {
+		return common.ErrInvalidArgument
+	}
+	current, err := r.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return r.repoForRun(current.WorkspaceID, current.RunID).Delete(ctx, id)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) SavePlan(ctx context.Context, id common.ArtifactContinuationID, plan map[string]any) error {
+	repo, err := r.repoForContinuation(ctx, id)
+	if err != nil {
+		return err
+	}
+	return repo.SavePlan(ctx, id, plan)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) GetPlan(ctx context.Context, id common.ArtifactContinuationID) (map[string]any, error) {
+	repo, err := r.repoForContinuation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return repo.GetPlan(ctx, id)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) SaveChunk(ctx context.Context, chunk *orchestratormodel.ArtifactContinuationChunk, content string) error {
+	if chunk == nil || chunk.ContinuationID == "" {
+		return common.ErrInvalidArgument
+	}
+	repo, err := r.repoForContinuation(ctx, chunk.ContinuationID)
+	if err != nil {
+		return err
+	}
+	return repo.SaveChunk(ctx, chunk, content)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) GetChunk(ctx context.Context, id common.ArtifactContinuationID, sequence int) (*orchestratormodel.ArtifactContinuationChunk, string, error) {
+	repo, err := r.repoForContinuation(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	return repo.GetChunk(ctx, id, sequence)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) ListChunks(ctx context.Context, id common.ArtifactContinuationID) ([]*orchestratormodel.ArtifactContinuationChunk, error) {
+	repo, err := r.repoForContinuation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListChunks(ctx, id)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) SaveAssembled(ctx context.Context, item *orchestratormodel.ArtifactContinuationAssembledMetadata, content string) error {
+	if item == nil || item.ContinuationID == "" {
+		return common.ErrInvalidArgument
+	}
+	repo, err := r.repoForContinuation(ctx, item.ContinuationID)
+	if err != nil {
+		return err
+	}
+	return repo.SaveAssembled(ctx, item, content)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) GetAssembled(ctx context.Context, id common.ArtifactContinuationID) (*orchestratormodel.ArtifactContinuationAssembledMetadata, string, error) {
+	repo, err := r.repoForContinuation(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	return repo.GetAssembled(ctx, id)
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) repoForContinuation(ctx context.Context, id common.ArtifactContinuationID) (*fileRepo.ArtifactContinuationRepository, error) {
+	item, err := r.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return r.repoForRun(item.WorkspaceID, item.RunID), nil
+}
+
+func (r *workspaceScopedArtifactContinuationRepository) repoForRun(workspaceID common.WorkspaceID, runID common.RunID) *fileRepo.ArtifactContinuationRepository {
+	return r.store.artifactContinuationRepo(r.store.runPath(r.store.runRoot(workspaceID, runID), workspaceScopedArtifactContinuationDir))
+}
+
 type workspaceScopedResultRepository struct {
 	store *workspaceScopedFileStore
 }
@@ -2181,6 +2363,13 @@ func nilIfEmpty[T any](items []T) []T {
 	return items
 }
 
+func nilIfEmptyArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) []*orchestratormodel.ArtifactContinuation {
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
 func sortRuns(items []*runmodel.Run) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
 }
@@ -2228,6 +2417,15 @@ func sortValidationResults(items []*runmodel.ValidationResult) {
 
 func sortRuntimeCheckpoints(items []*runmodel.RuntimeCheckpoint) {
 	sort.Slice(items, func(i, j int) bool { return string(items[i].ID) < string(items[j].ID) })
+}
+
+func sortArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].RunID != items[j].RunID {
+			return string(items[i].RunID) < string(items[j].RunID)
+		}
+		return string(items[i].ID) < string(items[j].ID)
+	})
 }
 
 func sortResults(items []*resultmodel.Result) {

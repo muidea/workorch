@@ -42,10 +42,23 @@ type RepositoryConfiguration struct {
 }
 
 type RuntimeConfiguration struct {
-	DefaultSoulID            string `json:"defaultSoulId,omitempty"`
-	MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts"`
-	MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
-	ShellCommandTimeout      string `json:"shellCommandTimeout"`
+	DefaultSoulID            string                        `json:"defaultSoulId,omitempty"`
+	MaxRuntimeRepairAttempts int                           `json:"maxRuntimeRepairAttempts"`
+	MaxProviderRetryAttempts int                           `json:"maxProviderRetryAttempts"`
+	ShellCommandTimeout      string                        `json:"shellCommandTimeout"`
+	LLMOutput                RuntimeLLMOutputConfiguration `json:"llmOutput"`
+}
+
+type RuntimeLLMOutputConfiguration struct {
+	MaxPatchContentBytes               int `json:"maxPatchContentBytes"`
+	MaxGraphBytes                      int `json:"maxGraphBytes"`
+	MaxGraphFileWrites                 int `json:"maxGraphFileWrites"`
+	SchemaInvalidLargePreviewThreshold int `json:"schemaInvalidLargePreviewThreshold"`
+	MaxArtifactChunkBytes              int `json:"maxArtifactChunkBytes"`
+	PreviousChunkTailBytes             int `json:"previousChunkTailBytes"`
+	MaxChunkRetryAttempts              int `json:"maxChunkRetryAttempts"`
+	MaxArtifactPlanAttempts            int `json:"maxArtifactPlanAttempts"`
+	MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts"`
 }
 
 type LLMConfiguration struct {
@@ -322,6 +335,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 			MaxRuntimeRepairAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
 			MaxProviderRetryAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
 			ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
+			LLMOutput:                runtimeLLMOutputConfiguration(cfg.Runtime.LLMOutput),
 		},
 		LLM: LLMConfiguration{
 			DefaultProviderID:          defaultProviderID,
@@ -363,6 +377,24 @@ func runtimeShellCommandTimeout(configured string) string {
 		return configured
 	}
 	return "60s"
+}
+
+func runtimeLLMOutputConfiguration(cfg workorchconfig.LLMOutputRuntimeConfig) RuntimeLLMOutputConfiguration {
+	normalized, err := workorchconfig.NormalizeLLMOutputRuntimeConfig(cfg)
+	if err != nil {
+		normalized = workorchconfig.DefaultLLMOutputRuntimeConfig()
+	}
+	return RuntimeLLMOutputConfiguration{
+		MaxPatchContentBytes:               normalized.MaxPatchContentBytes,
+		MaxGraphBytes:                      normalized.MaxGraphBytes,
+		MaxGraphFileWrites:                 normalized.MaxGraphFileWrites,
+		SchemaInvalidLargePreviewThreshold: normalized.SchemaInvalidLargePreviewThreshold,
+		MaxArtifactChunkBytes:              normalized.MaxArtifactChunkBytes,
+		PreviousChunkTailBytes:             normalized.PreviousChunkTailBytes,
+		MaxChunkRetryAttempts:              normalized.MaxChunkRetryAttempts,
+		MaxArtifactPlanAttempts:            normalized.MaxArtifactPlanAttempts,
+		MaxArtifactReplanAttempts:          normalized.MaxArtifactReplanAttempts,
+	}
 }
 
 func DefaultLLMProviderTemplates() []LLMProviderTemplate {

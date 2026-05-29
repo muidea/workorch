@@ -13,6 +13,7 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
@@ -264,6 +265,18 @@ func TestRuntimeCheckpointRepositoryContract_File(t *testing.T) {
 	})
 }
 
+func TestArtifactContinuationRepositoryContract_Memory(t *testing.T) {
+	testArtifactContinuationRepositoryContract(t, func() repository.ArtifactContinuationRepository {
+		return memory.NewArtifactContinuationRepository()
+	})
+}
+
+func TestArtifactContinuationRepositoryContract_File(t *testing.T) {
+	testArtifactContinuationRepositoryContract(t, func() repository.ArtifactContinuationRepository {
+		return file.NewArtifactContinuationRepository(filepath.Join(t.TempDir(), "artifact-continuations"))
+	})
+}
+
 func TestDecisionTicketRepositoryContract_Memory(t *testing.T) {
 	testDecisionTicketRepositoryContract(t, func() repository.DecisionTicketRepository {
 		return memory.NewDecisionTicketRepository()
@@ -302,28 +315,29 @@ func TestApprovalRepositoryContract_File(t *testing.T) {
 
 func TestRepositoryBundleContract_Memory(t *testing.T) {
 	bundle := repositoryBundle{
-		souls:                memory.NewSoulRepository(),
-		memoryItems:          memory.NewMemoryItemRepository(),
-		memoryRecallTraces:   memory.NewMemoryRecallTraceRepository(),
-		autoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
-		skills:               memory.NewSkillRepository(),
-		mcpServers:           memory.NewMCPServerRepository(),
-		mcpCapabilities:      memory.NewMCPCapabilityRepository(),
-		results:              memory.NewResultRepository(),
-		artifacts:            memory.NewArtifactRepository(),
-		eventRecords:         memory.NewEventRecordRepository(),
-		workspaces:           memory.NewWorkspaceRepository(),
-		goals:                memory.NewGoalRepository(),
-		dods:                 memory.NewDoDRepository(),
-		runs:                 memory.NewRunRepository(),
-		steps:                memory.NewStepRepository(),
-		toolCalls:            memory.NewToolCallRepository(),
-		patches:              memory.NewPatchRepository(),
-		validationResults:    memory.NewValidationResultRepository(),
-		runtimeCheckpoints:   memory.NewRuntimeCheckpointRepository(),
-		tickets:              memory.NewDecisionTicketRepository(),
-		resolutions:          memory.NewDecisionResolutionRepository(),
-		approvals:            memory.NewApprovalRepository(),
+		souls:                 memory.NewSoulRepository(),
+		memoryItems:           memory.NewMemoryItemRepository(),
+		memoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
+		autoGovernanceTraces:  memory.NewAutoGovernanceTraceRepository(),
+		skills:                memory.NewSkillRepository(),
+		mcpServers:            memory.NewMCPServerRepository(),
+		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		workspaces:            memory.NewWorkspaceRepository(),
+		goals:                 memory.NewGoalRepository(),
+		dods:                  memory.NewDoDRepository(),
+		runs:                  memory.NewRunRepository(),
+		steps:                 memory.NewStepRepository(),
+		toolCalls:             memory.NewToolCallRepository(),
+		patches:               memory.NewPatchRepository(),
+		validationResults:     memory.NewValidationResultRepository(),
+		runtimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
 	}
 	testRepositoryBundleContract(t, bundle, func() repositoryBundle { return bundle })
 }
@@ -332,56 +346,58 @@ func TestRepositoryBundleContract_File(t *testing.T) {
 	dir := t.TempDir()
 	build := func() repositoryBundle {
 		return repositoryBundle{
-			souls:                file.NewSoulRepository(filepath.Join(dir, "souls")),
-			memoryItems:          file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
-			memoryRecallTraces:   file.NewMemoryRecallTraceRepository(filepath.Join(dir, "memory_recall_trace.json")),
-			autoGovernanceTraces: file.NewAutoGovernanceTraceRepository(filepath.Join(dir, "auto_governance_trace.json")),
-			skills:               file.NewSkillRepository(filepath.Join(dir, "skill.json")),
-			mcpServers:           file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
-			mcpCapabilities:      file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
-			results:              file.NewResultRepository(filepath.Join(dir, "result.json")),
-			artifacts:            file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
-			eventRecords:         file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
-			workspaces:           file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
-			goals:                file.NewGoalRepository(filepath.Join(dir, "goal.json")),
-			dods:                 file.NewDoDRepository(filepath.Join(dir, "dod.json")),
-			runs:                 file.NewRunRepository(filepath.Join(dir, "run.json")),
-			steps:                file.NewStepRepository(filepath.Join(dir, "step.json")),
-			toolCalls:            file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
-			patches:              file.NewPatchRepository(filepath.Join(dir, "patch.json")),
-			validationResults:    file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
-			runtimeCheckpoints:   file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
-			tickets:              file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
-			resolutions:          file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
-			approvals:            file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
+			souls:                 file.NewSoulRepository(filepath.Join(dir, "souls")),
+			memoryItems:           file.NewMemoryItemRepository(filepath.Join(dir, "memory_item.json")),
+			memoryRecallTraces:    file.NewMemoryRecallTraceRepository(filepath.Join(dir, "memory_recall_trace.json")),
+			autoGovernanceTraces:  file.NewAutoGovernanceTraceRepository(filepath.Join(dir, "auto_governance_trace.json")),
+			skills:                file.NewSkillRepository(filepath.Join(dir, "skill.json")),
+			mcpServers:            file.NewMCPServerRepository(filepath.Join(dir, "mcp_server.json")),
+			mcpCapabilities:       file.NewMCPCapabilityRepository(filepath.Join(dir, "mcp_capability.json")),
+			results:               file.NewResultRepository(filepath.Join(dir, "result.json")),
+			artifacts:             file.NewArtifactRepository(filepath.Join(dir, "artifact.json")),
+			eventRecords:          file.NewEventRecordRepository(filepath.Join(dir, "event_record.json")),
+			workspaces:            file.NewWorkspaceRepository(filepath.Join(dir, "workspace.json")),
+			goals:                 file.NewGoalRepository(filepath.Join(dir, "goal.json")),
+			dods:                  file.NewDoDRepository(filepath.Join(dir, "dod.json")),
+			runs:                  file.NewRunRepository(filepath.Join(dir, "run.json")),
+			steps:                 file.NewStepRepository(filepath.Join(dir, "step.json")),
+			toolCalls:             file.NewToolCallRepository(filepath.Join(dir, "tool_call.json")),
+			patches:               file.NewPatchRepository(filepath.Join(dir, "patch.json")),
+			validationResults:     file.NewValidationResultRepository(filepath.Join(dir, "validation_result.json")),
+			runtimeCheckpoints:    file.NewRuntimeCheckpointRepository(filepath.Join(dir, "runtime_checkpoint.json")),
+			artifactContinuations: file.NewArtifactContinuationRepository(filepath.Join(dir, "artifact-continuations")),
+			tickets:               file.NewDecisionTicketRepository(filepath.Join(dir, "ticket.json")),
+			resolutions:           file.NewDecisionResolutionRepository(filepath.Join(dir, "resolution.json")),
+			approvals:             file.NewApprovalRepository(filepath.Join(dir, "approval.json")),
 		}
 	}
 	testRepositoryBundleContract(t, build(), build)
 }
 
 type repositoryBundle struct {
-	souls                repository.SoulRepository
-	memoryItems          repository.MemoryItemRepository
-	memoryRecallTraces   repository.MemoryRecallTraceRepository
-	autoGovernanceTraces repository.AutoGovernanceTraceRepository
-	skills               repository.SkillRepository
-	mcpServers           repository.MCPServerRepository
-	mcpCapabilities      repository.MCPCapabilityRepository
-	results              repository.ResultRepository
-	artifacts            repository.ArtifactRepository
-	eventRecords         repository.EventRecordRepository
-	workspaces           repository.WorkspaceRepository
-	goals                repository.GoalRepository
-	dods                 repository.DoDRepository
-	runs                 repository.RunRepository
-	steps                repository.StepRepository
-	toolCalls            repository.ToolCallRepository
-	patches              repository.PatchRepository
-	validationResults    repository.ValidationResultRepository
-	runtimeCheckpoints   repository.RuntimeCheckpointRepository
-	tickets              repository.DecisionTicketRepository
-	resolutions          repository.DecisionResolutionRepository
-	approvals            repository.ApprovalRepository
+	souls                 repository.SoulRepository
+	memoryItems           repository.MemoryItemRepository
+	memoryRecallTraces    repository.MemoryRecallTraceRepository
+	autoGovernanceTraces  repository.AutoGovernanceTraceRepository
+	skills                repository.SkillRepository
+	mcpServers            repository.MCPServerRepository
+	mcpCapabilities       repository.MCPCapabilityRepository
+	results               repository.ResultRepository
+	artifacts             repository.ArtifactRepository
+	eventRecords          repository.EventRecordRepository
+	workspaces            repository.WorkspaceRepository
+	goals                 repository.GoalRepository
+	dods                  repository.DoDRepository
+	runs                  repository.RunRepository
+	steps                 repository.StepRepository
+	toolCalls             repository.ToolCallRepository
+	patches               repository.PatchRepository
+	validationResults     repository.ValidationResultRepository
+	runtimeCheckpoints    repository.RuntimeCheckpointRepository
+	artifactContinuations repository.ArtifactContinuationRepository
+	tickets               repository.DecisionTicketRepository
+	resolutions           repository.DecisionResolutionRepository
+	approvals             repository.ApprovalRepository
 }
 
 func testSkillRepositoryContract(t *testing.T, factory func() repository.SkillRepository) {
@@ -2034,6 +2050,161 @@ func testRuntimeCheckpointRepositoryContract(t *testing.T, factory func() reposi
 	}
 }
 
+func testArtifactContinuationRepositoryContract(t *testing.T, factory func() repository.ArtifactContinuationRepository) {
+	t.Helper()
+	ctx := context.Background()
+	repo := factory()
+
+	item := &orchestratormodel.ArtifactContinuation{
+		ID:                  common.ArtifactContinuationID("artifact-continuation-contract-001"),
+		WorkspaceID:         common.WorkspaceID("ws-contract"),
+		RunID:               common.RunID("run-contract"),
+		RootStepID:          common.StepID("run-contract/step-1"),
+		ArtifactID:          "artifact-001",
+		TargetRef:           "deliverable/example.txt",
+		Operation:           "replace",
+		CoverageTargets:     []string{"coverage-001"},
+		State:               common.ArtifactContinuationStatePlanning,
+		ExpectedSequence:    1,
+		ReceivedSequences:   []int{1},
+		ReceivedChunkHashes: map[int]string{1: "hash-001"},
+		RetryCounters:       map[string]int{"hash_mismatch": 1},
+		EvidenceRefs:        []string{"run-contract/step-1"},
+		Metadata:            map[string]any{"scope": "contract"},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create artifact continuation: %v", err)
+	}
+	if err := repo.Create(ctx, item); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("duplicate artifact continuation create err = %v, want conflict", err)
+	}
+	got, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get artifact continuation: %v", err)
+	}
+	got.Metadata["scope"] = "mutated"
+	got.CoverageTargets[0] = "mutated"
+	fresh, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get fresh artifact continuation: %v", err)
+	}
+	if fresh.Metadata["scope"] != "contract" || fresh.CoverageTargets[0] != "coverage-001" || fresh.ReceivedChunkHashes[1] != "hash-001" {
+		t.Fatalf("artifact continuation clone isolation failed: %+v", fresh)
+	}
+
+	plan := map[string]any{"artifacts": []any{map[string]any{"artifactId": "artifact-001"}}}
+	if err := repo.SavePlan(ctx, item.ID, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+	plan["mutated"] = true
+	storedPlan, err := repo.GetPlan(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if storedPlan["mutated"] != nil {
+		t.Fatalf("stored plan leaked caller mutation: %+v", storedPlan)
+	}
+
+	chunk := &orchestratormodel.ArtifactContinuationChunk{
+		ContinuationID:   item.ID,
+		Sequence:         1,
+		ArtifactID:       item.ArtifactID,
+		TargetRef:        item.TargetRef,
+		ContentHash:      "hash-001",
+		Bytes:            5,
+		CurrentChunkTail: "hello",
+		LLMCallRefs:      []string{"llm-call-001"},
+		StepRefs:         []common.StepID{item.RootStepID},
+		Validation:       map[string]any{"state": "accepted"},
+		Metadata:         map[string]any{"scope": "chunk"},
+	}
+	if err := repo.SaveChunk(ctx, chunk, "hello"); err != nil {
+		t.Fatalf("save chunk: %v", err)
+	}
+	chunk.Metadata["scope"] = "mutated"
+	storedChunk, content, err := repo.GetChunk(ctx, item.ID, 1)
+	if err != nil {
+		t.Fatalf("get chunk: %v", err)
+	}
+	if content != "hello" || storedChunk.Metadata["scope"] != "chunk" {
+		t.Fatalf("stored chunk/content = %+v/%q, want isolated chunk content", storedChunk, content)
+	}
+	chunks, err := repo.ListChunks(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("list chunks: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].Sequence != 1 {
+		t.Fatalf("chunks = %+v, want sequence 1", chunks)
+	}
+
+	assembled := &orchestratormodel.ArtifactContinuationAssembledMetadata{
+		ContinuationID:    item.ID,
+		TargetRef:         item.TargetRef,
+		Bytes:             5,
+		RollingHash:       "rolling-hash",
+		SourceChunkRefs:   []string{"001"},
+		ApplyEvidenceRefs: []string{"apply-step"},
+		Metadata:          map[string]any{"scope": "assembled"},
+	}
+	if err := repo.SaveAssembled(ctx, assembled, "hello"); err != nil {
+		t.Fatalf("save assembled: %v", err)
+	}
+	storedAssembled, assembledContent, err := repo.GetAssembled(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get assembled: %v", err)
+	}
+	if assembledContent != "hello" || storedAssembled.RollingHash != "rolling-hash" {
+		t.Fatalf("assembled = %+v/%q, want content and metadata", storedAssembled, assembledContent)
+	}
+
+	item.State = common.ArtifactContinuationStateChunking
+	if err := repo.Update(ctx, item); err != nil {
+		t.Fatalf("update artifact continuation: %v", err)
+	}
+	otherRun := &orchestratormodel.ArtifactContinuation{
+		ID:          common.ArtifactContinuationID("artifact-continuation-contract-002"),
+		WorkspaceID: item.WorkspaceID,
+		RunID:       common.RunID("run-other"),
+		ArtifactID:  "artifact-002",
+		TargetRef:   "deliverable/other.txt",
+		State:       common.ArtifactContinuationStatePlanning,
+	}
+	if err := repo.Create(ctx, otherRun); err != nil {
+		t.Fatalf("create other run artifact continuation: %v", err)
+	}
+	byRun, err := repo.ListByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list by run: %v", err)
+	}
+	if len(byRun) != 1 || byRun[0].ID != item.ID {
+		t.Fatalf("artifact continuations by run = %+v, want %q", byRun, item.ID)
+	}
+	open, err := repo.ListOpenByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list open by run: %v", err)
+	}
+	if len(open) != 1 || open[0].State != common.ArtifactContinuationStateChunking {
+		t.Fatalf("open artifact continuations = %+v, want chunking item", open)
+	}
+	item.State = common.ArtifactContinuationStateApplied
+	if err := repo.Update(ctx, item); err != nil {
+		t.Fatalf("update applied artifact continuation: %v", err)
+	}
+	open, err = repo.ListOpenByRun(ctx, item.RunID)
+	if err != nil {
+		t.Fatalf("list open by run after applied: %v", err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open artifact continuations = %+v, want none after applied", open)
+	}
+	if _, err := repo.Get(ctx, common.ArtifactContinuationID("missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing get err = %v, want not found", err)
+	}
+	if err := repo.Update(ctx, &orchestratormodel.ArtifactContinuation{ID: common.ArtifactContinuationID("missing")}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing update err = %v, want not found", err)
+	}
+}
+
 func testDecisionTicketRepositoryContract(t *testing.T, factory func() repository.DecisionTicketRepository) {
 	t.Helper()
 	ctx := context.Background()
@@ -2262,6 +2433,7 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	patchID := common.PatchID("patch-bundle-contract")
 	validationResultID := common.ValidationResultID("validation-bundle-contract")
 	checkpointID := common.CheckpointID("checkpoint-bundle-contract")
+	artifactContinuationID := common.ArtifactContinuationID("artifact-continuation-bundle-contract-001")
 	resultID := common.ResultID("result-bundle-contract")
 	artifactID := common.ArtifactID("artifact-bundle-contract")
 	eventRecordID := common.EventRecordID("event-bundle-contract")
@@ -2544,6 +2716,44 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if err := bundle.runtimeCheckpoints.Create(ctx, checkpoint); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("duplicate runtime checkpoint create err = %v, want conflict", err)
+	}
+
+	artifactContinuation := &orchestratormodel.ArtifactContinuation{
+		ID:              artifactContinuationID,
+		WorkspaceID:     workspaceID,
+		RunID:           runID,
+		RootStepID:      stepID,
+		ArtifactID:      "artifact-001",
+		TargetRef:       "deliverable/bundle.txt",
+		Operation:       "replace",
+		CoverageTargets: []string{"bundle-coverage"},
+		State:           common.ArtifactContinuationStateChunking,
+		Metadata:        map[string]any{"scope": "bundle"},
+	}
+	if err := bundle.artifactContinuations.Create(ctx, artifactContinuation); err != nil {
+		t.Fatalf("create artifact continuation: %v", err)
+	}
+	if err := bundle.artifactContinuations.SavePlan(ctx, artifactContinuationID, map[string]any{"artifactId": "artifact-001"}); err != nil {
+		t.Fatalf("save artifact continuation plan: %v", err)
+	}
+	if err := bundle.artifactContinuations.SaveChunk(ctx, &orchestratormodel.ArtifactContinuationChunk{
+		ContinuationID: artifactContinuationID,
+		Sequence:       1,
+		ArtifactID:     "artifact-001",
+		TargetRef:      "deliverable/bundle.txt",
+		ContentHash:    "hash-001",
+		Bytes:          6,
+	}, "bundle"); err != nil {
+		t.Fatalf("save artifact continuation chunk: %v", err)
+	}
+	if err := bundle.artifactContinuations.SaveAssembled(ctx, &orchestratormodel.ArtifactContinuationAssembledMetadata{
+		ContinuationID:  artifactContinuationID,
+		TargetRef:       "deliverable/bundle.txt",
+		Bytes:           6,
+		RollingHash:     "rolling-hash",
+		SourceChunkRefs: []string{"001"},
+	}, "bundle"); err != nil {
+		t.Fatalf("save assembled artifact continuation: %v", err)
 	}
 
 	result := &resultmodel.Result{
@@ -2852,6 +3062,37 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 		t.Fatalf("reloaded runtime checkpoints = %+v, want %q", reloadedCheckpoints, checkpointID)
 	}
 
+	reloadedArtifactContinuations, err := reloaded.artifactContinuations.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("reload artifact continuations by run: %v", err)
+	}
+	if len(reloadedArtifactContinuations) != 1 ||
+		reloadedArtifactContinuations[0].ID != artifactContinuationID ||
+		reloadedArtifactContinuations[0].Metadata["scope"] != "bundle" {
+		t.Fatalf("reloaded artifact continuations = %+v, want %q", reloadedArtifactContinuations, artifactContinuationID)
+	}
+	reloadedArtifactPlan, err := reloaded.artifactContinuations.GetPlan(ctx, artifactContinuationID)
+	if err != nil {
+		t.Fatalf("reload artifact continuation plan: %v", err)
+	}
+	if reloadedArtifactPlan["artifactId"] != "artifact-001" {
+		t.Fatalf("reloaded artifact continuation plan = %+v, want artifact id", reloadedArtifactPlan)
+	}
+	reloadedArtifactChunk, reloadedArtifactChunkContent, err := reloaded.artifactContinuations.GetChunk(ctx, artifactContinuationID, 1)
+	if err != nil {
+		t.Fatalf("reload artifact continuation chunk: %v", err)
+	}
+	if reloadedArtifactChunk.ContentHash != "hash-001" || reloadedArtifactChunkContent != "bundle" {
+		t.Fatalf("reloaded artifact continuation chunk = %+v/%q, want metadata and content", reloadedArtifactChunk, reloadedArtifactChunkContent)
+	}
+	reloadedAssembledArtifact, reloadedAssembledContent, err := reloaded.artifactContinuations.GetAssembled(ctx, artifactContinuationID)
+	if err != nil {
+		t.Fatalf("reload assembled artifact continuation: %v", err)
+	}
+	if reloadedAssembledArtifact.RollingHash != "rolling-hash" || reloadedAssembledContent != "bundle" {
+		t.Fatalf("reloaded assembled artifact continuation = %+v/%q, want metadata and content", reloadedAssembledArtifact, reloadedAssembledContent)
+	}
+
 	reloadedResults, err := reloaded.results.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("reload results by run: %v", err)
@@ -2941,6 +3182,9 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	}
 	if _, err := reloaded.runtimeCheckpoints.Get(ctx, common.CheckpointID("checkpoint-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing runtime checkpoint get err = %v, want not found", err)
+	}
+	if _, err := reloaded.artifactContinuations.Get(ctx, common.ArtifactContinuationID("artifact-continuation-missing")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("missing artifact continuation get err = %v, want not found", err)
 	}
 	if _, err := reloaded.eventRecords.Get(ctx, common.EventRecordID("event-missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("missing event record get err = %v, want not found", err)

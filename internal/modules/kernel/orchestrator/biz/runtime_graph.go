@@ -964,7 +964,8 @@ func (o *RuntimeOrchestrator) graphFollowUpExpansionCount(ctx context.Context, r
 func hasCompletionFollowUpSideEffect(output map[string]any) bool {
 	return outputItemCount(output[stepOutputKeyPatches]) > 0 ||
 		outputItemCount(output[stepOutputKeyMemoryWrites]) > 0 ||
-		outputItemCount(output[stepOutputKeyMemoryRefs]) > 0
+		outputItemCount(output[stepOutputKeyMemoryRefs]) > 0 ||
+		len(mapFromValue(output["artifactContinuationApply"])) > 0
 }
 
 func outputItemCount(value any) int {
@@ -1001,6 +1002,17 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 	inheritRuntimeRepairLineage(input, step)
 	inheritWorkspaceFileManifest(input, step)
 	inheritStableExecutionContextPackage(input, step)
+	input[stepInputKeyAssessmentOnly] = true
+	input["assessmentOnlyReason"] = "completion_follow_up"
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "repairObjective")
+	delete(input, "repairActionPackage")
+	delete(input, "outputMode")
+	delete(input, "requestedOutputMode")
+	delete(input, "outputModeSelector")
+	delete(input, "artifactOutputContract")
+	delete(input, "artifactContinuationContext")
+	delete(input, "artifactContinuationId")
 	if step.Kind != "" {
 		input["previousStepKind"] = step.Kind
 	}
@@ -1980,6 +1992,9 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	if branch := graphBranch(step); branch != "" {
 		item["graphBranch"] = branch
 	}
+	if artifact := processEvidenceArtifactContinuationSummary(step); len(artifact) > 0 {
+		item["artifactContinuation"] = artifact
+	}
 	if outputRef := stepOutputRefForLLMContext(run, step); outputRef != "" {
 		item["payloadRef"] = outputRef
 		item["outputRef"] = outputRef
@@ -2033,6 +2048,42 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		item["toolEvidence"] = toolEvidence
 	}
 	return item
+}
+
+func processEvidenceArtifactContinuationSummary(step *runModel.Step) map[string]any {
+	if step == nil || len(step.Output) == 0 {
+		return nil
+	}
+	for _, key := range []string{"artifactContinuationApply", "artifactContinuationAssemble", "artifactContinuation"} {
+		item := mapFromValue(step.Output[key])
+		if len(item) == 0 {
+			continue
+		}
+		ret := map[string]any{}
+		for _, field := range []string{
+			"id",
+			"artifactId",
+			"targetRef",
+			"state",
+			"bytes",
+			"rollingHash",
+		} {
+			if value, ok := item[field]; ok && value != nil {
+				ret[field] = compactLLMContextValue(value, 1)
+			}
+		}
+		if refs := stringSliceFromValue(item["sourceChunkRefs"]); len(refs) > 0 {
+			ret["sourceChunkRefs"] = limitedStrings(refs, 16)
+		}
+		if refs := stringSliceFromValue(item["applyEvidenceRefs"]); len(refs) > 0 {
+			ret["applyEvidenceRefs"] = limitedStrings(refs, 16)
+		}
+		if len(ret) > 0 {
+			ret["summaryKind"] = key
+			return ret
+		}
+	}
+	return nil
 }
 
 func completedShellCommandOutputHasFailureSignal(step *runModel.Step) bool {

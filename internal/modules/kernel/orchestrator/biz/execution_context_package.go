@@ -34,8 +34,12 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	if step.Input == nil {
 		step.Input = map[string]any{}
 	}
+	o.applyLLMOutputModeSelection(ctx, run, step.Input, nil, 0)
 	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
 	step.Input[stepInputKeyExecutionContextPackage] = pkg
+	if policy := o.llmOutputPolicyValues(); len(policy) > 0 {
+		step.Input["llmOutputPolicy"] = policy
+	}
 	if timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
 		step.Input[stepInputKeyProcessEvidenceTimeline] = timeline
 	}
@@ -168,6 +172,21 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stepId":      string(step.ID),
 		"stage":       firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage)),
 		"stageMode":   stringFromMap(step.Input, stepInputKeyRuntimeStageMode),
+	}
+	if policy := o.llmOutputPolicyValues(); len(policy) > 0 {
+		ret["llmOutputPolicy"] = policy
+	}
+	if mode := strings.TrimSpace(stringFromMap(step.Input, "outputMode")); mode != "" {
+		ret["outputMode"] = mode
+	}
+	if selector := mapFromValue(step.Input["outputModeSelector"]); len(selector) > 0 {
+		ret["outputModeSelector"] = selector
+	}
+	if contract := mapFromValue(step.Input["artifactOutputContract"]); len(contract) > 0 {
+		ret["artifactOutputContract"] = contract
+	}
+	if continuation := mapFromValue(step.Input["artifactContinuationContext"]); len(continuation) > 0 {
+		ret["artifactContinuationContext"] = continuation
 	}
 	mergeExecutionDefinitionsIntoPackage(ret, executionContext)
 	if context := mapFromValue(executionContext[coverageWorkItemContextKey]); len(context) > 0 {

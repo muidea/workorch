@@ -74,7 +74,7 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	}
 }
 
-func TestBuildConvergenceContractUsesCoverageWorkItemStateChangeGap(t *testing.T) {
+func TestBuildConvergenceContractUsesProfileStateChangingEvidenceRequirement(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-convergence",
 		ExecutionContext: map[string]any{
@@ -103,15 +103,22 @@ func TestBuildConvergenceContractUsesCoverageWorkItemStateChangeGap(t *testing.T
 
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 
-	if contract.State != convergenceStateNeedEvidence {
-		t.Fatalf("contract state = %q, want need_evidence", contract.State)
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want need_state_change", contract.State)
 	}
-	if contract.RepairObjective != repairObjectiveAcquireFailureEvidence || !contract.ConcreteFailureEvidenceRequired {
-		t.Fatalf("contract = %+v, want evidence acquisition before state change without target evidence", contract)
+	if contract.RepairObjective != repairObjectiveStateChangingOutput || !contract.StateChangingOutputRequired {
+		t.Fatalf("contract = %+v, want state-changing output for profile-declared evidence requirement", contract)
 	}
 	pkg := mapFromValue(contract.RepairActionPackage)
 	if len(mapFromValue(pkg[coverageWorkItemContextKey])) == 0 {
 		t.Fatalf("repairActionPackage = %+v, want coverageWorkItemContext", pkg)
+	}
+	if targets := mapSliceFromValue(pkg["coverageTargetSet"]); len(targets) == 0 {
+		t.Fatalf("repairActionPackage = %+v, want coverageTargetSet", pkg)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustDeclareCoverageTargets"]) || !boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing coverage repair contract", required)
 	}
 }
 
@@ -406,7 +413,7 @@ func TestCoverageWorkItemContextDoesNotFocusSkippedItems(t *testing.T) {
 	}
 }
 
-func TestCoverageWorkItemContextPrioritizesPrimaryStateChangeDeliverable(t *testing.T) {
+func TestCoverageWorkItemContextPrioritizesStateChangingCoverageItem(t *testing.T) {
 	revision := "rev-current"
 	items := []map[string]any{
 		{
@@ -424,12 +431,12 @@ func TestCoverageWorkItemContextPrioritizesPrimaryStateChangeDeliverable(t *test
 		{
 			"id":                    "cwi-002",
 			"definitionRevision":    revision,
-			"source":                "deliverable",
-			"sourceScope":           "deliverable",
-			"sourceRequirementId":   "source_change",
-			"sourcePath":            "executionContract.profileContracts.neutral.deliverableExpectations[0]",
-			"targetText":            "source_change",
-			"normalizedSourceKey":   "deliverable:deliverable:source_change",
+			"source":                "contract",
+			"sourceScope":           "contract_item",
+			"sourceRequirementId":   "stateful-output",
+			"sourcePath":            "executionContract.profileContracts.neutral.requirements[0]",
+			"targetText":            "stateful output",
+			"normalizedSourceKey":   "contract:contract_item:stateful-output",
 			"requiredEvidenceKinds": []string{"validation", "state_change"},
 			"status":                "open",
 		},
@@ -439,11 +446,11 @@ func TestCoverageWorkItemContextPrioritizesPrimaryStateChangeDeliverable(t *test
 
 	focus := mapFromValue(context["currentFocus"])
 	if stringFromMap(focus, "id") != "cwi-002" {
-		t.Fatalf("currentFocus = %+v, want primary state-changing deliverable", focus)
+		t.Fatalf("currentFocus = %+v, want state-changing item", focus)
 	}
 	focuses := mapSliceFromValue(context["currentFocusItems"])
 	if len(focuses) < 2 || stringFromMap(focuses[0], "id") != "cwi-002" || stringFromMap(focuses[1], "id") != "cwi-001" {
-		t.Fatalf("currentFocusItems = %+v, want state-changing deliverable before validation-only goal", focuses)
+		t.Fatalf("currentFocusItems = %+v, want state-changing item before validation-only goal", focuses)
 	}
 	ledger := mapSliceFromValue(context["ledgerSummary"])
 	if len(ledger) != 2 || stringFromMap(ledger[0], "id") != "cwi-001" || stringFromMap(ledger[1], "id") != "cwi-002" {
@@ -451,7 +458,7 @@ func TestCoverageWorkItemContextPrioritizesPrimaryStateChangeDeliverable(t *test
 	}
 }
 
-func TestCoverageWorkItemsRequirePrimaryStateChangeForSourceChangeDeliverable(t *testing.T) {
+func TestCoverageWorkItemsRequireStateChangeForRequiredCoverageWhenRunRequiresStateChange(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-source-change-state",
 		ExecutionContext: map[string]any{
@@ -464,8 +471,8 @@ func TestCoverageWorkItemsRequirePrimaryStateChangeForSourceChangeDeliverable(t 
 				"profileContracts": map[string]any{
 					"neutral": map[string]any{
 						"deliverableExpectations": []map[string]any{
-							{"id": "source_change", "required": true},
-							{"id": "validation_report", "required": true},
+							{"id": "primary-output", "required": true},
+							{"id": "supporting-evidence", "required": true},
 						},
 					},
 				},
@@ -476,24 +483,24 @@ func TestCoverageWorkItemsRequirePrimaryStateChangeForSourceChangeDeliverable(t 
 	if !ensureRunCoverageWorkItems(run) {
 		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
 	}
-	var sourceChange map[string]any
+	var primaryOutput map[string]any
 	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
-		if stringFromMap(item, "sourceRequirementId") == "source_change" {
-			sourceChange = item
+		if stringFromMap(item, "sourceRequirementId") == "primary-output" {
+			primaryOutput = item
 			break
 		}
 	}
-	if len(sourceChange) == 0 {
-		t.Fatalf("coverageWorkItems = %+v, want source_change item", run.ExecutionContext[coverageWorkItemsKey])
+	if len(primaryOutput) == 0 {
+		t.Fatalf("coverageWorkItems = %+v, want primary-output item", run.ExecutionContext[coverageWorkItemsKey])
 	}
-	missing := stringSet(coverageMissingEvidenceKinds(sourceChange))
+	missing := stringSet(coverageMissingEvidenceKinds(primaryOutput))
 	if !missing["state_change"] || !missing["validation"] {
-		t.Fatalf("source_change missingEvidenceKinds = %+v, want state_change and validation", coverageMissingEvidenceKinds(sourceChange))
+		t.Fatalf("primary-output missingEvidenceKinds = %+v, want state_change and validation", coverageMissingEvidenceKinds(primaryOutput))
 	}
 	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	focus := mapFromValue(context["currentFocus"])
-	if stringFromMap(focus, "sourceRequirementId") != "source_change" {
-		t.Fatalf("currentFocus = %+v, want source_change before validation-only items", focus)
+	if stringFromMap(focus, "sourceRequirementId") != "primary-output" {
+		t.Fatalf("currentFocus = %+v, want primary-output before validation-only items", focus)
 	}
 }
 

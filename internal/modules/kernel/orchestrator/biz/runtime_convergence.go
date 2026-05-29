@@ -252,6 +252,9 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		return false
 	}
 	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
+	if len(missing) == 0 {
+		missing = stringSet(coverageMissingEvidenceKinds(focus))
+	}
 	contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(contract.RepairActionPackage) == 0 {
 		contract.RepairActionPackage = map[string]any{}
@@ -356,10 +359,11 @@ func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus map[stri
 	if len(focus) == 0 {
 		return false
 	}
-	return coverageSourceRequiresPrimaryStateChange(coverageWorkItemSource{
-		SourceScope:         stringFromMap(focus, "sourceScope"),
-		SourceRequirementID: stringFromMap(focus, "sourceRequirementId"),
-	})
+	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
+	if len(missing) == 0 {
+		missing = stringSet(coverageMissingEvidenceKinds(focus))
+	}
+	return missing["state_change"] && strings.TrimSpace(stringFromMap(focus, "sourceScope")) != ""
 }
 
 func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evidenceKind string) bool {
@@ -828,12 +832,7 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 
 func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[string]any {
 	required := stateChangingRepairRequiredOutput()
-	for key, value := range mapFromValue(pkg["requiredOutput"]) {
-		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustDeclareStrategyReassessmentFields", "strategyReassessmentRequiredFields", "strategyReassessmentMatchRule", "mustReassessRepeatedFailedSurface":
-			required[key] = value
-		}
-	}
+	preserveStateChangingRequiredOutputSignals(required, mapFromValue(pkg["requiredOutput"]))
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
 		required["mustTargetFailureScope"] = true
 		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
@@ -849,6 +848,32 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[st
 	}
 	pkg["requiredOutput"] = required
 	return required
+}
+
+func preserveStateChangingRequiredOutputSignals(required map[string]any, existing map[string]any) {
+	if required == nil || len(existing) == 0 {
+		return
+	}
+	for key, value := range existing {
+		if value == nil {
+			continue
+		}
+		switch key {
+		case "mustReturnValidJSON",
+			"mustNotReuseRejectedJSON",
+			"forbiddenStalePatchReuse",
+			"mustDeclareStrategyReassessmentFields",
+			"strategyReassessmentRequiredFields",
+			"strategyReassessmentMatchRule",
+			"mustReassessRepeatedFailedSurface",
+			"estimatedPatchContentBytes",
+			"estimatedGraphBytes",
+			"expectedStateChangingArtifactCount",
+			"maxArtifactChunkBytes",
+			"previousChunkTailBytes":
+			required[key] = value
+		}
+	}
 }
 
 func inheritRejectedResultCoverageContract(input map[string]any, source map[string]any) bool {

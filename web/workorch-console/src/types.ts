@@ -33,6 +33,19 @@ export type RuntimeConfiguration = {
   maxRuntimeRepairAttempts?: number;
   maxProviderRetryAttempts?: number;
   shellCommandTimeout?: string;
+  llmOutput?: RuntimeLLMOutputConfiguration;
+};
+
+export type RuntimeLLMOutputConfiguration = {
+  maxPatchContentBytes?: number;
+  maxGraphBytes?: number;
+  maxGraphFileWrites?: number;
+  schemaInvalidLargePreviewThreshold?: number;
+  maxArtifactChunkBytes?: number;
+  previousChunkTailBytes?: number;
+  maxChunkRetryAttempts?: number;
+  maxArtifactPlanAttempts?: number;
+  maxArtifactReplanAttempts?: number;
 };
 
 export type LLMConfiguration = {
@@ -702,6 +715,29 @@ export type Artifact = {
   updatedAt?: string;
 };
 
+export type ArtifactContinuation = {
+  id: string;
+  workspaceId: string;
+  runId: string;
+  rootStepId?: string;
+  artifactId: string;
+  targetRef: string;
+  operation?: string;
+  state: string;
+  expectedSequence?: number;
+  receivedSequences?: number[];
+  finalReceived?: boolean;
+  bytesWritten?: number;
+  rollingHash?: string;
+  lastChunkHash?: string;
+  coverageTargets?: string[];
+  evidenceRefs?: string[];
+  failureReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  progress?: Record<string, unknown>;
+};
+
 export type ArtifactPage = {
   runId: string;
   artifacts?: Artifact[];
@@ -1135,6 +1171,7 @@ export type RunSnapshot = {
   runtimeCheckpoints?: RuntimeCheckpoint[];
   results?: Result[];
   artifacts?: Artifact[];
+  artifactContinuations?: ArtifactContinuation[];
   selectedCapabilities?: RuntimeCapability[];
   usedCapabilities?: RuntimeCapability[];
   eventRecords?: EventRecord[];
@@ -1153,6 +1190,7 @@ export type WorkspaceSnapshot = {
   runs?: Run[];
   results?: Result[];
   artifacts?: Artifact[];
+  artifactContinuations?: ArtifactContinuation[];
   patches?: Patch[];
   webSources?: WebSourceTrace[];
   llmContextBudgets?: LLMContextBudgetTrace[];

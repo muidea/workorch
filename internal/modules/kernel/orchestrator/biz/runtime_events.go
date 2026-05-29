@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -217,6 +219,75 @@ func (o *RuntimeOrchestrator) publishPatchChanged(ctx context.Context, run *runM
 	})
 }
 
+func (o *RuntimeOrchestrator) publishArtifactContinuationChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, item *orchestratormodel.ArtifactContinuation, topic string, failure error) error {
+	if o.eventHub == nil || run == nil || item == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"id":               string(item.ID),
+		"runId":            string(item.RunID),
+		"artifactId":       item.ArtifactID,
+		"targetRef":        item.TargetRef,
+		"state":            string(item.State),
+		"expectedSequence": item.ExpectedSequence,
+		"finalReceived":    item.FinalReceived,
+		"bytesWritten":     item.BytesWritten,
+	}
+	if item.RollingHash != "" {
+		payload["rollingHash"] = item.RollingHash
+	}
+	if item.LastChunkHash != "" {
+		payload["lastChunkHash"] = item.LastChunkHash
+	}
+	if len(item.ReceivedSequences) > 0 {
+		payload["receivedSequences"] = append([]int(nil), item.ReceivedSequences...)
+	}
+	if len(item.CoverageTargets) > 0 {
+		payload["coverageTargets"] = append([]string(nil), item.CoverageTargets...)
+	}
+	if len(item.EvidenceRefs) > 0 {
+		payload["evidenceRefs"] = append([]string(nil), item.EvidenceRefs...)
+	}
+	if failure != nil {
+		payload["failureReason"] = failure.Error()
+	}
+	stepID := common.StepID("")
+	if step != nil {
+		stepID = step.ID
+	}
+	return o.eventHub.Publish(ctx, events.Envelope{
+		ID:           fmt.Sprintf("%s/event/%s", item.ID, artifactContinuationEventName(topic)),
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "artifact_continuation",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		StepID:       string(stepID),
+		Payload:      payload,
+	})
+}
+
+func artifactContinuationEventName(topic string) string {
+	switch topic {
+	case events.TopicArtifactContinuationCreated:
+		return "created"
+	case events.TopicArtifactContinuationChunkRecorded:
+		return "chunk-recorded"
+	case events.TopicArtifactContinuationChunkRejected:
+		return "chunk-rejected"
+	case events.TopicArtifactContinuationAssembled:
+		return "assembled"
+	case events.TopicArtifactContinuationApplied:
+		return "applied"
+	case events.TopicArtifactContinuationFailed:
+		return "failed"
+	default:
+		return "changed"
+	}
+}
+
 func (o *RuntimeOrchestrator) publishPatchPreview(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, preview map[string]any) error {
 	if o.eventHub == nil || run == nil || step == nil || len(preview) == 0 {
 		return nil
@@ -317,6 +388,9 @@ func intFromAny(value any) int {
 		return int(typed)
 	case float64:
 		return int(typed)
+	case json.Number:
+		ret, _ := typed.Int64()
+		return int(ret)
 	default:
 		return 0
 	}

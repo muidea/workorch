@@ -69,29 +69,30 @@ type AppModel struct {
 	activeRunID         string
 	cursor              int
 
-	input         string
-	inputCursor   int
-	slashCursor   int
-	inputHistory  []string
-	historyCursor int
-	currentTask   string
-	dodItems      []string
-	transcript    []transcriptItem
-	result        string
-	artifacts     []string
-	sources       []string
-	patches       []backend.PatchInfo
-	taskDecomp    []backend.TaskDecompositionInfo
-	memoryRecalls []backend.MemoryRecallTraceInfo
-	llmUsage      backend.LLMUsageSummaryInfo
-	llmContext    map[string]any
-	runtimeEvents []string
-	progress      progressState
-	progressText  string
-	repairLoop    string
-	failureReason string
-	failureHint   string
-	running       bool
+	input                 string
+	inputCursor           int
+	slashCursor           int
+	inputHistory          []string
+	historyCursor         int
+	currentTask           string
+	dodItems              []string
+	transcript            []transcriptItem
+	result                string
+	artifacts             []string
+	sources               []string
+	patches               []backend.PatchInfo
+	artifactContinuations []backend.ArtifactContinuationInfo
+	taskDecomp            []backend.TaskDecompositionInfo
+	memoryRecalls         []backend.MemoryRecallTraceInfo
+	llmUsage              backend.LLMUsageSummaryInfo
+	llmContext            map[string]any
+	runtimeEvents         []string
+	progress              progressState
+	progressText          string
+	repairLoop            string
+	failureReason         string
+	failureHint           string
+	running               bool
 
 	blockingDecision          *backend.DecisionInfo
 	blockingApproval          *backend.ApprovalInfo
@@ -390,6 +391,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
 		return m, m.refreshActiveWorkspaceState()
+	case ConfigMsg:
+		if msg.Error != nil {
+			m.setLastError(msg.Error)
+			return m, nil
+		}
+		m.result = renderConfigResult(msg.Config)
+		m.progressText = "Showing system configuration"
+		m.lastError = nil
+		m.resetMainViewport()
+		return m, nil
 	case ErrorMsg:
 		m.setLastError(msg.Error)
 		return m, nil
@@ -616,6 +627,12 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.lastError = nil
 		m.resetMainViewport()
 		return m, nil, true
+	case "config", "configuration":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.progressText = "Loading system configuration"
+		m.lastError = nil
+		return m, FetchConfiguration(m.be), true
 	case "workspace", "ws":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
@@ -1012,6 +1029,30 @@ func renderPendingDoDResult(items []string) string {
 		b.WriteString(item)
 		b.WriteString("\n")
 	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderConfigResult(cfg *backend.ServiceConfig) string {
+	if cfg == nil {
+		return "System configuration is unavailable."
+	}
+	output := cfg.LLMOutput
+	var b strings.Builder
+	b.WriteString("System Configuration\n")
+	b.WriteString(fmt.Sprintf("- Server: %s\n", nonEmpty(cfg.ServerAddr, "-")))
+	b.WriteString(fmt.Sprintf("- Repository: %s %s\n", nonEmpty(cfg.Backend, "-"), nonEmpty(cfg.DataDir, "-")))
+	b.WriteString(fmt.Sprintf("- Default LLM provider: %s\n", nonEmpty(cfg.DefaultProvider, "-")))
+	b.WriteString(fmt.Sprintf("- Max concurrent runs: %d\n", cfg.MaxConcurrentRuns))
+	b.WriteString("\nLLM Output Budget\n")
+	b.WriteString(fmt.Sprintf("- maxPatchContentBytes: %d\n", output.MaxPatchContentBytes))
+	b.WriteString(fmt.Sprintf("- maxGraphBytes: %d\n", output.MaxGraphBytes))
+	b.WriteString(fmt.Sprintf("- maxGraphFileWrites: %d\n", output.MaxGraphFileWrites))
+	b.WriteString(fmt.Sprintf("- schemaInvalidLargePreviewThreshold: %d\n", output.SchemaInvalidLargePreviewThreshold))
+	b.WriteString(fmt.Sprintf("- maxArtifactChunkBytes: %d\n", output.MaxArtifactChunkBytes))
+	b.WriteString(fmt.Sprintf("- previousChunkTailBytes: %d\n", output.PreviousChunkTailBytes))
+	b.WriteString(fmt.Sprintf("- maxChunkRetryAttempts: %d\n", output.MaxChunkRetryAttempts))
+	b.WriteString(fmt.Sprintf("- maxArtifactPlanAttempts: %d\n", output.MaxArtifactPlanAttempts))
+	b.WriteString(fmt.Sprintf("- maxArtifactReplanAttempts: %d\n", output.MaxArtifactReplanAttempts))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -1520,6 +1561,11 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		} else {
 			m.progressText = string(evt.Type)
 		}
+		m.appendRuntimeEvent(m.progressText)
+		m.followMainViewportTailUnlessUserScrolled()
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	case backend.EventArtifactContinuationChanged:
+		m.progressText = artifactContinuationProgressText(evt.Payload)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -2365,6 +2411,23 @@ func snapshotPatches(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID
 	return out
 }
 
+func snapshotArtifactContinuations(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.ArtifactContinuationInfo {
+	if snapshot == nil || len(snapshot.ArtifactContinuations) == 0 {
+		return nil
+	}
+	out := make([]backend.ArtifactContinuationInfo, 0, len(snapshot.ArtifactContinuations))
+	for _, item := range snapshot.ArtifactContinuations {
+		if runID != "" && item.RunID != "" && item.RunID != runID {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.TaskDecompositionInfo {
 	if snapshot == nil || len(snapshot.TaskDecompositions) == 0 {
 		return nil
@@ -2380,6 +2443,40 @@ func snapshotTaskDecompositions(snapshot *backend.WorkspaceSnapshotInfo, runID c
 		return nil
 	}
 	return out
+}
+
+func artifactContinuationDisplayLabel(item backend.ArtifactContinuationInfo) string {
+	parts := make([]string, 0, 5)
+	if item.State != "" {
+		parts = append(parts, string(item.State))
+	}
+	if item.TargetRef != "" {
+		parts = append(parts, item.TargetRef)
+	} else if item.ArtifactID != "" {
+		parts = append(parts, item.ArtifactID)
+	} else if item.ID != "" {
+		parts = append(parts, string(item.ID))
+	}
+	if item.ExpectedSequence > 0 || len(item.ReceivedSequences) > 0 {
+		parts = append(parts, fmt.Sprintf("seq %d/%s", len(item.ReceivedSequences), artifactExpectedSequenceText(item.ExpectedSequence)))
+	}
+	if item.BytesWritten > 0 {
+		parts = append(parts, fmt.Sprintf("%dB", item.BytesWritten))
+	}
+	if item.FailureReason != "" {
+		parts = append(parts, item.FailureReason)
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func artifactExpectedSequenceText(value int) string {
+	if value <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d", value)
 }
 
 func patchDisplayLabel(item backend.PatchInfo) string {

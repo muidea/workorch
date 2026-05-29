@@ -578,22 +578,14 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 			kinds = append(kinds, "validation")
 		}
 	}
-	if runExecutionContractRequiresStateChange(run) && coverageSourceRequiresPrimaryStateChange(source) {
+	if runExecutionContractRequiresStateChange(run) && coverageSourceCanCarryStateChange(source) {
 		kinds = append(kinds, "state_change")
 	}
 	return compactUniqueStrings(kinds)
 }
 
-func coverageSourceRequiresPrimaryStateChange(source coverageWorkItemSource) bool {
-	if strings.TrimSpace(source.SourceScope) != "deliverable" {
-		return false
-	}
-	switch strings.TrimSpace(source.SourceRequirementID) {
-	case "source_change", "user_deliverable":
-		return true
-	default:
-		return false
-	}
+func coverageSourceCanCarryStateChange(source coverageWorkItemSource) bool {
+	return normalizeEvidenceKindRequirementScope(source.SourceScope) == "deliverable"
 }
 
 func coverageWorkItemContextFromItems(revision string, items []map[string]any, excludedSources []map[string]any, historicalItems []map[string]any) map[string]any {
@@ -690,17 +682,12 @@ func coverageWorkItemFocusPriority(item map[string]any) int {
 	}
 	missing := stringSet(coverageMissingEvidenceKinds(item))
 	switch {
-	case missing["state_change"] && coverageSourceRequiresPrimaryStateChange(coverageWorkItemSource{
-		SourceScope:         stringFromMap(item, "sourceScope"),
-		SourceRequirementID: stringFromMap(item, "sourceRequirementId"),
-	}):
-		return 0
 	case missing["state_change"]:
-		return 1
+		return 0
 	case missing["validation"] || missing["artifact"]:
-		return 2
+		return 1
 	default:
-		return 3
+		return 2
 	}
 }
 
@@ -1221,7 +1208,7 @@ func attachCoverageWorkItemFailureDiagnostics(run *runModel.Run, step *runModel.
 	if len(context) == 0 {
 		return
 	}
-	unresolved := mapSliceFromValue(context["unresolvedItems"])
+	unresolved := coverageWorkItemUnresolvedItemsFromContext(context)
 	if len(unresolved) == 0 {
 		return
 	}
@@ -1234,6 +1221,34 @@ func attachCoverageWorkItemFailureDiagnostics(run *runModel.Run, step *runModel.
 	diagnostics["coverageWorkItemContext"] = context
 	diagnostics["unresolvedCoverageWorkItems"] = unresolved
 	step.Output["runtimeDiagnostics"] = diagnostics
+}
+
+func coverageWorkItemUnresolvedItemsFromContext(context map[string]any) []map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	if unresolved := mapSliceFromValue(context["unresolvedItems"]); len(unresolved) > 0 {
+		return unresolved
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0)
+	add := func(item map[string]any) {
+		if len(item) == 0 || coverageWorkItemClosedForFocus(stringFromMap(item, "status")) {
+			return
+		}
+		id := strings.TrimSpace(stringFromMap(item, "id"))
+		key := firstNonEmptyString(id, stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "targetText"))
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, coverageWorkItemSummary(item))
+	}
+	add(mapFromValue(context["currentFocus"]))
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		add(item)
+	}
+	return ret
 }
 
 func coverageWorkItemSourceKey(source coverageWorkItemSource) string {

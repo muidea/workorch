@@ -100,6 +100,9 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 	if err := o.validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, run, assessment); err != nil {
 		return err
 	}
+	if err := o.validateArtifactContinuationAssessmentEvidenceRefs(ctx, assessment); err != nil {
+		return err
+	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
 	if ok && o.evidence.ValidationResults != nil {
 		for _, item := range items {
@@ -140,6 +143,61 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 		return err
 	}
 	return nil
+}
+
+func (o *RuntimeOrchestrator) validateArtifactContinuationAssessmentEvidenceRefs(ctx context.Context, assessment map[string]any) error {
+	if o == nil || assessment == nil || o.steps == nil {
+		return nil
+	}
+	for _, scoped := range definitionChangeAssessmentCoverageItems(assessment) {
+		if strings.ToLower(strings.TrimSpace(stringFromMap(scoped.item, "state"))) != "satisfied" {
+			continue
+		}
+		for _, ref := range evidenceRefsFromValue(scoped.item["evidenceRefs"]) {
+			step, ok, err := o.evidenceRefStep(ctx, ref)
+			if err != nil {
+				return err
+			}
+			if !ok || step == nil || !artifactContinuationChunkEvidenceStep(step) {
+				continue
+			}
+			itemName := evidenceKindRequirementItemName(profileEvidenceKindRequirement{Scope: scoped.scope}, scoped.item)
+			cause := fmt.Errorf("%w: satisfied %s item %q references artifact chunk evidence %q; cite artifact apply or validation evidence instead", common.ErrInvalidArgument, scoped.scope, itemName, ref)
+			return &doDAssessmentEvidenceQualityError{
+				cause: cause,
+				scope: scoped.scope,
+				items: []map[string]any{{
+					"kind":         scoped.scope,
+					"item":         itemName,
+					"state":        "failed",
+					"source":       "artifactContinuationEvidence",
+					"evidenceRefs": []string{ref},
+					"reason":       "Artifact chunk evidence is intermediate internal state and cannot directly satisfy acceptance.",
+					"impact":       "Acceptance must be backed by state-changing artifact apply evidence or validation evidence.",
+					"suggestedNextActions": []string{
+						"Cite the artifact apply evidenceRef after the assembled artifact is applied.",
+						"Run validation and cite the resulting validation evidenceRef.",
+					},
+				}},
+			}
+		}
+	}
+	return nil
+}
+
+func artifactContinuationChunkEvidenceStep(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	continuation := mapFromValue(step.Input["artifactContinuationContext"])
+	if len(continuation) == 0 {
+		continuation = mapFromValue(step.Output["artifactContinuationContext"])
+	}
+	if strings.TrimSpace(stringFromMap(continuation, "state")) == string(common.ArtifactContinuationStateChunking) {
+		return true
+	}
+	stage := strings.TrimSpace(stringFromMap(step.Output, "stage"))
+	return stage == "llm_artifact_chunk" || stage == artifactOutputPhaseChunk
 }
 
 func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEvidence(ctx context.Context, run *runModel.Run, assessment map[string]any) error {

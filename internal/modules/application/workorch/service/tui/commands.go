@@ -30,6 +30,18 @@ func FetchAll(be backend.Backend) tea.Cmd {
 	}
 }
 
+func FetchConfiguration(be backend.Backend) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cfg, err := be.Config().Get(ctx)
+		if err != nil {
+			return ConfigMsg{Error: err}
+		}
+		return ConfigMsg{Config: cfg}
+	}
+}
+
 func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 	if workspaceID == "" {
 		return nil

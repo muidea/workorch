@@ -23,6 +23,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -57,25 +58,26 @@ const (
 )
 
 type readModelDependencies struct {
-	workspaces           repository.WorkspaceRepository
-	goals                repository.GoalRepository
-	dods                 repository.DoDRepository
-	runs                 repository.RunRepository
-	steps                repository.StepRepository
-	results              repository.ResultRepository
-	artifacts            repository.ArtifactRepository
-	eventRecords         repository.EventRecordRepository
-	memoryRecalls        repository.MemoryRecallTraceRepository
-	toolCalls            repository.ToolCallRepository
-	mcpCapabilities      repository.MCPCapabilityRepository
-	patches              repository.PatchRepository
-	validations          repository.ValidationResultRepository
-	checkpoints          repository.RuntimeCheckpointRepository
-	autoGovernanceTraces repository.AutoGovernanceTraceRepository
-	tickets              repository.DecisionTicketRepository
-	resolutions          repository.DecisionResolutionRepository
-	approvals            repository.ApprovalRepository
-	published            []events.WorkorchEvent
+	workspaces            repository.WorkspaceRepository
+	goals                 repository.GoalRepository
+	dods                  repository.DoDRepository
+	runs                  repository.RunRepository
+	steps                 repository.StepRepository
+	results               repository.ResultRepository
+	artifacts             repository.ArtifactRepository
+	artifactContinuations repository.ArtifactContinuationRepository
+	eventRecords          repository.EventRecordRepository
+	memoryRecalls         repository.MemoryRecallTraceRepository
+	toolCalls             repository.ToolCallRepository
+	mcpCapabilities       repository.MCPCapabilityRepository
+	patches               repository.PatchRepository
+	validations           repository.ValidationResultRepository
+	checkpoints           repository.RuntimeCheckpointRepository
+	autoGovernanceTraces  repository.AutoGovernanceTraceRepository
+	tickets               repository.DecisionTicketRepository
+	resolutions           repository.DecisionResolutionRepository
+	approvals             repository.ApprovalRepository
+	published             []events.WorkorchEvent
 }
 
 func ReadRunSnapshotWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret RunSnapshot, err error) {
@@ -654,6 +656,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		exports.Repositories.Steps == nil ||
 		exports.Repositories.Results == nil ||
 		exports.Repositories.Artifacts == nil ||
+		exports.Repositories.ArtifactContinuations == nil ||
 		exports.Repositories.EventRecords == nil ||
 		exports.Repositories.MemoryRecallTraces == nil ||
 		exports.Repositories.ToolCalls == nil ||
@@ -673,25 +676,26 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	}
 
 	return readModelDependencies{
-		workspaces:           exports.Repositories.Workspaces,
-		goals:                exports.Repositories.Goals,
-		dods:                 exports.Repositories.DoDs,
-		runs:                 exports.Repositories.Runs,
-		steps:                exports.Repositories.Steps,
-		results:              exports.Repositories.Results,
-		artifacts:            exports.Repositories.Artifacts,
-		eventRecords:         exports.Repositories.EventRecords,
-		memoryRecalls:        exports.Repositories.MemoryRecallTraces,
-		toolCalls:            exports.Repositories.ToolCalls,
-		mcpCapabilities:      exports.Repositories.MCPCapabilities,
-		patches:              exports.Repositories.Patches,
-		validations:          exports.Repositories.ValidationResults,
-		checkpoints:          exports.Repositories.RuntimeCheckpoints,
-		autoGovernanceTraces: exports.Repositories.AutoGovernanceTraces,
-		tickets:              exports.Repositories.Tickets,
-		resolutions:          exports.Repositories.Resolutions,
-		approvals:            exports.Repositories.Approvals,
-		published:            published,
+		workspaces:            exports.Repositories.Workspaces,
+		goals:                 exports.Repositories.Goals,
+		dods:                  exports.Repositories.DoDs,
+		runs:                  exports.Repositories.Runs,
+		steps:                 exports.Repositories.Steps,
+		results:               exports.Repositories.Results,
+		artifacts:             exports.Repositories.Artifacts,
+		artifactContinuations: exports.Repositories.ArtifactContinuations,
+		eventRecords:          exports.Repositories.EventRecords,
+		memoryRecalls:         exports.Repositories.MemoryRecallTraces,
+		toolCalls:             exports.Repositories.ToolCalls,
+		mcpCapabilities:       exports.Repositories.MCPCapabilities,
+		patches:               exports.Repositories.Patches,
+		validations:           exports.Repositories.ValidationResults,
+		checkpoints:           exports.Repositories.RuntimeCheckpoints,
+		autoGovernanceTraces:  exports.Repositories.AutoGovernanceTraces,
+		tickets:               exports.Repositories.Tickets,
+		resolutions:           exports.Repositories.Resolutions,
+		approvals:             exports.Repositories.Approvals,
+		published:             published,
 	}, nil
 }
 
@@ -708,6 +712,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	var checkpoints []*runmodel.RuntimeCheckpoint
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
+	var artifactContinuations []*orchestratormodel.ArtifactContinuation
 	var eventRecords []*eventstreammodel.EventRecord
 	var llmUsageEventRecords []*eventstreammodel.EventRecord
 	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
@@ -756,6 +761,11 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		func() error {
 			var err error
 			artifacts, err = deps.artifacts.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			artifactContinuations, err = deps.artifactContinuations.ListByRun(ctx, item.ID)
 			return err
 		},
 		func() error {
@@ -821,6 +831,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		RuntimeCheckpoints:      mapRuntimeCheckpoints(checkpoints),
 		Results:                 mapResults(results),
 		Artifacts:               mapArtifacts(artifacts),
+		ArtifactContinuations:   mapArtifactContinuations(artifactContinuations),
 		CoverageWorkItems:       readModelMapSliceValue(item.ExecutionContext["coverageWorkItems"]),
 		CoverageWorkItemContext: cloneReadModelMap(readModelMapValue(item.ExecutionContext["coverageWorkItemContext"])),
 		MemoryRecallTraces:      mapMemoryRecallTraces(memoryRecallTraces),
@@ -858,6 +869,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	var checkpoints []*runmodel.RuntimeCheckpoint
 	var results []*resultmodel.Result
 	var artifacts []*resultmodel.Artifact
+	var artifactContinuations []*orchestratormodel.ArtifactContinuation
 	var eventRecords []*eventstreammodel.EventRecord
 	var llmUsageEventRecords []*eventstreammodel.EventRecord
 	var memoryRecallTraces []*memorymodel.MemoryRecallTrace
@@ -906,6 +918,11 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		},
 		func() error {
 			var err error
+			artifactContinuations, err = deps.artifactContinuations.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
 			eventRecords, err = deps.eventRecords.List(ctx, repository.EventRecordQuery{RunID: item.ID, Limit: readModelEventRecordLimit})
 			return err
 		},
@@ -943,22 +960,23 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	stepViews := presenter.MapSteps(steps)
 	currentStep := currentRunSnapshotStep(stepViews, "", "", mapRuntimeCheckpoints(checkpoints))
 	ret := RunSnapshot{
-		Workspace:          mapWorkspaceWithRunProjection(workspace, item),
-		Run:                mapRun(item),
-		Step:               currentStep,
-		Steps:              stepViews,
-		ToolCalls:          mapToolCalls(toolCalls),
-		Patches:            mapPatches(patches),
-		LLMContextBudgets:  mapLLMContextBudgetTraces(stepViews),
-		LLMUsageTraces:     mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecords), string(item.ID)),
-		ValidationResults:  mapValidationResults(validations),
-		RuntimeCheckpoints: mapRuntimeCheckpoints(checkpoints),
-		Results:            mapResults(results),
-		Artifacts:          mapArtifacts(artifacts),
-		MemoryRecallTraces: mapMemoryRecallTraces(memoryRecallTraces),
-		EventRecords:       mapProjectedEventRecords(eventRecords),
-		Decisions:          decisions,
-		Approvals:          approvals,
+		Workspace:             mapWorkspaceWithRunProjection(workspace, item),
+		Run:                   mapRun(item),
+		Step:                  currentStep,
+		Steps:                 stepViews,
+		ToolCalls:             mapToolCalls(toolCalls),
+		Patches:               mapPatches(patches),
+		LLMContextBudgets:     mapLLMContextBudgetTraces(stepViews),
+		LLMUsageTraces:        mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecords), string(item.ID)),
+		ValidationResults:     mapValidationResults(validations),
+		RuntimeCheckpoints:    mapRuntimeCheckpoints(checkpoints),
+		Results:               mapResults(results),
+		Artifacts:             mapArtifacts(artifacts),
+		ArtifactContinuations: mapArtifactContinuations(artifactContinuations),
+		MemoryRecallTraces:    mapMemoryRecallTraces(memoryRecallTraces),
+		EventRecords:          mapProjectedEventRecords(eventRecords),
+		Decisions:             decisions,
+		Approvals:             approvals,
 	}
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = mapRunOutcome(ret)
@@ -1070,6 +1088,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	var ticketItems []*decisionmodel.Ticket
 	var approvalItems []*approvalmodel.Approval
 	var patchItems []*runmodel.Patch
+	var artifactContinuationItems []*orchestratormodel.ArtifactContinuation
 	tasks := []func() error{
 		func() error {
 			var err error
@@ -1139,6 +1158,13 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			continue
 		}
 		runs = append(runs, mapRun(runItem))
+		if deps.artifactContinuations != nil {
+			items, err := deps.artifactContinuations.ListByRun(ctx, runItem.ID)
+			if err != nil {
+				return WorkspaceSnapshot{}, err
+			}
+			artifactContinuationItems = append(artifactContinuationItems, items...)
+		}
 		if deps.patches != nil {
 			items, err := deps.patches.ListByRun(ctx, runItem.ID)
 			if err != nil {
@@ -1176,16 +1202,17 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 	}
 
 	ret := WorkspaceSnapshot{
-		Workspace:    mapWorkspaceWithRunProjection(item, projectionRun),
-		Goals:        mapGoals(goalItems),
-		DoDs:         mapDoDs(dodItems),
-		Runs:         runs,
-		Results:      mapResults(resultItems),
-		Artifacts:    mapArtifacts(artifactItems),
-		Patches:      mapPatches(patchItems),
-		EventRecords: mapProjectedEventRecords(eventRecordItems),
-		Decisions:    decisions,
-		Approvals:    approvals,
+		Workspace:             mapWorkspaceWithRunProjection(item, projectionRun),
+		Goals:                 mapGoals(goalItems),
+		DoDs:                  mapDoDs(dodItems),
+		Runs:                  runs,
+		Results:               mapResults(resultItems),
+		Artifacts:             mapArtifacts(artifactItems),
+		ArtifactContinuations: mapArtifactContinuations(artifactContinuationItems),
+		Patches:               mapPatches(patchItems),
+		EventRecords:          mapProjectedEventRecords(eventRecordItems),
+		Decisions:             decisions,
+		Approvals:             approvals,
 	}
 	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(llmUsageEventRecordItems), "")
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
@@ -1216,6 +1243,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 		ret.ExecutionSections = runSnapshot.ExecutionSections
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 		ret.Patches = mergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
+		ret.ArtifactContinuations = mergeWorkspaceSnapshotArtifactContinuations(ret.ArtifactContinuations, runSnapshot.ArtifactContinuations)
 		ret.WebSources = runSnapshot.WebSources
 		ret.LLMContextBudgets = runSnapshot.LLMContextBudgets
 		ret.LLMUsageTraces = mergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
@@ -2447,6 +2475,30 @@ func mergeWorkspaceSnapshotPatches(existing []Patch, latest []Patch) []Patch {
 	return out
 }
 
+func mergeWorkspaceSnapshotArtifactContinuations(existing []ArtifactContinuation, latest []ArtifactContinuation) []ArtifactContinuation {
+	if len(existing) == 0 {
+		return latest
+	}
+	if len(latest) == 0 {
+		return existing
+	}
+	seen := make(map[string]int, len(existing)+len(latest))
+	out := make([]ArtifactContinuation, 0, len(existing)+len(latest))
+	for _, item := range existing {
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range latest {
+		if idx, ok := seen[item.ID]; ok {
+			out[idx] = item
+			continue
+		}
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
 func mergeWorkspaceLLMUsageTraces(existing []LLMUsageTrace, latest []LLMUsageTrace) []LLMUsageTrace {
 	if len(existing) == 0 {
 		return latest
@@ -3111,6 +3163,78 @@ func mapArtifacts(items []*resultmodel.Artifact) []Artifact {
 		return nil
 	}
 	return ret
+}
+
+func mapArtifactContinuations(items []*orchestratormodel.ArtifactContinuation) []ArtifactContinuation {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]ArtifactContinuation, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		ret = append(ret, projectArtifactContinuation(item))
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func projectArtifactContinuation(item *orchestratormodel.ArtifactContinuation) ArtifactContinuation {
+	if item == nil {
+		return ArtifactContinuation{}
+	}
+	progress := map[string]any{}
+	if item.ExpectedSequence > 0 {
+		progress["expectedSequence"] = item.ExpectedSequence
+	}
+	if len(item.ReceivedSequences) > 0 {
+		progress["receivedCount"] = len(item.ReceivedSequences)
+		progress["lastReceivedSequence"] = item.ReceivedSequences[len(item.ReceivedSequences)-1]
+	}
+	if item.BytesWritten > 0 {
+		progress["bytesWritten"] = item.BytesWritten
+	}
+	if len(progress) == 0 {
+		progress = nil
+	}
+	return ArtifactContinuation{
+		ID:                string(item.ID),
+		WorkspaceID:       string(item.WorkspaceID),
+		RunID:             string(item.RunID),
+		RootStepID:        string(item.RootStepID),
+		ArtifactID:        item.ArtifactID,
+		TargetRef:         item.TargetRef,
+		Operation:         item.Operation,
+		State:             string(item.State),
+		ExpectedSequence:  item.ExpectedSequence,
+		ReceivedSequences: append([]int(nil), item.ReceivedSequences...),
+		FinalReceived:     item.FinalReceived,
+		BytesWritten:      item.BytesWritten,
+		RollingHash:       item.RollingHash,
+		LastChunkHash:     item.LastChunkHash,
+		CoverageTargets:   cloneReadModelStringSlice(item.CoverageTargets),
+		EvidenceRefs:      cloneReadModelStringSlice(item.EvidenceRefs),
+		FailureReason:     artifactContinuationFailureReason(item),
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+		Progress:          progress,
+	}
+}
+
+func artifactContinuationFailureReason(item *orchestratormodel.ArtifactContinuation) string {
+	if item == nil || len(item.Metadata) == 0 {
+		return ""
+	}
+	if failure := readModelStringValue(item.Metadata["failureError"]); strings.TrimSpace(failure) != "" {
+		return strings.TrimSpace(failure)
+	}
+	if failure := readModelStringValue(item.Metadata["applyFailure"]); strings.TrimSpace(failure) != "" {
+		return strings.TrimSpace(failure)
+	}
+	return ""
 }
 
 func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {

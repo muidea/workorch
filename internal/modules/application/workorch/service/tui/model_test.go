@@ -114,6 +114,60 @@ func TestModelView(t *testing.T) {
 	}
 }
 
+func TestModelRendersArtifactContinuationProgress(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.width = 120
+	m.height = 32
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-001"
+	m.progress = progressRunning
+	m.artifactContinuations = []backend.ArtifactContinuationInfo{{
+		ID:                "artifact-continuation-001",
+		WorkspaceID:       "ws-1",
+		RunID:             "run-001",
+		ArtifactID:        "artifact-001",
+		TargetRef:         "deliverable.txt",
+		State:             common.ArtifactContinuationStateChunking,
+		ExpectedSequence:  3,
+		ReceivedSequences: []int{1, 2},
+		BytesWritten:      128,
+	}}
+
+	view := m.View()
+	if !strings.Contains(view, "Artifact Continuations") || !strings.Contains(view, "deliverable.txt") {
+		t.Fatalf("view missing artifact continuation progress:\n%s", view)
+	}
+	status := m.renderRuntimeStatusBar(120)
+	if !strings.Contains(status, "artifact deliverable.txt 2/3") {
+		t.Fatalf("status = %q, want active artifact progress", status)
+	}
+}
+
+func TestModelHandlesArtifactContinuationEvent(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-001"
+	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+		Type:        backend.EventArtifactContinuationChanged,
+		WorkspaceID: "ws-1",
+		RunID:       "run-001",
+		Payload: map[string]any{
+			"state":             "chunking",
+			"targetRef":         "deliverable.txt",
+			"expectedSequence":  4,
+			"receivedSequences": []any{1, 2, 3},
+			"bytesWritten":      512,
+		},
+	}})
+	got := asModel(next)
+	if !strings.Contains(got.progressText, "Artifact chunking deliverable.txt seq 3/4 512B") {
+		t.Fatalf("progressText = %q, want artifact continuation progress", got.progressText)
+	}
+	if cmd == nil {
+		t.Fatalf("expected workspace context refresh command")
+	}
+}
+
 func TestModelWorkspacePanelKeepsStateVisible(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-f2e4da0c7199a047", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
@@ -941,6 +995,21 @@ func TestModelSlashCompletionSuggestionsVisible(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Commands:") || !strings.Contains(view, "/workspace") {
 		t.Fatalf("slash completion suggestions missing:\n%s", view)
+	}
+}
+
+func TestModelConfigCommandShowsLLMOutputBudget(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.setInput("/config")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected config command")
+	}
+	msg := cmd()
+	next, _ = asModel(next).Update(msg)
+	m = asModel(next)
+	if !strings.Contains(m.result, "LLM Output Budget") || !strings.Contains(m.result, "maxGraphBytes: 32768") {
+		t.Fatalf("config result missing llm output budget:\n%s", m.result)
 	}
 }
 
@@ -3292,7 +3361,24 @@ func (f *fakeT) Delete(ctx context.Context, id string) error { return nil }
 type fakeC struct{}
 
 func (f *fakeC) Get(ctx context.Context) (*backend.ServiceConfig, error) {
-	return &backend.ServiceConfig{}, nil
+	return &backend.ServiceConfig{
+		ServerAddr:        "127.0.0.1:8080",
+		Backend:           "file",
+		DataDir:           ".workorch-data",
+		DefaultProvider:   "local",
+		MaxConcurrentRuns: 1,
+		LLMOutput: backend.LLMOutputConfig{
+			MaxPatchContentBytes:               12288,
+			MaxGraphBytes:                      32768,
+			MaxGraphFileWrites:                 3,
+			SchemaInvalidLargePreviewThreshold: 8192,
+			MaxArtifactChunkBytes:              8192,
+			PreviousChunkTailBytes:             300,
+			MaxChunkRetryAttempts:              3,
+			MaxArtifactPlanAttempts:            2,
+			MaxArtifactReplanAttempts:          2,
+		},
+	}, nil
 }
 
 type fakeE struct{}

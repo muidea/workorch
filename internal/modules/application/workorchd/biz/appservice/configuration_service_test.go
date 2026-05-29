@@ -34,6 +34,17 @@ maxRuntimeRepairAttempts = 11
 maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
+[runtime.llmOutput]
+maxPatchContentBytes = 4096
+maxGraphBytes = 16384
+maxGraphFileWrites = 2
+schemaInvalidLargePreviewThreshold = 8192
+maxArtifactChunkBytes = 4096
+previousChunkTailBytes = 128
+maxChunkRetryAttempts = 4
+maxArtifactPlanAttempts = 3
+maxArtifactReplanAttempts = 2
+
 [llm]
 defaultProvider = "local"
 defaultEmbeddingProvider = "local"
@@ -101,6 +112,17 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.MaxProviderRetryAttempts != 12 ||
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime configuration = %+v, want system runtime settings", cfg.Runtime)
+	}
+	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
+		cfg.Runtime.LLMOutput.MaxGraphBytes != 16384 ||
+		cfg.Runtime.LLMOutput.MaxGraphFileWrites != 2 ||
+		cfg.Runtime.LLMOutput.SchemaInvalidLargePreviewThreshold != 8192 ||
+		cfg.Runtime.LLMOutput.MaxArtifactChunkBytes != 4096 ||
+		cfg.Runtime.LLMOutput.PreviousChunkTailBytes != 128 ||
+		cfg.Runtime.LLMOutput.MaxChunkRetryAttempts != 4 ||
+		cfg.Runtime.LLMOutput.MaxArtifactPlanAttempts != 3 ||
+		cfg.Runtime.LLMOutput.MaxArtifactReplanAttempts != 2 {
+		t.Fatalf("runtime llmOutput configuration = %+v, want configured thresholds", cfg.Runtime.LLMOutput)
 	}
 	if cfg.LLM.DefaultProviderID != "local" || cfg.LLM.DefaultEmbeddingProviderID != "local" || len(cfg.LLM.Providers) != 1 {
 		t.Fatalf("llm configuration = %+v, want local provider", cfg.LLM)

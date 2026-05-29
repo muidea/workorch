@@ -183,9 +183,7 @@ func patchDiffArtifactContent(patchDetails []resultPatchDetail) string {
 			builder.WriteString("\n```\n")
 			continue
 		}
-		builder.WriteString("\n```text\n")
-		builder.WriteString(strings.TrimRight(patch.Content, "\n"))
-		builder.WriteString("\n```\n")
+		builder.WriteString(fmt.Sprintf("- Content: omitted from summary view (%d bytes)\n", len([]byte(patch.Content))))
 	}
 	return strings.TrimSpace(builder.String())
 }

@@ -105,6 +105,29 @@ type ArtifactInfo struct {
 	EvidenceRefs []string
 }
 
+type ArtifactContinuationInfo struct {
+	ID                common.ArtifactContinuationID
+	WorkspaceID       common.WorkspaceID
+	RunID             common.RunID
+	RootStepID        common.StepID
+	ArtifactID        string
+	TargetRef         string
+	Operation         string
+	State             common.ArtifactContinuationState
+	ExpectedSequence  int
+	ReceivedSequences []int
+	FinalReceived     bool
+	BytesWritten      int64
+	RollingHash       string
+	LastChunkHash     string
+	CoverageTargets   []string
+	EvidenceRefs      []string
+	FailureReason     string
+	CreatedAt         string
+	UpdatedAt         string
+	Progress          map[string]any
+}
+
 type PatchInfo struct {
 	ID               common.PatchID
 	WorkspaceID      common.WorkspaceID
@@ -248,22 +271,23 @@ type FetchedWebSourceInfo struct {
 }
 
 type WorkspaceSnapshotInfo struct {
-	Workspace          WorkspaceInfo
-	Outcome            WorkspaceOutcomeInfo
-	TaskProgress       TaskProgressInfo
-	TaskDecompositions []TaskDecompositionInfo
-	Goals              []GoalInfo
-	DoDs               []DoDInfo
-	Runs               []RunInfo
-	Results            []ResultInfo
-	Artifacts          []ArtifactInfo
-	Patches            []PatchInfo
-	MemoryRecallTraces []MemoryRecallTraceInfo
-	WebSources         []WebSourceTraceInfo
-	LLMUsageTraces     []LLMUsageTraceInfo
-	LLMUsageSummary    LLMUsageSummaryInfo
-	Decisions          []DecisionInfo
-	Approvals          []ApprovalInfo
+	Workspace             WorkspaceInfo
+	Outcome               WorkspaceOutcomeInfo
+	TaskProgress          TaskProgressInfo
+	TaskDecompositions    []TaskDecompositionInfo
+	Goals                 []GoalInfo
+	DoDs                  []DoDInfo
+	Runs                  []RunInfo
+	Results               []ResultInfo
+	Artifacts             []ArtifactInfo
+	ArtifactContinuations []ArtifactContinuationInfo
+	Patches               []PatchInfo
+	MemoryRecallTraces    []MemoryRecallTraceInfo
+	WebSources            []WebSourceTraceInfo
+	LLMUsageTraces        []LLMUsageTraceInfo
+	LLMUsageSummary       LLMUsageSummaryInfo
+	Decisions             []DecisionInfo
+	Approvals             []ApprovalInfo
 }
 
 type RecoveryPlanInfo struct {
@@ -620,6 +644,18 @@ type LLMProvider struct {
 	Streaming bool
 }
 
+type LLMOutputConfig struct {
+	MaxPatchContentBytes               int
+	MaxGraphBytes                      int
+	MaxGraphFileWrites                 int
+	SchemaInvalidLargePreviewThreshold int
+	MaxArtifactChunkBytes              int
+	PreviousChunkTailBytes             int
+	MaxChunkRetryAttempts              int
+	MaxArtifactPlanAttempts            int
+	MaxArtifactReplanAttempts          int
+}
+
 type ServiceConfig struct {
 	ServerAddr        string
 	Backend           string
@@ -627,6 +663,7 @@ type ServiceConfig struct {
 	DefaultProvider   string
 	MaxConcurrentRuns int64
 	Providers         []LLMProvider
+	LLMOutput         LLMOutputConfig
 }
 
 type ConfigBackend interface {
@@ -639,33 +676,34 @@ type ConfigBackend interface {
 type EventType string
 
 const (
-	EventWorkspaceCreated      EventType = "workspace/created"
-	EventWorkspaceListChanged  EventType = "workspace/list/changed"
-	EventWorkspaceStateChanged EventType = "workspace/state/changed"
-	EventWorkspaceDeleted      EventType = "workspace/deleted"
-	EventGoalDefined           EventType = "goal/defined"
-	EventDoDDefined            EventType = "dod/defined"
-	EventRunStateChanged       EventType = "run/state/changed"
-	EventStepDispatched        EventType = "step/dispatched"
-	EventStepCompleted         EventType = "step/completed"
-	EventDecisionCreated       EventType = "decision/created"
-	EventDecisionResolved      EventType = "decision/resolved"
-	EventApprovalCreated       EventType = "approval/created"
-	EventApprovalResolved      EventType = "approval/resolved"
-	EventResultAccepted        EventType = "result/accepted"
-	EventMemoryCreated         EventType = "memory/created"
-	EventMemoryUpdated         EventType = "memory/updated"
-	EventMemoryDeleted         EventType = "memory/deleted"
-	EventMemoryRecallRecorded  EventType = "memory/recall/recorded"
-	EventLLMUsageRecorded      EventType = "llm/usage/recorded"
-	EventPatchPreviewed        EventType = "patch/previewed"
-	EventPatchApplied          EventType = "patch/applied"
-	EventPatchFailed           EventType = "patch/failed"
-	EventPatchReverted         EventType = "patch/reverted"
-	EventGovernanceEvaluated   EventType = "governance/auto/evaluated"
-	EventGovernanceResolved    EventType = "governance/auto/resolved"
-	EventGovernanceEscalated   EventType = "governance/auto/escalated"
-	EventGovernanceBlocked     EventType = "governance/auto/blocked"
+	EventWorkspaceCreated            EventType = "workspace/created"
+	EventWorkspaceListChanged        EventType = "workspace/list/changed"
+	EventWorkspaceStateChanged       EventType = "workspace/state/changed"
+	EventWorkspaceDeleted            EventType = "workspace/deleted"
+	EventGoalDefined                 EventType = "goal/defined"
+	EventDoDDefined                  EventType = "dod/defined"
+	EventRunStateChanged             EventType = "run/state/changed"
+	EventStepDispatched              EventType = "step/dispatched"
+	EventStepCompleted               EventType = "step/completed"
+	EventDecisionCreated             EventType = "decision/created"
+	EventDecisionResolved            EventType = "decision/resolved"
+	EventApprovalCreated             EventType = "approval/created"
+	EventApprovalResolved            EventType = "approval/resolved"
+	EventResultAccepted              EventType = "result/accepted"
+	EventMemoryCreated               EventType = "memory/created"
+	EventMemoryUpdated               EventType = "memory/updated"
+	EventMemoryDeleted               EventType = "memory/deleted"
+	EventMemoryRecallRecorded        EventType = "memory/recall/recorded"
+	EventLLMUsageRecorded            EventType = "llm/usage/recorded"
+	EventPatchPreviewed              EventType = "patch/previewed"
+	EventPatchApplied                EventType = "patch/applied"
+	EventPatchFailed                 EventType = "patch/failed"
+	EventPatchReverted               EventType = "patch/reverted"
+	EventArtifactContinuationChanged EventType = "artifact_continuation/changed"
+	EventGovernanceEvaluated         EventType = "governance/auto/evaluated"
+	EventGovernanceResolved          EventType = "governance/auto/resolved"
+	EventGovernanceEscalated         EventType = "governance/auto/escalated"
+	EventGovernanceBlocked           EventType = "governance/auto/blocked"
 )
 
 type Event struct {

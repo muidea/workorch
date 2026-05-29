@@ -94,6 +94,81 @@ func TestValidateLLMCapabilityUsagePolicyAllowsStructuredSkipReason(t *testing.T
 	}
 }
 
+func TestValidateLLMCapabilityUsagePolicySkipDoesNotForcePatchFailedSurfaceToGraphContract(t *testing.T) {
+	run := capabilityPolicyTestRun()
+	step := capabilityPolicyTestStep()
+	step.ID = common.StepID("run-capability-policy/repair-001")
+	step.Input[stepInputKeyRuntimeStage] = runtimeStageRepair
+	step.Input["repairObjective"] = repairObjectiveStateChangingOutput
+	step.Input["stateChangingOutputRequired"] = true
+	step.Input["capabilityPolicyRepairRequired"] = true
+	step.Input["coverageTargetSet"] = []map[string]any{{
+		"coverageTargetToken": "source_change",
+		"targetText":          "source_change",
+	}}
+	step.Input["capabilityPolicyRepairContract"] = map[string]any{
+		"triggeredPolicies": []map[string]any{{
+			"id":                 "code-semantics-policy",
+			"appliesToCategory":  "code_semantics",
+			"preferredTools":     []string{"semantic.diagnostics"},
+			"requiredAfterKinds": []string{"patch/apply"},
+		}},
+	}
+	step.Input["strategyReassessment"] = map[string]any{
+		"required":      true,
+		"failedSurface": `invalid argument: executionGraph triggered capability usage policy "code-semantics-policy" after "patch/apply" but returned no dependent matching mcp/tool_call or structured capabilityPolicySkips reason`,
+		"requiredDecisionFields": []string{
+			"failedSurface",
+			"rootCauseTarget",
+			"repairTargetDecision",
+			"repairMode",
+			"forbiddenRepair",
+			"verificationPlan",
+		},
+	}
+	patch := capabilityPolicyPatchNode()
+	patch.Input["coverageTargets"] = []string{"source_change"}
+	patch.Input["failedSurface"] = "workspace has no deliverable files"
+	patch.Input["rootCauseTarget"] = "workspace root"
+	patch.Input["repairTargetDecision"] = "create the smallest deliverable state change for the current coverage item"
+	patch.Input["repairMode"] = "file_write creation"
+	patch.Input["forbiddenRepair"] = "do not write unrelated marker files"
+	patch.Input["verificationPlan"] = "run bounded validation for source_change"
+	output := map[string]any{
+		"capabilityPolicySkips": []map[string]any{{
+			"policyId": "code-semantics-policy",
+			"category": "code_semantics",
+			"reason":   "current graph creates initial files and will use bounded build output as the fallback semantic signal",
+		}},
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				patch,
+				{
+					ID:        "verify",
+					Kind:      "shell/command",
+					DependsOn: []string{"patch"},
+					Input:     map[string]any{"command": "go", "args": []string{"test", "./..."}},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want capability-policy graph repair separated from patch failedSurface", err)
+	}
+}
+
+func TestCapabilityUsagePoliciesForStepDeduplicatesByPolicyID(t *testing.T) {
+	run := capabilityPolicyTestRun()
+	step := capabilityPolicyTestStep()
+	step.Input["executionContract"] = run.ExecutionContext["executionContract"]
+
+	policies := capabilityUsagePoliciesForStep(run, step)
+	if len(policies) != 1 {
+		t.Fatalf("capabilityUsagePoliciesForStep len = %d, want 1: %#v", len(policies), policies)
+	}
+}
+
 func TestRuntimeRepairCapabilityPolicyViolationRequiresCorrectedGraphOrSkip(t *testing.T) {
 	run := capabilityPolicyTestRun()
 	failed := capabilityPolicyTestStep()

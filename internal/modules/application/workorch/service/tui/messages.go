@@ -81,3 +81,8 @@ type ApprovalResolvedMsg struct {
 	Approval *backend.ApprovalInfo
 	Error    error
 }
+
+type ConfigMsg struct {
+	Config *backend.ServiceConfig
+	Error  error
+}

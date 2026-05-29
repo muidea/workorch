@@ -125,10 +125,18 @@ func (h *MemoryHub) handlersLocked(topic string) []Handler {
 func cloneEnvelope(item Envelope) Envelope {
 	cloned := item
 	if item.Payload != nil {
-		cloned.Payload = make(map[string]any, len(item.Payload))
-		for k, v := range item.Payload {
-			cloned.Payload[k] = v
-		}
+		cloned.Payload = cloneStringAnyMap(item.Payload)
 	}
 	return cloned
+}
+
+func cloneStringAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }

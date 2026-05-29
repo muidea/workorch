@@ -569,8 +569,8 @@ func dialogLanguageInstruction(request llmmodels.ProviderRequest) string {
 func decisionContractPrompt(request llmmodels.ProviderRequest) string {
 	lines := []string{
 		"Required output JSON fields use the LLMExecutionDecision contract:",
-		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed.",
-		"- Allowed top-level JSON fields are only: completionState, thoughtSummary, plan, executionGraph, nextAction, requiredDecision, requiredApproval, patchRequests, mcpToolCalls, shellCommands, memoryWrites, capabilityPolicySkips, dodAssessment.",
+		"- completionState must be one of: continue, blocked_on_decision, blocked_on_approval, completed, failed. When an explicit artifactChunkRepair schema requests it, completionState may also be blocked.",
+		"- Allowed top-level JSON fields are only: completionState, thoughtSummary, plan, executionGraph, nextAction, requiredDecision, requiredApproval, patchRequests, mcpToolCalls, shellCommands, memoryWrites, capabilityPolicySkips, dodAssessment, artifactPlan, artifactChunk, artifactChunkRepair.",
 		"- Do not return unknown top-level fields such as validationPlan, testPlan, implementationPlan, verificationPlan, workspaceId, runId, stepId, schema, traceRefs, or config. Put advisory planning text into plan or thoughtSummary; put executable validation/check work into executionGraph or shellCommands when executable work is allowed.",
 		"- When executable work is allowed, use executionGraph when the next work contains multiple blocks, dependencies, or future parallel-ready work.",
 		"- executionGraph.nodes items require id and kind; dependsOn is a list of node ids; input carries block input.",

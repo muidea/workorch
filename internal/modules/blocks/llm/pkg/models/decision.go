@@ -220,6 +220,9 @@ type LLMExecutionDecision struct {
 	MemoryWrites          []MemoryWriteRequest   `json:"memoryWrites,omitempty"`
 	CapabilityPolicySkips []CapabilityPolicySkip `json:"capabilityPolicySkips,omitempty"`
 	DoDAssessment         *DoDAssessment         `json:"dodAssessment,omitempty"`
+	ArtifactPlan          map[string]any         `json:"artifactPlan,omitempty"`
+	ArtifactChunk         map[string]any         `json:"artifactChunk,omitempty"`
+	ArtifactChunkRepair   map[string]any         `json:"artifactChunkRepair,omitempty"`
 	CompletionState       string                 `json:"completionState"`
 }
 

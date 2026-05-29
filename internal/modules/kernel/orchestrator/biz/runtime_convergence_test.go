@@ -1559,6 +1559,109 @@ func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverage
 	}
 }
 
+func TestRunExecutionInputCarriesNeutralRuntimeContractSignals(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-contract-signal",
+		WorkspaceID: "ws-contract-signal",
+		GoalID:      "goal-contract-signal",
+		DoDID:       "dod-contract-signal",
+		ExecutionContext: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"estimatedPatchContentBytes":   defaultMaxPatchContentBytes + 1,
+				},
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if !boolValue(input["stateChangingOutputRequired"]) ||
+		stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput ||
+		stringFromMap(input, "requestedOutputMode") != outputModeIncrementalArtifact {
+		t.Fatalf("input contract signals = %+v", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		intFromAny(required["estimatedPatchContentBytes"]) <= defaultMaxPatchContentBytes {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v", required)
+	}
+	if stringFromMap(mapFromValue(input["executionContract"]), "stateChangePolicy") != "must_produce_state_change" {
+		t.Fatalf("executionContract = %+v", input["executionContract"])
+	}
+}
+
+func TestEnforceStateChangingRequiredOutputPreservesNeutralOutputBudgetSignals(t *testing.T) {
+	pkg := map[string]any{
+		"requiredOutput": map[string]any{
+			"mustIncludeStateChangingNode":       true,
+			"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+			"estimatedGraphBytes":                defaultMaxGraphBytes + 1,
+			"expectedStateChangingArtifactCount": defaultMaxGraphFileWrites + 1,
+		},
+	}
+
+	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+
+	if intFromAny(required["estimatedPatchContentBytes"]) != defaultMaxPatchContentBytes+1 ||
+		intFromAny(required["estimatedGraphBytes"]) != defaultMaxGraphBytes+1 ||
+		intFromAny(required["expectedStateChangingArtifactCount"]) != defaultMaxGraphFileWrites+1 {
+		t.Fatalf("requiredOutput = %+v, want output budget signals preserved", required)
+	}
+}
+
+func TestInitialStepOutputModeSelectionRestoresBudgetSignalsWithProfileStateChange(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-contract-profile-signal",
+		WorkspaceID: "ws-contract-profile-signal",
+		GoalID:      "goal-contract-profile-signal",
+		DoDID:       "dod-contract-profile-signal",
+		ExecutionContext: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":       true,
+					"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{
+								"id":          "source_change",
+								"required":    true,
+								"description": "A neutral deliverable must be changed through runtime-managed artifact output.",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+	orch.applyLLMOutputModeSelection(context.Background(), run, input, nil, 0)
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+
+	if intFromAny(required["estimatedPatchContentBytes"]) <= defaultMaxPatchContentBytes ||
+		intFromAny(required["expectedStateChangingArtifactCount"]) != 1 {
+		t.Fatalf("requiredOutput = %+v, want output budget signals preserved with profile state change", required)
+	}
+}
+
 func TestBuildConvergenceContractNeedValidationWhenPatchAlreadySatisfied(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,

@@ -13,6 +13,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -125,6 +126,75 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}
 	if len(items) != 1 || items[0].Payload["large"] != payload {
 		t.Fatalf("events = %+v, want rehydrated large payload", items)
+	}
+}
+
+func TestArtifactContinuationRepositoryStoresContentOutsideMetadata(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "artifact-continuations")
+	repo := NewArtifactContinuationRepository(root)
+	continuationID := common.ArtifactContinuationID("artifact-continuation-path-001")
+	chunkContent := strings.Repeat("chunk-body-", 64)
+	assembledContent := strings.Repeat("assembled-body-", 64)
+
+	if err := repo.Create(ctx, &orchestratormodel.ArtifactContinuation{
+		ID:          continuationID,
+		WorkspaceID: common.WorkspaceID("ws-path"),
+		RunID:       common.RunID("run-path"),
+		RootStepID:  common.StepID("run-path/step-1"),
+		ArtifactID:  "artifact-001",
+		TargetRef:   "deliverable/path.txt",
+		State:       common.ArtifactContinuationStateChunking,
+	}); err != nil {
+		t.Fatalf("create artifact continuation: %v", err)
+	}
+	if err := repo.SaveChunk(ctx, &orchestratormodel.ArtifactContinuationChunk{
+		ContinuationID: continuationID,
+		Sequence:       1,
+		ArtifactID:     "artifact-001",
+		TargetRef:      "deliverable/path.txt",
+		ContentHash:    "hash-001",
+		Bytes:          int64(len(chunkContent)),
+	}, chunkContent); err != nil {
+		t.Fatalf("save chunk: %v", err)
+	}
+	if err := repo.SaveAssembled(ctx, &orchestratormodel.ArtifactContinuationAssembledMetadata{
+		ContinuationID: continuationID,
+		TargetRef:      "deliverable/path.txt",
+		Bytes:          int64(len(assembledContent)),
+		RollingHash:    "rolling-hash",
+	}, assembledContent); err != nil {
+		t.Fatalf("save assembled: %v", err)
+	}
+
+	dir := filepath.Join(root, string(continuationID))
+	chunkMetadata, err := os.ReadFile(filepath.Join(dir, "chunks", "001.json"))
+	if err != nil {
+		t.Fatalf("read chunk metadata: %v", err)
+	}
+	if strings.Contains(string(chunkMetadata), chunkContent) {
+		t.Fatalf("chunk metadata contains chunk content")
+	}
+	chunkBody, err := os.ReadFile(filepath.Join(dir, "chunks", "001.content"))
+	if err != nil {
+		t.Fatalf("read chunk content: %v", err)
+	}
+	if string(chunkBody) != chunkContent {
+		t.Fatalf("chunk content = %q, want original content", string(chunkBody))
+	}
+	assembledMetadata, err := os.ReadFile(filepath.Join(dir, "assembled", "metadata.json"))
+	if err != nil {
+		t.Fatalf("read assembled metadata: %v", err)
+	}
+	if strings.Contains(string(assembledMetadata), assembledContent) {
+		t.Fatalf("assembled metadata contains assembled content")
+	}
+	assembledBody, err := os.ReadFile(filepath.Join(dir, "assembled", "content"))
+	if err != nil {
+		t.Fatalf("read assembled content: %v", err)
+	}
+	if string(assembledBody) != assembledContent {
+		t.Fatalf("assembled content = %q, want original content", string(assembledBody))
 	}
 }
 

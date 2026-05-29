@@ -453,6 +453,29 @@ type Artifact struct {
 	UpdatedAt          string         `json:"updatedAt,omitempty"`
 }
 
+type ArtifactContinuation struct {
+	ID                string         `json:"id"`
+	WorkspaceID       string         `json:"workspaceId"`
+	RunID             string         `json:"runId"`
+	RootStepID        string         `json:"rootStepId,omitempty"`
+	ArtifactID        string         `json:"artifactId"`
+	TargetRef         string         `json:"targetRef"`
+	Operation         string         `json:"operation,omitempty"`
+	State             string         `json:"state"`
+	ExpectedSequence  int            `json:"expectedSequence,omitempty"`
+	ReceivedSequences []int          `json:"receivedSequences,omitempty"`
+	FinalReceived     bool           `json:"finalReceived,omitempty"`
+	BytesWritten      int64          `json:"bytesWritten,omitempty"`
+	RollingHash       string         `json:"rollingHash,omitempty"`
+	LastChunkHash     string         `json:"lastChunkHash,omitempty"`
+	CoverageTargets   []string       `json:"coverageTargets,omitempty"`
+	EvidenceRefs      []string       `json:"evidenceRefs,omitempty"`
+	FailureReason     string         `json:"failureReason,omitempty"`
+	CreatedAt         string         `json:"createdAt,omitempty"`
+	UpdatedAt         string         `json:"updatedAt,omitempty"`
+	Progress          map[string]any `json:"progress,omitempty"`
+}
+
 type RuntimeCheckpoint struct {
 	ID                 string         `json:"id"`
 	WorkspaceID        string         `json:"workspaceId"`
@@ -502,48 +525,50 @@ type MemoryRecallTrace struct {
 
 // Snapshot is the full workspace/run snapshot returned by the read model.
 type WorkspaceSnapshot struct {
-	Workspace          Workspace           `json:"workspace"`
-	Outcome            RunOutcome          `json:"outcome"`
-	TaskProgress       TaskProgress        `json:"taskProgress"`
-	Goals              []Goal              `json:"goals,omitempty"`
-	DoDs               []DoD               `json:"dods,omitempty"`
-	Runs               []Run               `json:"runs,omitempty"`
-	Results            []Result            `json:"results,omitempty"`
-	Artifacts          []Artifact          `json:"artifacts,omitempty"`
-	Decisions          []Decision          `json:"decisions,omitempty"`
-	Approvals          []Approval          `json:"approvals,omitempty"`
-	Steps              []Step              `json:"steps,omitempty"`
-	ToolCalls          []ToolCall          `json:"toolCalls,omitempty"`
-	Patches            []Patch             `json:"patches,omitempty"`
-	ValidationResults  []ValidationResult  `json:"validationResults,omitempty"`
-	RuntimeCheckpoints []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
-	MemoryRecallTraces []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
-	LLMUsageTraces     []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary    LLMUsageSummary     `json:"llmUsageSummary"`
-	EventRecords       []EventRecord       `json:"eventRecords,omitempty"`
+	Workspace             Workspace              `json:"workspace"`
+	Outcome               RunOutcome             `json:"outcome"`
+	TaskProgress          TaskProgress           `json:"taskProgress"`
+	Goals                 []Goal                 `json:"goals,omitempty"`
+	DoDs                  []DoD                  `json:"dods,omitempty"`
+	Runs                  []Run                  `json:"runs,omitempty"`
+	Results               []Result               `json:"results,omitempty"`
+	Artifacts             []Artifact             `json:"artifacts,omitempty"`
+	ArtifactContinuations []ArtifactContinuation `json:"artifactContinuations,omitempty"`
+	Decisions             []Decision             `json:"decisions,omitempty"`
+	Approvals             []Approval             `json:"approvals,omitempty"`
+	Steps                 []Step                 `json:"steps,omitempty"`
+	ToolCalls             []ToolCall             `json:"toolCalls,omitempty"`
+	Patches               []Patch                `json:"patches,omitempty"`
+	ValidationResults     []ValidationResult     `json:"validationResults,omitempty"`
+	RuntimeCheckpoints    []RuntimeCheckpoint    `json:"runtimeCheckpoints,omitempty"`
+	MemoryRecallTraces    []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
+	LLMUsageTraces        []LLMUsageTrace        `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary       LLMUsageSummary        `json:"llmUsageSummary"`
+	EventRecords          []EventRecord          `json:"eventRecords,omitempty"`
 }
 
 type RunSnapshot struct {
-	Workspace               Workspace           `json:"workspace"`
-	Run                     Run                 `json:"run"`
-	Outcome                 RunOutcome          `json:"outcome"`
-	TaskProgress            TaskProgress        `json:"taskProgress"`
-	RepairLoop              RepairLoop          `json:"repairLoop"`
-	Steps                   []Step              `json:"steps,omitempty"`
-	ToolCalls               []ToolCall          `json:"toolCalls,omitempty"`
-	Patches                 []Patch             `json:"patches,omitempty"`
-	ValidationResults       []ValidationResult  `json:"validationResults,omitempty"`
-	RuntimeCheckpoints      []RuntimeCheckpoint `json:"runtimeCheckpoints,omitempty"`
-	Results                 []Result            `json:"results,omitempty"`
-	Artifacts               []Artifact          `json:"artifacts,omitempty"`
-	Decisions               []Decision          `json:"decisions,omitempty"`
-	Approvals               []Approval          `json:"approvals,omitempty"`
-	MemoryRecallTraces      []MemoryRecallTrace `json:"memoryRecallTraces,omitempty"`
-	LLMUsageTraces          []LLMUsageTrace     `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary         LLMUsageSummary     `json:"llmUsageSummary"`
-	CoverageWorkItems       []map[string]any    `json:"coverageWorkItems,omitempty"`
-	CoverageWorkItemContext map[string]any      `json:"coverageWorkItemContext,omitempty"`
-	EventRecords            []EventRecord       `json:"eventRecords,omitempty"`
+	Workspace               Workspace              `json:"workspace"`
+	Run                     Run                    `json:"run"`
+	Outcome                 RunOutcome             `json:"outcome"`
+	TaskProgress            TaskProgress           `json:"taskProgress"`
+	RepairLoop              RepairLoop             `json:"repairLoop"`
+	Steps                   []Step                 `json:"steps,omitempty"`
+	ToolCalls               []ToolCall             `json:"toolCalls,omitempty"`
+	Patches                 []Patch                `json:"patches,omitempty"`
+	ValidationResults       []ValidationResult     `json:"validationResults,omitempty"`
+	RuntimeCheckpoints      []RuntimeCheckpoint    `json:"runtimeCheckpoints,omitempty"`
+	Results                 []Result               `json:"results,omitempty"`
+	Artifacts               []Artifact             `json:"artifacts,omitempty"`
+	ArtifactContinuations   []ArtifactContinuation `json:"artifactContinuations,omitempty"`
+	Decisions               []Decision             `json:"decisions,omitempty"`
+	Approvals               []Approval             `json:"approvals,omitempty"`
+	MemoryRecallTraces      []MemoryRecallTrace    `json:"memoryRecallTraces,omitempty"`
+	LLMUsageTraces          []LLMUsageTrace        `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary         LLMUsageSummary        `json:"llmUsageSummary"`
+	CoverageWorkItems       []map[string]any       `json:"coverageWorkItems,omitempty"`
+	CoverageWorkItemContext map[string]any         `json:"coverageWorkItemContext,omitempty"`
+	EventRecords            []EventRecord          `json:"eventRecords,omitempty"`
 }
 
 type Activation struct {
@@ -718,6 +743,17 @@ type ServiceConfiguration struct {
 		MaxRuntimeRepairAttempts int    `json:"maxRuntimeRepairAttempts"`
 		MaxProviderRetryAttempts int    `json:"maxProviderRetryAttempts"`
 		ShellCommandTimeout      string `json:"shellCommandTimeout"`
+		LLMOutput                struct {
+			MaxPatchContentBytes               int `json:"maxPatchContentBytes"`
+			MaxGraphBytes                      int `json:"maxGraphBytes"`
+			MaxGraphFileWrites                 int `json:"maxGraphFileWrites"`
+			SchemaInvalidLargePreviewThreshold int `json:"schemaInvalidLargePreviewThreshold"`
+			MaxArtifactChunkBytes              int `json:"maxArtifactChunkBytes"`
+			PreviousChunkTailBytes             int `json:"previousChunkTailBytes"`
+			MaxChunkRetryAttempts              int `json:"maxChunkRetryAttempts"`
+			MaxArtifactPlanAttempts            int `json:"maxArtifactPlanAttempts"`
+			MaxArtifactReplanAttempts          int `json:"maxArtifactReplanAttempts"`
+		} `json:"llmOutput"`
 	} `json:"runtime"`
 	LLM struct {
 		DefaultProviderID          string                     `json:"defaultProviderId"`

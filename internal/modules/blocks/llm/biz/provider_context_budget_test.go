@@ -1072,6 +1072,66 @@ func TestEnforceProviderRequestBudgetAcceptsRepairPackageCurrentFailure(t *testi
 	}
 }
 
+func TestEnforceProviderRequestBudgetAcceptsInitialStateChangingRunWithoutProcessEvidence(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-state-changing-initial",
+		RunID:       "run-state-changing-initial",
+		StepID:      "run-state-changing-initial/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"runtimeStage":                "repair",
+			"stateChangingOutputRequired": true,
+			"goal":                        map[string]any{"text": "goal"},
+			"dod":                         map[string]any{"items": []any{"dod"}},
+			"coverageWorkItemContext": map[string]any{
+				"summary": map[string]any{
+					"total": 1,
+					"open":  1,
+				},
+				"currentFocus": map[string]any{
+					"id":                           "cwi-001",
+					"definitionRevision":           "rev-1",
+					"sourceScope":                  "deliverable",
+					"sourceRequirementId":          "source_change",
+					"targetText":                   "source_change",
+					"status":                       "open",
+					"currentGap":                   "missing accepted evidence binding for required evidence kind: validation, state_change",
+					"requiredEvidenceKinds":        []string{"validation", "state_change"},
+					"missingEvidenceKinds":         []string{"validation", "state_change"},
+					"acceptedEvidenceRefs":         []string{},
+					"rejectedEvidenceRefs":         []string{},
+					"nextAllowedConvergenceStates": []string{"need_evidence", "need_state_change"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []map[string]any{{
+					"kind":                "deliverable",
+					"sourceRequirementId": "source_change",
+					"targetText":          "source_change",
+					"state":               "open",
+				}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"mustDeclareCoverageTargets":   true,
+				},
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget = nil, want integrity audit")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "runtime_repair_process_evidence_missing") {
+		t.Fatalf("integrityWarnings = %+v, did not expect missing process evidence for initial state-changing run", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast {
+		t.Fatalf("contextGateAction = %q, did not expect fail_fast", got.ContextBudget.ContextGateAction)
+	}
+}
+
 func TestEnforceProviderRequestBudgetFailsGateWhenRepairProcessEvidenceMissing(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-missing-process-evidence",

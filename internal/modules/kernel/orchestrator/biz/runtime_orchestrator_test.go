@@ -31,6 +31,7 @@ import (
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
@@ -2244,6 +2245,41 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	}
 	if !publishedTopicForTarget(hub.Published(), events.TopicPatchFailed, "main.go") {
 		t.Fatalf("published = %+v, want patch failed event", hub.Published())
+	}
+}
+
+func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	orch := &RuntimeOrchestrator{eventHub: hub}
+	run := &runmodel.Run{ID: "run-artifact-continuation-event", WorkspaceID: "ws-artifact-continuation-event"}
+	step := &runmodel.Step{ID: "run-artifact-continuation-event/artifact-assemble-001", RunID: run.ID}
+	item := &orchestratormodel.ArtifactContinuation{
+		ID:                "artifact-continuation-event-001",
+		WorkspaceID:       run.WorkspaceID,
+		RunID:             run.ID,
+		ArtifactID:        "artifact-001",
+		TargetRef:         "deliverable/target.txt",
+		State:             common.ArtifactContinuationStateApplying,
+		ExpectedSequence:  3,
+		ReceivedSequences: []int{1, 2},
+		RollingHash:       "hash-001",
+		Metadata:          map[string]any{"content": "must not be published"},
+	}
+
+	if err := orch.publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationAssembled, nil); err != nil {
+		t.Fatalf("publish artifact continuation event: %v", err)
+	}
+	published := hub.Published()
+	if len(published) != 1 || published[0].Topic != events.TopicArtifactContinuationAssembled {
+		t.Fatalf("published = %+v, want artifact continuation assembled event", published)
+	}
+	payload := published[0].Payload
+	if payload["targetRef"] != item.TargetRef || payload["rollingHash"] != item.RollingHash {
+		t.Fatalf("payload = %+v, want metadata", payload)
+	}
+	if payload["content"] != nil || payload["body"] != nil || payload["diff"] != nil || payload["metadata"] != nil {
+		t.Fatalf("payload = %+v, want no body content or raw metadata", payload)
 	}
 }
 
@@ -5457,6 +5493,71 @@ func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
 	}
 	if _, ok := nested["failedStepInput"]; ok {
 		t.Fatalf("nested failedStepInput should be dropped")
+	}
+}
+
+func TestCompactLLMContextOmitsArtifactChunkContent(t *testing.T) {
+	chunkContent := "line 1\nline 2\nline 3\n"
+	input := compactStepInputForLLMContext(map[string]any{
+		"outputMode": outputModeIncrementalArtifact,
+		"artifactContinuationContext": map[string]any{
+			"id":                  "continuation-001",
+			"runId":               "run-001",
+			"artifactId":          "artifact-001",
+			"targetRef":           "deliverable.txt",
+			"operation":           "replace",
+			"expectedSequence":    2,
+			"previousChunkTail":   "line 1\n",
+			"receivedSequences":   []int{1},
+			"receivedChunkHashes": map[int]string{1: "sha256:previous"},
+			"coverageTargets":     []string{"cwi-001"},
+			"content":             chunkContent,
+			"body":                chunkContent,
+		},
+	})
+	continuation := mapFromValue(input["artifactContinuationContext"])
+	if continuation["artifactId"] != "artifact-001" || continuation["expectedSequence"] != 2 {
+		t.Fatalf("artifactContinuationContext = %+v, want compact current cursor", continuation)
+	}
+	if continuation["content"] != nil || continuation["body"] != nil || continuation["previousChunkTail"] != nil {
+		t.Fatalf("artifactContinuationContext = %+v, want no raw body", continuation)
+	}
+
+	output := compactStepOutputForLLMContext(map[string]any{
+		"artifactChunk": map[string]any{
+			"artifactId": "artifact-001",
+			"targetRef":  "deliverable.txt",
+			"sequence":   2,
+			"content":    chunkContent,
+			"isFinal":    false,
+			"chunkHash":  "sha256:chunk",
+			"endsWith":   "line 3",
+		},
+		stepOutputKeyLLMDecision: map[string]any{
+			"artifactChunk": map[string]any{
+				"artifactId": "artifact-001",
+				"targetRef":  "deliverable.txt",
+				"sequence":   2,
+				"content":    chunkContent,
+				"isFinal":    false,
+				"chunkHash":  "sha256:chunk",
+			},
+		},
+	})
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("marshal compact artifact output: %v", err)
+	}
+	if strings.Contains(string(encoded), chunkContent) || strings.Contains(string(encoded), `"content":"`) {
+		t.Fatalf("compact artifact output retained chunk content: %s", encoded)
+	}
+	chunk := mapFromValue(output["artifactChunk"])
+	if chunk["contentOmitted"] != true || chunk["contentBytes"] != len([]byte(strings.TrimSpace(chunkContent))) {
+		t.Fatalf("artifactChunk = %+v, want omitted content metadata", chunk)
+	}
+	decisionChunk := mapFromValue(mapFromValue(output[stepOutputKeyLLMDecision])["artifactChunk"])
+	if decisionChunk["contentOmitted"] != true {
+		t.Fatalf("llmDecision.artifactChunk = %+v, want omitted content metadata", decisionChunk)
 	}
 }
 
@@ -10224,8 +10325,18 @@ func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
 	if got := NormalizeRuntimePolicy(RuntimePolicy{}).MaxProviderRetryAttempts; got != maxProviderRetryAttempts {
 		t.Fatalf("default max provider retry attempts = %d, want %d", got, maxProviderRetryAttempts)
 	}
+	if got := NormalizeRuntimePolicy(RuntimePolicy{}).LLMOutput.MaxGraphBytes; got != defaultMaxGraphBytes {
+		t.Fatalf("default max graph bytes = %d, want %d", got, defaultMaxGraphBytes)
+	}
 	orch := &RuntimeOrchestrator{
-		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 9, MaxProviderRetryAttempts: 7}),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{
+			MaxRuntimeRepairAttempts: 9,
+			MaxProviderRetryAttempts: 7,
+			LLMOutput: LLMOutputRuntimePolicy{
+				MaxPatchContentBytes: 4096,
+				MaxGraphBytes:        16384,
+			},
+		}),
 	}
 	repairInput := orch.runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{
 		ID:          "run-policy",
@@ -10256,6 +10367,9 @@ func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
 	}, 1, errors.New("context deadline exceeded"))
 	if got := input["maxProviderRetryAttempts"]; got != 7 {
 		t.Fatalf("maxProviderRetryAttempts = %v, want configured 7", got)
+	}
+	if got := orch.llmOutputPolicyValues()["maxPatchContentBytes"]; got != 4096 {
+		t.Fatalf("llmOutputPolicy.maxPatchContentBytes = %v, want configured 4096", got)
 	}
 }
 
@@ -11800,6 +11914,64 @@ func TestRuntimeOrchestrator_RuntimeMemoryRejectsSensitiveMCPEnvFeedback(t *test
 	}
 	if len(requests) != 0 {
 		t.Fatalf("memory requests = %+v, want sensitive env feedback rejected", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_ArtifactChunkStepSuppressesMemoryWrites(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{ID: "run-artifact-memory", WorkspaceID: "ws-artifact-memory"}
+	step := &runmodel.Step{
+		ID:    "run-artifact-memory/artifact-chunk-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"outputMode": outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": artifactOutputPhaseChunk,
+			},
+			"artifactContinuationContext": map[string]any{
+				"state":            string(common.ArtifactContinuationStateChunking),
+				"artifactId":       "artifact-001",
+				"targetRef":        "deliverable.txt",
+				"expectedSequence": 1,
+			},
+		},
+	}
+	output := map[string]any{
+		"artifactChunk": map[string]any{
+			"artifactId": "artifact-001",
+			"targetRef":  "deliverable.txt",
+			"sequence":   1,
+			"content":    "artifact body must stay out of memory",
+			"isFinal":    true,
+			"chunkHash":  "sha256:chunk",
+		},
+		stepOutputKeyMemoryWrites: []map[string]any{{
+			"memoryType": memorycommon.MemoryTypeProjectContext,
+			"summary":    "Artifact content",
+			"content":    "artifact body must stay out of memory",
+			"tags":       []string{"reference_value"},
+		}},
+	}
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{
+			MemoryItems: memory.NewMemoryItemRepository(),
+		},
+	}
+
+	refs, err := orch.recordMemoryWrites(ctx, run, step, output)
+	if err != nil {
+		t.Fatalf("recordMemoryWrites: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("memory refs = %+v, want artifact chunk memory suppressed", refs)
+	}
+	items, err := orch.evidence.MemoryItems.ListByWorkspaceID(ctx, run.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("memory items = %+v, want none", items)
 	}
 }
 
@@ -15055,6 +15227,9 @@ func TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPlannedShellLeaf(t *te
 	}
 	if followUpInput[stepInputKeyRuntimeStage] != runtimeStageVerification {
 		t.Fatalf("completion follow-up runtimeStage = %v, want verification", followUpInput[stepInputKeyRuntimeStage])
+	}
+	if followUpInput[stepInputKeyAssessmentOnly] != true || followUpInput["stateChangingOutputRequired"] != nil {
+		t.Fatalf("completion follow-up assessment contract = %+v, want assessment-only without state-changing output", followUpInput)
 	}
 	previousOutput, ok := followUpInput["previousStepOutput"].(map[string]any)
 	if !ok || previousOutput["stdout"] != "result ready" {
@@ -21553,6 +21728,90 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T)
 		}},
 	})
 	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityRejectsArtifactChunkEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-artifact-chunk-evidence")
+	chunkStepID := common.StepID(runID + "/artifact-continue-001")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    chunkStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"artifactContinuationContext": map[string]any{
+				"state": string(common.ArtifactContinuationStateChunking),
+			},
+		},
+		Output: map[string]any{
+			"stage": "llm_artifact_chunk",
+		},
+	}); err != nil {
+		t.Fatalf("seed chunk step: %v", err)
+	}
+
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{{
+			"item":         "assembled artifact is delivered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(chunkStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "artifact chunk evidence") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want artifact chunk evidence rejection", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityAllowsArtifactApplyEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	patchRepo := memory.NewPatchRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Patches: patchRepo,
+		},
+	}
+	runID := common.RunID("run-dod-artifact-apply-evidence")
+	stepID := common.StepID(runID + "/artifact-apply-001")
+	patchID := common.PatchID(string(stepID) + "/patch/1")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  artifactApplyStepKind,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"artifactContinuationApply": map[string]any{
+				"targetRef": "deliverable/target.txt",
+				"state":     string(common.ArtifactContinuationStateApplied),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed apply step: %v", err)
+	}
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:        patchID,
+		RunID:     runID,
+		StepID:    stepID,
+		PatchType: "file_write",
+		TargetRef: "deliverable/target.txt",
+		State:     common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("seed patch: %v", err)
+	}
+
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{{
+			"item":         "assembled artifact is delivered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(patchID)},
+		}},
+	}); err != nil {
 		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
 	}
 }

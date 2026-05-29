@@ -365,4 +365,18 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	if governance.Type != EventGovernanceResolved || governance.Payload["traceId"] != "trace-1" {
 		t.Fatalf("governance event = %+v, want governance resolved with trace id", governance)
 	}
+
+	artifact := convertEnvelope(events.Envelope{
+		Topic:       events.TopicArtifactContinuationChunkRecorded,
+		SubjectID:   "artifact-continuation-1",
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"state":     "chunking",
+			"targetRef": "deliverable.txt",
+		},
+	})
+	if artifact.Type != EventArtifactContinuationChanged || artifact.Payload["artifactContinuationId"] != "artifact-continuation-1" {
+		t.Fatalf("artifact continuation event = %+v, want artifact continuation id from subject", artifact)
+	}
 }

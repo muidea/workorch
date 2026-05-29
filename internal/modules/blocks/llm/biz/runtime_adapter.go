@@ -1520,6 +1520,9 @@ func validateLLMDecisionTopLevelFields(raw map[string]json.RawMessage) error {
 			"memoryWrites",
 			"capabilityPolicySkips",
 			"dodAssessment",
+			"artifactPlan",
+			"artifactChunk",
+			"artifactChunkRepair",
 			"completionState":
 			continue
 		default:
@@ -2517,6 +2520,21 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	if len(decision.CapabilityPolicySkips) > 0 {
 		output["capabilityPolicySkips"] = capabilityPolicySkipOutput(decision.CapabilityPolicySkips)
 	}
+	if len(decision.ArtifactPlan) > 0 {
+		output["stage"] = "llm_artifact_plan"
+		output["artifactPlan"] = cloneMap(decision.ArtifactPlan)
+		return output, nil
+	}
+	if len(decision.ArtifactChunk) > 0 {
+		output["stage"] = "llm_artifact_chunk"
+		output["artifactChunk"] = cloneMap(decision.ArtifactChunk)
+		return output, nil
+	}
+	if len(decision.ArtifactChunkRepair) > 0 {
+		output["stage"] = "llm_artifact_chunk_repair"
+		output["artifactChunkRepair"] = cloneMap(decision.ArtifactChunkRepair)
+		return output, nil
+	}
 	if decision.CompletionState == "failed" && decision.DoDAssessment != nil {
 		output["stage"] = "llm_dod_assessment"
 		output["dodAssessment"] = doDAssessmentOutput(decision.DoDAssessment)
@@ -2594,6 +2612,10 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 	switch decision.CompletionState {
 	case "continue", "blocked_on_decision", "blocked_on_approval", "completed", "failed":
+	case "blocked":
+		if len(decision.ArtifactChunkRepair) == 0 {
+			return fmt.Errorf("%w: unsupported llm completionState", common.ErrInvalidArgument)
+		}
 	default:
 		return fmt.Errorf("%w: unsupported llm completionState", common.ErrInvalidArgument)
 	}
@@ -3167,6 +3189,7 @@ func isAssessmentOnlyDecisionRequest(request llmmodels.ProviderRequest) bool {
 	return boolFromProviderInput(request.Input, "assessmentOnly") ||
 		boolFromProviderInput(request.Input, "graphExpansionLimitFollowUp") ||
 		boolFromProviderInput(request.Input, "providerRetryAssessmentOnly") ||
+		boolFromProviderInput(request.Input, "completionFollowUp") ||
 		boolFromProviderInput(request.Input, "assessmentOnlyContractCorrection")
 }
 

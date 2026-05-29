@@ -62,6 +62,8 @@ const (
 	stepInputKeyNoActionableFollowUp    = "noActionableContinuationFollowUp"
 	stepInputKeyAssessmentOnly          = "assessmentOnly"
 	stepInputKeyGraphLimitFollowUp      = "graphExpansionLimitFollowUp"
+	artifactAssembleStepKind            = "artifact/assemble"
+	artifactApplyStepKind               = "artifact/apply"
 	stepOutputKeyBlockDecisionReason    = "blockDecisionReason"
 	stepOutputKeyBlockDecisionTicketID  = "blockDecisionTicketId"
 	stepOutputKeyBlockDecisionKind      = "blockDecisionKind"
@@ -80,12 +82,34 @@ const (
 	soulStageValidation                 = "validation"
 	defaultMaxRuntimeRepairAttempts     = 10
 	maxProviderRetryAttempts            = 10
+	defaultMaxPatchContentBytes         = 12288
+	defaultMaxGraphBytes                = 32768
+	defaultMaxGraphFileWrites           = 3
+	defaultSchemaInvalidPreviewBytes    = 8192
+	defaultMaxArtifactChunkBytes        = 8192
+	defaultPreviousChunkTailBytes       = 300
+	defaultMaxChunkRetryAttempts        = 3
+	defaultMaxArtifactPlanAttempts      = 2
+	defaultMaxArtifactReplanAttempts    = 2
 	maxGraphFollowUpExpansionAttempts   = 2
 )
 
 type RuntimePolicy struct {
 	MaxRuntimeRepairAttempts int
 	MaxProviderRetryAttempts int
+	LLMOutput                LLMOutputRuntimePolicy
+}
+
+type LLMOutputRuntimePolicy struct {
+	MaxPatchContentBytes               int
+	MaxGraphBytes                      int
+	MaxGraphFileWrites                 int
+	SchemaInvalidLargePreviewThreshold int
+	MaxArtifactChunkBytes              int
+	PreviousChunkTailBytes             int
+	MaxChunkRetryAttempts              int
+	MaxArtifactPlanAttempts            int
+	MaxArtifactReplanAttempts          int
 }
 
 type RuntimeOrchestrator struct {
@@ -102,15 +126,16 @@ type RuntimeOrchestrator struct {
 }
 
 type RuntimeEvidenceRepositories struct {
-	Results              repository.ResultRepository
-	Artifacts            repository.ArtifactRepository
-	ToolCalls            repository.ToolCallRepository
-	Patches              repository.PatchRepository
-	ValidationResults    repository.ValidationResultRepository
-	RuntimeCheckpoints   repository.RuntimeCheckpointRepository
-	MemoryItems          repository.MemoryItemRepository
-	MemoryRecallTraces   repository.MemoryRecallTraceRepository
-	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
+	Results               repository.ResultRepository
+	Artifacts             repository.ArtifactRepository
+	ToolCalls             repository.ToolCallRepository
+	Patches               repository.PatchRepository
+	ValidationResults     repository.ValidationResultRepository
+	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	ArtifactContinuations repository.ArtifactContinuationRepository
+	MemoryItems           repository.MemoryItemRepository
+	MemoryRecallTraces    repository.MemoryRecallTraceRepository
+	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
 }
 
 type stepDispatchSpec struct {
@@ -194,7 +219,61 @@ func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 	if policy.MaxProviderRetryAttempts <= 0 {
 		policy.MaxProviderRetryAttempts = maxProviderRetryAttempts
 	}
+	policy.LLMOutput = NormalizeLLMOutputRuntimePolicy(policy.LLMOutput)
 	return policy
+}
+
+func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
+	if policy.MaxPatchContentBytes <= 0 {
+		policy.MaxPatchContentBytes = defaultMaxPatchContentBytes
+	}
+	if policy.MaxGraphBytes <= 0 {
+		policy.MaxGraphBytes = defaultMaxGraphBytes
+	}
+	if policy.MaxGraphFileWrites <= 0 {
+		policy.MaxGraphFileWrites = defaultMaxGraphFileWrites
+	}
+	if policy.SchemaInvalidLargePreviewThreshold <= 0 {
+		policy.SchemaInvalidLargePreviewThreshold = defaultSchemaInvalidPreviewBytes
+	}
+	if policy.MaxArtifactChunkBytes <= 0 {
+		policy.MaxArtifactChunkBytes = defaultMaxArtifactChunkBytes
+	}
+	if policy.PreviousChunkTailBytes <= 0 {
+		policy.PreviousChunkTailBytes = defaultPreviousChunkTailBytes
+	}
+	if policy.MaxChunkRetryAttempts <= 0 {
+		policy.MaxChunkRetryAttempts = defaultMaxChunkRetryAttempts
+	}
+	if policy.MaxArtifactPlanAttempts <= 0 {
+		policy.MaxArtifactPlanAttempts = defaultMaxArtifactPlanAttempts
+	}
+	if policy.MaxArtifactReplanAttempts <= 0 {
+		policy.MaxArtifactReplanAttempts = defaultMaxArtifactReplanAttempts
+	}
+	return policy
+}
+
+func (p LLMOutputRuntimePolicy) Values() map[string]any {
+	normalized := NormalizeLLMOutputRuntimePolicy(p)
+	return map[string]any{
+		"maxPatchContentBytes":               normalized.MaxPatchContentBytes,
+		"maxGraphBytes":                      normalized.MaxGraphBytes,
+		"maxGraphFileWrites":                 normalized.MaxGraphFileWrites,
+		"schemaInvalidLargePreviewThreshold": normalized.SchemaInvalidLargePreviewThreshold,
+		"maxArtifactChunkBytes":              normalized.MaxArtifactChunkBytes,
+		"previousChunkTailBytes":             normalized.PreviousChunkTailBytes,
+		"maxChunkRetryAttempts":              normalized.MaxChunkRetryAttempts,
+		"maxArtifactPlanAttempts":            normalized.MaxArtifactPlanAttempts,
+		"maxArtifactReplanAttempts":          normalized.MaxArtifactReplanAttempts,
+	}
+}
+
+func (o *RuntimeOrchestrator) llmOutputPolicyValues() map[string]any {
+	if o == nil {
+		return NormalizeLLMOutputRuntimePolicy(LLMOutputRuntimePolicy{}).Values()
+	}
+	return o.policy.LLMOutput.Values()
 }
 
 func (o *RuntimeOrchestrator) maxRuntimeRepairAttempts() int {
@@ -533,6 +612,9 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 func (o *RuntimeOrchestrator) runningFailedTerminalStepRecoverySpecs(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, error) {
 	if o == nil || run == nil || o.steps == nil {
 		return nil, common.ErrConflict
+	}
+	if specs, ok, err := o.artifactContinuationRecoverySpecs(ctx, run); ok || err != nil {
+		return specs, err
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
@@ -1395,6 +1477,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err != nil {
 		return err
 	}
+	if handled, err := o.dispatchInternalArtifactContinuationStep(ctx, run, step, toolCall, workspace); handled || err != nil {
+		return err
+	}
 
 	runtimeInput := cloneStepPayload(step.Input)
 	if err := validatePatchStepInputBeforeRuntime(step.Kind, runtimeInput); err != nil {
@@ -1474,6 +1559,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime execution contract failed", err)
+	}
+	if handled, err := o.handleArtifactOutputContinuation(ctx, run, step, output, workspace); handled || err != nil {
+		return err
 	}
 
 	nextStepID, nextKind := nextStepSpec(output)
@@ -1688,6 +1776,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	stage := runtimeStageFromStepInput(step.Input)
+	if err := validateIncrementalArtifactOutputContract(run, step, output); err != nil {
+		return err
+	}
 	if err := validateLLMExecutionGraphOutputContract(step, output); err != nil {
 		return err
 	}
@@ -1738,6 +1829,12 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			return nil
 		}
 		if hasStateChangingLLMExecutionOutput(output) {
+			return nil
+		}
+		if outputModeIsIncrementalArtifact(step.Input) &&
+			(artifactOutputFieldPresent(output, "artifactPlan") ||
+				artifactOutputFieldPresent(output, "artifactChunk") ||
+				artifactOutputFieldPresent(output, "artifactChunkRepair")) {
 			return nil
 		}
 		if assessment := doDAssessmentFromOutput(output); assessment != nil {
@@ -2042,6 +2139,7 @@ func capabilityUsagePoliciesForStep(run *runModel.Run, step *runModel.Step) []ma
 		return nil
 	}
 	var ret []map[string]any
+	seen := map[string]bool{}
 	for _, source := range []map[string]any{
 		mapFromValue(run.ExecutionContext["executionContract"]),
 		mapFromValue(stepInputValue(step, "executionContract")),
@@ -2049,12 +2147,36 @@ func capabilityUsagePoliciesForStep(run *runModel.Run, step *runModel.Step) []ma
 		mapFromValue(mapFromValue(stepInputValue(step, stepInputKeyExecutionContextPackage))["executionContract"]),
 	} {
 		for _, policy := range mapSliceFromValue(source["capabilityUsagePolicies"]) {
-			if len(policy) > 0 {
-				ret = append(ret, policy)
+			if len(policy) == 0 {
+				continue
 			}
+			key := capabilityUsagePolicyIdentityKey(policy)
+			if key != "" {
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+			}
+			ret = append(ret, policy)
 		}
 	}
 	return ret
+}
+
+func capabilityUsagePolicyIdentityKey(policy map[string]any) string {
+	if len(policy) == 0 {
+		return ""
+	}
+	if id := strings.TrimSpace(stringFromMap(policy, "id")); id != "" {
+		return "id:" + id
+	}
+	category := strings.TrimSpace(stringFromMap(policy, "appliesToCategory"))
+	requiredAfter := strings.Join(compactUniqueStrings(stringSliceFromValue(policy["requiredAfterKinds"])), ",")
+	preferredTools := strings.Join(compactUniqueStrings(stringSliceFromValue(policy["preferredTools"])), ",")
+	if category == "" && requiredAfter == "" && preferredTools == "" {
+		return ""
+	}
+	return "shape:" + category + "|" + requiredAfter + "|" + preferredTools
 }
 
 func stepInputValue(step *runModel.Step, key string) any {
@@ -3044,6 +3166,9 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 	if !boolValue(reassessment["required"]) {
 		return nil
 	}
+	if capabilityPolicyGraphRepairSatisfiedForStrategy(step, output, reassessment) {
+		return nil
+	}
 	candidates, hasPatch := strategyReassessmentDecisionCandidates(output)
 	if !hasPatch {
 		return nil
@@ -3096,6 +3221,93 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 		return nil
 	}
 	return fmt.Errorf("%w: strategyReassessment.required=true requires state-changing patch output to declare failedSurface/rootCauseTarget/repairTargetDecision/repairMode/forbiddenRepair/verificationPlan aligned with current failed surface", common.ErrInvalidArgument)
+}
+
+func capabilityPolicyGraphRepairSatisfiedForStrategy(step *runModel.Step, output map[string]any, reassessment map[string]any) bool {
+	if step == nil || step.Input == nil || len(output) == 0 || len(reassessment) == 0 {
+		return false
+	}
+	if !capabilityPolicyRepairInputActive(step.Input) {
+		return false
+	}
+	if !strategyReassessmentSurfaceIsCapabilityPolicyFailure(reassessment) {
+		return false
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) == 0 || !coverageGapRepairOutputHasPatch(output) {
+		return false
+	}
+	policies := capabilityPolicyRepairPoliciesFromInput(step.Input)
+	if len(policies) == 0 {
+		return false
+	}
+	repaired := false
+	for _, policy := range policies {
+		requiredAfter := stringSliceFromValue(policy["requiredAfterKinds"])
+		if len(requiredAfter) == 0 || !graphHasAnyNodeKind(graph, requiredAfter) {
+			continue
+		}
+		repaired = true
+		if graphHasCapabilityPolicyFollowUp(graph, policy) || outputDeclaresCapabilityPolicySkip(output, policy) {
+			continue
+		}
+		return false
+	}
+	return repaired
+}
+
+func capabilityPolicyRepairInputActive(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if boolValue(input["capabilityPolicyRepairRequired"]) {
+		return true
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	return boolValue(pkg["capabilityPolicyRepairRequired"])
+}
+
+func strategyReassessmentSurfaceIsCapabilityPolicyFailure(reassessment map[string]any) bool {
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(reassessment, "failedSurface"),
+		stringFromMap(reassessment, "reason"),
+		stringFromMap(reassessment, "failureClass"),
+	}, "\n"))
+	return strings.Contains(text, "capability usage policy") ||
+		strings.Contains(text, "capabilitypolicyskips") ||
+		strings.Contains(text, "capability policy")
+}
+
+func capabilityPolicyRepairPoliciesFromInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	var policies []map[string]any
+	for _, contract := range []map[string]any{
+		mapFromValue(input["capabilityPolicyRepairContract"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["capabilityPolicyRepairContract"]),
+	} {
+		policies = append(policies, mapSliceFromValue(contract["triggeredPolicies"])...)
+	}
+	if len(policies) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0, len(policies))
+	for _, policy := range policies {
+		if len(policy) == 0 {
+			continue
+		}
+		key := capabilityUsagePolicyIdentityKey(policy)
+		if key != "" {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		ret = append(ret, policy)
+	}
+	return ret
 }
 
 func strategyReassessmentExpectedSurfaces(step *runModel.Step, reassessment map[string]any) []string {
@@ -4601,7 +4813,7 @@ func stepKindCanProduceStateChangingEvidence(kind string) bool {
 	if kind == "" {
 		return false
 	}
-	if kind == "patch/apply" {
+	if kind == "patch/apply" || kind == artifactApplyStepKind {
 		return true
 	}
 	return strings.HasSuffix(kind, "/write")

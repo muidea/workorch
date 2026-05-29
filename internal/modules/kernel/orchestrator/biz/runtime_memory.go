@@ -26,6 +26,9 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 	output map[string]any,
 ) ([]string, error) {
 	explicitWrites := output != nil && output[stepOutputKeyMemoryWrites] != nil
+	if artifactChunkMemoryWriteSuppressed(step) {
+		return nil, nil
+	}
 	requests, err := runtimeMemoryWriteRequests(output)
 	if err != nil {
 		return nil, err
@@ -78,6 +81,14 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 		return nil, err
 	}
 	return refs, nil
+}
+
+func artifactChunkMemoryWriteSuppressed(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	return outputModeFromInput(step.Input) == outputModeIncrementalArtifact &&
+		artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseChunk
 }
 
 func runtimeMemoryWriteRequests(output map[string]any) ([]runtimeMemoryWriteRequest, error) {
