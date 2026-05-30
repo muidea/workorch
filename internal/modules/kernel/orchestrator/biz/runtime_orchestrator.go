@@ -979,6 +979,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["resolutionType"] = resolution.Type
 		replanContext["resolutionPayload"] = compactDecisionPayloadForRuntimeContext(resolution.Payload)
 	}
+	o.hydrateReplanContextWithInheritedPrimaryFailure(ctx, run, replanContext)
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
 	successor := &runModel.Run{
 		ID:               successorID,
@@ -1008,6 +1009,58 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		return err
 	}
 	return o.StartRun(ctx, successor.ID)
+}
+
+func (o *RuntimeOrchestrator) hydrateReplanContextWithInheritedPrimaryFailure(ctx context.Context, run *runModel.Run, replanContext map[string]any) {
+	if o == nil || run == nil || len(replanContext) == 0 {
+		return
+	}
+	if primary := primaryActionableFailureFromReplanContinuation(replanContext); len(primary) > 0 {
+		return
+	}
+	inherited := o.findInheritedActionableReplanContinuation(ctx, run, map[common.RunID]bool{})
+	if len(inherited) == 0 {
+		return
+	}
+	if timeline := mapSliceFromValue(inherited[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
+		replanContext[stepInputKeyProcessEvidenceTimeline] = timeline
+	}
+	if primary := primaryActionableFailureFromReplanContinuation(inherited); len(primary) > 0 {
+		if digest := currentProgressDigestFromPrimaryActionableFailure(primary); len(digest) > 0 {
+			replanContext[stepInputKeyCurrentProgressDigest] = digest
+		}
+	} else if digest := mapFromValue(inherited[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
+		replanContext[stepInputKeyCurrentProgressDigest] = digest
+	}
+	if pkg := mapFromValue(inherited["repairActionPackage"]); len(pkg) > 0 && len(mapFromValue(replanContext["repairActionPackage"])) == 0 {
+		replanContext["repairActionPackage"] = pkg
+	}
+}
+
+func (o *RuntimeOrchestrator) findInheritedActionableReplanContinuation(ctx context.Context, run *runModel.Run, visited map[common.RunID]bool) map[string]any {
+	if o == nil || run == nil || run.ID == "" {
+		return nil
+	}
+	if visited == nil {
+		visited = map[common.RunID]bool{}
+	}
+	if visited[run.ID] {
+		return nil
+	}
+	visited[run.ID] = true
+	replan := mapFromValue(run.ExecutionContext["replanContinuation"])
+	if primary := primaryActionableFailureFromReplanContinuation(replan); len(primary) > 0 {
+		return replan
+	}
+	predecessorID := common.RunID(strings.TrimSpace(stringFromMap(replan, "predecessorRunId")))
+	if predecessorID == "" || o.runs == nil || visited[predecessorID] {
+		return nil
+	}
+	predecessor, err := o.runs.Get(ctx, predecessorID)
+	if err != nil {
+		return nil
+	}
+	return o.findInheritedActionableReplanContinuation(ctx, predecessor, visited)
 }
 
 func compressedContextForCreatedRuntimeRun(run *runModel.Run) map[string]any {

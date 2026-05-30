@@ -175,6 +175,9 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(mapFromValue(failureContext["failedStepOutput"]))
 	}
 	targetInput := cloneStepPayload(failureContext)
+	if targetInput == nil {
+		targetInput = map[string]any{}
+	}
 	if len(primaryFailure) > 0 {
 		for _, key := range []string{
 			failureOutputKeyClass,
@@ -281,6 +284,45 @@ func primaryActionableFailureFromProgressDigest(digest map[string]any) map[strin
 		}
 	}
 	return compactLLMContextMap(ret, 1)
+}
+
+func currentProgressDigestFromPrimaryActionableFailure(failure map[string]any) map[string]any {
+	if len(failure) == 0 || runtimeRepairWrapperFailureOutput(failure) {
+		return nil
+	}
+	reason := firstNonEmptyString(
+		stringFromMap(failure, "reason"),
+		stringFromMap(failure, "failureReason"),
+		stringFromMap(failure, "concreteFailureDiagnostic"),
+	)
+	if strings.TrimSpace(reason) == "" {
+		return nil
+	}
+	lastFailure := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			lastFailure[key] = value
+		}
+	}
+	add("stepId", firstNonEmptyString(stringFromMap(failure, "stepId"), stringFromMap(failure, "failedStepId")))
+	add("kind", firstNonEmptyString(stringFromMap(failure, "kind"), stringFromMap(failure, "failedStepKind")))
+	add(failureOutputKeyClass, stringFromMap(failure, failureOutputKeyClass))
+	add(failureOutputKeySignature, stringFromMap(failure, failureOutputKeySignature))
+	add("failureReason", reason)
+	add("concreteFailureDiagnostic", reason)
+	add("evidenceValidity", firstNonEmptyString(stringFromMap(failure, "evidenceValidity"), "actionable_failure"))
+	add("targetRef", stringFromMap(failure, "targetRef"))
+	add("targetScope", firstNonEmptyString(stringFromMap(failure, "targetScope"), stringFromMap(failure, "failureTargetScope")))
+	add("source", firstNonEmptyString(stringFromMap(failure, "source"), "replanContinuation"))
+	if len(lastFailure) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"currentGap":          truncateLLMContextString(reason),
+		"lastObservedFailure": compactLLMContextMap(lastFailure, 1),
+		"nextRequiredAction":  "address_last_failure_under_current_stage_contract",
+		"source":              "replanContinuation",
+	}
 }
 
 func structuredFailureSignalsFromPrimaryActionableFailure(failure map[string]any) map[string]any {
@@ -639,7 +681,8 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 		ret["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
 	}
 	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
-		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 {
+		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 &&
+			!replanContinuationCarriesActionableFailure(executionContext) {
 			ret["replanContinuation"] = compactHistoricalReplanContinuationForRuntimeContext(value)
 		} else {
 			ret["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)

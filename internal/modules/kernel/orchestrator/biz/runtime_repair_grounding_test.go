@@ -136,6 +136,77 @@ func TestRepairActionPackageAnchorsPrimaryFailureAcrossWrapperFailure(t *testing
 	}
 }
 
+func TestRepairActionPackageAnchorsPrimaryFailureAcrossTargetAdmissionWrapperFailure(t *testing.T) {
+	targetAdmissionFailure := `invalid argument: runtime repair patch/apply target "pkg/lsp/instance.go" is not related to failure target scope [pkg/lsp/server.go main.go]; patch a current failure target or return a failed assessment/blocker`
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureClass":                failureClassRuntime,
+		"failureReason":               targetAdmissionFailure,
+		"failedStepOutput": map[string]any{
+			"stage":                   "llm_execution_graph_plan",
+			"error":                   targetAdmissionFailure,
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=" + targetAdmissionFailure,
+		},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failedStepId":     "run/graph-001/009-verify-build",
+				"failedStepKind":   shellcommon.StepKindCommand,
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+				"reason":           "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+				"targetRef":        "pkg/lsp/server.go,main.go",
+				"targetScope":      "failureTargets=pkg/lsp/server.go,main.go",
+			},
+			"structuredFailureSignals": map[string]any{
+				"targetRefs": []string{"pkg/lsp/server.go", "main.go"},
+				"lineRefs": []map[string]any{
+					{"targetRef": "pkg/lsp/server.go", "line": 10, "column": 24},
+					{"targetRef": "main.go", "line": 28, "column": 28},
+				},
+			},
+			"repairTargetSet": []string{"pkg/lsp/server.go", "main.go"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "pkg/lsp/server.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-server",
+				"content":          "package lsp\n",
+			}, {
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-main",
+				"content":          "package main\n",
+			}},
+		},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":                   "llm_execution_graph_plan",
+		"error":                   targetAdmissionFailure,
+		failureOutputKeyClass:     failureClassRuntime,
+		failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=" + targetAdmissionFailure,
+	})
+
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/009-verify-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want original shell/build failure anchored", currentFailure)
+	}
+	if refs := stringSliceFromValue(pkg["repairTargetSet"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("repairTargetSet = %+v, want original repair targets preserved", refs)
+	}
+	summary := mapFromValue(pkg["previousRejectedOutputSummary"])
+	if !strings.Contains(stringFromMap(summary, "error"), "not related to failure target scope") {
+		t.Fatalf("previousRejectedOutputSummary = %+v, want target admission wrapper retained as summary", summary)
+	}
+}
+
 func TestRepairActionPackageAnchorsPrimaryFailureFromReplanContinuation(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

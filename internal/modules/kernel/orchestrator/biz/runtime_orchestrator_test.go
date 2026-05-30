@@ -4095,6 +4095,73 @@ func TestRuntimeOrchestrator_InitialRejectedResultContinuationDoesNotSupersedeAc
 	}
 }
 
+func TestRuntimeOrchestrator_InitialRejectedResultContinuationDoesNotSupersedeReplanTimelineConcreteFailure(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-rejected-keeps-replan-timeline-failure",
+		WorkspaceID:     "ws-rejected-keeps-replan-timeline-failure",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"summary":          "deliverable evidence still missing",
+				"requiredEvidence": []string{"coverage_map", "version_control_snapshot"},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap": "invalid argument: state-changing llm repair step returned no state-changing output",
+					"lastObservedFailure": map[string]any{
+						"stepId":           "run-before-replan/repair-009",
+						"kind":             llmWorkspaceExecutionStepKind,
+						"failureClass":     failureClassRuntime,
+						"failureReason":    "invalid argument: state-changing llm repair step returned no state-changing output",
+						"evidenceValidity": "actionable_failure",
+					},
+				},
+				stepInputKeyProcessEvidenceTimeline: []map[string]any{
+					{
+						"stepId":                    "run-before-replan/graph-001/009-verify-build",
+						"kind":                      shellcommon.StepKindCommand,
+						"state":                     string(common.StepStateFailed),
+						"failureClass":              failureClassShellCommand,
+						"failureSignature":          "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+						"failureReason":             "# module\npkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"concreteFailureDiagnostic": "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"evidenceValidity":          "actionable_failure",
+					},
+					{
+						"stepId":           "run-before-replan/repair-009",
+						"kind":             llmWorkspaceExecutionStepKind,
+						"state":            string(common.StepStateFailed),
+						"failureClass":     failureClassRuntime,
+						"failureReason":    "invalid argument: state-changing llm repair step returned no state-changing output",
+						"failureSignature": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_plan|error=invalid argument: state-changing llm repair step returned no state-changing output",
+					},
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	currentFailure := mapFromValue(input["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run-before-replan/graph-001/009-verify-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want concrete predecessor build failure", currentFailure)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want concrete build target refs", signals)
+	}
+	if strings.Contains(stringFromMap(mapFromValue(pkg["currentFailure"]), "reason"), "state-changing llm repair step returned no state-changing output") {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want wrapper failure skipped", pkg["currentFailure"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairReturnsToRejectedContinuationAfterHistoricalReplanFailure(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-repair-rejected-supersedes-replan",
@@ -29187,6 +29254,129 @@ func TestRuntimeOrchestrator_ResumeRunReplanSupersedesRun(t *testing.T) {
 	}
 	if !publishedRunCreatedFor(hub.Published(), "run-decision-replan-replan-001") {
 		t.Fatalf("published events = %+v, want run-created event for successor", hub.Published())
+	}
+}
+
+func TestRuntimeOrchestrator_ReplanSuccessorRecoversConcreteFailureFromAncestorLineage(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &requestCapturingRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": true,
+			"summary":   "captured",
+			"items": []map[string]any{{
+				"item":         "captured",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-wrapper-replan-replan-001/step-1"},
+			}},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutions(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, resolutionRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-replan-ancestor-primary")
+	rootRunID := common.RunID("run-root-primary")
+	runID := common.RunID("run-wrapper-replan")
+	ticketID := common.TicketID("ticket-wrapper-replan")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          rootRunID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateSuperseded,
+		ExecutionContext: map[string]any{
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-root",
+				stepInputKeyProcessEvidenceTimeline: []map[string]any{{
+					"stepId":                    "run-before-root/graph-001/009-build",
+					"kind":                      shellcommon.StepKindCommand,
+					"state":                     string(common.StepStateFailed),
+					"failureClass":              failureClassShellCommand,
+					"failureSignature":          "class=shell_command_failed|kind=shell/command|failureTargets=pkg/service.go,cmd/main.go|exitCode=1",
+					"failureReason":             "pkg/service.go:10:2: undefined: Service\ncmd/main.go:12:8: undefined: NewServer",
+					"concreteFailureDiagnostic": "pkg/service.go:10:2: undefined: Service\ncmd/main.go:12:8: undefined: NewServer",
+					"evidenceValidity":          "actionable_failure",
+				}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed root run: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"summary":          "generic rejected result gap",
+				"requiredEvidence": []string{"produce accepted evidence"},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": string(rootRunID),
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap": "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+					"lastObservedFailure": map[string]any{
+						"stepId":           string(runID) + "/repair-003",
+						"kind":             llmcommon.StepKindWorkspaceExecution,
+						"failureClass":     failureClassRuntime,
+						"failureReason":    "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+						"evidenceValidity": "actionable_gap",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateResolved}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       common.ResolutionID("resolution-wrapper-replan"),
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeReplan,
+		Payload:  map[string]any{"operator": "tester", "recoveryAction": "replan"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume replan: %v", err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want one successor initial step", len(runtime.requests))
+	}
+	input := runtime.requests[0].Input
+	currentFailure := mapFromValue(input["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run-before-root/graph-001/009-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "Service") {
+		t.Fatalf("currentFailure = %+v, want ancestor concrete failure", currentFailure)
+	}
+	if strings.Contains(stringFromMap(currentFailure, "reason"), "without patch/apply") {
+		t.Fatalf("currentFailure = %+v, want wrapper failure suppressed", currentFailure)
+	}
+	signals := mapFromValue(mapFromValue(input["repairActionPackage"])["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/service.go") || !stringSliceContains(refs, "cmd/main.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want ancestor target refs", signals)
+	}
+	successor, err := runRepo.Get(ctx, "run-wrapper-replan-replan-001")
+	if err != nil {
+		t.Fatalf("get successor: %v", err)
+	}
+	replan := mapFromValue(successor.ExecutionContext["replanContinuation"])
+	digest := mapFromValue(replan[stepInputKeyCurrentProgressDigest])
+	if stringFromMap(mapFromValue(digest["lastObservedFailure"]), "failureClass") != failureClassShellCommand {
+		t.Fatalf("successor replan digest = %+v, want inherited concrete failure persisted", digest)
 	}
 }
 

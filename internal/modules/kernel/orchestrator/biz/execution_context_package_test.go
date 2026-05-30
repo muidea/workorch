@@ -640,6 +640,89 @@ func TestRunExecutionContextPackageRejectedResultContinuationSupersedesReplanPro
 	}
 }
 
+func TestRunExecutionContextPackageActionableReplanFailureSupersedesRejectedResultGap(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-process-context-actionable-replan",
+		WorkspaceID: "ws-process-context-actionable-replan",
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"resultId":         "run-latest/result/dod-assessment",
+				"summary":          "latest rejected result requires version control evidence",
+				"requiredEvidence": []string{"version_control_snapshot", "coverage_map"},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan",
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap": "invalid argument: state-changing llm repair step returned no state-changing output",
+					"lastObservedFailure": map[string]any{
+						"stepId":           "run-before-replan/repair-009",
+						"kind":             llmWorkspaceExecutionStepKind,
+						"failureClass":     failureClassRuntime,
+						"failureReason":    "invalid argument: state-changing llm repair step returned no state-changing output",
+						"evidenceValidity": "actionable_failure",
+					},
+				},
+				stepInputKeyProcessEvidenceTimeline: []map[string]any{
+					{
+						"stepId":                    "run-before-replan/graph-001/009-verify-build",
+						"kind":                      "shell/command",
+						"state":                     string(common.StepStateFailed),
+						"failureClass":              failureClassShellCommand,
+						"failureSignature":          "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+						"failureReason":             "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"concreteFailureDiagnostic": "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"evidenceValidity":          "actionable_failure",
+					},
+					{
+						"stepId":           "run-before-replan/repair-009",
+						"kind":             llmWorkspaceExecutionStepKind,
+						"state":            string(common.StepStateFailed),
+						"failureClass":     failureClassRuntime,
+						"failureReason":    "invalid argument: state-changing llm repair step returned no state-changing output",
+						"failureSignature": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_plan|error=invalid argument: state-changing llm repair step returned no state-changing output",
+					},
+				},
+			},
+		},
+	}
+	current := &runmodel.Step{
+		ID:    "run-process-context-actionable-replan/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: "repair",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustReturnValidJSON": true,
+				},
+			},
+		},
+	}
+
+	orch := &RuntimeOrchestrator{steps: memrepo.NewStepRepository()}
+	orch.enrichLLMStepInputContext(ctx, run, current, nil)
+
+	digest := mapFromValue(current.Input[stepInputKeyCurrentProgressDigest])
+	if stringFromMap(mapFromValue(digest["lastObservedFailure"]), "failureClass") != failureClassShellCommand ||
+		!strings.Contains(stringFromMap(digest, "currentGap"), "LSPInstance") {
+		t.Fatalf("currentProgressDigest = %+v, want actionable replan build failure", digest)
+	}
+	if strings.Contains(stringFromMap(digest, "currentGap"), "version_control_snapshot") {
+		t.Fatalf("currentProgressDigest = %+v, want rejected result gap suppressed while concrete failure is open", digest)
+	}
+	pkg := mapFromValue(current.Input[stepInputKeyExecutionContextPackage])
+	replan := mapFromValue(pkg["replanContinuation"])
+	if replan["historicalOnly"] == true || replan["useAsCurrentProgress"] == false {
+		t.Fatalf("replanContinuation = %+v, want active current-progress replan", replan)
+	}
+	timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline])
+	if len(timeline) == 0 || timeline[0]["kind"] != "shell/command" {
+		t.Fatalf("processEvidenceTimeline = %+v, want inherited concrete replan evidence", timeline)
+	}
+}
+
 func TestRejectedResultContinuationCurrentGapPrefersDiagnosticsOverRequiredEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{

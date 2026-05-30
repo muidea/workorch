@@ -687,7 +687,8 @@ func mergeExecutionDefinitionsIntoPackage(pkg map[string]any, executionContext m
 		pkg["rejectedResultContinuation"] = compactRejectedResultContinuationForRuntimeContext(value)
 	}
 	if value := mapFromValue(executionContext["replanContinuation"]); len(value) > 0 {
-		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 {
+		if len(mapFromValue(executionContext["rejectedResultContinuation"])) > 0 &&
+			!replanContinuationCarriesActionableFailure(executionContext) {
 			pkg["replanContinuation"] = compactHistoricalReplanContinuationForRuntimeContext(value)
 		} else {
 			pkg["replanContinuation"] = compactReplanContinuationForRuntimeContext(value)

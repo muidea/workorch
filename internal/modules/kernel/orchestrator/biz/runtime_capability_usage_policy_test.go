@@ -219,6 +219,135 @@ func TestRuntimeRepairCapabilityPolicyViolationRequiresCorrectedGraphOrSkip(t *t
 	}
 }
 
+func TestRuntimeRepairCapabilityPolicyFollowUpAnchorsPriorActionableFailure(t *testing.T) {
+	run := capabilityPolicyTestRun()
+	failed := capabilityPolicyTestStep()
+	failed.State = common.StepStateFailed
+	failed.Input["repairActionPackage"] = capabilityPolicyPriorActionableRepairPackage()
+	failed.Output = map[string]any{
+		"stage":               "llm_execution_graph_plan",
+		failureOutputKeyClass: failureClassRuntime,
+		"error":               capabilityPolicyViolationText(),
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				capabilityPolicyPatchNode(),
+				{
+					ID:        "verify",
+					Kind:      "shell/command",
+					DependsOn: []string{"patch"},
+					Input:     map[string]any{"command": "go", "args": []string{"test", "./..."}},
+				},
+			},
+		},
+	}
+
+	input := (&RuntimeOrchestrator{steps: memory.NewStepRepository()}).runtimeRepairFollowUpStepInput(context.Background(), run, failed, 2, common.ErrInvalidArgument)
+
+	if input["capabilityPolicyRepairRequired"] != true {
+		t.Fatalf("repair input = %#v, want capabilityPolicyRepairRequired", input)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/009-verify-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want prior actionable failure", currentFailure)
+	}
+	if refs := stringSliceFromValue(pkg["repairTargetSet"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("repairTargetSet = %+v, want prior repair target refs", refs)
+	}
+	summary := mapFromValue(pkg["previousRejectedOutputSummary"])
+	if !strings.Contains(stringFromMap(summary, "error"), "capability usage policy") {
+		t.Fatalf("previousRejectedOutputSummary = %+v, want wrapper preserved as rejection summary", summary)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustRepairCapabilityPolicyFollowUp"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") {
+		t.Fatalf("requiredOutput = %+v, want capability policy follow-up contract", required)
+	}
+}
+
+func TestRuntimeRepairCapabilityPolicyViolationPreservesPrimaryFailure(t *testing.T) {
+	policyFailure := capabilityPolicyViolationText()
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             "repair_capability_policy_follow_up",
+		"failureClass":                failureClassRuntime,
+		"failureReason":               policyFailure,
+		"failedStepOutput": map[string]any{
+			"stage":               "llm_execution_graph_plan",
+			"error":               policyFailure,
+			failureOutputKeyClass: failureClassRuntime,
+		},
+		"capabilityPolicyRepairContract": map[string]any{
+			"triggeredPolicies": []map[string]any{{
+				"id":                 "code-semantics-policy",
+				"appliesToCategory":  "code_semantics",
+				"preferredTools":     []string{"semantic.diagnostics"},
+				"requiredAfterKinds": []string{"patch/apply"},
+			}},
+		},
+		"repairActionPackage": capabilityPolicyPriorActionableRepairPackage(),
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_execution_graph_plan",
+		"error":               policyFailure,
+		failureOutputKeyClass: failureClassRuntime,
+	})
+
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/009-verify-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want original actionable shell failure preserved", currentFailure)
+	}
+	if refs := stringSliceFromValue(pkg["repairTargetSet"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("repairTargetSet = %+v, want original target refs preserved", refs)
+	}
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want original structured target refs preserved", signals)
+	}
+	summary := mapFromValue(pkg["previousRejectedOutputSummary"])
+	if !strings.Contains(stringFromMap(summary, "error"), "capability usage policy") {
+		t.Fatalf("previousRejectedOutputSummary = %+v, want capability policy wrapper retained as rejected summary", summary)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustRepairCapabilityPolicyFollowUp"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") {
+		t.Fatalf("requiredOutput = %+v, want capability policy graph repair contract", required)
+	}
+}
+
+func capabilityPolicyViolationText() string {
+	return `invalid argument: executionGraph triggered capability usage policy "code-semantics-policy" after "patch/apply" but returned no dependent matching mcp/tool_call or structured capabilityPolicySkips reason`
+}
+
+func capabilityPolicyPriorActionableRepairPackage() map[string]any {
+	return map[string]any{
+		"currentFailure": map[string]any{
+			"failedStepId":     "run/graph-001/009-verify-build",
+			"failedStepKind":   "shell/command",
+			"failureClass":     failureClassShellCommand,
+			"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+			"reason":           "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+			"targetRef":        "pkg/lsp/server.go,main.go",
+			"targetScope":      "failureTargets=pkg/lsp/server.go,main.go",
+		},
+		"repairTargetSet": []string{"pkg/lsp/server.go", "main.go"},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"pkg/lsp/server.go", "main.go"},
+			"lineRefs": []map[string]any{{
+				"targetRef": "pkg/lsp/server.go",
+				"line":      10,
+				"column":    24,
+			}},
+		},
+		"requiredOutput": stateChangingRepairRequiredOutput(),
+	}
+}
+
 func capabilityPolicyTestRun() *runmodel.Run {
 	return &runmodel.Run{
 		ID:              common.RunID("run-capability-policy"),

@@ -3958,8 +3958,15 @@ func runtimeRepairWrapperFailureOutput(output map[string]any) bool {
 		stage == "llm_schema_invalid" ||
 		strings.Contains(text, "invalid llm decision json") ||
 		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
+		strings.Contains(text, "state-changing llm repair step returned no state-changing output") ||
 		strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply") ||
-		strings.Contains(text, "executiongraph patch/apply input invalid")
+		strings.Contains(text, "executiongraph patch/apply input invalid") ||
+		strings.Contains(text, "runtime repair patch/apply target") ||
+		strings.Contains(text, "not related to failure target scope") ||
+		strings.Contains(text, "patch a current failure target") ||
+		strings.Contains(text, "capability usage policy") ||
+		strings.Contains(text, "dependent matching mcp/tool_call") ||
+		strings.Contains(text, "capabilitypolicyskips")
 }
 
 func primaryActionableFailureFromRepairPackage(pkg map[string]any) map[string]any {

@@ -146,10 +146,20 @@ func compactHistoricalReplanContinuationForRuntimeContext(input map[string]any) 
 }
 
 func inheritedContinuationProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
+	if replanContinuationCarriesActionableFailure(executionContext) {
+		return inheritedReplanProcessEvidence(executionContext)
+	}
 	if timeline, digest := inheritedRejectedResultProcessEvidence(executionContext); len(timeline) > 0 {
 		return timeline, digest
 	}
 	return inheritedReplanProcessEvidence(executionContext)
+}
+
+func replanContinuationCarriesActionableFailure(executionContext map[string]any) bool {
+	if len(executionContext) == 0 {
+		return false
+	}
+	return len(primaryActionableFailureFromReplanContinuation(mapFromValue(executionContext["replanContinuation"]))) > 0
 }
 
 func inheritedRejectedResultProcessEvidence(executionContext map[string]any) ([]map[string]any, map[string]any) {
@@ -180,6 +190,11 @@ func inheritedReplanProcessEvidence(executionContext map[string]any) ([]map[stri
 	digest := mapFromValue(replan[stepInputKeyCurrentProgressDigest])
 	if len(digest) == 0 {
 		digest = currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	}
+	if primary := primaryActionableFailureFromReplanContinuation(replan); len(primary) > 0 {
+		if primaryDigest := currentProgressDigestFromPrimaryActionableFailure(primary); len(primaryDigest) > 0 {
+			digest = primaryDigest
+		}
 	}
 	return compactProcessEvidenceTimelineForRuntimeContext(timeline), digest
 }
