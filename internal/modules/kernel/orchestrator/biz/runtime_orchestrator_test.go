@@ -4583,6 +4583,85 @@ func TestRuntimeOrchestrator_RuntimeRepairInputHydratesRootCauseCandidatesFromIn
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandidate(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	files := map[string][]byte{
+		"go.mod":         []byte("module example.test/app\n\ngo 1.21\n"),
+		"server/main.go": []byte("package main\n"),
+	}
+	for name, content := range files {
+		path := filepath.Join(deliverableDirectory, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	workspaceID := common.WorkspaceID("ws-prereq-manifest-candidate")
+	runID := common.RunID("run-prereq-manifest-candidate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+		ContextHints: map[string]any{
+			"runtimeRepair": map[string]any{
+				"prerequisiteManifestTargetPatterns": []any{"go.mod"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/004-dependency-resolution"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			"stderr": strings.Join([]string{
+				"go: finding module for package example.test/dependency",
+				"go: toolchain upgrade needed to resolve example.test/dependency",
+				`Get "https://external.example/toolchain?go-get=1": dial tcp 142.251.45.145:443: i/o timeout`,
+			}, "\n"),
+			"exitCode":                1,
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=142.251.45.145|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	if targets := mapSliceFromValue(input["failureTargetRepairContext"]); len(targets) != 0 {
+		t.Fatalf("failureTargetRepairContext = %#v, want external endpoint excluded from repair targets", targets)
+	}
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) == 0 || stringFromMap(candidates[0], "targetRef") != "go.mod" {
+		t.Fatalf("rootCauseCandidateContext = %#v, want go.mod prerequisite manifest candidate", candidates)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(actionPackage["targetSnapshots"])
+	if len(targets) == 0 || stringFromMap(targets[0], "targetRef") != "go.mod" || !strings.Contains(stringFromMap(targets[0], "content"), "module example.test/app") {
+		t.Fatalf("repairActionPackage = %#v, rootCauseCandidateContext = %#v, want promoted go.mod current snapshot", actionPackage, input["rootCauseCandidateContext"])
+	}
+	targetSet := stringSliceFromValue(actionPackage["repairTargetSet"])
+	if !stringSliceContains(targetSet, "go.mod") || stringSliceContains(targetSet, "142.251.45.145") {
+		t.Fatalf("repairTargetSet = %#v, want go.mod and no external endpoint", targetSet)
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %#v, want current snapshot patch contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForCoverageValidationEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

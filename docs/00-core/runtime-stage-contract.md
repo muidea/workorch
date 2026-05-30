@@ -1488,6 +1488,8 @@ Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的�
 
 结构化 failure target 抽取必须过滤明显不是 workspace 资源的中立噪声，例如单独的运行产物标签、duration / numeric measurement、runtime contract 字段名、URL、空路径和无法通过 manifest 唯一解析的裸 token。过滤规则只能基于通用路径形态、扩展名形态、数值形态和 workspace manifest，不得基于具体命令、语言或测试框架。过滤后的 token 仍可作为 diagnostic message / identifier 保留，但不得进入 `targetRefs`、`failureTargetRepairContext` 或 `repairTargetSet`。
 
+当非 LLM 执行失败只暴露外部端点、IP、URL、registry、toolchain endpoint、网络超时或等价 prerequisite 失败，而没有可唯一解析的 workspace target 时，这些外部引用只能作为诊断保留，不得升级为 `failureTargetRepairContext` 或 `repairTargetSet`。如果当前 workspace/template/profile 通过 `contextHints` 声明了中立 `prerequisiteManifestTargetPatterns`，或当前 manifest 中存在通用 manifest / metadata / lock / checksum / requirements / config 形态的资源，runtime 可以把这些当前资源作为 `rootCauseCandidateContext`，并在快照完整、安全、带 `contentHash` 时提升到 `repairActionPackage.targetSnapshots`。Core 只消费抽象 pattern 和 manifest 事实；具体生态文件名、包管理器和语言栈必须由 workspaceTemplate/profile 声明，不得硬编码进 core runtime。
+
 Repair exhausted 后必须二选一：
 
 - 写 rejected result 并进入 failed / blocked_on_decision。

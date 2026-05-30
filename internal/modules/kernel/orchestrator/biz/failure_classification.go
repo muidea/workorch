@@ -364,7 +364,7 @@ func failureTargetsForSignature(output map[string]any) []string {
 			continue
 		}
 		target := normalizedFailureTarget(match[1])
-		if target == "" || seen[target] {
+		if target == "" || !runtimeRepairTargetRefAdmissible(target) || seen[target] {
 			continue
 		}
 		seen[target] = true

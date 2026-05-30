@@ -70,6 +70,22 @@
     },
     "contextHints": {
       "stateChangePolicy": "must_produce_state_change",
+      "runtimeRepair": {
+        "prerequisiteManifestTargetPatterns": [
+          "go.mod",
+          "go.sum",
+          "package.json",
+          "package-lock.json",
+          "pnpm-lock.yaml",
+          "yarn.lock",
+          "pyproject.toml",
+          "requirements*.txt",
+          "poetry.lock",
+          "Cargo.toml",
+          "Cargo.lock",
+          "Makefile"
+        ]
+      },
       "versionControl": {
         "git": {
           "initializeOnCreate": true,

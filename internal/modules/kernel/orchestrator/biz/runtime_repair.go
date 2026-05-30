@@ -2952,7 +2952,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
 		)
 	}
-	if rootCauseCandidates := o.runtimeRepairRootCauseCandidateContext(ctx, run, failedStep); len(rootCauseCandidates) > 0 {
+	rootCauseCandidates := o.runtimeRepairRootCauseCandidateContext(ctx, run, failedStep)
+	if len(rootCauseCandidates) > 0 {
 		input["rootCauseCandidateContext"] = rootCauseCandidates
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Use rootCauseCandidateContext to evaluate grounded adjacent or referenced resources when the failed surface may be unblocked by changing a related current workspace resource.",
@@ -2967,7 +2968,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
 		)
 	}
-	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 {
+	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 || len(rootCauseCandidates) > 0 {
 		manifest := o.workspaceFileManifest(ctx, run)
 		if len(manifest) > 0 {
 			input[stepInputKeyWorkspaceFileManifest] = manifest
@@ -3773,6 +3774,17 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
 		pkg["rootCauseCandidateContext"] = compactLLMContextValue(candidates, 1)
 		requiredOutput["rootCauseCandidateRule"] = "a grounded rootCauseCandidateContext target may be patched when the patch declares relatedFailureTargets for the failed surface or the candidate is included in repairTargetSet"
+		if len(mapSliceFromValue(pkg["targetSnapshots"])) == 0 {
+			if promoted := repairActionPromotableRootCauseCandidateTargetSnapshots(candidates); len(promoted) > 0 {
+				pkg["targetSnapshots"] = promoted
+				pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(promoted)
+				pkg["rootCauseCandidateTargetsPromoted"] = true
+				requiredOutput["mustTargetFailureScope"] = true
+				requiredOutput["targetRelation"] = "grounded_root_cause_candidate_or_declared_related_failure_target"
+				applyCurrentSnapshotDirectPatchContract(requiredOutput)
+				requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
+			}
+		}
 	}
 	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
@@ -5338,6 +5350,13 @@ func runtimeRepairTargetRefAdmissible(value string) bool {
 	if runtimeRepairTargetLooksLikeLocalAbsolutePath(lower) {
 		return false
 	}
+	if !strings.Contains(clean, "/") {
+		ext := strings.ToLower(filepath.Ext(clean))
+		base := strings.TrimSuffix(clean, ext)
+		if structuredFailureBareTargetLooksLikeNumericMeasurement(base, ext) {
+			return false
+		}
+	}
 	if isRuntimeContractFieldTargetRef(lower) {
 		return false
 	}
@@ -5719,6 +5738,40 @@ func repairActionTargetSnapshot(item map[string]any) map[string]any {
 		} else {
 			ret["contentPreview"] = truncateLLMContextString(content)
 		}
+	}
+	return ret
+}
+
+func repairActionPromotableRootCauseCandidateTargetSnapshots(candidates []map[string]any) []map[string]any {
+	if len(candidates) == 0 {
+		return nil
+	}
+	var ret []map[string]any
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		targetRef := normalizeRepairPatchTargetRef(stringFromMap(candidate, "targetRef"))
+		if targetRef == "" || seen[targetRef] || !runtimeRepairTargetRefAdmissible(targetRef) || boolValue(candidate["isBinary"]) {
+			continue
+		}
+		if !boolValue(candidate["exists"]) || !boolValue(candidate["contentComplete"]) || !boolValue(candidate["safeForFileWrite"]) ||
+			strings.TrimSpace(stringFromMap(candidate, "contentHash")) == "" ||
+			strings.TrimSpace(stringFromMap(candidate, "content")) == "" {
+			continue
+		}
+		snapshot := repairActionTargetSnapshot(candidate)
+		if len(snapshot) == 0 || boolValue(snapshot["isBinary"]) {
+			continue
+		}
+		snapshot["targetRef"] = targetRef
+		snapshot["contextSource"] = firstNonEmptyString(stringFromMap(candidate, "source"), "root_cause_candidate")
+		seen[targetRef] = true
+		ret = append(ret, snapshot)
+		if len(ret) >= maxLLMContextSliceItems {
+			break
+		}
+	}
+	if len(ret) == 0 {
+		return nil
 	}
 	return ret
 }
@@ -6514,7 +6567,8 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 		}
 	}
 	includeSurfaceCandidates := runtimeRepairShouldIncludeRootCauseCandidates(failedStep)
-	if (len(reassessment) == 0 || !strategyReassessmentRequiresRootCauseTargetShift(reassessment)) && !includeSurfaceCandidates {
+	includePrerequisiteCandidates := runtimeRepairShouldIncludePrerequisiteManifestCandidates(failedStep)
+	if (len(reassessment) == 0 || !strategyReassessmentRequiresRootCauseTargetShift(reassessment)) && !includeSurfaceCandidates && !includePrerequisiteCandidates {
 		return nil
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
@@ -6530,6 +6584,9 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 		failedTargets = resolveWorkspaceTargetRefs(workspace.DeliverableDirectory, failureTargetRepairRefsFromStrategyReassessment(reassessment))
 	}
 	if len(failedTargets) == 0 {
+		if includePrerequisiteCandidates {
+			return runtimeRepairPrerequisiteManifestCandidateContext(workspace.DeliverableDirectory, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep))
+		}
 		return nil
 	}
 	failedSet := map[string]bool{}
@@ -6620,6 +6677,187 @@ func runtimeRepairShouldIncludeRootCauseCandidates(failedStep *runModel.Step) bo
 		return false
 	}
 	return len(failureTargetRepairRefs(failedStep)) > 0
+}
+
+func runtimeRepairShouldIncludePrerequisiteManifestCandidates(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	if strings.TrimSpace(string(failedStep.Kind)) != "shell/command" {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
+	if class != "" && class != failureClassShellCommand {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(failedStep.Output, "stderr"),
+		stringFromMap(failedStep.Output, "stdout"),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	prerequisiteSignals := []string{
+		"prerequisite", "dependency", "dependencies",
+		"manifest", "metadata", "checksum", "lock", "requirements", "resolve",
+		"download", "version", "registry", "repository", "network", "timeout",
+		"unavailable",
+	}
+	for _, signal := range prerequisiteSignals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeRepairPrerequisiteManifestCandidateContext(deliverableDirectory string, files []workspaceDeliverableFile, targetPatterns []string) []map[string]any {
+	if strings.TrimSpace(deliverableDirectory) == "" || len(files) == 0 {
+		return nil
+	}
+	candidates := make([]workspaceDeliverableFile, 0)
+	for _, file := range files {
+		path := normalizeRepairPatchTargetRef(file.Path)
+		if path == "" || !runtimeRepairTargetRefAdmissible(path) || runtimeRepairPrerequisiteManifestCandidateScore(path, targetPatterns) <= 0 {
+			continue
+		}
+		candidates = append(candidates, file)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		leftScore := runtimeRepairPrerequisiteManifestCandidateScore(candidates[i].Path, targetPatterns)
+		rightScore := runtimeRepairPrerequisiteManifestCandidateScore(candidates[j].Path, targetPatterns)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		leftDepth := strings.Count(normalizeRepairPatchTargetRef(candidates[i].Path), "/")
+		rightDepth := strings.Count(normalizeRepairPatchTargetRef(candidates[j].Path), "/")
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		if candidates[i].Size != candidates[j].Size {
+			return candidates[i].Size < candidates[j].Size
+		}
+		return candidates[i].Path < candidates[j].Path
+	})
+	ret := make([]map[string]any, 0, min(len(candidates), 4))
+	for _, candidate := range candidates {
+		if len(ret) >= 4 {
+			break
+		}
+		item := patchRepairTargetSnapshot(deliverableDirectory, candidate.Path)
+		if len(item) == 0 || !boolValue(item["exists"]) || boolValue(item["isBinary"]) {
+			continue
+		}
+		item["source"] = "prerequisite_manifest_candidate"
+		item["guidance"] = "Use this current dependency/configuration manifest candidate only when the failed prerequisite can be repaired by a minimal workspace metadata change; external endpoints remain diagnostics, not repair targets."
+		ret = append(ret, item)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func runtimeRepairPrerequisiteManifestCandidateScore(path string, targetPatterns []string) int {
+	path = strings.ToLower(normalizeRepairPatchTargetRef(path))
+	if path == "" {
+		return 0
+	}
+	base := filepath.Base(path)
+	ext := strings.TrimPrefix(filepath.Ext(base), ".")
+	stem := strings.TrimSuffix(base, "."+ext)
+	score := 0
+	if runtimeRepairPathMatchesAnyPattern(path, targetPatterns) {
+		score += 200
+	}
+	for _, token := range []string{"manifest", "metadata", "dependency", "dependencies", "requirements", "checksum", "lock", "sum"} {
+		if stem == token || strings.Contains(stem, token) || ext == token {
+			score += 80
+		}
+	}
+	for _, token := range []string{"project", "workspace", "config", "settings"} {
+		if stem == token || strings.Contains(stem, token) || ext == token {
+			score += 45
+		}
+	}
+	if strings.Count(path, "/") == 0 {
+		score += 10
+	}
+	return score
+}
+
+func runtimeRepairPrerequisiteManifestTargetPatterns(run *runModel.Run, workspace *workspaceModel.Workspace, failedStep *runModel.Step) []string {
+	var ret []string
+	addFrom := func(value any) {
+		ret = append(ret, runtimeRepairPrerequisiteManifestTargetPatternsFromValue(value)...)
+	}
+	if workspace != nil {
+		addFrom(workspace.ContextHints)
+	}
+	if run != nil {
+		addFrom(run.ExecutionContext)
+		addFrom(mapFromValue(run.ExecutionContext["executionContract"]))
+	}
+	if failedStep != nil {
+		addFrom(failedStep.Input)
+		addFrom(mapFromValue(failedStep.Input["executionContract"]))
+		pkg := mapFromValue(failedStep.Input[stepInputKeyExecutionContextPackage])
+		addFrom(pkg)
+		addFrom(mapFromValue(pkg["executionContract"]))
+	}
+	return compactUniqueStrings(ret)
+}
+
+func runtimeRepairPrerequisiteManifestTargetPatternsFromValue(value any) []string {
+	return runtimeRepairPrerequisiteManifestTargetPatternsFromMap(mapFromValue(value), 0)
+}
+
+func runtimeRepairPrerequisiteManifestTargetPatternsFromMap(value map[string]any, depth int) []string {
+	if len(value) == 0 || depth > 5 {
+		return nil
+	}
+	var ret []string
+	for _, key := range []string{"prerequisiteManifestTargetPatterns", "prerequisiteManifestPatterns"} {
+		for _, pattern := range stringSliceFromValue(value[key]) {
+			if normalized := normalizeRepairPatchTargetRef(pattern); normalized != "" && runtimeRepairTargetRefAdmissible(normalized) {
+				ret = append(ret, normalized)
+			}
+		}
+	}
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		ret = append(ret, runtimeRepairPrerequisiteManifestTargetPatternsFromMap(mapFromValue(value[key]), depth+1)...)
+	}
+	return compactUniqueStrings(ret)
+}
+
+func runtimeRepairPathMatchesAnyPattern(path string, patterns []string) bool {
+	path = strings.ToLower(normalizeRepairPatchTargetRef(path))
+	if path == "" || len(patterns) == 0 {
+		return false
+	}
+	for _, pattern := range patterns {
+		pattern = strings.ToLower(normalizeRepairPatchTargetRef(pattern))
+		if pattern == "" {
+			continue
+		}
+		if matched, _ := filepath.Match(pattern, path); matched {
+			return true
+		}
+		if !strings.Contains(pattern, "/") {
+			if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func failureTargetRepairRefsFromStrategyReassessment(reassessment map[string]any) []string {

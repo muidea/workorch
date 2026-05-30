@@ -166,7 +166,7 @@ Last Updated: 2026-05-30
   - `soulBindings`
     - 应覆盖六阶段 software-dev Souls
   - `contextHints`
-    - 应至少包含 `stateChangePolicy`、`versionControl`、`semanticCodeNavigation`、`profileContracts`、`capabilityUsagePolicies`
+    - 应至少包含 `stateChangePolicy`、`runtimeRepair.prerequisiteManifestTargetPatterns`、`versionControl`、`semanticCodeNavigation`、`profileContracts`、`capabilityUsagePolicies`
   - `evidencePolicies`
     - 应包含 `workEvidenceMarkers`
 - 主要验证入口

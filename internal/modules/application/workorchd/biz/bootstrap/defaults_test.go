@@ -42,6 +42,12 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if item.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", item.ContextHints)
 	}
+	runtimeRepair, ok := item.ContextHints["runtimeRepair"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev runtimeRepair context hint = %+v, want map", item.ContextHints["runtimeRepair"])
+	}
+	assertStringListContains(t, runtimeRepair["prerequisiteManifestTargetPatterns"].([]any), "go.mod")
+	assertStringListContains(t, runtimeRepair["prerequisiteManifestTargetPatterns"].([]any), "package.json")
 	versionControl, ok := item.ContextHints["versionControl"].(map[string]any)
 	if !ok {
 		t.Fatalf("software-dev versionControl context hint = %+v, want map", item.ContextHints["versionControl"])
