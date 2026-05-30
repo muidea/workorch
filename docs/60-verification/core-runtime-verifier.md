@@ -19,6 +19,7 @@ core verifier 应只验证：
 - evidence/result boundary
 - repair/replan/governance neutrality
 - request audit / protected fields / source refs
+- incremental artifact mode 的中立 contract
 
 ## Verification Entry
 
@@ -44,6 +45,7 @@ core verifier 需要覆盖：
 - Goal / DoD / coverage / evidenceRefs / accepted vs rejected result 的核心闭环
 - request audit、protected fields、redaction summary、source refs、cache-aware 关键字段
 - repair / provider retry / duplicate failure / runtime context recovery 等恢复链的中立行为
+- `incrementalArtifact` 的 selector / continuation / apply / validation / projection 边界
 - 领域中立守卫：core 不解析业务词、语言词、测试框架词来决定治理动作
 - canonical failure hydration、coverage target auto-rebuild、context-gate recovery routing
 
@@ -82,6 +84,7 @@ core verifier 需要覆盖：
 | 入口 | 主要输入/fixture | 主要断言 |
 | --- | --- | --- |
 | `verify-workorch-runtime-core-flow.sh` | file backend workspace/run/step/result/ticket records | stage contract、recovery lineage、state-changing gate、accepted/rejected result 闭环、workspace activeRun consistency |
+| `verify-incremental-artifact-e2e.sh` | deployed incremental-artifact fixture / snapshot / observability / raw content open | selector、continuation lifecycle、apply/validation routing、metadata-only projection、raw content leakage guard |
 | `verify-boundary-contract.sh` | runtime/core/prompt/Web code tree | reusable runtime 不得包含 software-dev / LSP / deliverable / test-command 偏置 |
 
 ### Unit / Go Test Layer
@@ -120,6 +123,8 @@ core verifier 需要覆盖：
 | assessment-only / follow-up / repair / replan continuation 边界 | core flow script + full-chain assessment audit |
 | accepted vs rejected result 闭环 | core flow script |
 | provider retry / runtime repair / duplicate failure lineage | core flow script + orchestrator tests |
+| incremental artifact mode 只承载 `need_state_change`，不得绕过 apply/validation | orchestrator tests + incremental artifact e2e |
+| continuation metadata 可投影但正文不泄漏到默认 snapshot/observability | incremental artifact e2e + appservice/read-model tests |
 | reusable runtime 不得含 software-dev / LSP 偏置 | `verify-boundary-contract.sh` |
 
 ### Script-To-Rule Coverage
@@ -135,6 +140,9 @@ core verifier 需要覆盖：
 | `verify-workorch-runtime-core-flow.sh` | accepted / rejected result 与 `resultPolicy` 闭环 |
 | `verify-workorch-runtime-core-flow.sh` | blocked / superseded / failed run 的 rejected-result 收口 |
 | `verify-workorch-runtime-core-flow.sh` | workspace `activeRunId` 不得指向 terminal run |
+| `verify-workorch-runtime-core-flow.sh` | incremental artifact continuation 恢复后不得跳过 apply/validation |
+| `verify-incremental-artifact-e2e.sh` | active continuation 默认只暴露 metadata，不暴露正文 |
+| `verify-incremental-artifact-e2e.sh` | continuation 完成后必须收口到 apply/validation evidence 与 accepted/rejected result |
 | `verify-boundary-contract.sh` | reusable runtime / prompt / Web 不得含 software-dev 语义 |
 | `verify-boundary-contract.sh` | LSP / test command / deliverable id 不得下沉到 core |
 
@@ -164,6 +172,7 @@ core verifier 需要覆盖：
 | 测试或测试组 | 主要覆盖规则 |
 | --- | --- |
 | `runtime_verify_script_test.go` | core/profile verify scripts 在代表性 fixture 上的通过/失败条件 |
+| incremental artifact orchestrator / repository / appservice tests | output mode selector、continuation lifecycle、restart recovery、projection redaction |
 | `TestRuntimeOrchestrator_DoesNotRepairLLMProviderError` / retry timeout tests | provider retry 与 config block 边界 |
 | `TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature` | runtime repair scope / failure signature 预算隔离 |
 | `TestRuntimeOrchestrator_DispatchesValidationFollowUpForContinueWithoutActionableContinuation` | no-actionable continuation -> validation follow-up |
@@ -193,6 +202,8 @@ core verifier 需要覆盖：
 | repair exhaustion + rejected policy 无 result 失败 | `runtime_verify_script_test.go` 中 `superseded repair exhausted rejected policy without result fails` |
 | assessment-only 存在正式 assessment 时应忽略 graph | `TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent` |
 | execution graph 完成后必须进入 follow-up | `TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterExecutionGraphCompletes` / `TestRuntimeOrchestrator_DispatchesLLMFollowUpAfterLLMPatchSideEffect` |
+| incremental artifact chunk/apply 后必须进入 validation / acceptance | incremental artifact orchestrator tests + `verify-incremental-artifact-e2e.sh` |
+| active continuation 默认只暴露 metadata，不暴露正文 | appservice/read-model tests + `verify-incremental-artifact-e2e.sh` |
 | graph follow-up 在获得具体证据后恢复 repair contract | `TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvidenceAcquisition` |
 | provider timeout 触发后可升级为决策阻塞 | `TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhausted` |
 | follow-up evidence 必须复用已完成并行证据 | `TestRuntimeOrchestrator_GraphFollowUpIncludesAllCompletedParallelEvidence` |
@@ -210,6 +221,7 @@ core verifier 需要覆盖：
   - canonical failure hydration / protected field preservation / semantic admission
 - state change gate
   - `stateChangingOutputRequired` / patch/apply / planning restrictions
+  - incremental artifact selector / continuation / metadata-only projection
 - closure gate
   - accepted vs rejected result / `resultPolicy` / DoD evidence
 - recovery lineage
