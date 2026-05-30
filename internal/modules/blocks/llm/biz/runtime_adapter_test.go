@@ -992,6 +992,108 @@ func TestRuntimeAdapterClassifiesProviderStreamIncomplete(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterClassifiesProviderProtocolInvalid(t *testing.T) {
+	provider := &staticProvider{
+		err: fmt.Errorf("%w: llm provider protocol invalid: provider returned error object", common.ErrInvalidArgument),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected provider protocol error")
+	}
+	if result.Output["stage"] != "llm_provider_protocol_invalid" {
+		t.Fatalf("stage = %v, want llm_provider_protocol_invalid", result.Output["stage"])
+	}
+	if result.Output["failureCategory"] != "llm_provider" {
+		t.Fatalf("failureCategory = %v, want llm_provider", result.Output["failureCategory"])
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok || usage["failureClass"] != providerFailureClassProtocolInvalid {
+		t.Fatalf("llmUsage = %+v, want protocol invalid failure class", result.Output["llmUsage"])
+	}
+	if result.Output["llmDecision"] != nil || result.Output["executionGraph"] != nil {
+		t.Fatalf("output = %+v, provider protocol errors must not be treated as llm decisions", result.Output)
+	}
+}
+
+func TestRuntimeAdapterClassifiesProviderResponseSchemaInvalid(t *testing.T) {
+	provider := &staticProvider{
+		err: fmt.Errorf("%w: llm provider response schema invalid: choices are required", common.ErrInvalidArgument),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected provider response schema error")
+	}
+	if result.Output["stage"] != "llm_provider_response_schema_invalid" {
+		t.Fatalf("stage = %v, want llm_provider_response_schema_invalid", result.Output["stage"])
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok || usage["failureClass"] != providerFailureClassResponseSchema {
+		t.Fatalf("llmUsage = %+v, want response schema failure class", result.Output["llmUsage"])
+	}
+	if result.Output["llmDecision"] != nil || result.Output["executionGraph"] != nil {
+		t.Fatalf("output = %+v, provider response schema errors must not be treated as llm decisions", result.Output)
+	}
+}
+
+func TestRuntimeAdapterClassifiesHTTPStatusAsRetryableProviderFailure(t *testing.T) {
+	for _, tc := range []struct {
+		statusCode int
+		wantClass  string
+		wantStage  string
+	}{
+		{statusCode: 400, wantClass: providerFailureClassUnavailable, wantStage: "llm_provider_unavailable"},
+		{statusCode: 401, wantClass: providerFailureClassUnavailable, wantStage: "llm_provider_unavailable"},
+		{statusCode: 403, wantClass: providerFailureClassUnavailable, wantStage: "llm_provider_unavailable"},
+		{statusCode: 404, wantClass: providerFailureClassUnavailable, wantStage: "llm_provider_unavailable"},
+		{statusCode: 429, wantClass: providerFailureClassRateLimited, wantStage: "llm_provider_rate_limited"},
+		{statusCode: 503, wantClass: providerFailureClassUnavailable, wantStage: "llm_provider_unavailable"},
+	} {
+		t.Run(fmt.Sprintf("http-%d", tc.statusCode), func(t *testing.T) {
+			provider := &staticProvider{
+				err: fmt.Errorf("%w: llm provider http status %d: upstream rejected request", common.ErrInvalidArgument, tc.statusCode),
+			}
+			adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+				Provider: llmcommon.ProviderCompatible,
+				APIKey:   "secret-value",
+				Model:    "test-model",
+				Capabilities: llmmodels.ProviderCapabilities{
+					ChatCompletions: true,
+				},
+			}, provider)
+
+			result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+			if err == nil {
+				t.Fatal("expected provider HTTP status error")
+			}
+			if result.Output["stage"] != tc.wantStage {
+				t.Fatalf("stage = %v, want %s", result.Output["stage"], tc.wantStage)
+			}
+			usage, ok := result.Output["llmUsage"].(map[string]any)
+			if !ok || usage["failureClass"] != tc.wantClass {
+				t.Fatalf("llmUsage = %+v, want failure class %s", result.Output["llmUsage"], tc.wantClass)
+			}
+		})
+	}
+}
+
 func TestRuntimeAdapterRejectsUndeclaredNonChatOperation(t *testing.T) {
 	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
 		Provider: llmcommon.ProviderCompatible,

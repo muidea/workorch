@@ -84,11 +84,17 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 	}
 	var decoded chatCompletionResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: invalid llm provider response: %v", common.ErrInvalidArgument, err)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: invalid response json: %v", common.ErrInvalidArgument, err)
+	}
+	if decoded.Error != nil {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
+	}
+	if len(decoded.Choices) == 0 {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: choices are required", common.ErrInvalidArgument)
 	}
 	content := strings.TrimSpace(decoded.FirstContent())
 	if content == "" {
-		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response content is empty", common.ErrInvalidArgument)
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: first choice content is empty", common.ErrInvalidArgument)
 	}
 	return llmmodels.ProviderCompletionResult{
 		Payload: []byte(content),
@@ -237,7 +243,8 @@ type chatCompletionResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage chatCompletionUsage `json:"usage"`
+	Usage chatCompletionUsage  `json:"usage"`
+	Error *chatCompletionError `json:"error,omitempty"`
 }
 
 type chatCompletionStreamChunk struct {
@@ -250,7 +257,14 @@ type chatCompletionStreamChunk struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage chatCompletionUsage `json:"usage"`
+	Usage chatCompletionUsage  `json:"usage"`
+	Error *chatCompletionError `json:"error,omitempty"`
+}
+
+type chatCompletionError struct {
+	Message string `json:"message,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Code    any    `json:"code,omitempty"`
 }
 
 type chatCompletionUsage struct {
@@ -364,7 +378,10 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 		}
 		var chunk chatCompletionStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return "", nil, fmt.Errorf("%w: invalid llm provider stream chunk: %v", common.ErrInvalidArgument, err)
+			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: invalid stream chunk json: %v", common.ErrInvalidArgument, err)
+		}
+		if chunk.Error != nil {
+			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, chunk.Error.Summary())
 		}
 		if parsed := chunk.Usage.ProviderUsage(); parsed != nil {
 			usage = parsed
@@ -389,6 +406,26 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 		return "", nil, err
 	}
 	return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before [DONE]", common.ErrInvalidArgument)
+}
+
+func (e *chatCompletionError) Summary() string {
+	if e == nil {
+		return "provider returned error object"
+	}
+	parts := []string{}
+	if value := strings.TrimSpace(e.Type); value != "" {
+		parts = append(parts, "type="+value)
+	}
+	if value := strings.TrimSpace(fmt.Sprint(e.Code)); value != "" && value != "<nil>" {
+		parts = append(parts, "code="+value)
+	}
+	if value := strings.TrimSpace(e.Message); value != "" {
+		parts = append(parts, value)
+	}
+	if len(parts) == 0 {
+		return "provider returned error object"
+	}
+	return strings.Join(parts, ": ")
 }
 
 func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {

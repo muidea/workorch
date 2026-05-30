@@ -8198,20 +8198,22 @@ func TestRuntimeOrchestrator_SoftwareDevCodeAgentRepairsTestFailureAndDeliversDi
 	}
 }
 
-func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
+func TestRuntimeOrchestrator_RetriesHTTPStatusProviderErrorBeforeBlocking(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
+	attempts := 0
 	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 		if strings.Contains(string(request.StepID), "/repair-") {
 			t.Fatalf("unexpected runtime repair step for provider failure: %s", request.StepID)
 		}
+		attempts++
 		return map[string]any{
 			"status": "failed",
-			"stage":  "llm_provider_error",
+			"stage":  "llm_provider_unavailable",
 			"error":  "invalid argument: llm provider http status 404",
 		}, fmt.Errorf("%w: llm provider http status 404", common.ErrInvalidArgument)
 	}}
@@ -8257,15 +8259,20 @@ func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
 		t.Fatalf("run = %+v, want blocked on provider decision", runItem)
 	}
+	if attempts != maxProviderRetryAttempts+1 {
+		t.Fatalf("attempts = %d, want initial attempt plus retry budget", attempts)
+	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
 	}
-	if len(steps) != 1 || steps[0].ID != common.StepID("run-llm-provider-error/step-1") {
-		t.Fatalf("steps = %+v, want only initial failed provider step", steps)
+	if len(steps) != maxProviderRetryAttempts+1 {
+		t.Fatalf("steps = %+v, want initial failed provider step plus retry budget", steps)
 	}
-	if steps[0].Output["failureClass"] != failureClassProviderUnavailable {
-		t.Fatalf("failureClass = %#v, want provider unavailable", steps[0].Output["failureClass"])
+	for _, step := range steps {
+		if step.Output["failureClass"] != failureClassProviderUnavailable {
+			t.Fatalf("step %s failureClass = %#v, want provider unavailable", step.ID, step.Output["failureClass"])
+		}
 	}
 	ticket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
 	if err != nil {
@@ -8275,7 +8282,7 @@ func TestRuntimeOrchestrator_DoesNotRepairLLMProviderError(t *testing.T) {
 		ticket.Context[decisionContextKeyScope] != decisionContextScopeWorkorchRuntime {
 		t.Fatalf("ticket context = %+v, want provider config decision without business result", ticket.Context)
 	}
-	if ticket.Context["attempts"] != 0 || ticket.Context["maxAttempts"] != maxProviderRetryAttempts {
+	if ticket.Context["attempts"] != maxProviderRetryAttempts || ticket.Context["maxAttempts"] != maxProviderRetryAttempts {
 		t.Fatalf("ticket attempts = %+v/%+v, want actual attempts with max budget", ticket.Context["attempts"], ticket.Context["maxAttempts"])
 	}
 }
@@ -8390,6 +8397,131 @@ func TestRuntimeOrchestrator_RetriesTransientProviderUnavailableBeforeConfigBloc
 		specs[0].Input[stepInputKeyProviderRetryFollowUp] != true ||
 		specs[0].Input[stepInputKeyProviderRetryAttempt] != 1 {
 		t.Fatalf("spec = %+v, want first provider retry for transient provider unavailable", specs[0])
+	}
+}
+
+func TestRuntimeOrchestrator_RetriesTransientProviderHTTPStatusBeforeFailingRun(t *testing.T) {
+	for _, statusCode := range []int{
+		http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		t.Run(fmt.Sprintf("http-%d", statusCode), func(t *testing.T) {
+			ctx := context.Background()
+			runID := common.RunID(fmt.Sprintf("run-provider-http-%d-retry", statusCode))
+			failedStepID := common.StepID(string(runID) + "/step-1")
+			stepRepo := memory.NewStepRepository()
+			orch := &RuntimeOrchestrator{
+				runtime: &stubRuntimeAdapter{},
+				steps:   stepRepo,
+				policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 3}),
+			}
+			run := &runmodel.Run{
+				ID:              runID,
+				WorkspaceID:     common.WorkspaceID(fmt.Sprintf("ws-provider-http-%d-retry", statusCode)),
+				DoDID:           common.DoDID(fmt.Sprintf("dod-provider-http-%d-retry", statusCode)),
+				State:           common.RunStateRunning,
+				InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+			}
+			failedStep := &runmodel.Step{
+				ID:    failedStepID,
+				RunID: runID,
+				Kind:  llmcommon.StepKindWorkspaceExecution,
+				State: common.StepStateFailed,
+				Output: map[string]any{
+					"status":                  "failed",
+					"stage":                   "llm_provider_unavailable",
+					"error":                   fmt.Sprintf("invalid argument: llm provider http status %d: upstream temporarily unavailable", statusCode),
+					failureOutputKeyClass:     failureClassProviderUnavailable,
+					failureOutputKeySignature: fmt.Sprintf("class=provider_unavailable|stage=llm_provider_unavailable|error=http status %d", statusCode),
+				},
+			}
+			if err := stepRepo.Create(ctx, failedStep); err != nil {
+				t.Fatalf("seed failed step: %v", err)
+			}
+
+			specs, err := orch.nextDispatchSpecsFromStep(ctx, run, failedStep)
+			if err != nil {
+				t.Fatalf("nextDispatchSpecsFromStep: %v", err)
+			}
+			if len(specs) != 1 ||
+				specs[0].ID != providerRetryStepID(runID, failedStepID, 1) ||
+				specs[0].Input[stepInputKeyProviderRetryFollowUp] != true {
+				t.Fatalf("specs = %+v, want provider retry for transient HTTP %d", specs, statusCode)
+			}
+		})
+	}
+}
+
+func TestRuntimeOrchestrator_BlocksProviderHTTPStatusAfterRetryBudget(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-http-404-retry-exhausted")
+	rootStepID := common.StepID(runID + "/step-1")
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   stepRepo,
+		tickets: ticketRepo,
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 2}),
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     common.WorkspaceID("ws-provider-http-404-retry-exhausted"),
+		DoDID:           common.DoDID("dod-provider-http-404-retry-exhausted"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+	}
+	failedOutput := map[string]any{
+		"status":                  "failed",
+		"stage":                   "llm_provider_unavailable",
+		"error":                   "invalid argument: llm provider http status 404: upstream temporarily unavailable",
+		failureOutputKeyClass:     failureClassProviderUnavailable,
+		failureOutputKeySignature: "class=provider_unavailable|stage=llm_provider_unavailable|error=http status 404",
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     rootStepID,
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateFailed,
+		Output: failedOutput,
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    providerRetryStepID(runID, rootStepID, attempt),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+				stepInputKeyProviderRetryAttempt:  attempt,
+				stepInputKeyProviderRetryRootStep: string(rootStepID),
+			},
+			Output: failedOutput,
+		}); err != nil {
+			t.Fatalf("seed retry %d: %v", attempt, err)
+		}
+	}
+
+	specs, err := orch.nextDispatchSpecsFromStep(ctx, run, &runmodel.Step{
+		ID:     rootStepID,
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateFailed,
+		Output: failedOutput,
+	})
+	if !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("nextDispatchSpecsFromStep err = %v, want blocked after transient HTTP retry budget", err)
+	}
+	if len(specs) != 0 {
+		t.Fatalf("specs = %+v, want no retry beyond budget", specs)
 	}
 }
 
@@ -10861,6 +10993,79 @@ func TestRuntimeRepairInputForSchemaInvalidRepairAddsJSONRecoveryContract(t *tes
 	required := mapFromValue(pkg["requiredOutput"])
 	if required["mustReturnValidJSON"] != true || required["mustNotReuseRejectedJSON"] != true {
 		t.Fatalf("requiredOutput = %+v, want schema invalid JSON constraints", required)
+	}
+	if required["mustPatchDirectlyFromProvidedSnapshot"] != true ||
+		!strings.Contains(stringFromAny(required["sameGraphReadPatchRule"]), "do not put file/read before patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want direct patch from provided snapshot contract", required)
+	}
+	if guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"); !strings.Contains(guidance, "single valid JSON") {
+		t.Fatalf("repairGuidance = %+v, want schema invalid JSON guidance", input["repairGuidance"])
+	}
+}
+
+func TestRuntimeRepairInputForReadBeforePatchContractFailurePreservesDirectPatchContract(t *testing.T) {
+	runID := common.RunID("run-read-before-patch-contract-repair")
+	failedRepair := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-001-of-graph-001-014-build"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfStepID:        string(runID) + "/graph-001/014-build",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/step-1",
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-main",
+				"content":          "package main\n",
+			}},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"contentHash":      "hash-main",
+					"content":          "package main\n",
+				}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_schema_invalid",
+			failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+			failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+			"error":                   "invalid argument: executionGraph patch/apply must not depend on same-graph file/read; read current content in an earlier turn and submit a separate state-changing graph",
+			"reason":                  "invalid argument: executionGraph patch/apply must not depend on same-graph file/read; read current content in an earlier turn and submit a separate state-changing graph",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}).runtimeRepairFollowUpStepInput(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-read-before-patch-contract", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedRepair, 2, common.ErrInvalidArgument)
+
+	if input["stateChangingOutputRequired"] != true || input["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("input = %+v, want state-changing repair preserved", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %+v, want direct state-changing patch contract", required)
+	}
+	if !strings.Contains(stringFromAny(required["sameGraphReadPatchRule"]), "do not put file/read before patch/apply") {
+		t.Fatalf("sameGraphReadPatchRule = %q, want explicit same-graph read patch rule", required["sameGraphReadPatchRule"])
+	}
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") {
+		t.Fatalf("acceptedKinds = %+v, should not accept file/read for state-changing repair", required["acceptedKinds"])
 	}
 	if guidance := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"); !strings.Contains(guidance, "single valid JSON") {
 		t.Fatalf("repairGuidance = %+v, want schema invalid JSON guidance", input["repairGuidance"])

@@ -180,6 +180,9 @@ func isLLMProviderAuthOrConfigFailure(lowerStage string, execErr error, output m
 		return true
 	}
 	errText := providerFailureErrorText(execErr, output)
+	if providerFailureHTTPStatus(errText) >= 400 {
+		return false
+	}
 	return strings.Contains(errText, "unauthorized") ||
 		strings.Contains(errText, "forbidden") ||
 		strings.Contains(errText, "invalid api key") ||
@@ -259,6 +262,22 @@ func isLLMProviderUnavailableFailure(lowerStage string) bool {
 
 func providerFailureErrorText(execErr error, output map[string]any) string {
 	return strings.ToLower(firstNonEmptyString(errorString(execErr), stringFromMap(output, "error"), stringFromMap(output, "reason")))
+}
+
+func providerFailureHTTPStatus(text string) int {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return 0
+	}
+	match := providerFailureHTTPStatusPattern.FindStringSubmatch(text)
+	if len(match) != 2 {
+		return 0
+	}
+	status, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 func isMCPRejectedFailure(lowerStage string) bool {

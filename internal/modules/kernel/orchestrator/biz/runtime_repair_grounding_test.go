@@ -703,6 +703,47 @@ func TestRuntimeRepairActionPackageRequiresStrategyFieldsForDeclaredRelatedTarge
 	}
 }
 
+func TestRuntimeRepairActionPackageRequiresDirectPatchFromCurrentSnapshot(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "main.go",
+			"exists":           true,
+			"contentHash":      "hash-main",
+			"content":          "package main\n",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"main.go"},
+			"messages":   []string{"main.go failed validation"},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"status": "failed",
+		"error":  "exit status 1",
+	})
+
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustUseCurrentTargetSnapshot"] != true ||
+		required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %#v, want direct current-snapshot patch contract", required)
+	}
+	if !strings.Contains(stringFromAny(required["sameGraphReadPatchRule"]), "do not put file/read before patch/apply") {
+		t.Fatalf("sameGraphReadPatchRule = %q, want read-before-patch prohibition", required["sameGraphReadPatchRule"])
+	}
+	if !strings.Contains(stringFromAny(required["patchApplyFieldRule"]), "text_replace requires") {
+		t.Fatalf("patchApplyFieldRule = %q, want patch field contract", required["patchApplyFieldRule"])
+	}
+	for _, want := range []string{"same_graph_file_read_before_patch", "incomplete_patch_apply_input"} {
+		if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), want) {
+			t.Fatalf("requiredOutput.forbiddenKinds = %#v, want %q", required["forbiddenKinds"], want)
+		}
+	}
+}
+
 func TestRuntimeRepairActionPackageGroundsCurrentPatchFailure(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

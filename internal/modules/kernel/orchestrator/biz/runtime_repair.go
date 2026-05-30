@@ -420,6 +420,9 @@ func providerUnavailableFailureTextRequiresConfigBlock(failedStep *runModel.Step
 	if text == "" {
 		return false
 	}
+	if providerFailureHTTPStatus(text) >= 400 {
+		return false
+	}
 	configMarkers := []string{
 		"auth_unavailable",
 		"no auth available",
@@ -438,10 +441,6 @@ func providerUnavailableFailureTextRequiresConfigBlock(failedStep *runModel.Step
 		"unsupported model",
 		"operation unsupported",
 		"unsupported operation",
-		"http status 400",
-		"http status 401",
-		"http status 403",
-		"http status 404",
 	}
 	for _, marker := range configMarkers {
 		if strings.Contains(text, marker) {
@@ -3505,7 +3504,9 @@ func stateChangingRepairGuidance() []string {
 		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
 		"If multiple dependent operations are needed, executionGraph must contain an auditable state-changing operation accepted by repairActionPackage.requiredOutput; patch/apply is preferred when it can represent the change.",
 		"Do not return read-only, inspection-only, or LLM-gated executionGraph.",
+		"When current target snapshots are already provided in failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots, do not add file/read before patch/apply in the same executionGraph; use the provided snapshot directly or return a failed assessment/blocker if it is insufficient.",
 		"patch/apply supports file_write, unified_diff, and text_replace; file_write content must be non-empty and must not be used as a delete operation.",
+		"For patch/apply text_replace, input.oldText and input.newText must be exact non-empty literal strings from the current target snapshot; for file_write, input.content must be complete non-empty literal content; for unified_diff, input.diff must be a complete standard unified diff with explicit line ranges.",
 		"When changing an existing target file, prefer text_replace with exact oldText/newText or the smallest unified_diff over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"unified_diff patches must include explicit hunk line ranges such as @@ -12,3 +12,4 @@; never emit a bare @@ hunk.",
 		"Do not use shell/command or mcp/tool_call to modify workspace files when a patch/apply state-change artifact can represent the change; when acceptedKinds explicitly allows them, declare stateChanging=true plus targetRef, relatedFailureTargets, stateChangingReason, or boundedReason, then add bounded verification that depends on the operation.",
@@ -3765,8 +3766,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(targets)
 		requiredOutput["mustTargetFailureScope"] = true
 		requiredOutput["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-		requiredOutput["mustUseCurrentTargetSnapshot"] = true
-		requiredOutput["forbiddenStalePatchReuse"] = true
+		applyCurrentSnapshotDirectPatchContract(requiredOutput)
 		requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
 	}
 	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
@@ -3897,8 +3897,7 @@ func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput ma
 	}
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
 		requiredOutput["mustTargetFailureScope"] = true
-		requiredOutput["mustUseCurrentTargetSnapshot"] = true
-		requiredOutput["forbiddenStalePatchReuse"] = true
+		applyCurrentSnapshotDirectPatchContract(requiredOutput)
 	}
 	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
 		requiredOutput["mustTargetRepairTargetSet"] = true
@@ -3917,8 +3916,31 @@ func stateChangingRepairRequiredOutput() map[string]any {
 			"llm_gated_graph",
 			"self_inspection_graph",
 			"context_rehydration_graph",
+			"same_graph_file_read_before_patch",
+			"incomplete_patch_apply_input",
+		},
+		"patchApplyInputContract": map[string]any{
+			"text_replace": []string{"targetRef", "oldText", "newText"},
+			"file_write":   []string{"targetRef", "content"},
+			"unified_diff": []string{"targetRef", "diff"},
 		},
 	}
+}
+
+func applyCurrentSnapshotDirectPatchContract(requiredOutput map[string]any) {
+	if len(requiredOutput) == 0 {
+		return
+	}
+	requiredOutput["mustUseCurrentTargetSnapshot"] = true
+	requiredOutput["mustPatchDirectlyFromProvidedSnapshot"] = true
+	requiredOutput["forbiddenStalePatchReuse"] = true
+	requiredOutput["sameGraphReadPatchRule"] = "when current target snapshots are provided, do not put file/read before patch/apply in the same executionGraph; patch/apply must use provided current snapshot content/hash, or return failed dodAssessment/blocker if the snapshot is insufficient"
+	requiredOutput["patchApplyFieldRule"] = "patch/apply input must include complete literal fields for its patchType: text_replace requires targetRef, oldText, newText; file_write requires targetRef, non-empty content; unified_diff requires targetRef and a complete diff with explicit hunk ranges"
+	requiredOutput["readBeforePatchRecoveryRule"] = "if additional current content is required, output a separate evidence acquisition step rather than mixing same-turn file/read and patch/apply"
+	requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+		"same_graph_file_read_before_patch",
+		"incomplete_patch_apply_input",
+	))
 }
 
 func stateChangingRepairAcceptedKinds() []string {
@@ -5438,6 +5460,7 @@ func runtimeValueContainsRedactionMarker(value any, depth int) bool {
 var structuredFailureLineRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+):([0-9]+)(?::([0-9]+))?`)
 var structuredFailureTargetRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[=])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+)(?::[0-9]+(?::[0-9]+)?)?`)
 var structuredFailureIdentifierPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{2,}`)
+var providerFailureHTTPStatusPattern = regexp.MustCompile(`\bhttp status\s+([0-9]{3})\b`)
 
 var structuredFailureIdentifierStopWords = map[string]bool{
 	"error": true, "failed": true, "failure": true, "status": true, "stage": true,

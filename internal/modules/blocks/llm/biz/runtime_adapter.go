@@ -55,6 +55,7 @@ var unavailableIfMissingShellCommands = []string{"sshpass", "expect"}
 var (
 	httpURLPattern              = regexp.MustCompile(`https?://[^\s'"<>\\]+`)
 	bareLocalServicePathPattern = regexp.MustCompile(`(?:^|[\s'"(=])((?:/api/v1/workorch/[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]+)|(?:/(?:runs|observability|metrics)(?:[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%-]*)?))`)
+	providerHTTPStatusPattern   = regexp.MustCompile(`\bhttp status\s+([0-9]{3})\b`)
 )
 
 var providerSoulStages = map[string]struct{}{
@@ -394,6 +395,8 @@ const (
 	providerFailureClassStreamIncomplete = "provider_stream_incomplete"
 	providerFailureClassUnavailable      = "provider_unavailable"
 	providerFailureClassContextIntegrity = "context_integrity_failed"
+	providerFailureClassProtocolInvalid  = "provider_protocol_invalid"
+	providerFailureClassResponseSchema   = "provider_response_schema_invalid"
 )
 
 type providerCallResult struct {
@@ -548,6 +551,7 @@ func classifyProviderInvocationFailure(err error) string {
 	if err != nil {
 		text = strings.ToLower(strings.TrimSpace(err.Error()))
 	}
+	httpStatus := providerInvocationHTTPStatus(text)
 	switch {
 	case strings.Contains(text, "context length"),
 		strings.Contains(text, "maximum context"),
@@ -563,6 +567,10 @@ func classifyProviderInvocationFailure(err error) string {
 		strings.Contains(text, "ended before [done]"),
 		strings.Contains(text, "without [done]"):
 		return providerFailureClassStreamIncomplete
+	case strings.Contains(text, "provider protocol invalid"):
+		return providerFailureClassProtocolInvalid
+	case strings.Contains(text, "provider response schema invalid"):
+		return providerFailureClassResponseSchema
 	case strings.Contains(text, "context gate"),
 		strings.Contains(text, "context integrity"):
 		return providerFailureClassContextIntegrity
@@ -571,8 +579,10 @@ func classifyProviderInvocationFailure(err error) string {
 	case strings.Contains(text, "rate limit"),
 		strings.Contains(text, "too many requests"),
 		strings.Contains(text, "quota exceeded"),
-		strings.Contains(text, "429"):
+		httpStatus == 429:
 		return providerFailureClassRateLimited
+	case httpStatus >= 400:
+		return providerFailureClassUnavailable
 	case strings.Contains(text, "unauthorized"),
 		strings.Contains(text, "forbidden"),
 		strings.Contains(text, "invalid api key"),
@@ -584,6 +594,22 @@ func classifyProviderInvocationFailure(err error) string {
 	default:
 		return providerFailureClassUnavailable
 	}
+}
+
+func providerInvocationHTTPStatus(text string) int {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return 0
+	}
+	match := providerHTTPStatusPattern.FindStringSubmatch(text)
+	if len(match) != 2 {
+		return 0
+	}
+	status, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 func providerFailureStage(failureClass string, stream bool) string {
@@ -600,6 +626,10 @@ func providerFailureStage(failureClass string, stream bool) string {
 		return "llm_provider_stream_incomplete"
 	case providerFailureClassContextIntegrity:
 		return "llm_context_integrity_failed"
+	case providerFailureClassProtocolInvalid:
+		return "llm_provider_protocol_invalid"
+	case providerFailureClassResponseSchema:
+		return "llm_provider_response_schema_invalid"
 	case providerFailureClassUnavailable:
 		if stream {
 			return "llm_provider_stream_error"
@@ -3571,6 +3601,8 @@ func llmFailureCategory(stage string) string {
 		"llm_provider_rate_limited",
 		"llm_provider_auth_or_config_error",
 		"llm_provider_stream_incomplete",
+		"llm_provider_protocol_invalid",
+		"llm_provider_response_schema_invalid",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "llm_provider"
@@ -3591,6 +3623,8 @@ func llmFailureResolutionHint(stage string) string {
 		"llm_provider_rate_limited",
 		"llm_provider_auth_or_config_error",
 		"llm_provider_stream_incomplete",
+		"llm_provider_protocol_invalid",
+		"llm_provider_response_schema_invalid",
 		"llm_provider_error",
 		"llm_provider_stream_error":
 		return "check LLM provider baseURL, model, API key, protocol compatibility, and network availability before rerunning the workspace"

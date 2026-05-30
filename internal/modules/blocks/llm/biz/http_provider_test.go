@@ -272,6 +272,49 @@ func TestHTTPProviderCompleteReportsProviderErrorWithoutLeakingSecret(t *testing
 	}
 }
 
+func TestHTTPProviderCompleteRejectsProviderErrorObjectWithHTTP200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"model overloaded","type":"server_error","code":"upstream_failed"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	_, err := provider.Complete(context.Background(), llmProviderRequest())
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "llm provider protocol invalid") ||
+		!strings.Contains(err.Error(), "model overloaded") {
+		t.Fatalf("complete err = %v, want provider protocol invalid error object", err)
+	}
+}
+
+func TestHTTPProviderCompleteRejectsMissingChoicesAsProviderSchemaInvalid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-empty","choices":[]}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	_, err := provider.Complete(context.Background(), llmProviderRequest())
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "llm provider response schema invalid") {
+		t.Fatalf("complete err = %v, want response schema invalid", err)
+	}
+}
+
 func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 	var gotPayload chatCompletionRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +360,29 @@ func TestHTTPProviderStreamCompleteParsesChatCompletionDeltas(t *testing.T) {
 		result.Usage.CacheReadTokens != 5 ||
 		result.Usage.CacheWriteTokens != 6 {
 		t.Fatalf("usage = %+v, want stream usage", result.Usage)
+	}
+}
+
+func TestHTTPProviderStreamCompleteRejectsProviderErrorEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"error":{"message":"stream rejected","type":"server_error"}}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "llm provider protocol invalid") ||
+		!strings.Contains(err.Error(), "stream rejected") {
+		t.Fatalf("stream complete err = %v, want provider protocol invalid event", err)
 	}
 }
 

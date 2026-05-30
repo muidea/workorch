@@ -836,8 +836,7 @@ func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[st
 	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 || len(mapSliceFromValue(pkg["currentTargetSnapshots"])) > 0 {
 		required["mustTargetFailureScope"] = true
 		required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
-		required["mustUseCurrentTargetSnapshot"] = true
-		required["forbiddenStalePatchReuse"] = true
+		applyCurrentSnapshotDirectPatchContract(required)
 	}
 	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
 		required["mustTargetRepairTargetSet"] = true
@@ -862,6 +861,10 @@ func preserveStateChangingRequiredOutputSignals(required map[string]any, existin
 		case "mustReturnValidJSON",
 			"mustNotReuseRejectedJSON",
 			"forbiddenStalePatchReuse",
+			"mustPatchDirectlyFromProvidedSnapshot",
+			"sameGraphReadPatchRule",
+			"patchApplyFieldRule",
+			"readBeforePatchRecoveryRule",
 			"mustDeclareStrategyReassessmentFields",
 			"strategyReassessmentRequiredFields",
 			"strategyReassessmentMatchRule",
