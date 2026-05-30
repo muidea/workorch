@@ -18,7 +18,7 @@ Last Updated: 2026-05-29
 
 ### 1.1 旧模板/Soul 文档同时承担目录、示例、详细内容、规则说明多重角色
 
-`../builtin-templates-and-souls-design.md` 同时包含：
+`builtin-templates-and-souls.md` 同时包含：
 
 - 模板目录
 - 6 阶段 Soul 说明
@@ -33,7 +33,7 @@ Last Updated: 2026-05-29
 
 ### 1.2 software-dev 文档原先混有 core 和 profile 规则
 
-`../software-dev-goal-coverage-template-closure-design.md` 虽声明自己不是 core，
+`software-dev/goal-coverage-and-dod.md` 虽声明自己不是 core，
 但仍混入：
 
 - core runtime 改进设计
@@ -48,7 +48,7 @@ Last Updated: 2026-05-29
 
 ### 1.3 deployment / status / acceptance 之间职责仍重叠
 
-`../deployment.md`、旧综合状态文档（后续归档副本见
+`../50-product-interface/deployment.md`、旧综合状态文档（后续归档副本见
 `../90-archive/superseded/workorch-status.md`）、后续 `service-acceptance`
 都在承载：
 
@@ -58,7 +58,7 @@ Last Updated: 2026-05-29
 
 处理结论：
 
-- `../deployment.md` 只保留部署和运行入口
+- `../50-product-interface/deployment.md` 只保留部署和运行入口
 - API 和 acceptance 后续继续拆分
 
 ## 2. 内容不完整，需要补充
@@ -94,8 +94,8 @@ Last Updated: 2026-05-29
 
 补充：
 
-- `../workorch-tui-interaction-contract.md` 与
-  `../workorch-tui-display-refresh-consistency-design.md` 已降级为过渡索引
+- `../50-product-interface/tui/interaction-contract.md` 与
+  `../50-product-interface/tui/display-refresh-consistency-design.md` 已降级为过渡索引
 
 ### 2.3 Web Console 产品层仍不完整
 
@@ -121,7 +121,7 @@ Last Updated: 2026-05-29
 补充：
 
 - `workspace/soul-md-default-resource.md` 已迁入默认 Soul 资源拆分规则，但仍缺与 bootstrap / verifier 的更细实现映射
-- `../workorch-workspace-deliverable-boundary-design.md` 的稳定边界已迁入
+- `../10-domain-model/workspace-goal-dod.md` 的稳定边界已迁入
   `../10-domain-model/workspace-goal-dod.md` 与 `../30-module-architecture/storage-readmodel.md`
 
 ### 2.5 software-dev profile 正文已开始迁入，但交叉链接仍不完整
@@ -170,7 +170,7 @@ Last Updated: 2026-05-29
 
 ### 3.2 TUI 主题仍是跨 product / verification / audit 的重叠区域
 
-`../workorch-cli-tui-agent-requirements.md` 同时包含：
+`../50-product-interface/tui/requirements.md` 同时包含：
 
 - 产品要求
 - 当前实现快照

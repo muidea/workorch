@@ -20,10 +20,10 @@ Last Updated: 2026-05-29
 
 当前以下文档都在承担部分验收角色：
 
-- `../deployment.md`
+- `../50-product-interface/deployment.md`
 - 旧综合状态文档（现归档副本见 `../90-archive/superseded/workorch-status.md`）
-- `../workspace-concurrency-loadtest-plan.md`
-- `../workorch-tui-agent-acceptance.md`
+- `../90-archive/records/workspace-concurrency-loadtest-record.md`
+- `tui/tui-agent-acceptance.md`
 
 处理结论：
 
@@ -36,7 +36,7 @@ Last Updated: 2026-05-29
 
 当前 active / candidate / completed 的边界在旧文档中不稳定：
 
-- `../next-stage-demand-candidates.md` 与 `../next-stage-result-event-development-plan.md` 互相引用
+- `../70-roadmap/candidates/next-stage-demand-candidates.md` 与 `../90-archive/completed/result-event-development-plan.md` 互相引用
 - 旧综合状态文档当时同时列 active next stage、completed P1、runtime expansion、advanced scheduling
 
 处理结论：
@@ -48,16 +48,16 @@ Last Updated: 2026-05-29
 
 例如：
 
-- `../runtime-contract-conformance-audit.md` 同时包含核查、偏差、收口跟踪
-- `../workorch-full-chain-assessment-closure-plan.md` 同时是审计和计划
+- `audits/runtime-contract-conformance-audit.md` 同时包含核查、偏差、收口跟踪
+- `audits/full-chain-assessment-closure-plan.md` 同时是审计和计划
 
 处理结论：
 
 - 本批先将其归入 verification/audits 入口
 - 后续仍需判断哪些部分属于 audit，哪些部分属于 roadmap
-- `../runtime-contract-conformance-audit.md`、
-  `../workorch-full-chain-assessment-closure-plan.md`、
-  `../workorch-codex-request-context-comparison.md` 已开始迁入
+- `audits/runtime-contract-conformance-audit.md`、
+  `audits/full-chain-assessment-closure-plan.md`、
+  `audits/codex-request-context-comparison.md` 已开始迁入
   `60-verification/audits/`
 
 ## 2. 内容不完整，需要补充
@@ -68,7 +68,7 @@ Last Updated: 2026-05-29
 
 - 服务验收命令分层
 - 本地 / file backend / deployed-instance 差异
-- 与 `../deployment.md` 的分工说明
+- 与 `../50-product-interface/deployment.md` 的分工说明
 - loadtest baseline 的指标口径、脚本入口与 records 交叉引用
 - TUI acceptance / closure / review 之间的剩余交叉引用清理
 
@@ -98,9 +98,9 @@ Last Updated: 2026-05-29
 
 当前虽然已经迁出第一批 active / candidate / completed 正文，并开始迁入 records 正文，但仍有剩余旧文档未逐项收口：
 
-- `../single-workspace-performance-optimization-record.md`
-- `../workorch-console-bundle-ui-optimization-experience.md`
-- `../workspace-concurrency-loadtest-plan.md`
+- `../90-archive/records/single-workspace-performance-optimization-record.md`
+- `../50-product-interface/web-console/bundle-ui-optimization-record.md`
+- `../90-archive/records/workspace-concurrency-loadtest-record.md`
 - 多份 verification / audit / runtime 专题旧正文
 
 并且旧路径互引仍待清理。

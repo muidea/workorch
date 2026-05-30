@@ -253,7 +253,7 @@ real LLM 基线通过标准：
 
 补充：
 
-- 更细场景设计源文档仍可追溯到 `../workspace-concurrency-loadtest-plan.md`
+- 更细场景设计源文档仍可追溯到 `../90-archive/records/workspace-concurrency-loadtest-record.md`
 - 但 active 验收与当前阈值应以本文件为准，而不是继续回到旧规划文档解释
 
 ## Source Documents

@@ -42,7 +42,7 @@
 - HTTP / 部署 / TUI：
   [50-product-interface/overview.md](50-product-interface/overview.md),
   [service-api.md](50-product-interface/service-api.md),
-  [deployment.md](50-product-interface/deployment.md),
+  [50-product-interface/deployment.md](50-product-interface/50-product-interface/deployment.md),
   [50-product-interface/tui/requirements.md](50-product-interface/tui/requirements.md)
 - 验收 / 审计 / 历史记录：
   [60-verification/overview.md](60-verification/overview.md),
@@ -64,7 +64,7 @@
   - [50-product-interface/service-api.md](50-product-interface/service-api.md)
 - 验收/验证/运维
   - [60-verification/overview.md](60-verification/overview.md)
-  - [50-product-interface/deployment.md](50-product-interface/deployment.md)
+  - [50-product-interface/50-product-interface/deployment.md](50-product-interface/50-product-interface/deployment.md)
 - 规划/历史追溯
   - [70-roadmap/active/overview.md](70-roadmap/active/overview.md)
   - [90-archive/records/overview.md](90-archive/records/overview.md)

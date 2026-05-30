@@ -21,8 +21,8 @@ Last Updated: 2026-05-29
 
 ### 2.1 唯一核心文档
 
-`workorch-runtime-stage-contract-neutrality-design.md` 是当前 WorkOrch
-runtime 演进的唯一核心设计合约。最终迁移后应落到：
+旧核心合同文档曾是当前 WorkOrch runtime 演进的唯一核心设计合约。
+最终迁移后其稳定内容已落到：
 
 `00-core/runtime-stage-contract.md`
 
@@ -102,7 +102,7 @@ docs/
     workspace/
 
   50-product-interface/
-    deployment.md
+    50-product-interface/deployment.md
     service-api.md
     tui/
     web-console/
@@ -245,8 +245,8 @@ docs/
 
 来源：
 
-- `workorch-runtime-stage-contract-neutrality-design.md`
-- `workorch-llm-request-cache-aware-context-design.md`
+- `00-core/runtime-stage-contract.md`
+- `00-core/runtime-request-cache-note.md`
 - `01-overview/current-state.md`
 
 完成标志：
@@ -272,11 +272,11 @@ docs/
 
 来源：
 
-- `workorch-workspace-deliverable-boundary-design.md`
-- `workspace-memory-recall-traceability-plan.md`
-- `llm-decision-memory-improvement-plan.md`
-- `next-stage-result-event-development-plan.md`
-- `workorch-runtime-storage-json-control-design.md`
+- `10-domain-model/workspace-goal-dod.md`
+- `10-domain-model/context-capability-memory.md`
+- `10-domain-model/context-capability-memory.md`
+- `90-archive/completed/result-event-development-plan.md`
+- `30-module-architecture/storage-readmodel.md`
 - `01-overview/current-state.md`
 
 完成标志：
@@ -302,14 +302,14 @@ docs/
 
 来源：
 
-- `codex-like-llm-prompt-context-design.md`
-- `llm-driven-workspace-execution-design.md`
-- `workorch-codex-request-context-comparison.md`
-- `runtime-recovery-governance-closure-design.md`
-- `graph-followup-dod-assessment-closure-plan.md`
-- `workorch-full-chain-assessment-closure-plan.md`
-- `run-closure-quality-improvement-plan.md`
-- `llm-driven-development-plan.md`
+- `20-runtime-flow/context-assembly-flow.md`
+- `20-runtime-flow/planning-execution-flow.md`
+- `60-verification/audits/codex-request-context-comparison.md`
+- `90-archive/completed/90-archive/completed/runtime-recovery-governance-closure-design.md`
+- `20-runtime-flow/verification-acceptance-flow.md`
+- `60-verification/audits/full-chain-assessment-closure-plan.md`
+- `70-roadmap/active/run-closure-quality-improvement-plan.md`
+- `90-archive/completed/llm-driven-development-plan.md`
 
 完成标志：
 
@@ -337,12 +337,12 @@ docs/
 
 来源：
 
-- `structure.md`
-- `workorch-architecture-design.md`
-- `model-aware-llm-context-budget-design.md`
-- `workorch-llm-auto-context-profile-design.md`
-- `workorch-magiccommon-context-first-upgrade.md`
-- `workorch-runtime-storage-json-control-design.md`
+- `30-module-architecture/repository-structure.md`
+- `30-module-architecture/architecture-overview.md`
+- `30-module-architecture/llm-provider-assembly.md`
+- `30-module-architecture/llm-provider-assembly.md`
+- `30-module-architecture/application-workorchd.md`
+- `30-module-architecture/storage-readmodel.md`
 
 完成标志：
 
@@ -363,22 +363,22 @@ docs/
 
 来源：
 
-- `builtin-templates-and-souls-design.md`
-- `mcp-capability-management-design.md`
-- `workspace-builtin-git-tool-capability-plan.md`
-- `workspace-file-diff-patch-capability-plan.md`
-- `workspace-web-search-capability-plan.md`
-- `software-dev-goal-coverage-template-closure-design.md`
-- `software-dev-lsp-bridge-integration-design.md`
-- `software-dev-code-agent-closure-plan.md`
-- `workorch-soul-md-default-resource-design.md`
-- `workspace-soul-routing-plan.md`
-- `workspace-setup-draft-session-plan.md`
-- `deployment.md`
-- `workorch-cli-tui-agent-requirements.md`
-- `workorch-tui-interaction-contract.md`
-- `workorch-tui-display-refresh-consistency-design.md`
-- `workorch-console-bundle-ui-optimization-experience.md`
+- `40-profiles-capabilities/builtin-templates-and-souls.md`
+- `40-profiles-capabilities/mcp/capability-management.md`
+- `40-profiles-capabilities/runtime-capabilities/builtin-git-tool.md`
+- `40-profiles-capabilities/runtime-capabilities/file-diff-patch.md`
+- `40-profiles-capabilities/runtime-capabilities/web-search.md`
+- `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md`
+- `40-profiles-capabilities/software-dev/lsp-bridge-integration.md`
+- `90-archive/completed/software-dev-code-agent-closure-plan.md`
+- `40-profiles-capabilities/workspace/soul-md-default-resource.md`
+- `40-profiles-capabilities/workspace/soul-routing.md`
+- `40-profiles-capabilities/workspace/setup-draft-session.md`
+- `50-product-interface/deployment.md`
+- `50-product-interface/tui/requirements.md`
+- `50-product-interface/tui/interaction-contract.md`
+- `50-product-interface/tui/display-refresh-consistency-design.md`
+- `50-product-interface/web-console/bundle-ui-optimization-record.md`
 - `50-product-interface/service-api.md` 承接前的旧 API 列表和接口说明来源
 
 完成标志：
@@ -401,26 +401,26 @@ docs/
 
 来源：
 
-- `design-implementation-audit-2026-05-12.md`
-- `runtime-contract-conformance-audit.md`
-- `workspace-concurrency-loadtest-plan.md`
-- `workorch-tui-agent-acceptance.md`
-- `workorch-tui-display-closure-tracking.md`
-- `next-mvp-acceptance.md`
-- `next-stage-demand-candidates.md`
-- `auto-governance-ticket-approval-plan.md`
-- `model-aware-llm-context-budget-todo.md`
-- `software-dev-dod-repair-closure-plan.md`
-- `software-requirement-development-orchestration-plan.md`
-- `workorch-unified-tui-console-migration-plan.md`
-- `advanced-runtime-scheduling-plan.md`
-- `mvp-backlog.md`
-- `next-stage-p1-development-plan.md`
-- `refactor-progress.md`
-- `runtime-expansion-plan.md`
-- `single-workspace-performance-optimization-record.md`
-- `workorch-tui-improvements-absorption-plan.md`
-- `workspace-data-layout-plan.md`
+- `60-verification/audits/design-implementation-audit-2026-05-12.md`
+- `60-verification/audits/runtime-contract-conformance-audit.md`
+- `90-archive/records/workspace-concurrency-loadtest-record.md`
+- `60-verification/tui/tui-agent-acceptance.md`
+- `60-verification/tui/display-closure-tracking.md`
+- `70-roadmap/active/next-mvp-acceptance.md`
+- `70-roadmap/candidates/next-stage-demand-candidates.md`
+- `70-roadmap/active/auto-governance-ticket-approval-plan.md`
+- `70-roadmap/active/llm-context-budget-todo.md`
+- `70-roadmap/active/software-dev-dod-repair-closure-plan.md`
+- `70-roadmap/active/software-requirement-development-orchestration-plan.md`
+- `70-roadmap/active/unified-tui-console-migration-plan.md`
+- `90-archive/completed/advanced-runtime-scheduling-plan.md`
+- `90-archive/completed/mvp-closure-record.md`
+- `90-archive/completed/p1-development-record.md`
+- `90-archive/superseded/refactor-archive.md`
+- `90-archive/completed/runtime-expansion-plan.md`
+- `90-archive/records/single-workspace-performance-optimization-record.md`
+- `90-archive/completed/tui-improvements-absorption-plan.md`
+- `90-archive/superseded/workspace-data-layout-plan.md`
 
 完成标志：
 
@@ -443,63 +443,63 @@ docs/
 
 | 现文件 | 目标位置 | 处理策略 | 说明 |
 | --- | --- | --- | --- |
-| `advanced-runtime-scheduling-plan.md` | `90-archive/completed/advanced-runtime-scheduling-plan.md` | 归档 | 已完成阶段计划 |
-| `auto-governance-ticket-approval-plan.md` | `70-roadmap/active/auto-governance-ticket-approval-plan.md` | 迁移 | 活跃计划 |
-| `builtin-templates-and-souls-design.md` | `40-profiles-capabilities/builtin-templates-and-souls.md` | 重写迁移 | profile/capability 主入口 |
-| `codex-like-llm-prompt-context-design.md` | `20-runtime-flow/context-assembly-flow.md` | 内容迁移 | 稳定的上下文组织规则进入 flow |
-| `deployment.md` | `50-product-interface/deployment.md` | 重命名迁移 | 产品接口层 |
-| `design-implementation-audit-2026-05-12.md` | `60-verification/audits/design-implementation-audit-2026-05-12.md` | 迁移 | 审计 |
-| `graph-followup-dod-assessment-closure-plan.md` | `20-runtime-flow/verification-acceptance-flow.md` + `graph-followup-dod-assessment-closure-plan.md` | 拆分归档 | 稳定规则进入 flow |
-| `llm-decision-memory-improvement-plan.md` | `10-domain-model/context-capability-memory.md` + `20-runtime-flow/context-assembly-flow.md` + `llm-decision-memory-improvement-plan.md` | 拆分 | 规则沉淀后仅保留活跃待办 |
-| `llm-driven-development-plan.md` | `20-runtime-flow/*` + `90-archive/completed/llm-driven-development-plan.md` | 拆分归档 | 主要是历史实现记录 |
-| `llm-driven-workspace-execution-design.md` | `20-runtime-flow/planning-execution-flow.md` | 内容迁移 | execution 主链设计 |
-| `mcp-capability-management-design.md` | `40-profiles-capabilities/mcp/capability-management.md` | 迁移 | capability 层 |
-| `model-aware-llm-context-budget-design.md` | `30-module-architecture/llm-provider-assembly.md` | 合并迁移 | LLM provider/预算实现说明 |
-| `model-aware-llm-context-budget-todo.md` | `70-roadmap/active/llm-context-budget-todo.md` | 迁移 | 活跃 TODO |
-| `mvp-backlog.md` | `90-archive/completed/mvp-closure-record.md` | 归档 | MVP 收口记录 |
-| `next-mvp-acceptance.md` | `70-roadmap/active/next-mvp-acceptance.md` | 迁移 | 未来验收目标 |
-| `next-stage-demand-candidates.md` | `70-roadmap/candidates/next-stage-demand-candidates.md` | 迁移 | 候选项 |
-| `next-stage-p1-development-plan.md` | `90-archive/completed/p1-development-record.md` | 归档 | 已完成 |
-| `next-stage-result-event-development-plan.md` | `10-domain-model/run-step-result-artifact.md` + `10-domain-model/event-observability.md` + `90-archive/completed/result-event-development-plan.md` | 拆分归档 | 稳定模型沉淀 |
-| `refactor-progress.md` | `90-archive/superseded/refactor-archive.md` | 归档 | archive marker |
-| `run-closure-quality-improvement-plan.md` | `20-runtime-flow/verification-acceptance-flow.md` + `70-roadmap/active/run-closure-quality-improvement-plan.md` | 拆分 | 稳定规则沉淀 |
-| `runtime-contract-conformance-audit.md` | `60-verification/audits/runtime-contract-conformance-audit.md` | 迁移 | runtime contract audit |
-| `runtime-expansion-plan.md` | `90-archive/completed/runtime-expansion-plan.md` | 归档 | 已完成 |
-| `runtime-recovery-governance-closure-design.md` | `20-runtime-flow/repair-replan-flow.md` + `90-archive/completed/runtime-recovery-governance-closure-design.md` | 拆分归档 | 稳定规则进入 flow |
-| `single-workspace-performance-optimization-record.md` | `90-archive/records/single-workspace-performance-optimization-record.md` | 归档 | 性能记录 |
-| `software-dev-code-agent-closure-plan.md` | `40-profiles-capabilities/software-dev/code-agent.md` + `90-archive/completed/software-dev-code-agent-closure-plan.md` | 拆分归档 | stable profile rule + 历史 closure |
-| `software-dev-dod-repair-closure-plan.md` | `70-roadmap/active/software-dev-dod-repair-closure-plan.md` | 迁移 | 活跃专项 |
-| `software-dev-goal-coverage-template-closure-design.md` | `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md` | 迁移 | software-dev 主设计 |
-| `software-dev-lsp-bridge-integration-design.md` | `40-profiles-capabilities/software-dev/lsp-bridge-integration.md` | 迁移 | software-dev 能力扩展 |
-| `software-requirement-development-orchestration-plan.md` | `70-roadmap/active/software-requirement-development-orchestration-plan.md` | 迁移 | 活跃主计划 |
-| `structure.md` | `30-module-architecture/repository-structure.md` | 重命名迁移 | 模块/目录结构 |
-| `workorch-architecture-design.md` | `30-module-architecture/architecture-overview.md` | 重写迁移 | 只保留稳定模块架构 |
-| `workorch-cli-tui-agent-requirements.md` | `50-product-interface/tui/requirements.md` | 迁移 | TUI 主需求文档 |
-| `workorch-codex-request-context-comparison.md` | `20-runtime-flow/context-assembly-flow.md` + `60-verification/audits/codex-request-context-comparison.md` | 拆分 | 中立规则沉淀 + 对标审计保留 |
-| `workorch-console-bundle-ui-optimization-experience.md` | `50-product-interface/web-console/bundle-ui-optimization-record.md` | 迁移 | Web Console 记录 |
-| `workorch-full-chain-assessment-closure-plan.md` | `20-runtime-flow/overview.md` + `60-verification/audits/full-chain-assessment-closure-plan.md` | 拆分 | flow 总体问题进入 runtime-flow，评审留在 audit |
-| `workorch-llm-auto-context-profile-design.md` | `30-module-architecture/llm-provider-assembly.md` | 合并迁移 | provider/profile 组装说明 |
-| `workorch-llm-request-cache-aware-context-design.md` | `00-core/runtime-request-cache-note.md` | 重命名迁移 | core 从属 request note |
-| `workorch-magiccommon-context-first-upgrade.md` | `30-module-architecture/application-workorchd.md` + `90-archive/completed/magiccommon-context-first-upgrade.md` | 拆分归档 | 稳定接线规则保留 |
-| `workorch-runtime-stage-contract-neutrality-design.md` | `00-core/runtime-stage-contract.md` | 重构迁移 | 唯一核心 contract |
-| `workorch-runtime-storage-json-control-design.md` | `10-domain-model/event-observability.md` + `30-module-architecture/storage-readmodel.md` | 拆分 | 对象/存储分离 |
-| `workorch-soul-md-default-resource-design.md` | `40-profiles-capabilities/workspace/soul-md-default-resource.md` | 迁移 | workspace profile 资源约定 |
+| `90-archive/completed/advanced-runtime-scheduling-plan.md` | `90-archive/completed/advanced-runtime-scheduling-plan.md` | 归档 | 已完成阶段计划 |
+| `70-roadmap/active/auto-governance-ticket-approval-plan.md` | `70-roadmap/active/auto-governance-ticket-approval-plan.md` | 迁移 | 活跃计划 |
+| `40-profiles-capabilities/builtin-templates-and-souls.md` | `40-profiles-capabilities/builtin-templates-and-souls.md` | 重写迁移 | profile/capability 主入口 |
+| `20-runtime-flow/context-assembly-flow.md` | `20-runtime-flow/context-assembly-flow.md` | 内容迁移 | 稳定的上下文组织规则进入 flow |
+| `50-product-interface/deployment.md` | `50-product-interface/50-product-interface/deployment.md` | 重命名迁移 | 产品接口层 |
+| `60-verification/audits/design-implementation-audit-2026-05-12.md` | `60-verification/audits/design-implementation-audit-2026-05-12.md` | 迁移 | 审计 |
+| `20-runtime-flow/verification-acceptance-flow.md` | `20-runtime-flow/verification-acceptance-flow.md` + `20-runtime-flow/verification-acceptance-flow.md` | 拆分归档 | 稳定规则进入 flow |
+| `10-domain-model/context-capability-memory.md` | `10-domain-model/context-capability-memory.md` + `20-runtime-flow/context-assembly-flow.md` + `10-domain-model/context-capability-memory.md` | 拆分 | 规则沉淀后仅保留活跃待办 |
+| `90-archive/completed/llm-driven-development-plan.md` | `20-runtime-flow/*` + `90-archive/completed/llm-driven-development-plan.md` | 拆分归档 | 主要是历史实现记录 |
+| `20-runtime-flow/planning-execution-flow.md` | `20-runtime-flow/planning-execution-flow.md` | 内容迁移 | execution 主链设计 |
+| `40-profiles-capabilities/mcp/capability-management.md` | `40-profiles-capabilities/mcp/capability-management.md` | 迁移 | capability 层 |
+| `30-module-architecture/llm-provider-assembly.md` | `30-module-architecture/llm-provider-assembly.md` | 合并迁移 | LLM provider/预算实现说明 |
+| `70-roadmap/active/llm-context-budget-todo.md` | `70-roadmap/active/llm-context-budget-todo.md` | 迁移 | 活跃 TODO |
+| `90-archive/completed/mvp-closure-record.md` | `90-archive/completed/mvp-closure-record.md` | 归档 | MVP 收口记录 |
+| `70-roadmap/active/next-mvp-acceptance.md` | `70-roadmap/active/next-mvp-acceptance.md` | 迁移 | 未来验收目标 |
+| `70-roadmap/candidates/next-stage-demand-candidates.md` | `70-roadmap/candidates/next-stage-demand-candidates.md` | 迁移 | 候选项 |
+| `90-archive/completed/p1-development-record.md` | `90-archive/completed/p1-development-record.md` | 归档 | 已完成 |
+| `90-archive/completed/result-event-development-plan.md` | `10-domain-model/run-step-result-artifact.md` + `10-domain-model/event-observability.md` + `90-archive/completed/result-event-development-plan.md` | 拆分归档 | 稳定模型沉淀 |
+| `90-archive/superseded/refactor-archive.md` | `90-archive/superseded/refactor-archive.md` | 归档 | archive marker |
+| `70-roadmap/active/run-closure-quality-improvement-plan.md` | `20-runtime-flow/verification-acceptance-flow.md` + `70-roadmap/active/run-closure-quality-improvement-plan.md` | 拆分 | 稳定规则沉淀 |
+| `60-verification/audits/runtime-contract-conformance-audit.md` | `60-verification/audits/runtime-contract-conformance-audit.md` | 迁移 | runtime contract audit |
+| `90-archive/completed/runtime-expansion-plan.md` | `90-archive/completed/runtime-expansion-plan.md` | 归档 | 已完成 |
+| `90-archive/completed/runtime-recovery-governance-closure-design.md` | `20-runtime-flow/repair-replan-flow.md` + `90-archive/completed/90-archive/completed/runtime-recovery-governance-closure-design.md` | 拆分归档 | 稳定规则进入 flow |
+| `90-archive/records/single-workspace-performance-optimization-record.md` | `90-archive/records/single-workspace-performance-optimization-record.md` | 归档 | 性能记录 |
+| `90-archive/completed/software-dev-code-agent-closure-plan.md` | `40-profiles-capabilities/software-dev/code-agent.md` + `90-archive/completed/90-archive/completed/software-dev-code-agent-closure-plan.md` | 拆分归档 | stable profile rule + 历史 closure |
+| `70-roadmap/active/software-dev-dod-repair-closure-plan.md` | `70-roadmap/active/software-dev-dod-repair-closure-plan.md` | 迁移 | 活跃专项 |
+| `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md` | `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md` | 迁移 | software-dev 主设计 |
+| `40-profiles-capabilities/software-dev/lsp-bridge-integration.md` | `40-profiles-capabilities/software-dev/lsp-bridge-integration.md` | 迁移 | software-dev 能力扩展 |
+| `70-roadmap/active/software-requirement-development-orchestration-plan.md` | `70-roadmap/active/software-requirement-development-orchestration-plan.md` | 迁移 | 活跃主计划 |
+| `30-module-architecture/repository-structure.md` | `30-module-architecture/repository-structure.md` | 重命名迁移 | 模块/目录结构 |
+| `30-module-architecture/architecture-overview.md` | `30-module-architecture/architecture-overview.md` | 重写迁移 | 只保留稳定模块架构 |
+| `50-product-interface/tui/requirements.md` | `50-product-interface/tui/requirements.md` | 迁移 | TUI 主需求文档 |
+| `60-verification/audits/codex-request-context-comparison.md` | `20-runtime-flow/context-assembly-flow.md` + `60-verification/audits/codex-request-context-comparison.md` | 拆分 | 中立规则沉淀 + 对标审计保留 |
+| `50-product-interface/web-console/bundle-ui-optimization-record.md` | `50-product-interface/web-console/bundle-ui-optimization-record.md` | 迁移 | Web Console 记录 |
+| `60-verification/audits/full-chain-assessment-closure-plan.md` | `20-runtime-flow/overview.md` + `60-verification/audits/full-chain-assessment-closure-plan.md` | 拆分 | flow 总体问题进入 runtime-flow，评审留在 audit |
+| `30-module-architecture/llm-provider-assembly.md` | `30-module-architecture/llm-provider-assembly.md` | 合并迁移 | provider/profile 组装说明 |
+| `00-core/runtime-request-cache-note.md` | `00-core/runtime-request-cache-note.md` | 重命名迁移 | core 从属 request note |
+| `30-module-architecture/application-workorchd.md` | `30-module-architecture/application-workorchd.md` | 迁移 | 稳定接线规则已收敛到 application/module 结构 |
+| 旧核心合同文档 | `00-core/runtime-stage-contract.md` | 重构迁移 | 唯一核心 contract |
+| `30-module-architecture/storage-readmodel.md` | `10-domain-model/event-observability.md` + `30-module-architecture/storage-readmodel.md` | 拆分 | 对象/存储分离 |
+| `40-profiles-capabilities/workspace/soul-md-default-resource.md` | `40-profiles-capabilities/workspace/soul-md-default-resource.md` | 迁移 | workspace profile 资源约定 |
 | `90-archive/superseded/workorch-status.md` | `01-overview/current-state.md` + `50-product-interface/service-api.md` + `60-verification/service-acceptance.md` + `90-archive/records/delivery-history.md` | 拆分 | 当前事实、接口、验收、历史分离 |
-| `workorch-tui-agent-acceptance.md` | `60-verification/tui/tui-agent-acceptance.md` | 迁移 | TUI 验收 |
-| `workorch-tui-display-closure-tracking.md` | `60-verification/tui/display-closure-tracking.md` | 迁移 | TUI closure 跟踪 |
-| `workorch-tui-display-refresh-consistency-design.md` | `50-product-interface/tui/display-refresh-consistency-design.md` | 迁移 | TUI 产品交互设计 |
-| `workorch-tui-improvements-absorption-plan.md` | `90-archive/completed/tui-improvements-absorption-plan.md` | 归档 | 已完成 |
-| `workorch-tui-interaction-contract.md` | `50-product-interface/tui/interaction-contract.md` | 迁移 | TUI contract |
-| `workorch-unified-tui-console-migration-plan.md` | `70-roadmap/active/unified-tui-console-migration-plan.md` | 迁移 | 活跃迁移计划 |
-| `workorch-workspace-deliverable-boundary-design.md` | `10-domain-model/workspace-goal-dod.md` + `30-module-architecture/storage-readmodel.md` | 拆分 | 领域边界与实现落点分离 |
-| `workspace-builtin-git-tool-capability-plan.md` | `40-profiles-capabilities/runtime-capabilities/builtin-git-tool.md` | 迁移 | capability 文档 |
-| `workspace-concurrency-loadtest-plan.md` | `60-verification/loadtest-baseline.md` + `90-archive/records/workspace-concurrency-loadtest-record.md` | 拆分 | 当前压测基线与历史复盘分离 |
-| `workspace-data-layout-plan.md` | `90-archive/superseded/workspace-data-layout-plan.md` | 归档 | 已被新边界设计取代 |
-| `workspace-file-diff-patch-capability-plan.md` | `40-profiles-capabilities/runtime-capabilities/file-diff-patch.md` | 迁移 | capability 文档 |
-| `workspace-memory-recall-traceability-plan.md` | `10-domain-model/context-capability-memory.md` + `20-runtime-flow/context-assembly-flow.md` | 拆分 | 对象/flow 分离 |
-| `workspace-setup-draft-session-plan.md` | `40-profiles-capabilities/workspace/setup-draft-session.md` | 迁移 | workspace profile 能力设计 |
-| `workspace-soul-routing-plan.md` | `40-profiles-capabilities/workspace/soul-routing.md` | 迁移 | workspace profile 路由 |
-| `workspace-web-search-capability-plan.md` | `40-profiles-capabilities/runtime-capabilities/web-search.md` | 迁移 | capability 文档 |
+| `60-verification/tui/tui-agent-acceptance.md` | `60-verification/tui/tui-agent-acceptance.md` | 迁移 | TUI 验收 |
+| `60-verification/tui/display-closure-tracking.md` | `60-verification/tui/display-closure-tracking.md` | 迁移 | TUI closure 跟踪 |
+| `50-product-interface/tui/display-refresh-consistency-design.md` | `50-product-interface/tui/display-refresh-consistency-design.md` | 迁移 | TUI 产品交互设计 |
+| `90-archive/completed/tui-improvements-absorption-plan.md` | `90-archive/completed/tui-improvements-absorption-plan.md` | 归档 | 已完成 |
+| `50-product-interface/tui/interaction-contract.md` | `50-product-interface/tui/interaction-contract.md` | 迁移 | TUI contract |
+| `70-roadmap/active/unified-tui-console-migration-plan.md` | `70-roadmap/active/unified-tui-console-migration-plan.md` | 迁移 | 活跃迁移计划 |
+| `10-domain-model/workspace-goal-dod.md` | `10-domain-model/workspace-goal-dod.md` + `30-module-architecture/storage-readmodel.md` | 拆分 | 领域边界与实现落点分离 |
+| `40-profiles-capabilities/runtime-capabilities/builtin-git-tool.md` | `40-profiles-capabilities/runtime-capabilities/builtin-git-tool.md` | 迁移 | capability 文档 |
+| `90-archive/records/workspace-concurrency-loadtest-record.md` | `60-verification/loadtest-baseline.md` + `90-archive/records/workspace-concurrency-loadtest-record.md` | 拆分 | 当前压测基线与历史复盘分离 |
+| `90-archive/superseded/workspace-data-layout-plan.md` | `90-archive/superseded/90-archive/superseded/workspace-data-layout-plan.md` | 归档 | 已被新边界设计取代 |
+| `40-profiles-capabilities/runtime-capabilities/file-diff-patch.md` | `40-profiles-capabilities/runtime-capabilities/file-diff-patch.md` | 迁移 | capability 文档 |
+| `10-domain-model/context-capability-memory.md` | `10-domain-model/context-capability-memory.md` + `20-runtime-flow/context-assembly-flow.md` | 拆分 | 对象/flow 分离 |
+| `40-profiles-capabilities/workspace/setup-draft-session.md` | `40-profiles-capabilities/workspace/setup-draft-session.md` | 迁移 | workspace profile 能力设计 |
+| `40-profiles-capabilities/workspace/soul-routing.md` | `40-profiles-capabilities/workspace/soul-routing.md` | 迁移 | workspace profile 路由 |
+| `40-profiles-capabilities/runtime-capabilities/web-search.md` | `40-profiles-capabilities/runtime-capabilities/web-search.md` | 迁移 | capability 文档 |
 
 ## 7. 收口规则
 

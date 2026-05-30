@@ -6,7 +6,7 @@
 
 ---
 
-## 一、DMI 改进计划（llm-decision-memory-improvement-plan.md）
+## 一、DMI 改进计划（历史 memory 改进计划）
 
 ### DMI-16 ~ DMI-24 验证结果
 
@@ -169,7 +169,7 @@
 
 #### P0 — 高优先级
 
-1. **更新 `../../workorch-architecture-design.md`**
+1. **更新 `../../30-module-architecture/architecture-overview.md`**
    - 补充 governance 模块描述（权重 45，自动治理引擎）
    - 补充 file/web blocks
    - 更新 step kind 表（7→14）
@@ -177,7 +177,7 @@
    - 补充 CLI/TUI/Agent 客户端架构
    - 更正 result 模块状态（非独立注册模块）
 
-2. **更新 `../../runtime-recovery-governance-closure-design.md`**
+2. **更新 `../../90-archive/completed/runtime-recovery-governance-closure-design.md`**
    - 补充 duplicate failure signature block 机制
    - 写明预算数值（provider retry=2, runtime repair=3）
    - 补充 repair scope 按 failureSignature 隔离计数策略
@@ -185,7 +185,7 @@
 
 #### P1 — 中优先级
 
-3. **更新 `../../workorch-runtime-stage-contract-neutrality-design.md`**
+3. **更新 `../../00-core/runtime-stage-contract.md`**
    - 补充未文档化的中立实现行为
    - 补充运行状态、终态、恢复和上下文合约到唯一核心设计文档
 

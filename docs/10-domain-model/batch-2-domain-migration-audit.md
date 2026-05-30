@@ -18,7 +18,7 @@ Last Updated: 2026-05-29
 
 ### 1.1 Workspace 领域边界与存储实现边界混写
 
-`../workorch-workspace-deliverable-boundary-design.md` 同时包含：
+`workspace-goal-dod.md` 同时包含：
 
 - Workspace 领域边界
 - 目录布局
@@ -33,8 +33,8 @@ Last Updated: 2026-05-29
 
 ### 1.2 Memory 同时被描述为知识资产和过程证据来源
 
-`../workspace-memory-recall-traceability-plan.md` 与
-`../llm-decision-memory-improvement-plan.md` 对 Memory 的关注点不同：
+`context-capability-memory.md` 与
+`context-capability-memory.md` 对 Memory 的关注点不同：
 
 - 前者强调 recall trace 和过程证据
 - 后者强调高价值 Memory 的写入、排序、召回策略
@@ -43,11 +43,11 @@ Last Updated: 2026-05-29
 
 - 领域层只保留 `MemoryItem` 与 `MemoryRecallTrace` 的对象边界
 - 排序、refresh、repair 继承等动态规则后续迁到 flow 层
-- `../llm-decision-memory-improvement-plan.md` 的高价值 memory 分类与 accepted input / necessary output 规则已开始迁入 `context-capability-memory.md`
+- `context-capability-memory.md` 的高价值 memory 分类与 accepted input / necessary output 规则已开始迁入 `context-capability-memory.md`
 
 ### 1.3 Result / Artifact / Event 与旧状态文档存在重复定义
 
-`../next-stage-result-event-development-plan.md`、`../workorch-runtime-storage-json-control-design.md`
+`../90-archive/completed/result-event-development-plan.md`、`../30-module-architecture/storage-readmodel.md`
 和旧综合状态文档（现归档副本见 `../90-archive/superseded/workorch-status.md`）
 都描述了 Result / Artifact / Event 的部分边界。
 

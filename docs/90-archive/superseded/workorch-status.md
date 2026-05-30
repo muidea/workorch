@@ -42,7 +42,4 @@ Last Updated: 2026-05-30
 
 ## Compatibility Note
 
-当前根目录仍保留一个轻量 `../../workorch-status.md` 兼容入口，用于旧引用过渡。
-
-当历史 audit / archive 中的剩余兼容说明也不再需要根目录落点时，
-可进一步只保留本归档副本。
+当前仅保留本归档副本作为历史综合状态入口说明。

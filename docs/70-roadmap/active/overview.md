@@ -18,13 +18,13 @@ Last Updated: 2026-05-29
 
 ## Historical Sources
 
-- `../../auto-governance-ticket-approval-plan.md`
-- `../../software-requirement-development-orchestration-plan.md`
-- `../../software-dev-dod-repair-closure-plan.md`
-- `../../workorch-unified-tui-console-migration-plan.md`
-- `../../next-mvp-acceptance.md`
-- `../../model-aware-llm-context-budget-todo.md`
-- `../../run-closure-quality-improvement-plan.md`
+- `auto-governance-ticket-approval-plan.md`
+- `software-requirement-development-orchestration-plan.md`
+- `software-dev-dod-repair-closure-plan.md`
+- `unified-tui-console-migration-plan.md`
+- `next-mvp-acceptance.md`
+- `llm-context-budget-todo.md`
+- `run-closure-quality-improvement-plan.md`
 
 ## Current Active Follow-up Themes
 

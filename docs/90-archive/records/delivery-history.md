@@ -178,7 +178,7 @@ MVP 已收口，不再作为活跃待办清单。
 
 归档主文档：
 
-- `../../mvp-backlog.md`
+- `../completed/mvp-closure-record.md`
 
 ## Workspace Concurrency Historical Summary
 

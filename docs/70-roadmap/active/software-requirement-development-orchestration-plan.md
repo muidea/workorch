@@ -173,7 +173,7 @@ Last Updated: 2026-05-30
 
 ### 已完成能力
 
-`../../software-dev-code-agent-closure-plan.md` 已记录上一阶段 Code Agent 能力收口，
+`../../90-archive/completed/software-dev-code-agent-closure-plan.md` 已记录上一阶段 Code Agent 能力收口，
 当前 DEV-01 至 DEV-15 均为 `verified`。
 
 已具备的平台能力：

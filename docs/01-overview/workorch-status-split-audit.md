@@ -8,7 +8,7 @@ Last Updated: 2026-05-30
 
 ## Scope
 
-本审计记录第一次对 `../workorch-status.md` 做实质正文拆分迁移时识别出的三类问题：
+本审计记录第一次对旧综合状态文档做实质正文拆分迁移时识别出的三类问题：
 
 - 冲突和不一致
 - 内容不完整、需要补充
@@ -19,7 +19,7 @@ Last Updated: 2026-05-30
 本文件记录的是第一次拆分迁移当时的判断，不等于当前实时未收口清单。
 
 本文中的“旧综合状态文档”指当时的历史汇总入口，也就是后续降级为
-`../workorch-status.md` 的那份文档。除开头点名外，后文优先使用这一历史称呼。
+（后续归档副本为 `../90-archive/superseded/workorch-status.md`）。除开头点名外，后文优先使用这一历史称呼。
 
 后续已完成的主要收口包括：
 
@@ -75,7 +75,7 @@ Last Updated: 2026-05-30
 
 ### 1.3 部署文档与服务验收文档仍有部分重叠
 
-`../deployment.md` 与新 `../60-verification/service-acceptance.md` 都还保留运行和验证命令。
+`../50-product-interface/deployment.md` 与新 `../60-verification/service-acceptance.md` 都还保留运行和验证命令。
 
 处理结论：
 

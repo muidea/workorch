@@ -147,7 +147,7 @@ planning / execution 主链会沉淀：
 ## Source Documents
 
 - `../00-core/runtime-stage-contract.md`
-- `../graph-followup-dod-assessment-closure-plan.md`
+- `verification-acceptance-flow.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 
 ## Open Migration Notes

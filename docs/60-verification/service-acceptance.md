@@ -12,14 +12,14 @@ Last Updated: 2026-05-30
 
 ## Responsibility Boundary
 
-- `../deployment.md` 负责如何启动、如何挂载配置、如何选择 backend
+- `../50-product-interface/deployment.md` 负责如何启动、如何挂载配置、如何选择 backend
 - 本文负责如何证明当前服务行为、读写路径和运行态投影符合预期
 - 完整资源面与端点分组以 `../50-product-interface/service-api.md` 为准
 
 换句话说：
 
 - 若问题是“该用哪种启动方式、配置怎么挂载、backend 怎么切换”
-  - 看 `../deployment.md`
+  - 看 `../50-product-interface/deployment.md`
 - 若问题是“启动之后哪些行为必须通过验证、由哪些脚本或 fixture 证明”
   - 看本文
 
@@ -332,7 +332,7 @@ make verify-service-file
 
 - 两个目标都应连接当前部署实例
 - `make verify-service-file` 只是别名，不负责启动或重启服务
-- 若实例尚未启动，先按 `../deployment.md` 完成启动，再执行这些验收入口
+- 若实例尚未启动，先按 `../50-product-interface/deployment.md` 完成启动，再执行这些验收入口
 
 ## File Backend Vs Deployed Instance
 

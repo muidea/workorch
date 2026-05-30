@@ -126,4 +126,4 @@ go run ./application/workorch --server -config-dir config/file
 
 ## Source Documents
 
-- `../deployment.md`
+- `deployment.md`

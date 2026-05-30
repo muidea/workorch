@@ -15,7 +15,7 @@ API/Web impact, and verification commands.
 
 Active delivery plan:
 
-- `../../next-stage-result-event-development-plan.md`
+- `../../90-archive/completed/result-event-development-plan.md`
 
 ## Completed P1 Delivery
 
@@ -40,7 +40,7 @@ Target direction:
 
 Acceptance:
 
-- Tracked in `../../next-stage-result-event-development-plan.md`.
+- Tracked in `../../90-archive/completed/result-event-development-plan.md`.
 
 ### C9. Persistent Workorch Event Stream
 
@@ -56,7 +56,7 @@ Target direction:
 
 Acceptance:
 
-- Tracked in `../../next-stage-result-event-development-plan.md`.
+- Tracked in `../../90-archive/completed/result-event-development-plan.md`.
 
 ### C2. Distributed Scheduling And External Worker Fleets
 

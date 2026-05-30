@@ -18,8 +18,8 @@ Last Updated: 2026-05-30
 
 ## Candidate Inputs
 
-- `../../refactor-progress.md`
-- `../../workorch-status.md`
+- `refactor-archive.md`
+- `workorch-status.md`
 - `workspace-data-layout-plan.md`
 - 迁移完成后的旧入口跳转文档
 
@@ -41,7 +41,7 @@ Last Updated: 2026-05-30
 
 - 若文档仍有“历史实现记录”价值，优先留在 `../completed/` 或 `../records/`
 - 若文档只剩“已被替代”说明，则迁入 `superseded/`
-- 若文档仍是根目录兼容落点，例如 `../../workorch-status.md`，需先完成兼容入口退出，再正式迁入
+- 若文档仍承担外部兼容别名角色，需先完成兼容入口退出，再正式只保留归档副本说明
 
 ## Cross-Archive Navigation
 

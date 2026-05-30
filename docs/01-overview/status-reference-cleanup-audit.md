@@ -8,9 +8,9 @@ Last Updated: 2026-05-30
 
 ## Scope
 
-本审计记录第二轮“`../workorch-status.md` 引用清理迁移”的结果。
+本审计记录第二轮“旧综合状态文档引用清理迁移”的结果。
 
-目标是清理新结构文档中仍把 `../workorch-status.md` 当作 source/fact 文档的情况，
+目标是清理新结构文档中仍把旧综合状态文档当作 source/fact 文档的情况，
 将能直接迁移的引用改为新的承接文档。
 
 ## Completed Cleanup
@@ -36,7 +36,7 @@ Last Updated: 2026-05-30
 
 ## Remaining Intentional References
 
-以下位置仍保留 `../workorch-status.md`，原因如下：
+以下位置仍保留对旧综合状态文档的直接点名，原因如下：
 
 - `batch-1-migration-audit.md`
   - 该审计文档记录的是 Batch 1 当时的事实，应保留原始审计上下文。
@@ -54,7 +54,7 @@ Last Updated: 2026-05-30
 
 ## Remaining Non-Transition References Outside New Structure
 
-当前未发现新的“仍把 `../workorch-status.md` 当正文事实来源”的 active 设计正文文档。
+当前未发现新的“仍把旧综合状态文档当正文事实来源”的 active 设计正文文档。
 
 剩余引用主要属于：
 
@@ -63,17 +63,17 @@ Last Updated: 2026-05-30
 
 ## Supersede Readiness
 
-当前可用以下检查表判断根目录 `../workorch-status.md` 的内部迁移是否已经完成：
+当前可用以下检查表判断旧综合状态文档的内部迁移是否已经完成：
 
 | 条件 | 当前状态 | 说明 |
 | --- | --- | --- |
-| active 设计正文不再把 `../workorch-status.md` 当事实来源 | satisfied | 当前 active 正文已无此类引用 |
-| root-level 阅读导航不再把 `../workorch-status.md` 作为推荐过渡入口 | satisfied | `../README.md` 与 `current-state.md` 已移除对其的主动推荐 |
+| active 设计正文不再把旧综合状态文档当事实来源 | satisfied | 当前 active 正文已无此类引用 |
+| root-level 阅读导航不再把旧综合状态文档作为推荐过渡入口 | satisfied | `../README.md` 与 `current-state.md` 已移除对其的主动推荐 |
 | archive/overview 历史说明不再需要保留旧路径追溯 | satisfied | 剩余保留已切换为“旧综合状态文档”历史语境或 superseded 副本路径 |
 | 存在明确 superseded 落位 | satisfied | `../90-archive/superseded/workorch-status.md` 已建立正式归档副本 |
 
 当前结论：
 
-- 内部文档迁移已经完成；`../workorch-status.md` 不再是 active 阅读入口或内部事实来源
-- 当前继续保留在根目录的唯一原因是外部旧引用兼容
-- 后续是否物理移除根目录兼容别名，不再属于文档结构迁移阻塞项
+- 内部文档迁移已经完成；旧综合状态文档不再是 active 阅读入口或内部事实来源
+- 根目录兼容别名如继续保留，仅属于外部旧引用兼容策略
+- 是否物理移除根目录兼容别名，不再属于文档结构迁移阻塞项

@@ -92,8 +92,8 @@ Last Updated: 2026-05-29
 
 ## Source Documents
 
-- `../structure.md`
+- `repository-structure.md`
 
 ## Open Migration Notes
 
-- 旧结构映射和历史 checkpoint 仍在旧 `../structure.md` 中，后续可继续收敛到 archive。
+- 旧结构映射和历史 checkpoint 仍在旧 `repository-structure.md` 中，后续可继续收敛到 archive。

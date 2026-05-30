@@ -10,8 +10,7 @@ Last Updated: 2026-05-30
 
 以下稳定定义已迁入正式结构，不再由本 roadmap 文档重复维护正文：
 
-- [model-aware-llm-context-budget-design.md](../../model-aware-llm-context-budget-design.md)
-- [workorch-llm-auto-context-profile-design.md](../../workorch-llm-auto-context-profile-design.md)
+- [llm-provider-assembly.md](../../30-module-architecture/llm-provider-assembly.md)
 - [runtime-stage-contract.md](../../00-core/runtime-stage-contract.md)
 - [context-assembly-flow.md](../../20-runtime-flow/context-assembly-flow.md)
 - [llm-provider-assembly.md](../../30-module-architecture/llm-provider-assembly.md)

@@ -151,7 +151,7 @@ Last Updated: 2026-05-30
 
 ## 与现有计划的关系
 
-- 本文档是 `../../software-requirement-development-orchestration-plan.md` 的专项后续收口文档。
+- 本文档是 `software-requirement-development-orchestration-plan.md` 的专项后续收口文档。
 - 已完成的 SRD-37 / SRD-38 解决了 DoD 子集误接受和 workspace outcome 指向旧 run 的问题。
 - 本文档继续处理 DoD 全覆盖门禁生效后暴露出的 repair 收敛、证据质量、历史 memory 可信度和软件开发模板执行策略问题。
 

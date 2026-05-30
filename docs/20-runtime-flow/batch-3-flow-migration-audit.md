@@ -35,31 +35,31 @@ Last Updated: 2026-05-29
 
 以下文档都涉及 context 组织：
 
-- `../codex-like-llm-prompt-context-design.md`
-- `../workorch-llm-request-cache-aware-context-design.md`
-- `../workorch-codex-request-context-comparison.md`
-- `../workorch-runtime-stage-contract-neutrality-design.md`
+- `context-assembly-flow.md`
+- `../00-core/runtime-request-cache-note.md`
+- `../60-verification/audits/codex-request-context-comparison.md`
+- 旧核心合同文档
 
 处理结论：
 
 - `00-core/` 保留唯一 contract
 - `context-assembly-flow.md` 只保留链路视角
 - provider-facing 结构和实现细节后续放模块层
-- `../workorch-codex-request-context-comparison.md` 的对标结论已拆到
+- `../60-verification/audits/codex-request-context-comparison.md` 的对标结论已拆到
   `context-assembly-flow.md` 与 `../60-verification/audits/codex-request-context-comparison.md`
-- `../workorch-llm-request-cache-aware-context-design.md` 的稳定 cache-aware 规则已拆到
+- `../00-core/runtime-request-cache-note.md` 的稳定 cache-aware 规则已拆到
   `../00-core/runtime-request-cache-note.md`
 
 ### 1.3 Repair / Replan / Governance 仍然存在“对象”和“流程”交织
 
-`../runtime-recovery-governance-closure-design.md` 既讲 ticket 结构，
+历史恢复治理设计文档（现归档于 `../90-archive/completed/runtime-recovery-governance-closure-design.md`）既讲 ticket 结构，
 也讲 auto-governance 和恢复动作表。
 
 处理结论：
 
 - 对象定义已在 domain 层抽出
 - 恢复链和动作转换留在 flow 层
-- `../runtime-recovery-governance-closure-design.md` 的稳定恢复治理规则已迁入
+- 上述历史恢复治理设计文档的稳定恢复治理规则已迁入
   `repair-replan-flow.md`，历史正文进入 completed archive
 
 ## 2. 内容不完整，需要补充
@@ -74,7 +74,7 @@ Last Updated: 2026-05-29
 
 ### 2.2 Planning/execution flow 仍缺 block kind 级细化
 
-当前 `planning-execution-flow.md` 已继续吸收 `../llm-driven-workspace-execution-design.md`
+当前 `planning-execution-flow.md` 已继续吸收 `planning-execution-flow.md`
 中的稳定链路规则，但还没有展开：
 
 - patch preview / patch apply / patch revert
@@ -83,7 +83,7 @@ Last Updated: 2026-05-29
 
 ### 2.3 Verification/acceptance flow 仍缺 coverageWorkItems 细化
 
-当前已继续吸收 `../run-closure-quality-improvement-plan.md` 中的 closure 规则，
+当前已继续吸收 `../70-roadmap/active/run-closure-quality-improvement-plan.md` 中的 closure 规则，
 但只抽出了：
 
 - evidence-backed dodAssessment
@@ -129,7 +129,7 @@ Last Updated: 2026-05-29
 这意味着 `20-runtime-flow/` 目前只能先建立外层骨架，不能完全替代 core 文档中
 的细化规则。
 
-### 3.2 `../run-closure-quality-improvement-plan.md` 仍是 closure 语义的重要来源
+### 3.2 `../70-roadmap/active/run-closure-quality-improvement-plan.md` 仍是 closure 语义的重要来源
 
 例如：
 
@@ -143,8 +143,8 @@ Last Updated: 2026-05-29
 
 ### 3.3 software-dev 特化仍会污染 flow 输入材料
 
-`../graph-followup-dod-assessment-closure-plan.md` 和
-`../workorch-full-chain-assessment-closure-plan.md` 虽强调 kernel 中立，
+`verification-acceptance-flow.md` 和
+`../60-verification/audits/full-chain-assessment-closure-plan.md` 虽强调 kernel 中立，
 但大量示例和验收路径仍以 software-dev 为主。
 
 处理结论：

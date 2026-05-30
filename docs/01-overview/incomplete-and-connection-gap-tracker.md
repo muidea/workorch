@@ -128,8 +128,8 @@ Last Updated: 2026-05-30
 
 补充：
 
-- `../workorch-magiccommon-context-first-upgrade.md` 的稳定内容已迁入 `../30-module-architecture/application-workorchd.md`
-- `../model-aware-llm-context-budget-design.md` 与 `../workorch-llm-auto-context-profile-design.md` 的稳定内容已迁入 `../30-module-architecture/llm-provider-assembly.md`
+- `../30-module-architecture/application-workorchd.md` 的稳定内容已迁入 `../30-module-architecture/application-workorchd.md`
+- `../30-module-architecture/llm-provider-assembly.md` 与 `../30-module-architecture/llm-provider-assembly.md` 的稳定内容已迁入 `../30-module-architecture/llm-provider-assembly.md`
 - `../00-core/runtime-request-cache-note.md` 已补 provider-neutral vs provider-specific
   boundary、module landing matrix 与 verification landing；当前剩余主要是
   `llm-provider-assembly.md` 自身的实现落点继续补细
@@ -216,7 +216,7 @@ Last Updated: 2026-05-30
 
 ## B. 无法完整衔接的内容断点
 
-### B1. `../workorch-status.md` 内部迁移已完成，当前仅保留外部兼容别名
+### B1. 旧综合状态入口内部迁移已完成，当前仅保留外部兼容别名
 
 结论：
 
@@ -231,7 +231,7 @@ Last Updated: 2026-05-30
 
 补充进展：
 
-- `../README.md` 与 `current-state.md` 已不再主动推荐根目录 `workorch-status.md`
+- `../README.md` 与 `current-state.md` 已不再主动推荐旧综合状态入口
 - 当前剩余保留已主要收缩为历史 audit / archive 语境和根兼容别名本身
 - `status-reference-cleanup-audit.md` 已将其从“迁移未收口项”降级为“外部兼容别名”
 
@@ -288,11 +288,11 @@ Last Updated: 2026-05-30
 
 典型来源：
 
-- `../workspace-memory-recall-traceability-plan.md`
-- `../llm-decision-memory-improvement-plan.md`
-- `../run-closure-quality-improvement-plan.md`
-- `../workorch-cli-tui-agent-requirements.md`
-- `../workorch-runtime-storage-json-control-design.md`
+- `../10-domain-model/context-capability-memory.md`
+- `../10-domain-model/context-capability-memory.md`
+- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
+- `../50-product-interface/tui/requirements.md`
+- `../30-module-architecture/storage-readmodel.md`
 
 结论：
 
@@ -301,9 +301,9 @@ Last Updated: 2026-05-30
 
 补充：
 
-- `../llm-decision-memory-improvement-plan.md` 已开始沉到 `../10-domain-model/context-capability-memory.md`
-- `../llm-driven-workspace-execution-design.md` 已开始沉到 `../20-runtime-flow/planning-execution-flow.md`
-- `../run-closure-quality-improvement-plan.md` 的稳定 closure 规则已继续沉到 `../20-runtime-flow/verification-acceptance-flow.md`
+- `../10-domain-model/context-capability-memory.md` 已开始沉到 `../10-domain-model/context-capability-memory.md`
+- `../20-runtime-flow/planning-execution-flow.md` 已开始沉到 `../20-runtime-flow/planning-execution-flow.md`
+- `../70-roadmap/active/run-closure-quality-improvement-plan.md` 的稳定 closure 规则已继续沉到 `../20-runtime-flow/verification-acceptance-flow.md`
 
 ### B4. Context 组织规则和 provider request rendering 规则仍分散
 
@@ -312,7 +312,7 @@ Last Updated: 2026-05-30
 - `../00-core/runtime-stage-contract.md`
 - `../20-runtime-flow/context-assembly-flow.md`
 - `../00-core/runtime-request-cache-note.md`
-- `../codex-like-llm-prompt-context-design.md`
+- `../20-runtime-flow/context-assembly-flow.md`
 - `../60-verification/audits/codex-request-context-comparison.md`
 
 结论：
@@ -354,7 +354,7 @@ Last Updated: 2026-05-30
 
 虽然新目录已经建立，但以下问题仍存在：
 
-- 部分旧 roadmap / completed / superseded 文档已迁出正文并降级为过渡索引，`../software-dev-code-agent-closure-plan.md` 与 `../workorch-tui-improvements-absorption-plan.md` 也已进入 `90-archive/completed/`
+- 部分旧 roadmap / completed / superseded 文档已迁出正文并降级为过渡索引，`../90-archive/completed/software-dev-code-agent-closure-plan.md` 与 `../90-archive/completed/tui-improvements-absorption-plan.md` 也已进入 `90-archive/completed/`
 - archive 已开始接收 completed / records / superseded 正文，但仍未全部收口
 - 审计文档与计划文档仍有角色交叉
 

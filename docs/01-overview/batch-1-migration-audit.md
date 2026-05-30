@@ -16,8 +16,8 @@ Last Updated: 2026-05-30
 
 说明：
 
-- 本文中的“旧综合状态文档”指当时仍位于根目录、后续降级为
-  `../workorch-status.md` 的历史汇总文档
+- 本文中的“旧综合状态文档”指当时仍位于根目录、后续迁入
+  `../90-archive/superseded/workorch-status.md` 的历史汇总文档
 - 除首次点名外，后文优先使用“旧综合状态文档”称呼，以强调这里记录的是
   Batch 1 当时的历史语境，而不是当前事实依赖
 
@@ -26,7 +26,7 @@ Last Updated: 2026-05-30
 ### 1.1 Core 入口路径曾经不一致，现已修复主入口
 
 - `../../AGENTS.md` 和 `../README.md` 已切换到 `../00-core/runtime-stage-contract.md`
-- 旧路径 `../workorch-runtime-stage-contract-neutrality-design.md` 当前仅保留过渡说明
+- 旧核心合同文档当前仅保留过渡说明
 
 处理结论：
 
@@ -36,7 +36,7 @@ Last Updated: 2026-05-30
 ### 1.2 Request Note 入口路径曾经不一致，现已修复主入口
 
 - `../../AGENTS.md` 已切换到 `../00-core/runtime-request-cache-note.md`
-- 旧路径 `../workorch-llm-request-cache-aware-context-design.md` 当前仅保留过渡说明
+- 旧路径 `../00-core/runtime-request-cache-note.md` 当前仅保留过渡说明
 
 处理结论：
 
@@ -93,8 +93,8 @@ Batch 1 当时，旧综合状态文档中的以下内容还没有迁出：
 
 当前仍有多份文档继续引用：
 
-- `../workorch-runtime-stage-contract-neutrality-design.md`
-- `../workorch-llm-request-cache-aware-context-design.md`
+- 旧核心合同文档
+- `../00-core/runtime-request-cache-note.md`
 - 旧综合状态文档
 
 这意味着在后续批次完成前，文档体系仍处于“新旧入口并存”的过渡态。

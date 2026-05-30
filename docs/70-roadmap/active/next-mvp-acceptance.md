@@ -170,7 +170,7 @@ post-completion control-plane governance features.
 - completed: `Runtime Expansion`
   Controlled shell execution, generalized diff patch apply, formal block
   execution graph, external runtime adapter contract, and runtime observability
-  are tracked as completed in `../../runtime-expansion-plan.md`.
+  are tracked as completed in `../../90-archive/completed/runtime-expansion-plan.md`.
 - completed: `LLM Graph Closure`
   Real-provider LLM decisions can emit validated `executionGraph` output; graph
   leaf completion dispatches an LLM follow-up for evidence-backed DoD
@@ -178,7 +178,7 @@ post-completion control-plane governance features.
 - completed: `Advanced Runtime And Scheduling`
   MCP resources, prompts, streaming evidence, long-lived stdio session reuse,
   and priority-aware local run scheduling are tracked as completed in
-  `../../advanced-runtime-scheduling-plan.md`.
+  `../../90-archive/completed/advanced-runtime-scheduling-plan.md`.
 - completed: `Decision Batch Resolution`
   Decision Queue now supports resolving multiple open Decision Tickets in one
   formal batch operation. The API validates all requested tickets before

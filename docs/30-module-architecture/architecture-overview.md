@@ -138,4 +138,4 @@ blocks 负责：
 
 ## Open Migration Notes
 
-- 当前旧 `../workorch-architecture-design.md` 仍包含过多易漂移内容，后续应继续收缩到本文件所定义的稳定范围。
+- 当前旧 `architecture-overview.md` 仍包含过多易漂移内容，后续应继续收缩到本文件所定义的稳定范围。

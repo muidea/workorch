@@ -15,21 +15,21 @@ Last Updated: 2026-05-29
 
 已迁入新落点：
 
-- `../next-stage-demand-candidates.md`
-- `../software-requirement-development-orchestration-plan.md`
-- `../software-dev-dod-repair-closure-plan.md`
-- `../workorch-unified-tui-console-migration-plan.md`
-- `../next-mvp-acceptance.md`
-- `../model-aware-llm-context-budget-todo.md`
-- `../run-closure-quality-improvement-plan.md`
-- `../mvp-backlog.md`
-- `../next-stage-p1-development-plan.md`
-- `../runtime-expansion-plan.md`
-- `../advanced-runtime-scheduling-plan.md`
-- `../next-stage-result-event-development-plan.md`
-- `../software-dev-code-agent-closure-plan.md`
-- `../workorch-tui-improvements-absorption-plan.md`
-- `../llm-driven-development-plan.md`
+- `../70-roadmap/candidates/next-stage-demand-candidates.md`
+- `../70-roadmap/active/software-requirement-development-orchestration-plan.md`
+- `../70-roadmap/active/software-dev-dod-repair-closure-plan.md`
+- `../70-roadmap/active/unified-tui-console-migration-plan.md`
+- `../70-roadmap/active/next-mvp-acceptance.md`
+- `../70-roadmap/active/llm-context-budget-todo.md`
+- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
+- `../90-archive/completed/mvp-closure-record.md`
+- `../90-archive/completed/p1-development-record.md`
+- `../90-archive/completed/runtime-expansion-plan.md`
+- `../90-archive/completed/advanced-runtime-scheduling-plan.md`
+- `../90-archive/completed/result-event-development-plan.md`
+- `../90-archive/completed/software-dev-code-agent-closure-plan.md`
+- `../90-archive/completed/tui-improvements-absorption-plan.md`
+- `../90-archive/completed/llm-driven-development-plan.md`
 
 ## Current State
 

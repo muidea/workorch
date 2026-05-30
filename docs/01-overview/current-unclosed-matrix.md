@@ -17,7 +17,7 @@ Last Updated: 2026-05-30
 - core / domain / flow / module / profile / product / verification 的稳定正文已完成落位
 - roadmap 已收敛为 active follow-up 入口
 - completed / records / superseded 已完成分层
-- `workorch-status.md` 已完成内部退役，只剩外部兼容别名角色
+- 历史综合状态入口已完成内部退役，只剩外部兼容别名角色
 
 ## Residual Editorial Follow-up
 
@@ -25,4 +25,4 @@ Last Updated: 2026-05-30
 
 1. `../00-core/runtime-stage-contract.md` 的极少量 grouped boundary/checklist 文案继续压缩
 2. `01-overview` / `90-archive` 中的少量历史追溯旧引用继续压缩
-3. 根目录 `../workorch-status.md` 是否物理移除，属于外部兼容策略决定，不再属于内部文档迁移阻塞
+3. 根目录兼容别名是否物理移除，属于外部兼容策略决定，不再属于内部文档迁移阻塞

@@ -18,7 +18,7 @@ Last Updated: 2026-05-29
 
 ## Historical Sources
 
-- `../../next-stage-demand-candidates.md`
+- `next-stage-demand-candidates.md`
 
 ## Candidate Documents
 

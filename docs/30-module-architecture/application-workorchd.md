@@ -166,7 +166,6 @@ server 层不应复制业务逻辑；其职责应止于：
 
 ## Source Documents
 
-- `../90-archive/completed/magiccommon-context-first-upgrade.md`
 - `repository-structure.md`
 - `../50-product-interface/service-api.md`
 

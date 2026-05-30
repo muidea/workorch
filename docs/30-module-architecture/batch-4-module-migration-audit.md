@@ -18,7 +18,7 @@ Last Updated: 2026-05-29
 
 ### 1.1 旧架构文档与当前代码树存在漂移
 
-`../workorch-architecture-design.md` 中仍存在：
+`architecture-overview.md` 中仍存在：
 
 - kernel 数量描述过时
 - blocks 数量描述过时
@@ -32,7 +32,7 @@ Last Updated: 2026-05-29
 
 ### 1.2 结构文档与架构文档职责重叠
 
-`../structure.md` 和 `../workorch-architecture-design.md` 都在描述：
+`repository-structure.md` 和 `architecture-overview.md` 都在描述：
 
 - 目录树
 - 模块落点
@@ -45,8 +45,8 @@ Last Updated: 2026-05-29
 
 ### 1.3 LLM 预算/auto profile 文档兼具设计与实现双重角色
 
-`../model-aware-llm-context-budget-design.md` 和
-`../workorch-llm-auto-context-profile-design.md` 既像设计，又像实现说明。
+`llm-provider-assembly.md` 和
+`llm-provider-assembly.md` 既像设计，又像实现说明。
 
 处理结论：
 
@@ -95,7 +95,7 @@ Last Updated: 2026-05-29
 补充说明：
 
 - 当前 `storage-readmodel.md` 已迁入 itemized runtime evidence storage、raw payload ref strategy、projection-oriented read model，以及 file backend 原子写 / append-only 基本方向。
-- `../workorch-runtime-storage-json-control-design.md` 的稳定内容已拆到 `../10-domain-model/event-observability.md` 和 `storage-readmodel.md`。
+- `storage-readmodel.md` 的稳定内容已拆到 `../10-domain-model/event-observability.md` 和 `storage-readmodel.md`。
 - 仍待后续收口的重点是 path-safe readable naming、segment overflow fallback，以及 full repository contract 与代码落点映射。
 
 ### 2.4 application-workorchd 仍缺 route 层与 session 层细化
@@ -114,7 +114,7 @@ Last Updated: 2026-05-29
 
 补充说明：
 
-- `../workorch-magiccommon-context-first-upgrade.md` 的稳定内容已迁入 `application-workorchd.md`
+- `application-workorchd.md` 的稳定内容已迁入 `application-workorchd.md`
 - lifecycle/context-first 升级已明确归入应用层/框架接线边界，而非 runtime core contract
 
 ### 2.5 llm-provider-assembly 已迁入第一轮正文，但 provider 细化仍缺
@@ -133,14 +133,14 @@ Last Updated: 2026-05-29
 
 补充说明：
 
-- `../model-aware-llm-context-budget-design.md` 与 `../workorch-llm-auto-context-profile-design.md` 的稳定内容已继续迁入本文件
+- `llm-provider-assembly.md` 与 `llm-provider-assembly.md` 的稳定内容已继续迁入本文件
 
 ## 3. 无法完整衔接的内容断点
 
 ### 3.1 旧文档大量混入历史实现记录
 
-`../structure.md`、`../workorch-magiccommon-context-first-upgrade.md`、
-`../workorch-runtime-storage-json-control-design.md` 都混有：
+`repository-structure.md`、`application-workorchd.md`、
+`storage-readmodel.md` 都混有：
 
 - 历史收口记录
 - 验证命令
@@ -166,6 +166,6 @@ Last Updated: 2026-05-29
 
 - `../00-core/runtime-stage-contract.md`
 - `../20-runtime-flow/context-assembly-flow.md`
-- `../workorch-llm-request-cache-aware-context-design.md`
+- `../00-core/runtime-request-cache-note.md`
 
 后续必须继续从 core/flow 中抽取“实现落点”部分，才能让本层完整闭合。

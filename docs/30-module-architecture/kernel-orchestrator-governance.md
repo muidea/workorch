@@ -102,7 +102,7 @@ approval 不应承担：
 - `architecture-overview.md`
 - `../20-runtime-flow/repair-replan-flow.md`
 - `../60-verification/audits/full-chain-assessment-closure-plan.md`
-- `../run-closure-quality-improvement-plan.md`
+- `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 
 ## Open Migration Notes
 

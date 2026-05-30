@@ -20,7 +20,7 @@ Last Updated: 2026-05-30
 ### 1. 核心权威入口
 
 以下文档已统一以 `../00-core/runtime-stage-contract.md` 作为唯一 core contract
-入口，不再把 `../workorch-runtime-stage-contract-neutrality-design.md` 当作并列权威：
+入口，不再把旧核心合同文档当作并列权威：
 
 - `../10-domain-model/run-step-result-artifact.md`
 - `../10-domain-model/governance-decision-approval.md`
@@ -208,7 +208,7 @@ Last Updated: 2026-05-30
 - `../60-verification/loadtest-baseline.md` 已补 active loadtest 入口、Make target、
   单一控制器脚本责任、指标口径、failure-class contract 与 records layering
 - 已明确 `../60-verification/loadtest-baseline.md`、`../90-archive/records/workspace-concurrency-loadtest-record.md`、
-  `../single-workspace-performance-optimization-record.md` 的职责边界
+  `../90-archive/records/single-workspace-performance-optimization-record.md` 的职责边界
 
 对齐原因：
 
@@ -431,7 +431,7 @@ Last Updated: 2026-05-30
 
 已对齐：
 
-- `status-reference-cleanup-audit.md` 已补 `../workorch-status.md` 的
+- `status-reference-cleanup-audit.md` 已补旧综合状态入口的
   supersede readiness checklist
 - `current-state.md` 已明确当前仍未归档的具体原因：
   root-level 过渡入口与历史来源追溯尚未完全退出
@@ -445,13 +445,13 @@ Last Updated: 2026-05-30
 
 补充进展：
 
-- `../README.md` 与 `current-state.md` 已不再把 `../workorch-status.md` 当推荐入口
+- `../README.md` 与 `current-state.md` 已不再把旧综合状态入口当推荐入口
 - `../90-archive/records/delivery-history.md` 已不再显式保留旧根路径来源说明，
   只保留普通 migration note
 - `batch-1-migration-audit.md`、`workorch-status-split-audit.md`、
   `batch-2-domain-migration-audit.md` 等历史审计已把后续提法统一降级为
   “旧综合状态文档”或 superseded 副本路径
-- 当前 `../workorch-status.md` 已从内部迁移未收口项降级为外部兼容别名
+- 当前旧综合状态入口已从内部迁移未收口项降级为历史归档副本语境
 
 ### 21. Current-State Repository Summary Alignment
 
@@ -815,4 +815,4 @@ Last Updated: 2026-05-30
 
 1. 视需要继续压缩 `01-overview` / `90-archive` 中仅剩的历史追溯旧引用。
 2. 继续收缩 `90-archive/records/*` 的旧路径互引和历史说明重复。
-3. 最后决定 `../workorch-status.md` 的正式归档时机。
+3. 最后决定旧综合状态入口兼容别名的最终处置时机。

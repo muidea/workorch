@@ -12,7 +12,7 @@ Last Updated: 2026-05-30
 
 ## Candidate Inputs
 
-- `../../mvp-backlog.md`
+- `mvp-closure-record.md`
 - `p1-development-record.md`
 - `runtime-expansion-plan.md`
 - `advanced-runtime-scheduling-plan.md`
@@ -68,5 +68,4 @@ Last Updated: 2026-05-30
 - [tui-improvements-absorption-plan.md](tui-improvements-absorption-plan.md)
 - [runtime-recovery-governance-closure-design.md](runtime-recovery-governance-closure-design.md)
 - [llm-driven-development-plan.md](llm-driven-development-plan.md)
-- [magiccommon-context-first-upgrade.md](magiccommon-context-first-upgrade.md)
 - [core-runtime-closure-history.md](core-runtime-closure-history.md)

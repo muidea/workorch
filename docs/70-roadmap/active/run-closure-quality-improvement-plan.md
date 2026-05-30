@@ -2661,6 +2661,6 @@ Acceptance criteria:
   `load-20260502034105`; expected impact is small and specifically bounded to
   terminal Artifact materialization on file backend.
 - Completed items should be marked in this document with verification evidence.
-- Broad future demand candidates remain in `../../next-stage-demand-candidates.md`.
-- Previously closed MVP scope remains in `../../mvp-backlog.md` and should not be
+- Broad future demand candidates remain in `../../70-roadmap/candidates/next-stage-demand-candidates.md`.
+- Previously closed MVP scope remains in `../../90-archive/completed/mvp-closure-record.md` and should not be
   reopened unless the acceptance target itself changes.
