@@ -1,5 +1,16 @@
 # WorkOrch Unified Runtime Design Contract
 
+Migration note:
+
+The active core entry has moved to
+`00-core/runtime-stage-contract.md`.
+
+This file is kept temporarily as a transition path while README, AGENTS,
+cross references, and related documents are migrated.
+
+During the transition, treat `00-core/runtime-stage-contract.md` as the
+authoritative core entry.
+
 本文定义 WorkOrch 面向长流程任务的唯一核心运行设计合约。目标是解决反复单点修复后仍无法稳定推进的问题，同时明确核心框架必须保持功能中立：runtime 只能治理阶段、约束、证据、结果、上下文和恢复策略，不得内置软件开发、代码 patch、具体技术栈或具体业务领域规则。
 
 ## 权威合约声明
@@ -1841,7 +1852,7 @@ Repair exhausted 后必须二选一：
 
 当 `shell/command` 通过 `sh -c` 执行的脚本显式依赖 `pipefail` 等 bash-only 语义时，runtime 可以在不改变步骤语义的前提下切换到兼容的 shell 执行器；该兼容必须是通用执行策略，不得以业务命令名或业务目录名做条件分支，并且应在 step output 中记录实际执行器以便追踪。
 
-`shell/command` 的工作目录属于 runtime capability contract，而不是业务语义。若 capability 已声明其工作目录由 runtime 绑定到 workspace 交付目录，则 LLM 不得再硬编码 `cd /home/user/workspace`、`.workorch-workspaces/...` 或等价的绝对 workspace 路径；core 可以把这类输出视为 capability-boundary violation 并拒绝，因为它破坏的是通用执行能力合同，而不是某个具体业务规则。
+`shell/command` 的工作目录属于 runtime capability contract，而不是业务语义。若 capability 已声明其工作目录由 runtime 绑定到 workspace 交付目录，则 LLM 不得再硬编码 `cd ../../../../user/workspace`、`.workorch-workspaces/...` 或等价的绝对 workspace 路径；core 可以把这类输出视为 capability-boundary violation 并拒绝，因为它破坏的是通用执行能力合同，而不是某个具体业务规则。
 
 `mcp/tool_call` 的 stdio server 启动目录同样属于 runtime capability contract。对 workspace-scoped stdio session，runtime 应以 workspace 交付目录作为子进程工作目录，并继续通过 env / args 提供必要的 workspace ref；LLM 向工具传入的相对 path/root 参数应按该能力合同解析，不应依赖 WorkOrch 进程自身 cwd。若 MCP tool result 按协议返回 `isError=true` 或等价结构化失败标记，runtime 必须把该 step 标记为 failed 并保留原始 result 作为诊断证据，不能把其作为 completed evidence 输入后续 DoD / Goal coverage 判断。
 
@@ -2029,7 +2040,7 @@ Stage input bundle 必须遵守：
 
 ### Codex 启发的中立过程证据合同
 
-通过核对 `/home/rangh/aispace/ai-proxy/logs/codex` 中 Codex 长流程代码开发请求，可以借鉴的是上下文组织机制，而不是 Codex 的私有 request schema、隐藏 reasoning、具体工具名或软件开发专用提示词。WorkOrch core 只能吸纳其中的中立原则：
+通过核对 `../../ai-proxy/logs/codex` 中 Codex 长流程代码开发请求，可以借鉴的是上下文组织机制，而不是 Codex 的私有 request schema、隐藏 reasoning、具体工具名或软件开发专用提示词。WorkOrch core 只能吸纳其中的中立原则：
 
 - LLM request 必须是分层上下文包，而不是单个无差别 runtime 快照。
 - 稳定 runtime 合同、当前 Goal / DoD、当前 stage bundle、当前 failure / required output 必须排在历史信息之前。

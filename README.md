@@ -107,7 +107,7 @@ This repository is still a single `go.mod` codebase. Here, `go-multi-module-dev`
 
 ### Core design contract
 
-`docs/workorch-runtime-stage-contract-neutrality-design.md` is the authoritative design contract for future WorkOrch functionality work. Any change that affects WorkOrch runtime behavior, orchestration flow, LLM execution, memory / recall, soul / skill / tool / MCP capability selection, repair / replan, verification / acceptance, or profile mapping must be designed, implemented, and verified against that document.
+`docs/00-core/runtime-stage-contract.md` is the authoritative design contract for future WorkOrch functionality work. Any change that affects WorkOrch runtime behavior, orchestration flow, LLM execution, memory / recall, soul / skill / tool / MCP capability selection, repair / replan, verification / acceptance, or profile mapping must be designed, implemented, and verified against that document.
 
 If older docs, local closure plans, or feature-specific proposals conflict with the stage contract and neutrality design, the stage contract takes precedence. Feature-specific behavior must remain in profile / capability layers and must not be hard-coded into the core runtime.
 
@@ -503,7 +503,7 @@ make ci
 ## Docs
 
 - `docs/structure.md`: layout normalization mapping
-- `docs/workorch-status.md`: delivered scope, acceptance baseline, and current closure status
+- `docs/01-overview/current-state.md`: current documentation authority and migration entry
 - `docs/mvp-backlog.md`: closed MVP scope, completed items, and closure criteria used
 - `docs/next-mvp-acceptance.md`: next MVP scope aligned with the WorkOrch product planning baseline
 - `docs/runtime-expansion-plan.md`: completed runtime adapter, shell, patch, graph, and observability scope
