@@ -797,6 +797,9 @@ func workspaceExecutionContract(ctx context.Context, templates repository.Worksp
 	if policies, ok := hints["capabilityUsagePolicies"].([]any); ok && len(policies) > 0 {
 		contract["capabilityUsagePolicies"] = cloneContextValue(policies)
 	}
+	if runtimeRepair, ok := hints["runtimeRepair"].(map[string]any); ok && len(runtimeRepair) > 0 {
+		contract["runtimeRepair"] = cloneContextValue(runtimeRepair)
+	}
 	return contract
 }
 

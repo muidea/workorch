@@ -6625,6 +6625,14 @@ func (o *RuntimeOrchestrator) runtimeRepairRootCauseCandidateContext(ctx context
 		item["guidance"] = "Use this as a grounded root-cause candidate resource when repairing the failed surface requires changing an adjacent or referenced current workspace resource."
 		ret = append(ret, item)
 	}
+	if includePrerequisiteCandidates {
+		for _, item := range runtimeRepairPrerequisiteManifestCandidateContext(workspace.DeliverableDirectory, files, runtimeRepairPrerequisiteManifestTargetPatterns(run, workspace, failedStep)) {
+			if len(ret) >= 6 {
+				break
+			}
+			addCandidate(stringFromMap(item, "targetRef"), "prerequisite_manifest_candidate")
+		}
+	}
 	signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, nil, strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass)), strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature)))
 	for _, target := range stringSliceFromValue(signals["targetRefs"]) {
 		addCandidate(resolveWorkspaceTargetRefFromManifest(files, target), "structured_failure_target_ref")

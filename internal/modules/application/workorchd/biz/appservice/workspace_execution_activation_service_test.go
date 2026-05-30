@@ -2499,6 +2499,9 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 		Name: "explicit contract",
 		ContextHints: map[string]any{
 			"stateChangePolicy": "must_produce_state_change",
+			"runtimeRepair": map[string]any{
+				"prerequisiteManifestTargetPatterns": []string{"manifest.json", "lockfile.*"},
+			},
 			"profileContracts": map[string]any{
 				"explicit-profile": map[string]any{
 					"deliverableExpectations": []map[string]any{{
@@ -2560,6 +2563,11 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	contract := workspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspaceModel)
 	if contract["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("executionContract = %+v, want template policy", contract)
+	}
+	runtimeRepair := contextMapFromValue(t, contract["runtimeRepair"])
+	if !contextStringSliceContains(runtimeRepair["prerequisiteManifestTargetPatterns"], "manifest.json") ||
+		!contextStringSliceContains(runtimeRepair["prerequisiteManifestTargetPatterns"], "lockfile.*") {
+		t.Fatalf("runtimeRepair = %+v, want refreshed template prerequisite manifest patterns", runtimeRepair)
 	}
 	profiles := contextMapFromValue(t, contract["profileContracts"])
 	if _, ok := profiles["explicit-profile"]; !ok {

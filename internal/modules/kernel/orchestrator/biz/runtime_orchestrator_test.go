@@ -4662,6 +4662,73 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandi
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputKeepsPrerequisiteManifestCandidateWithConcreteFailureTarget(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	files := map[string][]byte{
+		"dependency.manifest": []byte("dependency = stable\n"),
+		"src/client.txt":      []byte("client implementation\n"),
+	}
+	for name, content := range files {
+		path := filepath.Join(deliverableDirectory, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	workspaceID := common.WorkspaceID("ws-prereq-manifest-with-target")
+	runID := common.RunID("run-prereq-manifest-with-target")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/002-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageExecution,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"executionContract": map[string]any{
+				"runtimeRepair": map[string]any{
+					"prerequisiteManifestTargetPatterns": []any{"dependency.manifest"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stderr": strings.Join([]string{
+				"dependency resolve failed: lock/checksum metadata unavailable",
+				"src/client.txt:10: prerequisite version mismatch",
+			}, "\n"),
+			"exitCode":                1,
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=src/client.txt|exitCode=1",
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, failedStep, 1, errors.New("exit status 1"))
+
+	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
+	if len(candidates) == 0 || stringFromMap(candidates[0], "targetRef") != "dependency.manifest" {
+		t.Fatalf("rootCauseCandidateContext = %#v, want prerequisite manifest candidate retained before adjacent target candidates", candidates)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	pkgCandidates := mapSliceFromValue(actionPackage["rootCauseCandidateContext"])
+	if len(pkgCandidates) == 0 || stringFromMap(pkgCandidates[0], "targetRef") != "dependency.manifest" {
+		t.Fatalf("repairActionPackage.rootCauseCandidateContext = %#v, want prerequisite manifest candidate retained", actionPackage["rootCauseCandidateContext"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesManifestForCoverageValidationEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
