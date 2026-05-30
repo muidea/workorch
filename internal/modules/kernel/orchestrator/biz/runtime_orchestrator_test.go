@@ -18891,12 +18891,13 @@ func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairSatisfiedAs
 	}
 
 	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "satisfied dodAssessment without executable state-changing output") {
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "dodAssessment without executable state-changing output") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want satisfied assessment-only rejection", err)
 	}
 	output[stepOutputKeyDoDAssessment].(map[string]any)["satisfied"] = false
-	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
-		t.Fatalf("validateLLMExecutionOutputContract failed assessment err = %v, want allowed blocker/failure assessment", err)
+	err = validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "dodAssessment without executable state-changing output") {
+		t.Fatalf("validateLLMExecutionOutputContract failed assessment err = %v, want failed assessment-only rejection", err)
 	}
 }
 

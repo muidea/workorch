@@ -137,7 +137,7 @@ func TestRepairActionPackageAnchorsPrimaryFailureAcrossWrapperFailure(t *testing
 }
 
 func TestRepairActionPackageAnchorsPrimaryFailureAcrossTargetAdmissionWrapperFailure(t *testing.T) {
-	targetAdmissionFailure := `invalid argument: runtime repair patch/apply target "pkg/lsp/instance.go" is not related to failure target scope [pkg/lsp/server.go main.go]; patch a current failure target or return a failed assessment/blocker`
+	targetAdmissionFailure := `invalid argument: runtime repair patch/apply target "pkg/lsp/instance.go" is not related to failure target scope [pkg/lsp/server.go main.go]; patch a current failure target or return a real governance blocker`
 	input := map[string]any{
 		"stateChangingOutputRequired": true,
 		"repairObjective":             repairObjectiveStateChangingOutput,

@@ -226,7 +226,7 @@ func (o *RuntimeOrchestrator) applyRuntimePatches(
 				"patch_apply_noop",
 				common.ErrInvalidArgument,
 				fmt.Sprintf("invalid argument: runtime repair patch/apply %s for target %q is non-substantive", request.PatchType, request.TargetRef),
-				"Return a substantive state-changing artifact, a bounded validation graph when the current snapshot already satisfies the intended change, or a failed assessment/blocker.",
+				"Return a substantive state-changing artifact, a bounded validation graph when the current snapshot already satisfies the intended change, or a real governance blocker.",
 				"before/after content hashes are identical",
 			)
 			patch.State = common.PatchStateFailed

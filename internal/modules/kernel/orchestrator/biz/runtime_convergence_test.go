@@ -432,7 +432,7 @@ func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCo
 			t.Fatalf("repairGuidance contains stale assessment-only instruction %q: %s", forbidden, guidance)
 		}
 	}
-	if !strings.Contains(guidance, "satisfied dodAssessment alone cannot satisfy") {
+	if !strings.Contains(guidance, "dodAssessment alone cannot satisfy") {
 		t.Fatalf("repairGuidance = %s, want executable state-changing guidance", guidance)
 	}
 }
@@ -757,7 +757,7 @@ func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange
 			t.Fatalf("repairGuidance contains stale assessment-only instruction %q: %s", forbidden, guidance)
 		}
 	}
-	if !strings.Contains(guidance, "satisfied dodAssessment alone cannot satisfy") {
+	if !strings.Contains(guidance, "dodAssessment alone cannot satisfy") {
 		t.Fatalf("repairGuidance = %s, want explicit executable state-changing guidance", guidance)
 	}
 }

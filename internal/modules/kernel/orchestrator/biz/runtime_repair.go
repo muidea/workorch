@@ -2808,7 +2808,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		(len(mapSliceFromValue(input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(input)) > 0) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"When missingDoDItems or missingGoalCoverage are present, at least one patch/apply node must declare coverageTargets and each entry must match the exact missing DoD item text or goalRequirementId/item it is intended to close.",
-			"Do not return a generic skeleton patch. If a patch cannot be tied to a concrete missing coverage target, return a failed dodAssessment or blocker instead.",
+			"Do not return a generic skeleton patch. If a state-changing artifact cannot be tied to a concrete missing coverage target, return a real governance blocker instead.",
 		)
 	}
 	if len(mapSliceFromValue(input["unresolvedCoverageWorkItems"])) > 0 {
@@ -2858,7 +2858,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
 		input["strategyReassessment"] = reassessment
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"strategyReassessment.required is true: explicitly choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a failed assessment/blocker.",
+			"strategyReassessment.required is true: explicitly choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a real governance blocker.",
 			"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, repairMode, forbiddenRepair, and verificationPlan.",
 			"When continuing the same failed target, patch only if the current target snapshot and primary diagnostics show a concrete same-target correction; otherwise choose a grounded root-cause target or return a blocker.",
 			"When shifting root-cause target, patch a neutral grounded root-cause resource and declare relatedFailureTargets for the failed surface.",
@@ -2999,7 +2999,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		)
 		if !boolValue(input["concreteFailureEvidenceRequired"]) {
 			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a failed dodAssessment/blocker.",
+				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a real governance blocker.",
 			)
 		}
 		if stateChangingSchemaInvalidRepair(failedStep) {
@@ -3502,10 +3502,10 @@ func textContainsShapeConflictDiagnostic(text string) bool {
 
 func stateChangingRepairGuidance() []string {
 	return []string{
-		"Return concrete state-changing output with complete content, or return a failed dodAssessment if the required state change cannot be completed.",
+		"Return concrete state-changing output with complete content, or return a real governance blocker when external information, permission, approval, credential, or configuration is required.",
 		"If multiple dependent operations are needed, executionGraph must contain an auditable state-changing operation accepted by repairActionPackage.requiredOutput; patch/apply is preferred when it can represent the change.",
 		"Do not return read-only, inspection-only, or LLM-gated executionGraph.",
-		"When current target snapshots are already provided in failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots, do not add file/read before patch/apply in the same executionGraph; use the provided snapshot directly or return a failed assessment/blocker if it is insufficient.",
+		"When current target snapshots are already provided in failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots, do not add file/read before patch/apply in the same executionGraph; use the provided snapshot directly or return a real governance blocker if it is insufficient.",
 		"patch/apply supports file_write, unified_diff, and text_replace; file_write content must be non-empty and must not be used as a delete operation.",
 		"For patch/apply text_replace, input.oldText and input.newText must be exact non-empty literal strings from the current target snapshot; for file_write, input.content must be complete non-empty literal content; for unified_diff, input.diff must be a complete standard unified diff with explicit line ranges.",
 		"When changing an existing target file, prefer text_replace with exact oldText/newText or the smallest unified_diff over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
@@ -4126,7 +4126,7 @@ func applyCurrentSnapshotDirectPatchContract(requiredOutput map[string]any) {
 	requiredOutput["mustUseCurrentTargetSnapshot"] = true
 	requiredOutput["mustPatchDirectlyFromProvidedSnapshot"] = true
 	requiredOutput["forbiddenStalePatchReuse"] = true
-	requiredOutput["sameGraphReadPatchRule"] = "when current target snapshots are provided, do not put file/read before patch/apply in the same executionGraph; patch/apply must use provided current snapshot content/hash, or return failed dodAssessment/blocker if the snapshot is insufficient"
+	requiredOutput["sameGraphReadPatchRule"] = "when current target snapshots are provided, do not put file/read before patch/apply in the same executionGraph; patch/apply must use provided current snapshot content/hash, or return a real governance blocker if the snapshot is insufficient"
 	requiredOutput["patchApplyFieldRule"] = "patch/apply input must include complete literal fields for its patchType: text_replace requires targetRef, oldText, newText; file_write requires targetRef, non-empty content; unified_diff requires targetRef and a complete diff with explicit hunk ranges"
 	requiredOutput["readBeforePatchRecoveryRule"] = "if additional current content is required, output a separate evidence acquisition step rather than mixing same-turn file/read and patch/apply"
 	requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
@@ -4536,7 +4536,7 @@ func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredO
 	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
 		requiredOutput["mustReassessRepeatedFailedSurface"] = true
 		requiredOutput["sameTargetContinuationRule"] = "repairMode=continue_same_target_repair may patch the failed target only when it addresses current primary diagnostics with current target evidence and bounded verification"
-		requiredOutput["rootCauseTargetShiftRule"] = "repairMode=shift_root_cause_target must patch a distinct neutral grounded root-cause target or return a failed assessment/blocker"
+		requiredOutput["rootCauseTargetShiftRule"] = "repairMode=shift_root_cause_target must patch a distinct neutral grounded root-cause target or return a real governance blocker"
 	}
 }
 
@@ -7397,7 +7397,7 @@ func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targe
 			"deletedLineCount":   len(deletedLines),
 			"safeForValidation":  true,
 			"reason":             "current_target_already_matches_failed_patch_intent",
-			"guidance":           "The current target snapshot already reflects the failed patch's intended line-level state. Do not repeat the stale patch; run bounded concrete validation or return a failed assessment/blocker.",
+			"guidance":           "The current target snapshot already reflects the failed patch's intended line-level state. Do not repeat the stale patch; run bounded concrete validation or return a real governance blocker.",
 			"mechanicalSignal":   true,
 			"businessJudgment":   false,
 			"matchedCurrentFile": true,

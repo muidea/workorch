@@ -1391,7 +1391,7 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	input["repairObjective"] = repairObjectiveStateChangingOutput
 	delete(input, "concreteFailureEvidenceRequired")
 	input["repairGuidance"] = appendRepairGuidance(stateChangingRepairGuidance(),
-		"Concrete failure evidence has been acquired; continue with a target-scoped state-changing repair or return a failed assessment/blocker if the evidence proves the target is not repairable.",
+		"Concrete failure evidence has been acquired; continue with a target-scoped state-changing repair or return a real governance blocker if the evidence proves runtime cannot proceed without external input.",
 		"Use concreteFailureEvidence and any targetSnapshots as current evidence; do not ask for an operator decision when the target, diagnostic, and output contract are already available.",
 	)
 	if len(evidence) > 0 {

@@ -1900,10 +1900,10 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			return nil
 		}
 		if assessment := doDAssessmentFromOutput(output); assessment != nil {
-			if boolValue(assessment["satisfied"]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
-				return fmt.Errorf("%w: state-changing llm repair step returned satisfied dodAssessment without executable state-changing output", common.ErrInvalidArgument)
+			if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) && boolValue(assessment["satisfied"]) {
+				return nil
 			}
-			return nil
+			return fmt.Errorf("%w: state-changing llm repair step returned dodAssessment without executable state-changing output", common.ErrInvalidArgument)
 		}
 		if spec := decisionBlockSpec(output); spec.Reason != "" {
 			return nil
@@ -2565,7 +2565,7 @@ func validateRepairPatchRequestGranularity(step *runModel.Step, request runtimeP
 			if reason == "" {
 				reason = "non_substantive_unified_diff"
 			}
-			return fmt.Errorf("%w: runtime repair patch/apply unified_diff for target %q is non-substantive (%s); rebuild an exact patch from current target snapshot or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, reason)
+			return fmt.Errorf("%w: runtime repair patch/apply unified_diff for target %q is non-substantive (%s); rebuild an exact patch from current target snapshot or return a real governance blocker", common.ErrInvalidArgument, request.TargetRef, reason)
 		}
 	}
 	if strings.TrimSpace(request.PatchType) != "file_write" {
@@ -2653,7 +2653,7 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if repairPatchTargetRefIsRelatedPrerequisite(step.Input, request.TargetRef, targetRefs) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
-	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a failed assessment/blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a real governance blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
 }
 
 func validatePrimaryDiagnosticPatchOutputContract(step *runModel.Step, output map[string]any) error {
@@ -3262,7 +3262,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 				!strategySameTargetContinuationAddressesCurrentFailure(step, candidate, expectedSurface) &&
 				!strategyCandidateAddressesGroundedRootCauseTarget(step, candidate, expectedSurface) &&
 				!surfaceCorrection {
-				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=continue_same_target_repair requires patch/apply to address current primary diagnostics or return a failed assessment/blocker", common.ErrInvalidArgument)
+				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=continue_same_target_repair requires patch/apply to address current primary diagnostics or return a real governance blocker", common.ErrInvalidArgument)
 			}
 		case strategyRepairModeShiftRootCauseTarget:
 			if !strategyRootCauseDistinguishableFromFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
@@ -3270,7 +3270,7 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 			}
 			if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
 				strategyCandidatePatchesFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
-				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=shift_root_cause_target requires repeated failed-surface repairs to patch a distinct root-cause target or return a failed assessment/blocker", common.ErrInvalidArgument)
+				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=shift_root_cause_target requires repeated failed-surface repairs to patch a distinct root-cause target or return a real governance blocker", common.ErrInvalidArgument)
 			}
 		default:
 			continue

@@ -1073,7 +1073,7 @@ func stateChangingConvergenceGuidance(existing any) []string {
 		"do not return patchrequests",
 		"do not return other executable work",
 	}, append(stateChangingRepairGuidance(),
-		"When stateChangingOutputRequired is true, a satisfied dodAssessment alone cannot satisfy the repair contract; first produce an accepted executable state-changing operation or return a failed dodAssessment/blocker.",
+		"When stateChangingOutputRequired is true, dodAssessment alone cannot satisfy the repair contract; first produce an accepted executable state-changing operation or return a real governance blocker.",
 	)...)
 }
 
