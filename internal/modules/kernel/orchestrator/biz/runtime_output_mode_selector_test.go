@@ -122,6 +122,61 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequiredOutputBudgetSignal(
 	}
 }
 
+func TestOutputModeSelectorRetainsIncrementalArtifactAfterContractFailure(t *testing.T) {
+	runID := common.RunID("run-output-mode-artifact-contract-retry")
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/artifact-plan-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"outputMode": outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": artifactOutputPhasePlan,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"outputMode":             outputModeIncrementalArtifact,
+					"mustReturnArtifactPlan": true,
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"error":               "invalid argument: incrementalArtifact output must not include executionGraph",
+		},
+	}
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-artifact-contract-retry"}, input, failed, 1)
+
+	if outputModeFromInput(input) != outputModeIncrementalArtifact {
+		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
+	}
+	selector := mapFromValue(input["outputModeSelector"])
+	if selector["priority"] != "P2" || selector["reason"] != "incremental_artifact_contract_retry" {
+		t.Fatalf("outputModeSelector = %+v, want P2 incremental artifact contract retry", selector)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["outputMode"] != outputModeIncrementalArtifact ||
+		required["mustReturnArtifactPlan"] != true ||
+		required["mustIncludeStateChangingNode"] != nil {
+		t.Fatalf("requiredOutput = %+v, want artifact plan contract without graph state-changing node", required)
+	}
+	contract := mapFromValue(input["artifactOutputContract"])
+	if contract["phase"] != artifactOutputPhasePlan || contract["mustReturnArtifactPlan"] != true {
+		t.Fatalf("artifactOutputContract = %+v, want artifact plan contract", contract)
+	}
+}
+
 func TestOutputModeSelectorUsesIncrementalArtifactForRequestedModeWithInheritedBudgetSignal(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

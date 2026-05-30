@@ -130,6 +130,16 @@ func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runMode
 		}
 		return selection
 	}
+	if failedStep != nil && outputModeIsIncrementalArtifact(failedStep.Input) && artifactModeContractRetryEligible(failedStep) {
+		selection.Mode = outputModeIncrementalArtifact
+		selection.Priority = "P2"
+		selection.Reason = "incremental_artifact_contract_retry"
+		if artifactContextPhaseRequested(input, failedStep) {
+			selection.Reason = "incremental_artifact_context_contract_retry"
+			selection.ArtifactPhase = artifactOutputPhaseContext
+		}
+		return selection
+	}
 	if schemaInvalidLargePreview(failedStep, policy, attempt) {
 		selection.Mode = outputModeIncrementalArtifact
 		selection.Priority = "P3"
@@ -150,6 +160,35 @@ func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runMode
 		return selection
 	}
 	return selection
+}
+
+func artifactModeContractRetryEligible(step *runModel.Step) bool {
+	if step == nil || step.Input == nil || !outputModeIsIncrementalArtifact(step.Input) {
+		return false
+	}
+	contract := mapFromValue(step.Input["artifactOutputContract"])
+	required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+	if len(contract) == 0 && stringFromMap(required, "outputMode") != outputModeIncrementalArtifact {
+		return false
+	}
+	output := step.Output
+	class := strings.TrimSpace(stringFromMap(output, failureOutputKeyClass))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	text := strings.ToLower(strings.Join([]string{
+		stage,
+		class,
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, failureOutputKeySignature),
+	}, "\n"))
+	if class == failureClassLLMDecisionInvalid || stage == "llm_schema_invalid" {
+		return true
+	}
+	return strings.Contains(text, "incrementalartifact") ||
+		strings.Contains(text, "artifactplan") ||
+		strings.Contains(text, "artifact output") ||
+		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
+		strings.Contains(text, "incrementalartifact output must not include executiongraph")
 }
 
 func outputModeSignalKeys() []string {

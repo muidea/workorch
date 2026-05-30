@@ -3703,6 +3703,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if len(input) == 0 {
 		return nil
 	}
+	anchorRepairInputToPrimaryActionableFailure(input, rawFailedOutput...)
 	enrichRepairInputWithProgressFailureSignals(input)
 	refreshRepairStrategyReassessment(input)
 	priorPackage := mapFromValue(input["repairActionPackage"])
@@ -3872,6 +3873,164 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 		return nil
 	}
 	return pkg
+}
+
+func anchorRepairInputToPrimaryActionableFailure(input map[string]any, rawFailedOutput ...map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	priorPackage := mapFromValue(input["repairActionPackage"])
+	if len(priorPackage) == 0 {
+		return
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if !runtimeRepairWrapperFailureOutput(output) && !runtimeRepairWrapperFailureOutput(mapFromValue(input["failedStepOutput"])) {
+		return
+	}
+	primary := primaryActionableFailureFromRepairPackage(priorPackage)
+	if len(primary) == 0 {
+		primary = primaryActionableFailureFromRepairInputContinuations(input)
+	}
+	if len(primary) > 0 {
+		input["currentFailure"] = primary
+		for _, key := range []string{"failureClass", "failureSignature", "failedStepId", "failedStepKind", "failureTargetScope", "failureReason"} {
+			if value, ok := primary[key]; ok && strings.TrimSpace(stringFromAny(value)) != "" {
+				input[key] = value
+			}
+		}
+		if scope := strings.TrimSpace(firstNonEmptyString(stringFromMap(primary, "targetScope"), stringFromMap(input, "failureTargetScope"))); scope != "" {
+			input["failureTargetScope"] = scope
+		}
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"repairTargetSet",
+		"primaryDiagnosticRepair",
+		"rootCauseCandidateContext",
+		"strategyReassessment",
+	} {
+		if priorPackage[key] != nil {
+			input[key] = cloneStepInputValue(priorPackage[key])
+		}
+	}
+	if signals := primaryStructuredFailureSignalsFromRepairPackage(priorPackage); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+	} else if signals := structuredFailureSignalsFromPrimaryActionableFailure(primary); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+	}
+	if diagnostics := primaryLastFailureDiagnosticsFromRepairPackage(priorPackage); len(diagnostics) > 0 {
+		input["lastFailureDiagnostics"] = diagnostics
+	}
+	if output != nil {
+		input["recentRejectedAttempt"] = compactStateChangingRecoveryFailureOutput(output)
+	}
+}
+
+func primaryActionableFailureFromRepairInputContinuations(input map[string]any) map[string]any {
+	for _, container := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["executionContext"]),
+	} {
+		if primary := primaryActionableFailureFromReplanContinuation(mapFromValue(container["replanContinuation"])); len(primary) > 0 {
+			return primary
+		}
+	}
+	return nil
+}
+
+func runtimeRepairWrapperFailureOutput(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(output, failureOutputKeyClass))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	text := strings.ToLower(strings.Join([]string{
+		stage,
+		class,
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, failureOutputKeySignature),
+	}, "\n"))
+	return class == failureClassLLMDecisionInvalid ||
+		stage == "llm_schema_invalid" ||
+		strings.Contains(text, "invalid llm decision json") ||
+		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
+		strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply") ||
+		strings.Contains(text, "executiongraph patch/apply input invalid")
+}
+
+func primaryActionableFailureFromRepairPackage(pkg map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	for _, candidate := range []map[string]any{
+		mapFromValue(pkg["primaryActionableFailure"]),
+		mapFromValue(pkg["originalActionableFailure"]),
+		mapFromValue(pkg["currentFailure"]),
+		mapFromValue(pkg["lastFailureDiagnostics"]),
+	} {
+		if len(candidate) == 0 || runtimeRepairWrapperFailureOutput(candidate) {
+			continue
+		}
+		return compactLLMContextMap(candidate, 1)
+	}
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 {
+		ret := map[string]any{
+			"evidenceValidity": "actionable_failure",
+			"reason":           firstNonEmptyString(stringSliceFirst(stringSliceFromValue(primary["messages"])), stringFromMap(pkg, "failureReason")),
+		}
+		if refs := stringSliceFromValue(primary["targetRefs"]); len(refs) > 0 {
+			ret["targetRef"] = strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+			ret["targetScope"] = "failureTargets=" + strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+		}
+		for _, key := range []string{"failureClass", "failureSignature", "failedStepId", "failedStepKind"} {
+			if value := strings.TrimSpace(firstNonEmptyString(stringFromMap(pkg, key), stringFromMap(primary, key))); value != "" {
+				ret[key] = value
+			}
+		}
+		if len(ret) > 1 {
+			return compactLLMContextMap(ret, 1)
+		}
+	}
+	return nil
+}
+
+func primaryStructuredFailureSignalsFromRepairPackage(pkg map[string]any) map[string]any {
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+		return compactLLMContextMap(primary, 1)
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+		return compactStructuredFailureSignalsForRepairActionPackage(signals)
+	}
+	return nil
+}
+
+func primaryLastFailureDiagnosticsFromRepairPackage(pkg map[string]any) map[string]any {
+	for _, candidate := range []map[string]any{
+		mapFromValue(pkg["lastFailureDiagnostics"]),
+		mapFromValue(pkg["currentFailure"]),
+	} {
+		if len(candidate) == 0 || runtimeRepairWrapperFailureOutput(candidate) {
+			continue
+		}
+		return compactFailureStepOutputForRuntimeContext(candidate)
+	}
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 {
+		return compactLLMContextMap(primary, 1)
+	}
+	return nil
+}
+
+func stringSliceFirst(values []string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput map[string]any, prior map[string]any) {
@@ -4379,6 +4538,11 @@ func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[str
 		return nil
 	}
 	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if current := mapFromValue(input["currentFailure"]); len(current) > 0 &&
+		runtimeRepairWrapperFailureOutput(output) &&
+		!runtimeRepairWrapperFailureOutput(current) {
+		return compactLLMContextMap(current, 1)
+	}
 	ret := map[string]any{}
 	add := func(key string, value string) {
 		if value = strings.TrimSpace(value); value != "" {

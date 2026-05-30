@@ -199,11 +199,13 @@ LLM-facing context 至少要区分以下层级：
 - `processEvidenceTimeline`
   - 最近有效证据链；wrapper/schema/provider 失败只能作摘要
 - `failureEvidence` / `structuredFailureSignals`
-  - 机械诊断证据；未准入 target 只能作 diagnostic-only
+  - 机械诊断证据；未准入 target 只能作 diagnostic-only；repair-of-repair 中必须优先取 primary actionable failure，不能让 schema/mode/contract wrapper 覆盖当前失败面
 - `repairActionPackage`
   - 本轮唯一可行动 repair 合同，必须包含 required output、target admission 结果和必要 snapshots
 - `historicalSignals` / `governanceHistory` / `memory`
   - 参考信息，不得覆盖当前 Goal/DoD、当前 target snapshot 或当前失败证据
+
+若 `replanContinuation` 与 `rejectedResultContinuation` 同时存在，context assembly 必须先从 `replanContinuation.currentProgressDigest.lastObservedFailure` 和 `processEvidenceTimeline` 中恢复未关闭的 concrete actionable failure。只有没有这类 failure，或 failure 已被后续成功 evidence 明确关闭时，`rejectedResultContinuation` 的 coverage / deliverable 缺口才可作为当前 `currentFailure`。这保证验收层缺口不会覆盖执行层仍未修复的真实失败。
 
 ### Memory Recall Admission
 
@@ -213,6 +215,7 @@ LLM-facing context 至少要区分以下层级：
   除非其适用边界和当前 failure / Goal / DoD 存在结构化匹配
 - provider retry、schema invalid、stream incomplete、patch syntax failure、重复 repair loop
   等瞬态过程只能作为 process evidence 或 repair diagnostics，不得提升为可复用 memory
+- wrapper failure 的 rejected raw preview、schema 字段名、runtime contract 字段名和 mode violation 文本不得进入 current failure target admission；它们只能作为 `recentRejectedAttempt` / diagnostics 辅助 LLM 修正输出形态
 
 ### Semantic Gate Triggers
 

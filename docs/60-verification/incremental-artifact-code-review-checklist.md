@@ -91,6 +91,8 @@ Last Updated: 2026-05-30
   - `artifactOutputContract`
   - `artifactContinuationContext`
 - mode 从 `incrementalArtifact` 回落到 `executionGraph` 时，incremental-only 字段是否被清理。
+- 上一轮 `incrementalArtifact` 因 schema/mode/artifact contract failure 被拒绝时，下一轮是否继续 `incrementalArtifact` contract retry，而不是回退到 `executionGraph`。
+- contract retry 时 `requiredOutput` 是否只保留 artifact plan/chunk/context 要求，并清理 graph-only 的 `mustIncludeStateChangingNode=true`。
 - chunk 请求是否只带 metadata-only continuity 信息，而不是 raw tail 正文。
 - request audit 是否记录当前 artifact phase / continuation metadata 摘要。
 - schema 互斥是否在装配层就被保证，而不是只靠下游兜底。

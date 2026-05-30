@@ -4024,6 +4024,77 @@ func TestRuntimeOrchestrator_InitialRejectedResultContinuationSupersedesReplanSt
 	}
 }
 
+func TestRuntimeOrchestrator_InitialRejectedResultContinuationDoesNotSupersedeActionableReplanFailure(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-rejected-keeps-actionable-replan-input",
+		WorkspaceID:     "ws-rejected-keeps-actionable-replan-input",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"predecessorRunId": "run-latest",
+				"summary":          "deliverable evidence still missing",
+				"requiredEvidence": []string{"coverage_map", "version_control_snapshot"},
+			},
+			"replanContinuation": map[string]any{
+				"predecessorRunId": "run-before-replan",
+				"reason":           "runtime_repair_exhausted_requires_strategy",
+				"failureContext": map[string]any{
+					failureOutputKeyClass:     failureClassLLMDecisionInvalid,
+					failureOutputKeySignature: "class=llm_decision_invalid|kind=llm/workspace_execution|stage=llm_schema_invalid",
+					"failedStepId":            "run-before-replan/repair-010",
+					"failedStepKind":          llmWorkspaceExecutionStepKind,
+					"failedStepOutput": map[string]any{
+						"stage":               "llm_schema_invalid",
+						"error":               "invalid argument: invalid llm decision json: no json object found",
+						failureOutputKeyClass: failureClassLLMDecisionInvalid,
+					},
+				},
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap": "# target/pkg\npkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+					"lastObservedFailure": map[string]any{
+						"stepId":                    "run-before-replan/graph-001/011-build",
+						"kind":                      "shell/command",
+						"failureClass":              failureClassShellCommand,
+						"failureSignature":          "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+						"concreteFailureDiagnostic": "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"evidenceValidity":          "actionable_failure",
+					},
+					"nextRequiredAction": "address_last_failure_under_current_stage_contract",
+				},
+			},
+		},
+	}
+
+	input := initialStepInput(run)
+
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["stateChangingOutputRequired"] != nil ||
+		input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("input = %+v, want actionable replan failure to drive evidence acquisition", input)
+	}
+	currentFailure := mapFromValue(input["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run-before-replan/graph-001/011-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want predecessor build failure", currentFailure)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkgFailure := mapFromValue(pkg["currentFailure"])
+	if pkgFailure["failureClass"] != failureClassShellCommand ||
+		!strings.Contains(stringFromMap(pkgFailure, "targetScope"), "pkg/lsp/server.go") {
+		t.Fatalf("repairActionPackage.currentFailure = %+v, want actionable build failure", pkgFailure)
+	}
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want build target refs", signals)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustProduceConcreteFailureEvidence"] != true || boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want evidence acquisition until current target snapshots are loaded", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairReturnsToRejectedContinuationAfterHistoricalReplanFailure(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-repair-rejected-supersedes-replan",

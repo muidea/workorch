@@ -147,6 +147,8 @@ assessment-only correction 等 wrapper recovery 不得清空原始失败面。
 - 保留 target snapshots / manifest / coverage target context
 - 保留 recent rejected attempts / latest actionable diagnostics
 - wrapper failure 只作为最新 rejected output 或 contract diagnostics，不得覆盖原 failure surface
+- `currentFailure`、`structuredFailureSignals` 和 `primaryDiagnosticRepair` 必须继续来自 primary actionable failure；schema/mode/contract wrapper 的 `error`、`reason`、字段名和 target-like token 只能作为 rejected attempt 摘要
+- 若上一轮 output mode 是 `incrementalArtifact`，且 wrapper failure 只表示 artifact 输出合同不合法，下一轮继续 artifact contract recovery，不得退回单次 `executionGraph`
 
 若 wrapper failure 后仍没有 concrete target evidence：
 
@@ -170,6 +172,14 @@ assessment-only correction 等 wrapper recovery 不得清空原始失败面。
 | predecessor path 已不可继续 | `replan` successor |
 
 该表只表达恢复链分流，不表达任何领域特化修复策略。
+
+当 `replan` successor 同时继承 rejected result continuation 时，分流顺序必须保持：
+
+1. 如果 predecessor progress digest 或 process evidence 仍有未关闭 concrete actionable failure，优先恢复该 failure。
+2. 如果该 failure 只有 target refs / diagnostics、没有当前 snapshot，进入 `acquire_concrete_failure_evidence`。
+3. 只有 concrete failure 已关闭或不存在时，才让 rejected result 的 coverage / deliverable gap 驱动后续修复。
+
+因此 rejected result continuation 是验收收口背景，不是自动覆盖 replan primary failure 的更高优先级来源。
 
 ## Governance Queue And Resume Semantics
 

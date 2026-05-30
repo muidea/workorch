@@ -70,6 +70,14 @@ func initialStepInput(run *runModel.Run) map[string]any {
 				}
 			}
 			input["repairActionPackage"] = actionPackage
+			if currentFailure := mapFromValue(actionPackage["currentFailure"]); len(currentFailure) > 0 {
+				input["currentFailure"] = currentFailure
+				for _, key := range []string{failureOutputKeyClass, failureOutputKeySignature, "failureTargetScope", "failedStepId", "failedStepKind"} {
+					if value := actionPackage[key]; value != nil {
+						input[key] = cloneStepInputValue(value)
+					}
+				}
+			}
 		}
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
@@ -82,7 +90,8 @@ func replanRunRequiresStateChangingOutput(run *runModel.Run) bool {
 		return false
 	}
 	if len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) > 0 {
-		return false
+		continuation := mapFromValue(run.ExecutionContext["replanContinuation"])
+		return len(primaryActionableFailureFromReplanContinuation(continuation)) > 0
 	}
 	return len(mapFromValue(run.ExecutionContext["replanContinuation"])) > 0
 }
@@ -117,6 +126,29 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 			}
 		}
 	}
+	primaryFailure := primaryActionableFailureFromReplanContinuation(continuation)
+	if len(primaryFailure) > 0 {
+		pkg["currentFailure"] = primaryFailure
+		if value := stringFromMap(primaryFailure, "failureClass"); value != "" {
+			pkg[failureOutputKeyClass] = value
+		}
+		if value := stringFromMap(primaryFailure, "failureSignature"); value != "" {
+			pkg[failureOutputKeySignature] = value
+		}
+		if value := firstNonEmptyString(stringFromMap(primaryFailure, "failureTargetScope"), stringFromMap(primaryFailure, "targetScope")); value != "" {
+			pkg["failureTargetScope"] = value
+		}
+		if value := stringFromMap(primaryFailure, "failedStepId"); value != "" {
+			pkg["failedStepId"] = value
+		}
+		if value := stringFromMap(primaryFailure, "failedStepKind"); value != "" {
+			pkg["failedStepKind"] = value
+		}
+		if signals := structuredFailureSignalsFromPrimaryActionableFailure(primaryFailure); len(signals) > 0 {
+			pkg["structuredFailureSignals"] = signals
+			pkg["primaryDiagnosticRepair"] = signals
+		}
+	}
 	for _, key := range []string{
 		failureOutputKeyClass,
 		failureOutputKeySignature,
@@ -127,6 +159,14 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		"maxAttempts",
 		"repairOfRootStepId",
 	} {
+		if len(primaryFailure) > 0 {
+			switch key {
+			case failureOutputKeyClass, failureOutputKeySignature, "failureTargetScope", "failedStepId", "failedStepKind":
+				if pkg[key] != nil {
+					continue
+				}
+			}
+		}
 		if value, ok := failureContext[key]; ok && value != nil {
 			pkg[key] = compactLLMContextValue(value, 1)
 		}
@@ -134,10 +174,25 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 	if len(mapFromValue(failureContext["failedStepOutput"])) > 0 {
 		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(mapFromValue(failureContext["failedStepOutput"]))
 	}
-	if targets := repairActionTargetSnapshots(failureContext); len(targets) > 0 {
+	targetInput := cloneStepPayload(failureContext)
+	if len(primaryFailure) > 0 {
+		for _, key := range []string{
+			failureOutputKeyClass,
+			failureOutputKeySignature,
+			"failureTargetScope",
+			"failedStepId",
+			"failedStepKind",
+			"structuredFailureSignals",
+		} {
+			if value := pkg[key]; value != nil {
+				targetInput[key] = cloneStepInputValue(value)
+			}
+		}
+	}
+	if targets := repairActionTargetSnapshots(targetInput); len(targets) > 0 {
 		pkg["targetSnapshots"] = targets
 	}
-	if targetSet := repairActionTargetSet(failureContext, pkg); len(targetSet) > 0 {
+	if targetSet := repairActionTargetSet(targetInput, pkg); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
 		if required := mapFromValue(pkg["requiredOutput"]); len(required) > 0 {
 			required["mustTargetRepairTargetSet"] = true
@@ -145,12 +200,106 @@ func repairActionPackageFromReplanContinuation(run *runModel.Run) map[string]any
 		}
 	}
 	required := mapFromValue(pkg["requiredOutput"])
-	applyConcreteRepairEvidenceOutputContract(failureContext, pkg, required)
+	applyConcreteRepairEvidenceOutputContract(targetInput, pkg, required)
 	pkg["requiredOutput"] = required
 	if len(pkg) <= 3 {
 		return nil
 	}
 	return pkg
+}
+
+func primaryActionableFailureFromReplanContinuation(continuation map[string]any) map[string]any {
+	if len(continuation) == 0 {
+		return nil
+	}
+	if primary := primaryActionableFailureFromProgressDigest(mapFromValue(continuation[stepInputKeyCurrentProgressDigest])); len(primary) > 0 {
+		return primary
+	}
+	timeline := mapSliceFromValue(continuation[stepInputKeyProcessEvidenceTimeline])
+	for idx := len(timeline) - 1; idx >= 0; idx-- {
+		item := timeline[idx]
+		if len(item) == 0 {
+			continue
+		}
+		failure := map[string]any{
+			"stepId":                    stringFromMap(item, "stepId"),
+			"kind":                      stringFromMap(item, "kind"),
+			"failureClass":              stringFromMap(item, failureOutputKeyClass),
+			"failureSignature":          stringFromMap(item, failureOutputKeySignature),
+			"failureReason":             stringFromMap(item, "failureReason"),
+			"concreteFailureDiagnostic": stringFromMap(item, "concreteFailureDiagnostic"),
+			"evidenceValidity":          stringFromMap(item, "evidenceValidity"),
+			"targetRef":                 stringFromMap(item, "targetRef"),
+			"targetScope":               stringFromMap(item, "targetScope"),
+			"source":                    stringFromMap(item, "source"),
+		}
+		if strings.TrimSpace(stringFromMap(failure, "failureClass")) == "" && strings.TrimSpace(stringFromMap(item, "kind")) == "shell/command" {
+			failure["failureClass"] = failureClassShellCommand
+		}
+		digest := map[string]any{
+			"currentGap":          firstNonEmptyString(stringFromMap(failure, "concreteFailureDiagnostic"), stringFromMap(failure, "failureReason")),
+			"lastObservedFailure": failure,
+		}
+		if primary := primaryActionableFailureFromProgressDigest(digest); len(primary) > 0 {
+			return primary
+		}
+	}
+	return nil
+}
+
+func primaryActionableFailureFromProgressDigest(digest map[string]any) map[string]any {
+	if len(digest) == 0 {
+		return nil
+	}
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if len(failure) == 0 || runtimeRepairWrapperFailureOutput(failure) {
+		return nil
+	}
+	validity := strings.TrimSpace(stringFromMap(failure, "evidenceValidity"))
+	class := strings.TrimSpace(stringFromMap(failure, "failureClass"))
+	if validity != "actionable_failure" && class != failureClassShellCommand && class != failureClassPatchApply {
+		return nil
+	}
+	ret := currentFailureFromProgressDigest(digest)
+	if len(ret) == 0 || runtimeRepairWrapperFailureOutput(ret) {
+		return nil
+	}
+	signature := strings.TrimSpace(stringFromMap(ret, "failureSignature"))
+	scope := firstNonEmptyString(stringFromMap(ret, "failureTargetScope"), stringFromMap(ret, "targetScope"))
+	if scope == "" {
+		if refs := repairPatchTargetRefsFromScopeText(signature); len(refs) > 0 {
+			scope = "failureTargets=" + strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+		}
+	}
+	if scope != "" {
+		ret["failureTargetScope"] = scope
+		ret["targetScope"] = scope
+	}
+	if targetRef := strings.TrimSpace(stringFromMap(ret, "targetRef")); targetRef == "" {
+		if refs := repairPatchTargetRefsFromScopeText(scope); len(refs) > 0 {
+			ret["targetRef"] = strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+		}
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func structuredFailureSignalsFromPrimaryActionableFailure(failure map[string]any) map[string]any {
+	if len(failure) == 0 {
+		return nil
+	}
+	reason := firstNonEmptyString(
+		stringFromMap(failure, "reason"),
+		stringFromMap(failure, "error"),
+		stringFromMap(failure, "failureReason"),
+		stringFromMap(failure, "concreteFailureDiagnostic"),
+	)
+	output := map[string]any{
+		"stderr":                  reason,
+		"reason":                  reason,
+		failureOutputKeyClass:     stringFromMap(failure, "failureClass"),
+		failureOutputKeySignature: stringFromMap(failure, "failureSignature"),
+	}
+	return structuredFailureSignalsFromFailureOutput(output, nil, stringFromMap(failure, "failureClass"), stringFromMap(failure, "failureSignature"))
 }
 
 func replanContinuationFailureContext(run *runModel.Run) (map[string]any, map[string]any) {

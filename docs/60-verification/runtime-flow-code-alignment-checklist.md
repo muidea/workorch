@@ -129,6 +129,8 @@ Last Updated: 2026-05-30
 
 - failure 是否先结构化分类，再进入恢复链。
 - provider retry、schema invalid、repair-of-repair 是否保持 wrapper recovery inheritance。
+- wrapper/schema/mode contract failure 后，`currentFailure` 与 `structuredFailureSignals` 是否仍锚定 primary actionable failure，而不是被最新 wrapper 文本覆盖。
+- replan successor 同时带有 rejected result continuation 时，是否优先恢复 predecessor progress digest 中未关闭的 concrete actionable failure，而不是让 coverage / deliverable gap 覆盖当前失败面。
 - context-gate failure 是否不会落入普通 state-changing repair。
 - repair exhausted / duplicate failure / provider/config gate 是否升级到 decision / approval / replan。
 - `Decision` / `Approval` / `auto-governance` 是否只选择恢复路径，不替代 Run / Result 本体。
@@ -138,6 +140,8 @@ Last Updated: 2026-05-30
 常见偏差：
 
 - wrapper failure 覆盖原 failure surface
+- wrapper failure 的 error/reason 覆盖 primary actionable failure reason
+- rejected result continuation 抢占 replan 中仍未关闭的 build/tool/patch concrete failure
 - context gate failure 进入普通 repair
 - decision resolved 后重放旧 failed step
 

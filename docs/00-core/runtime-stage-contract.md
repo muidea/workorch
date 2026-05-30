@@ -126,6 +126,8 @@ if expectedStateChangingArtifactCount > maxGraphFileWrites:
     return incrementalArtifact
 if emptyDeliverableSurface and openCoverageRequiresStateChange and estimatedInitialArtifactBytesExceedThreshold:
     return incrementalArtifact
+if previousStep.outputMode == incrementalArtifact and previousFailure is schema_or_mode_contract_failure:
+    return incrementalArtifact
 return executionGraph
 ```
 
@@ -158,6 +160,8 @@ executionGraph
 - chunk 阶段不得直接声明 DoD / Goal satisfied；只能作为 state-changing artifact 的待组装输入。
 - `incrementalArtifact` 的任何 continuation 状态推进、chunk 持久化、assemble / apply 调度、step completed 事件和 evidence 记录，都必须发生在当前响应通过 `artifactOutputContract` / mode contract 校验之后。未通过 mode contract 的响应只能记录为 failed step / rejected chunk 诊断，不得先写入 completed step、validation passed、checkpoint completed 或 artifact cursor。
 - 分片期间允许必要的信息补充 tool 调用，但必须作为独立 `artifact_context` 阶段表达。该阶段只允许返回有界、只读或取证用途的 `executionGraph`，用于 `file/list`、`file/read`、`shell/command`、`mcp/tool_call`、`git/*` 等 capability 获取当前上下文；不得与 `artifactPlan`、`artifactChunk` 或 `artifactChunkRepair` 同一响应混用，也不得推进 artifact continuation cursor。
+- 如果上一轮已由 runtime 选择 `incrementalArtifact`，而失败只是 `llm_schema_invalid`、mode 互斥、artifact plan/chunk/context 字段缺失、返回了错误顶层输出或等价输出合同失败，下一轮必须继续使用 `incrementalArtifact` 并修正对应 artifact 合同。不得因为合同失败本身回落到 `executionGraph`，否则会把大载荷重新塞回单次 JSON，导致同类 schema failure 循环。
+- 上述重试规则只锚定输出承载 mode，不改变 `ConvergenceContract.State`、Goal/DoD coverage、repair budget 或 target admission。若原始 repair 缺 concrete target evidence，仍应进入 `artifact_context` / `acquire_concrete_failure_evidence`，而不是直接生成 chunk。
 
 ### Artifact Plan / Chunk / Context Core Boundary
 
@@ -1416,6 +1420,10 @@ State-changing repair 必须有 concrete implementation target evidence 才能�
 
 Replan continuation 不得只因为 predecessor run 的 execution contract 要求 state change 就直接派发 state-changing repair。它必须先从 predecessor lineage 恢复最近未解决的 concrete failure target、target snapshot、contentHash、coverage target 或 patch repair context；若只能恢复到 LLM schema/runtime contract wrapper failure，例如 `llm_schema_invalid`、`no json object found`、`executionGraph without patch/apply` 或 `coverageTargets missing`，则这些 wrapper failure 只能作为 rejected output / schema recovery evidence，不能替代原始未解决的 workspace 失败面。找不到原始目标证据时，replan successor 必须进入 `acquire_concrete_failure_evidence`。
 
+当 successor run 同时携带 `rejectedResultContinuation` 与 `replanContinuation` 时，runtime 必须先判断 `replanContinuation.currentProgressDigest.lastObservedFailure` 或等价 process evidence 中是否存在未关闭的 concrete actionable failure。若存在 `evidenceValidity=actionable_failure`，或中立 failure class 明确为 shell/patch 等可行动执行失败，则该 failure 是当前 primary actionable failure；`rejectedResultContinuation` 只能作为 coverage / result 收口背景，不得把 `coverage_map`、`version_control_snapshot`、`user_deliverable` 等交付物缺口提升到当前失败面之前。只有 replan continuation 不含 concrete actionable failure，或该 failure 已被后续成功 evidence 明确关闭时，rejected result continuation 才能作为当前 actionable gap 驱动 evidence acquisition / coverage repair。
+
+Replan successor 的 initial step input 必须从 predecessor progress digest 恢复 `currentFailure`、`repairActionPackage.currentFailure`、`failureClass`、`failureSignature`、`failureTargetScope`、`structuredFailureSignals` 和必要 target refs。若当前 `failureContext` 只是 `llm_schema_invalid` / mode contract / runtime contract wrapper，而 `currentProgressDigest.lastObservedFailure` 指向更早的 concrete execution failure，后者必须覆盖前者成为 primary failure；wrapper 只能保留为 `previousRejectedOutputSummary`。若该 primary failure 缺少当前 target snapshot，successor 应进入 `acquire_concrete_failure_evidence`，而不是生成 coverage 文档、版本快照或其他非当前失败面的补丁。
+
 本约束的实现收口必须覆盖以下检查点：
 
 - Repair action package 统一由 required output contract 决定是否允许 state-changing output；当 `mustIncludeStateChangingNode=false`，任何后续证据门禁不得再把它提升回 patch，例如 `currentTargetAlreadySatisfiesFailedPatch` 必须保持 concrete validation evidence contract。
@@ -1426,6 +1434,8 @@ Replan continuation 不得只因为 predecessor run 的 execution contract 要�
 - 测试必须同时覆盖“无实现目标证据进入 evidence acquisition / validation evidence”和“有 target refs / target snapshots / patch repair context 时保持 patch contract”两类路径；还必须覆盖“只有 coverageTargetSet 时不得保持 patch-only contract”，避免后续修改重新回到按失败类别一刀切。
 
 如果 repair-of-repair 是因为 LLM 输出违反 contract，例如缺少必需 artifact 字段、返回只读 graph、返回能力不支持的操作，后续 repair 必须继承上一轮可用的 target context、workspace manifest、state-changing contract、coverage gap context、current execution progress 和 rejection evidence。不得因为 contract violation 发生在 LLM repair step 外壳上，就丢失原始 failure target、Goal/DoD coverage target、已完成证据或当前失败信息，也不得降级为泛化探索。若原始失败来自 graph node，后续 repair 的 ID、lineage label 与 scope 必须继续指向该 graph failure label；即使当前外壳是 `repair-...` 或 schema-invalid repair，也不得退回 planning root。
+
+Repair-of-repair 的 `currentFailure` 必须锚定 primary actionable failure，而不是最新 wrapper failure。若当前失败是 `llm_schema_invalid`、`llm_decision_invalid`、mode contract violation、`executionGraph patch/apply must not depend on same-graph file/read`、`executionGraph without patch/apply`、`patch/apply input invalid` 或等价输出合同错误，runtime 必须从上一轮 `repairActionPackage` 继承原始 `currentFailure`、`failureClass`、`failureSignature`、`failedStepId`、`failedStepKind`、`failureTargetScope`、`targetSnapshots`、`repairTargetSet`、`structuredFailureSignals`、`primaryDiagnosticRepair`、`rootCauseCandidateContext` 和 `strategyReassessment`。最新 wrapper failure 只能进入 `recentRejectedAttempt` / `previousRejectedOutputSummary` / contract diagnostics；不得覆盖 `reason`、`error`、target refs 或 line refs，避免 LLM 把 schema 字段、runtime contract 字段或 wrapper 文本当成新的业务修复目标。
 
 当 repair-of-repair 的当前失败是 `llm_schema_invalid` / `llm_decision_invalid`，runtime 必须把该失败作为 LLM decision contract failure 处理，而不是 provider failure。repair input 应包含中立的 schema invalid recovery contract：只能基于 `repairActionPackage`、当前 target snapshot 和 schema 约束重建一个合法 JSON decision；禁止复用 rejected raw content / preview，禁止 markdown 包裹、注释、重复 JSON object、尾随多余括号和局部数组。该规则只治理输出形态和 lineage，不引入任何业务领域判断。
 

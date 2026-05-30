@@ -51,6 +51,148 @@ func TestStructuredFailureSignalsExtractsNeutralPathLineIdentifier(t *testing.T)
 	}
 }
 
+func TestRepairActionPackageAnchorsPrimaryFailureAcrossWrapperFailure(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureClass":                failureClassLLMDecisionInvalid,
+		"failureReason":               "invalid argument: executionGraph patch/apply must not depend on same-graph file/read",
+		"failedStepOutput": map[string]any{
+			"stage":               "llm_schema_invalid",
+			"error":               "invalid argument: executionGraph patch/apply must not depend on same-graph file/read",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+		},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failedStepId":     "run/graph-001/011-build",
+				"failedStepKind":   shellcommon.StepKindCommand,
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+				"reason":           "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+				"targetRef":        "pkg/lsp/server.go,main.go",
+				"targetScope":      "failureTargets=pkg/lsp/server.go,main.go",
+			},
+			"lastFailureDiagnostics": map[string]any{
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+				"stderrPreview":    "pkg/lsp/server.go:10:24: undefined: LSPInstance",
+			},
+			"primaryDiagnosticRepair": map[string]any{
+				"targetRefs": []string{"pkg/lsp/server.go", "main.go"},
+				"lineRefs": []map[string]any{
+					{"targetRef": "pkg/lsp/server.go", "line": 10, "column": 24},
+					{"targetRef": "main.go", "line": 28, "column": 28},
+				},
+				"identifiers": []string{"LSPInstance", "NewServer"},
+				"messages":    []string{"pkg/lsp/server.go:10:24: undefined: LSPInstance"},
+			},
+			"structuredFailureSignals": map[string]any{
+				"targetRefs": []string{"pkg/lsp/server.go", "main.go"},
+				"lineRefs": []map[string]any{
+					{"targetRef": "pkg/lsp/server.go", "line": 10, "column": 24},
+				},
+			},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "pkg/lsp/server.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-server",
+				"content":          "package lsp\n",
+			}, {
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-main",
+				"content":          "package main\n",
+			}},
+		},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_schema_invalid",
+		"error":               "invalid argument: executionGraph patch/apply must not depend on same-graph file/read",
+		failureOutputKeyClass: failureClassLLMDecisionInvalid,
+	})
+
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/011-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want original shell/build failure anchored", currentFailure)
+	}
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/lsp/server.go") || stringSliceContains(refs, "client.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want primary target refs without wrapper noise", signals)
+	}
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(targets) != 2 || targets[0]["targetRef"] != "pkg/lsp/server.go" || targets[1]["targetRef"] != "main.go" {
+		t.Fatalf("targetSnapshots = %+v, want inherited current target snapshots", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustPatchDirectlyFromProvidedSnapshot"] != true {
+		t.Fatalf("requiredOutput = %+v, want direct snapshot patch contract", required)
+	}
+}
+
+func TestRepairActionPackageAnchorsPrimaryFailureFromReplanContinuation(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureClass":                failureClassLLMDecisionInvalid,
+		"failureReason":               "invalid argument: invalid llm decision json: no json object found",
+		"failedStepOutput": map[string]any{
+			"stage":               "llm_schema_invalid",
+			"error":               "invalid argument: invalid llm decision json: no json object found",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+		},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failureClass": failureClassLLMDecisionInvalid,
+				"stage":        "llm_schema_invalid",
+				"reason":       "invalid argument: invalid llm decision json: no json object found",
+			},
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+		},
+		"executionContext": map[string]any{
+			"replanContinuation": map[string]any{
+				stepInputKeyCurrentProgressDigest: map[string]any{
+					"currentGap": "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+					"lastObservedFailure": map[string]any{
+						"stepId":                    "run/graph-001/011-build",
+						"kind":                      shellcommon.StepKindCommand,
+						"failureClass":              failureClassShellCommand,
+						"failureSignature":          "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+						"concreteFailureDiagnostic": "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+						"evidenceValidity":          "actionable_failure",
+					},
+				},
+			},
+		},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":               "llm_schema_invalid",
+		"error":               "invalid argument: invalid llm decision json: no json object found",
+		failureOutputKeyClass: failureClassLLMDecisionInvalid,
+	})
+
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/011-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want replan primary build failure", currentFailure)
+	}
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if refs := stringSliceFromValue(signals["targetRefs"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("structuredFailureSignals = %+v, want replan primary target refs", signals)
+	}
+	if summary := mapFromValue(pkg["previousRejectedOutputSummary"]); summary["stage"] != "llm_schema_invalid" {
+		t.Fatalf("previousRejectedOutputSummary = %+v, want wrapper retained only as rejected summary", summary)
+	}
+}
+
 func TestStructuredFailureSignalsDoNotPromoteRuntimeContractFieldsAsTargetRefs(t *testing.T) {
 	output := map[string]any{
 		"status":              "completed",

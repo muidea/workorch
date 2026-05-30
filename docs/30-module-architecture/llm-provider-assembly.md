@@ -115,6 +115,7 @@ provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow
 - response 顶层不得包含 `outputMode`
 - `artifact_context` 只能要求 bounded read graph
 - chunk 请求只能携带 metadata-only 连续性信号，不能把 raw tail 正文重新注入 prompt
+- 当上一轮 `incrementalArtifact` 响应因 schema / mode contract / artifact 字段合同失败被拒绝时，下一轮 request 仍必须投影 `incrementalArtifact` 及对应 phase contract；只允许修正 artifact 输出结构，不得把大载荷回退到普通 `executionGraph`
 
 ## Stage-Contract Projection Boundary
 
@@ -133,6 +134,7 @@ provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow
 约束：
 
 - 当 mode 回落为 `executionGraph` 时，incremental-only 字段必须从当前 step input 中清理
+- 当 mode 保持 `incrementalArtifact` 做 contract retry 时，`requiredOutput` 不得残留 `mustIncludeStateChangingNode=true` 等 graph-only 强约束
 - completion follow-up / assessment-only correction 不得继承已完成 artifact 的 chunk/plan contract
 - stage-contract 投影缺失时，应视为 request assembly defect，而不是让 LLM 自行猜测输出模式
 
