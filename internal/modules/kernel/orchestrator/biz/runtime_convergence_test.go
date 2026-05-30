@@ -1523,6 +1523,52 @@ func TestBuildConvergenceContractRequiresEvidenceWhenStateChangeOnlyHasRuntimeFi
 	}
 }
 
+func TestRefreshConvergenceCoverageTargetsPreservesPrerequisiteRootCauseSnapshots(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"coverageTargetSet": []map[string]any{{
+			"kind":       "deliverable",
+			"targetText": "validation_report",
+			"state":      "open",
+		}},
+		"missingDeliverableCoverage": []map[string]any{{
+			"kind":       "deliverable",
+			"item":       "validation_report",
+			"targetText": "validation_report",
+			"state":      "open",
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"rootCauseCandidateContext": []map[string]any{{
+				"targetRef":        "dependency.manifest",
+				"source":           "prerequisite_manifest_candidate",
+				"exists":           true,
+				"contentHash":      "sha256-current",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"content":          "dependency = stable\n",
+			}},
+		},
+	}
+
+	refreshConvergenceCoverageTargets(input)
+
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(snapshots) != 1 || stringFromMap(snapshots[0], "targetRef") != "dependency.manifest" {
+		t.Fatalf("targetSnapshots = %+v, want promoted prerequisite root-cause snapshot", snapshots)
+	}
+	if targets := stringSliceFromValue(pkg["repairTargetSet"]); !stringSliceContains(targets, "dependency.manifest") {
+		t.Fatalf("repairTargetSet = %+v, want prerequisite target retained", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || required["toolStateChangingInputContract"] == nil {
+		t.Fatalf("requiredOutput = %+v, want state-changing contract retained", required)
+	}
+}
+
 func TestDecisionResolutionInputAppliesConvergenceContract(t *testing.T) {
 	ticket := &decisionmodel.Ticket{
 		ID:           "ticket-resolved-continue",

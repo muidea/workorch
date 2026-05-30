@@ -4588,8 +4588,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandi
 	workspaceRepo := memory.NewWorkspaceRepository()
 	deliverableDirectory := t.TempDir()
 	files := map[string][]byte{
-		"go.mod":         []byte("module example.test/app\n\ngo 1.21\n"),
-		"server/main.go": []byte("package main\n"),
+		"go.mod":          []byte("module example.test/app\n\ngo 1.21\n"),
+		"mcp-config.json": []byte(`{"servers":{}}` + "\n"),
+		"main_test.go":    []byte("package main\n"),
+		"server/main.go":  []byte("package main\n"),
 	}
 	for name, content := range files {
 		path := filepath.Join(deliverableDirectory, filepath.FromSlash(name))
@@ -4646,6 +4648,9 @@ func TestRuntimeOrchestrator_RuntimeRepairInputPromotesPrerequisiteManifestCandi
 	candidates := mapSliceFromValue(input["rootCauseCandidateContext"])
 	if len(candidates) == 0 || stringFromMap(candidates[0], "targetRef") != "go.mod" {
 		t.Fatalf("rootCauseCandidateContext = %#v, want go.mod prerequisite manifest candidate", candidates)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("rootCauseCandidateContext = %#v, want only template-declared prerequisite manifest candidate", candidates)
 	}
 	actionPackage := mapFromValue(input["repairActionPackage"])
 	targets := mapSliceFromValue(actionPackage["targetSnapshots"])

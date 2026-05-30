@@ -633,6 +633,11 @@ func refreshConvergenceCoverageTargets(input map[string]any) {
 		input["repairActionPackage"] = pkg
 		return
 	}
+	if promoteRepairActionPackagePrerequisiteRootCauseCandidates(pkg) &&
+		stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
+		input["repairActionPackage"] = pkg
+		return
+	}
 	if profileStateChangingPackageMatchesCoverageTargets(pkg, targets) {
 		input["repairActionPackage"] = pkg
 		return

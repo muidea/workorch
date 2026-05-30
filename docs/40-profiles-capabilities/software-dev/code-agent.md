@@ -35,7 +35,7 @@ Last Updated: 2026-05-30
 - 最终 Result/Artifact 必须提供真实交付证据，包括变更摘要、diff 或可追溯 diff artifact、验证命令与结果、剩余风险和交付物索引。
 - Memory 只应沉淀项目约定、验证命令、历史决策和失败修复经验，不写入低价值过程噪音。
 - 自动修复循环必须基于失败证据推进，直到 DoD 满足、出现真实 blocker，或进入治理边界。
-- 当构建、测试或工具执行失败暴露依赖解析、锁文件、校验和、工具链或 registry/network prerequisite 问题时，`software-dev` template 通过 `contextHints.runtimeRepair.prerequisiteManifestTargetPatterns` 声明可作为根因候选的生态文件，例如 module manifest、lock、checksum、requirements、package metadata 和 build entry metadata。即使失败日志同时指向某个源文件，template 声明的 manifest 候选也必须作为 root-cause candidate 保留。Core runtime 只消费这些 pattern 与当前 manifest，不在核心层理解具体语言或包管理器。
+- 当构建、测试或工具执行失败暴露依赖解析、锁文件、校验和、工具链或 registry/network prerequisite 问题时，`software-dev` template 通过 `contextHints.runtimeRepair.prerequisiteManifestTargetPatterns` 声明可作为根因候选的生态文件，例如 module manifest、lock、checksum、requirements、package metadata 和 build entry metadata。即使失败日志同时指向某个源文件，template 声明的 manifest 候选也必须作为 root-cause candidate 保留；当 pattern 已声明时，只应优先投递匹配 pattern 的当前资源，避免配置、测试或源码文件混入 prerequisite candidate 噪点。Core runtime 只消费这些 pattern 与当前 manifest，不在核心层理解具体语言或包管理器。
 
 ## Capability And Module Mapping
 

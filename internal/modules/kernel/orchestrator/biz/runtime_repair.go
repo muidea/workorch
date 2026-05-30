@@ -3511,6 +3511,7 @@ func stateChangingRepairGuidance() []string {
 		"When changing an existing target file, prefer text_replace with exact oldText/newText or the smallest unified_diff over file_write; use file_write primarily to create missing targets or replace a known full file snapshot intentionally.",
 		"unified_diff patches must include explicit hunk line ranges such as @@ -12,3 +12,4 @@; never emit a bare @@ hunk.",
 		"Do not use shell/command or mcp/tool_call to modify workspace files when a patch/apply state-change artifact can represent the change; when acceptedKinds explicitly allows them, declare stateChanging=true plus targetRef, relatedFailureTargets, stateChangingReason, or boundedReason, then add bounded verification that depends on the operation.",
+		"If a shell/command or mcp/tool_call is the only practical way to materialize derived workspace state, it must explicitly declare stateChanging=true, targetRef, stateChangingReason, and relatedFailureTargets/targetRefs/affectedTargets; coverageTargets or summary alone are not an auditable state-changing declaration.",
 		"For scoped repair verification, shell/command input must declare targetRef, relatedFailureTargets, verificationScope, or boundedReason, or depend on a patch/apply node that directly targets the current failure scope.",
 		"Any MCP tool call that synchronizes modified file content must include the complete current file content in input.content together with the target path; do not emit path-only, root-only, or partial sync requests.",
 		"When failedStepOutput identifies concrete target resources, treat those target snapshots as authoritative and repair the target directly instead of changing unrelated prerequisite metadata.",
@@ -4090,6 +4091,18 @@ func stateChangingRepairRequiredOutput() map[string]any {
 	return map[string]any{
 		"mustIncludeStateChangingNode": true,
 		"acceptedKinds":                stateChangingRepairAcceptedKinds(),
+		"toolStateChangingInputContract": map[string]any{
+			"requiredWhenKind": []string{"shell/command", "mcp/tool_call"},
+			"requiredFields":   []string{"stateChanging", "targetRef", "stateChangingReason"},
+			"relationFields":   []string{"relatedFailureTargets", "targetRefs", "affectedTargets"},
+			"verificationFields": []string{
+				"verificationScope",
+				"targetRef",
+				"relatedFailureTargets",
+				"boundedReason",
+			},
+		},
+		"toolStateChangingRule": "when shell/command or mcp/tool_call is the state-changing node, declare input.stateChanging=true, input.targetRef, input.stateChangingReason, and a relation field such as relatedFailureTargets/targetRefs/affectedTargets; a dependent verification shell/tool node must declare verificationScope, targetRef, relatedFailureTargets, or boundedReason",
 		"forbiddenKinds": []string{
 			"read_only_graph",
 			"llm_gated_graph",
@@ -5837,6 +5850,46 @@ func repairActionWorkspaceManifest(input map[string]any) []map[string]any {
 	return ret
 }
 
+func promoteRepairActionPackagePrerequisiteRootCauseCandidates(pkg map[string]any) bool {
+	if len(pkg) == 0 {
+		return false
+	}
+	var prerequisiteCandidates []map[string]any
+	for _, candidate := range mapSliceFromValue(pkg["rootCauseCandidateContext"]) {
+		source := strings.ToLower(strings.TrimSpace(stringFromMap(candidate, "source")))
+		if !strings.Contains(source, "prerequisite_manifest") {
+			continue
+		}
+		prerequisiteCandidates = append(prerequisiteCandidates, candidate)
+	}
+	promoted := repairActionPromotableRootCauseCandidateTargetSnapshots(prerequisiteCandidates)
+	if len(promoted) == 0 {
+		return false
+	}
+	pkg["targetSnapshots"] = promoted
+	pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(promoted)
+	pkg["rootCauseCandidateTargetsPromoted"] = true
+	requiredOutput := mapFromValue(pkg["requiredOutput"])
+	if len(requiredOutput) == 0 {
+		requiredOutput = stateChangingRepairRequiredOutput()
+	}
+	requiredOutput["mustTargetFailureScope"] = true
+	requiredOutput["targetRelation"] = "grounded_prerequisite_root_cause_candidate_or_declared_related_failure_target"
+	applyCurrentSnapshotDirectPatchContract(requiredOutput)
+	requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, file/edit, or a declared auditable shell/tool state-changing operation"
+	pkg["requiredOutput"] = requiredOutput
+	targets := stringSliceFromValue(pkg["repairTargetSet"])
+	for _, item := range promoted {
+		if targetRef := normalizeRepairPatchTargetRef(stringFromMap(item, "targetRef")); targetRef != "" {
+			targets = append(targets, targetRef)
+		}
+	}
+	if targets = filterAdmissibleRuntimeRepairTargetRefs(compactUniqueStrings(targets)); len(targets) > 0 {
+		pkg["repairTargetSet"] = targets
+	}
+	return true
+}
+
 func stateChangingReadOnlyGraphFailureText(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
 	return strings.Contains(value, "state-changing") &&
@@ -6772,6 +6825,9 @@ func runtimeRepairPrerequisiteManifestCandidateContext(deliverableDirectory stri
 func runtimeRepairPrerequisiteManifestCandidateScore(path string, targetPatterns []string) int {
 	path = strings.ToLower(normalizeRepairPatchTargetRef(path))
 	if path == "" {
+		return 0
+	}
+	if len(targetPatterns) > 0 && !runtimeRepairPathMatchesAnyPattern(path, targetPatterns) {
 		return 0
 	}
 	base := filepath.Base(path)
