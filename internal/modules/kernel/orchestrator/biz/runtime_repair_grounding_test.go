@@ -207,6 +207,108 @@ func TestRepairActionPackageAnchorsPrimaryFailureAcrossTargetAdmissionWrapperFai
 	}
 }
 
+func TestRepairActionPackageAnchorsPrimaryFailureAcrossContinuableDecisionWrapperFailure(t *testing.T) {
+	decisionFailure := "invalid argument: decision requests a continuable candidate choice"
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureClass":                "dod_coverage_missing",
+		"failureReason":               decisionFailure,
+		"failedStepOutput": map[string]any{
+			"stage":                                "llm_decision_required",
+			"error":                                decisionFailure,
+			failureOutputKeyClass:                  "dod_coverage_missing",
+			failureOutputKeySignature:              "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_decision_required|error=" + decisionFailure,
+			"continuableDecisionConvertedToRepair": true,
+			"convertedDecision": map[string]any{
+				"question": "Please provide pkg/langserver/instance.go and pkg/handler/mcp.go.",
+				"context": map[string]any{
+					"missingFields":       []string{"pkg/langserver/instance.go content", "pkg/handler/mcp.go content"},
+					"requiresHumanFields": []string{"pkg/langserver/instance.go content", "pkg/handler/mcp.go content"},
+				},
+			},
+		},
+		"readableResourceRepairContext": []map[string]any{{
+			"targetRef":        "pkg/langserver/instance.go",
+			"exists":           true,
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"contentHash":      "hash-instance",
+			"content":          "package langserver\n",
+		}, {
+			"targetRef":        "pkg/handler/mcp.go",
+			"exists":           true,
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"contentHash":      "hash-handler",
+			"content":          "package handler\n",
+		}},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failedStepId":     "run/graph-001/009-verify-build",
+				"failedStepKind":   shellcommon.StepKindCommand,
+				"failureClass":     failureClassShellCommand,
+				"failureSignature": "class=shell_command_failed|kind=shell/command|failureTargets=pkg/lsp/server.go,main.go|exitCode=1",
+				"reason":           "pkg/lsp/server.go:10:24: undefined: LSPInstance\nmain.go:28:28: undefined: NewServer",
+				"targetRef":        "pkg/lsp/server.go,main.go",
+				"targetScope":      "failureTargets=pkg/lsp/server.go,main.go",
+			},
+			"structuredFailureSignals": map[string]any{
+				"targetRefs": []string{"pkg/lsp/server.go", "main.go"},
+				"lineRefs": []map[string]any{
+					{"targetRef": "pkg/lsp/server.go", "line": 10, "column": 24},
+					{"targetRef": "main.go", "line": 28, "column": 28},
+				},
+			},
+			"repairTargetSet": []string{"pkg/lsp/server.go", "main.go"},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "pkg/lsp/server.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-server",
+				"content":          "package lsp\n",
+			}, {
+				"targetRef":        "main.go",
+				"exists":           true,
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "hash-main",
+				"content":          "package main\n",
+			}},
+		},
+	}
+
+	pkg := repairActionPackageFromRepairInput(input, map[string]any{
+		"stage":                   "llm_decision_required",
+		"error":                   decisionFailure,
+		failureOutputKeyClass:     "dod_coverage_missing",
+		failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_decision_required|error=" + decisionFailure,
+	})
+
+	currentFailure := mapFromValue(pkg["currentFailure"])
+	if currentFailure["failureClass"] != failureClassShellCommand ||
+		currentFailure["failedStepId"] != "run/graph-001/009-verify-build" ||
+		!strings.Contains(stringFromMap(currentFailure, "reason"), "LSPInstance") {
+		t.Fatalf("currentFailure = %+v, want original shell/build failure anchored", currentFailure)
+	}
+	if refs := stringSliceFromValue(pkg["repairTargetSet"]); !stringSliceContains(refs, "pkg/lsp/server.go") || !stringSliceContains(refs, "main.go") {
+		t.Fatalf("repairTargetSet = %+v, want original repair targets preserved", refs)
+	}
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	targetRefs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetRefs = append(targetRefs, stringFromMap(target, "targetRef"))
+	}
+	if !stringSliceContains(targetRefs, "pkg/lsp/server.go") || !stringSliceContains(targetRefs, "main.go") {
+		t.Fatalf("targetSnapshots = %+v, want original target snapshots preserved", targets)
+	}
+	summary := mapFromValue(pkg["previousRejectedOutputSummary"])
+	if !strings.Contains(stringFromMap(summary, "error"), "continuable candidate choice") {
+		t.Fatalf("previousRejectedOutputSummary = %+v, want continuable decision wrapper retained as summary", summary)
+	}
+}
+
 func TestRepairActionPackageAnchorsPrimaryFailureFromReplanContinuation(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

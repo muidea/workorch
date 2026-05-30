@@ -3960,6 +3960,7 @@ func runtimeRepairWrapperFailureOutput(output map[string]any) bool {
 		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
 		strings.Contains(text, "state-changing llm repair step returned no state-changing output") ||
 		strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply") ||
+		strings.Contains(text, "decision requests a continuable candidate choice") ||
 		strings.Contains(text, "executiongraph patch/apply input invalid") ||
 		strings.Contains(text, "runtime repair patch/apply target") ||
 		strings.Contains(text, "not related to failure target scope") ||
