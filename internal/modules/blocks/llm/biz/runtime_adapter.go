@@ -2795,6 +2795,24 @@ func normalizeDecisionExecutionGraph(decision *llmmodels.LLMExecutionDecision) {
 	}
 	for idx := range decision.ExecutionGraph.Nodes {
 		decision.ExecutionGraph.Nodes[idx].Kind = llmcommon.CanonicalRuntimeBlockKind(decision.ExecutionGraph.Nodes[idx].Kind)
+		normalizeDecisionGraphFileInput(&decision.ExecutionGraph.Nodes[idx])
+	}
+}
+
+func normalizeDecisionGraphFileInput(node *llmmodels.BlockExecutionNode) {
+	if node == nil || node.Input == nil {
+		return
+	}
+	switch strings.TrimSpace(node.Kind) {
+	case filecommon.StepKindRead, filecommon.StepKindEdit, filecommon.StepKindList:
+	default:
+		return
+	}
+	if strings.TrimSpace(stringValue(node.Input["path"])) != "" {
+		return
+	}
+	if targetRef := strings.TrimSpace(stringValue(node.Input["targetRef"])); targetRef != "" {
+		node.Input["path"] = targetRef
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"

@@ -15,10 +15,10 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -3251,17 +3251,19 @@ func mapEventRecords(items []*eventstreammodel.EventRecord) []EventRecord {
 			continue
 		}
 		ret = append(ret, EventRecord{
-			ID:           string(item.ID),
-			Version:      item.Version,
-			Topic:        item.Topic,
-			OccurredAt:   item.OccurredAt,
-			SourceModule: item.SourceModule,
-			SubjectType:  item.SubjectType,
-			SubjectID:    item.SubjectID,
-			WorkspaceID:  string(item.WorkspaceID),
-			RunID:        string(item.RunID),
-			StepID:       string(item.StepID),
-			Payload:      canonicalizeEventRecordPayload(item.Topic, item.SubjectType, cloneReadModelMap(item.Payload)),
+			ID:             string(item.ID),
+			Version:        item.Version,
+			Topic:          item.Topic,
+			OccurredAt:     item.OccurredAt,
+			SourceModule:   item.SourceModule,
+			SubjectType:    item.SubjectType,
+			SubjectID:      item.SubjectID,
+			WorkspaceID:    string(item.WorkspaceID),
+			RunID:          string(item.RunID),
+			StepID:         string(item.StepID),
+			Payload:        canonicalizeEventRecordPayload(item.Topic, item.SubjectType, cloneReadModelMap(item.Payload)),
+			PayloadSummary: cloneReadModelMap(item.PayloadSummary),
+			PayloadRef:     item.PayloadRef,
 		})
 	}
 	if len(ret) == 0 {
@@ -4264,17 +4266,19 @@ func mapProjectedEventRecords(items []*eventstreammodel.EventRecord) []EventReco
 			continue
 		}
 		ret = append(ret, EventRecord{
-			ID:           string(item.ID),
-			Version:      item.Version,
-			Topic:        item.Topic,
-			OccurredAt:   item.OccurredAt,
-			SourceModule: item.SourceModule,
-			SubjectType:  item.SubjectType,
-			SubjectID:    item.SubjectID,
-			WorkspaceID:  string(item.WorkspaceID),
-			RunID:        string(item.RunID),
-			StepID:       string(item.StepID),
-			Payload:      projectEventPayload(item.Payload),
+			ID:             string(item.ID),
+			Version:        item.Version,
+			Topic:          item.Topic,
+			OccurredAt:     item.OccurredAt,
+			SourceModule:   item.SourceModule,
+			SubjectType:    item.SubjectType,
+			SubjectID:      item.SubjectID,
+			WorkspaceID:    string(item.WorkspaceID),
+			RunID:          string(item.RunID),
+			StepID:         string(item.StepID),
+			Payload:        projectEventPayload(item.Payload),
+			PayloadSummary: cloneReadModelMap(item.PayloadSummary),
+			PayloadRef:     item.PayloadRef,
 		})
 	}
 	if len(ret) == 0 {

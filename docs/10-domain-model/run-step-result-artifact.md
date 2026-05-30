@@ -22,6 +22,7 @@ Run 是一次围绕当前 Goal / DoD 定义发起的正式执行实例。
 - `workspaceId`
 - `goalId`
 - `doDId`
+- `definitionRevision`
 - `initialStepKind`
 - `executionContext`
 - `state`
@@ -203,6 +204,70 @@ RuntimeCheckpoint 表示一次可恢复、可诊断的运行时快照证据。
 - 它可以进入 observability、timeline、repair lineage 和 replay 输入面
 - RuntimeCheckpoint 不应被前端默认展示成正式 Artifact 或 Result
 
+### CoverageWorkItem
+
+CoverageWorkItem 是 run-scoped 的 coverage ledger 对象。
+
+它的作用是把当前 effective Goal / DoD / deliverable source 投影成可收敛、可追溯、
+可验证的工作项。
+
+建议稳定字段：
+
+- `id`
+- `runId`
+- `definitionRevision`
+- `normalizedSourceKey`
+- `sourceScope`
+- `sourceRequirementId`
+- `targetText`
+- `requiredEvidenceKinds`
+- `status`
+- `acceptedEvidenceRefs`
+- `rejectedEvidenceRefs`
+- `currentGap`
+- `updatedByStepId`
+
+稳定边界：
+
+- CoverageWorkItem 不是新的 Goal / DoD 定义
+- 它属于当前 run 的 coverage ledger，而不是 workspace formal definition
+- 它可以被 verification / acceptance / repair / replan 引用，但不替代 Run / Result 主状态机
+- 同一 `definitionRevision + normalizedSourceKey` 在当前 run 内只能有唯一 active item
+
+### ArtifactContinuation
+
+ArtifactContinuation 是 run-scoped 的 runtime internal continuation 对象。
+
+它用于承接 `incrementalArtifact` 的 plan / chunk / assemble / apply 恢复链。
+
+建议稳定字段：
+
+- `id`
+- `runId`
+- `rootStepId`
+- `currentStepId`
+- `artifactId`
+- `targetRef`
+- `operation`
+- `outputMode`
+- `expectedSequence`
+- `receivedSequences`
+- `finalReceived`
+- `bytesWritten`
+- `rollingHash`
+- `lastChunkHash`
+- `coverageTargets`
+- `state`
+- `createdAt`
+- `updatedAt`
+
+稳定边界：
+
+- ArtifactContinuation 属于 runtime internal state，不属于 workspace deliverable
+- 它服务恢复、诊断和 metadata-only projection，不直接表达 accepted business outcome
+- 它可以被 snapshot / observability / raw-detail 引用，但默认不暴露正文内容
+- apply / validation 完成后，正式 closeout 仍回到 Result / Artifact / Validation evidence
+
 ## Ownership Mapping
 
 这些过程证据对象与 Step / Result / Artifact 的稳定拥有关系应保持：
@@ -234,6 +299,8 @@ Run 终态与 Result 终态不是一回事：
 - accepted Result 必须有可追踪 evidence refs
 - Artifact 必须通过逻辑 URI 暴露，不得暴露本地绝对路径
 - ToolCall / Patch / ValidationResult / RuntimeCheckpoint 仍保留为过程证据
+- CoverageWorkItem 必须保持 run-scoped，不能回写 formal Goal / DoD
+- ArtifactContinuation 必须保持 internal state，不能默认投影成正式 deliverable artifact
 - Web / TUI / API 不得把普通 step output 直接冒充为正式 Result
 
 ## Projection Boundary
@@ -247,7 +314,3 @@ Run snapshot、run observability、workspace outcome、task progress 都是运�
 - `../90-archive/superseded/workspace-data-layout-plan.md`
 - `../90-archive/records/delivery-history.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- Result summary / artifact summary 与 read model outcome 的映射仍需在 flow 层展开。

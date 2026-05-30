@@ -17,8 +17,8 @@ import (
 	"time"
 
 	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"

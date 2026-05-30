@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
@@ -126,6 +126,9 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	}
 	if len(items) != 1 || items[0].Payload["large"] != payload {
 		t.Fatalf("events = %+v, want rehydrated large payload", items)
+	}
+	if items[0].PayloadRef == "" || len(items[0].PayloadSummary) == 0 {
+		t.Fatalf("event payload projection = ref:%q summary:%+v, want ref and summary", items[0].PayloadRef, items[0].PayloadSummary)
 	}
 }
 

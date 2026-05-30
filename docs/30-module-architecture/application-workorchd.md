@@ -168,8 +168,3 @@ server 层不应复制业务逻辑；其职责应止于：
 
 - `repository-structure.md`
 - `../50-product-interface/service-api.md`
-
-## Open Migration Notes
-
-- `service-api` 的完整资源清单后续迁入 `../50-product-interface/service-api.md`
-- TUI 本地模式的产品交互后续迁入 `50-product-interface/tui/`

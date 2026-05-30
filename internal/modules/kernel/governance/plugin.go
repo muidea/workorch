@@ -9,7 +9,7 @@ import (
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run/service"

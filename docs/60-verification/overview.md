@@ -14,10 +14,17 @@ Last Updated: 2026-05-30
 
 1. [service-acceptance.md](service-acceptance.md)
 2. [core-runtime-verifier.md](core-runtime-verifier.md)
-3. [profile-software-dev-verifier.md](profile-software-dev-verifier.md)
-4. [loadtest-baseline.md](loadtest-baseline.md)
-5. [audits/overview.md](audits/overview.md)
-6. `tui/`
+3. [incremental-artifact-code-review-checklist.md](incremental-artifact-code-review-checklist.md)
+4. [domain-model-code-alignment-checklist.md](domain-model-code-alignment-checklist.md)
+5. [runtime-flow-code-alignment-checklist.md](runtime-flow-code-alignment-checklist.md)
+6. [module-architecture-code-alignment-checklist.md](module-architecture-code-alignment-checklist.md)
+7. [profile-capability-code-alignment-checklist.md](profile-capability-code-alignment-checklist.md)
+8. [product-interface-code-alignment-checklist.md](product-interface-code-alignment-checklist.md)
+9. [verification-layer-code-alignment-checklist.md](verification-layer-code-alignment-checklist.md)
+10. [profile-software-dev-verifier.md](profile-software-dev-verifier.md)
+11. [loadtest-baseline.md](loadtest-baseline.md)
+12. [audits/overview.md](audits/overview.md)
+13. `tui/`
    - [tui-agent-acceptance.md](tui/tui-agent-acceptance.md)
    - [display-closure-tracking.md](tui/display-closure-tracking.md)
 
@@ -43,21 +50,20 @@ Last Updated: 2026-05-30
 - profile-specific 规则来源属于 `40-profiles-capabilities/`
 - archive / completed records 属于 `90-archive/`
 
-## Current Gaps
+## Current Status
 
-当前本层仍未完全收口的重点包括：
+当前本层已经形成稳定入口：
 
 - `service-acceptance.md`
-  - active 设计层已补 paginated detail / file-backend reload / deployed 对照矩阵；后续若继续补写，主要是更细 deployed shell 样本
+  - 承接服务启动、最小业务链、file backend persistence 与 deployed verification 入口
 - `core-runtime-verifier.md`
-  - active 设计层已收口；后续若继续补写，仅是穷举 rule-to-test 索引
+  - 承接 core contract、context gate、repair/replan、request audit 的中立验证
 - `profile-software-dev-verifier.md`
-  - active 设计层已收口；后续若继续补写，仅是穷举 profile-rule-to-assertion 索引
+  - 承接 software-dev profile 的 coverage/evidence/deliverable 闭环验证
 - `tui/*`
-  - 缺 acceptance / closure / review 的剩余交叉引用清理
+  - 承接 TUI acceptance、display closure 与 review boundary
 - `loadtest-baseline.md`
-  - active 设计层已补入口、指标口径、failure-class contract 与 records 分层；后续若继续补写，主要是更多历史轮次索引
+  - 承接当前 active 并发基线、指标口径和 records layering
 
-完整目录级缺口总表见：
-
-- `../01-overview/current-unclosed-matrix.md`
+后续若继续补写，主要只应是脚本索引、字段级映射和更多样例补细，
+而不是重新定义 runtime / product / profile 设计边界。

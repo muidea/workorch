@@ -351,7 +351,3 @@ repair、provider retry、schema repair、replan successor 进入下一轮时，
 - `../60-verification/audits/codex-request-context-comparison.md`
 - `../00-core/runtime-request-cache-note.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- `PromptContext.sections`、section hash、cachePlan、request-log verifier 等实现细节后续迁入模块层。

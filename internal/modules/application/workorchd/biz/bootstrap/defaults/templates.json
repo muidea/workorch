@@ -4,6 +4,7 @@
     "name": "通用治理任务",
     "description": "完整的决策与审批双门控流程，适用于各类通用任务。不限制工具类型，由 Soul 按阶段约束能力。",
     "goalText": "完成任务目标并产出结构化交付物。",
+    "defaultSoulId": "soul-generic-governed-execution",
     "doDItems": [
       "目标已完成，输出包含明确的执行结果",
       "如发生决策或审批，必须通过后端决策工单（Decision）/审批工单（Approval）记录并可追溯",
@@ -23,6 +24,7 @@
     "name": "天气查询治理",
     "description": "通过 MCP 外部天气工具查询指定城市天气，需要决策信息补充和操作审批双门控。",
     "goalText": "查询指定城市当前天气。缺少城市信息时触发决策工单（Decision），工具调用前触发审批工单（Approval）。",
+    "defaultSoulId": "soul-weather-query-execution",
     "doDItems": [
       "缺少目标城市时生成决策工单（Decision）",
       "补充城市信息后生成审批工单（Approval）并等待批准",
@@ -43,6 +45,7 @@
     "name": "软件开发",
     "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。支持 git、构建工具和测试框架。",
     "goalText": "根据需求完成软件开发任务：编码实现、运行测试、修复缺陷、产出交付物。",
+    "defaultSoulId": "soul-software-dev-execution",
     "doDItems": [
       "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
       "已从 PRD、README、需求文档或用户 Goal 中提取功能目标、约束和验收点，并映射到执行计划",
@@ -285,6 +288,7 @@
     "name": "代码审查",
     "description": "对代码进行只读分析，检查代码质量、安全隐患和最佳实践。发现问题时触发决策。",
     "goalText": "审查指定代码，检查代码质量、安全隐患、性能问题和最佳实践符合性。",
+    "defaultSoulId": "soul-code-review-execution",
     "doDItems": [
       "代码质量问题已识别并记录",
       "安全隐患已检查",
@@ -306,6 +310,7 @@
     "name": "文档生成",
     "description": "从代码和上下文生成结构化文档——API 文档、README、架构说明。",
     "goalText": "根据提供的代码和上下文生成完整的技术文档。",
+    "defaultSoulId": "soul-doc-generator-execution",
     "doDItems": [
       "文档覆盖所有公开接口和模块",
       "示例代码可运行",
@@ -327,6 +332,7 @@
     "name": "数据分析",
     "description": "执行数据分析任务——查询数据库、运行 Python/R 脚本、生成分析报告。优先级低于其他任务（priority=1）。",
     "goalText": "根据需求完成数据分析：获取数据、清洗处理、统计建模、生成分析报告。",
+    "defaultSoulId": "soul-data-analysis-execution",
     "doDItems": [
       "数据已成功获取",
       "数据清洗和处理已完成",

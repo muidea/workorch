@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"context"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -12,6 +11,7 @@ import (
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"

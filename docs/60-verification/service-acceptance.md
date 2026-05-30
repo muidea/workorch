@@ -152,7 +152,8 @@ Last Updated: 2026-05-30
 | Script / Target | 主要覆盖资源或行为 |
 | --- | --- |
 | `make verify-service` | `healthz` / `readyz` / `metrics` / `console` / `configuration` / `workspaces` / `runs` / `events?limit=20` |
-| `make verify-service-file` | file backend 启动基线与最小业务主链 |
+| `make verify-service-file` | `verify-service` 的 deployed-instance alias；不启动服务、不切换 backend |
+| `make docker-verify-file` / `scripts/verify-workorch-container.sh` | file backend 启动、重启与最小业务主链 |
 | `make verify-workspace-template-soul` | souls CRUD / workspace templates CRUD / soul bindings / template-based setup |
 | `make verify-llm` | configuration/llm / memory seed / execution activations / runs / decisions / approvals / LLM-driven execution loop |
 | `make verify-real-llm` | 真实 provider 下的最小 LLM 执行链 |
@@ -333,6 +334,8 @@ make verify-service-file
 - 两个目标都应连接当前部署实例
 - `make verify-service-file` 只是别名，不负责启动或重启服务
 - 若实例尚未启动，先按 `../50-product-interface/deployment.md` 完成启动，再执行这些验收入口
+- 需要验证 file backend 启动、重启和持久化重读时，使用 `make docker-verify-file`
+  或直接调用 `WORKORCH_VERIFY_BACKEND=file ./scripts/verify-workorch-container.sh`
 
 ## File Backend Vs Deployed Instance
 
@@ -465,21 +468,17 @@ go test ./...
 - 某些 detail page 在“真正重启后再次翻页”的逐页实例样本还没有专门 deployed script
 - raw payload ref 与 artifact uri 的跨脚本样本仍主要集中在 handler/file-backend fixture，而不是 deployed shell 脚本
 
-## Current Gaps
+## Detailing Boundary
 
-本文当前仍未展开：
+本文在服务级验收层已经给出稳定入口、资源面和 direct evidence 层次。
 
-- 某些 detail page 的 deployed shell 级逐页实例样本
-- `events/stream` 的 deployed shell 侧显式断线补偿样本
-- direct fixture、deployed script、container fixture 三层证据的更细脚本名对脚本名映射
+后续若继续补写，主要只应是：
 
-## Next Detailing Direction
+- detail page 的 deployed shell 级样例
+- `events/stream` 的 deployed 断线补偿样例
+- `make verify-*` 到 API/read-model/resource 的更细覆盖索引
 
-后续建议继续补：
-
-- detail page 的 deployed shell 级逐页实例样本
-- `events/stream` 的 deployed 断线补偿样本
-- 每个 `make verify-*` 到 API/read-model/resource 的更细覆盖矩阵
+这些补细不会改变本文当前的验收边界和责任划分。
 
 ## Source Migration Note
 

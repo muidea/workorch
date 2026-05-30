@@ -3,8 +3,8 @@ package observed
 import (
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -108,7 +108,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 			Version:      events.WorkorchEventVersion,
 			Topic:        events.TopicApprovalResolved,
 			OccurredAt:   "2026-04-21T08:00:04Z",
-			SourceModule: "blocks/approval",
+			SourceModule: "kernel/approval",
 			SubjectType:  "approval",
 			SubjectID:    string(approval.ID),
 			WorkspaceID:  string(ws.ID),
@@ -480,7 +480,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 			Version:      events.WorkorchEventVersion,
 			Topic:        events.TopicApprovalResolved,
 			OccurredAt:   "2026-04-21T09:10:02Z",
-			SourceModule: "blocks/approval",
+			SourceModule: "kernel/approval",
 			SubjectType:  "approval",
 			SubjectID:    string(approval.ID),
 			WorkspaceID:  string(ws.ID),

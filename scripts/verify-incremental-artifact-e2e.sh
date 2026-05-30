@@ -111,10 +111,13 @@ import hashlib
 import json
 import os
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONTENT = "neutral artifact content\n"
 CONTENT_HASH = "sha256:" + hashlib.sha256(CONTENT.encode("utf-8")).hexdigest()
+chunk_attempts = {}
+chunk_attempts_lock = threading.Lock()
 
 def extract_section_json(merged, title):
     marker = title + "\n"
@@ -225,7 +228,37 @@ def full_assessment(step_id):
 def decision_payload(request):
     if request.get("runId") == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
+    if request.get("phase") == "artifact_context":
+        return {
+            "completionState": "continue",
+            "executionGraph": {
+                "nodes": [
+                    {
+                        "id": "read-current-target",
+                        "kind": "file/read",
+                        "input": {"targetRef": "deliverable.txt", "optional": True},
+                    }
+                ]
+            },
+        }
     if request.get("artifactContextState") == "chunking" or request.get("phase") == "artifact_chunk":
+        run_id = request.get("runId") or "unknown"
+        with chunk_attempts_lock:
+            attempt = chunk_attempts.get(run_id, 0) + 1
+            chunk_attempts[run_id] = attempt
+        if attempt == 1:
+            return {
+                "completionState": "continue",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "id": "read-before-chunk",
+                            "kind": "file/read",
+                            "input": {"targetRef": "deliverable.txt", "optional": True},
+                        }
+                    ]
+                },
+            }
         return {
             "completionState": "continue",
             "artifactChunk": {
@@ -486,6 +519,7 @@ if not any(item.get("targetRef") == "deliverable.txt" and item.get("state") == "
 event_topics = {item.get("topic") for item in events}
 required_topics = {
     "/artifact_continuation/created",
+    "/artifact_continuation/chunk_rejected",
     "/artifact_continuation/chunk_recorded",
     "/artifact_continuation/assembled",
     "/artifact_continuation/applied",
@@ -507,6 +541,14 @@ if "neutral artifact content" in serialized_snapshot:
 for forbidden_key in ['"content":"neutral artifact content\\n"', '"diff":"', '"patch":"']:
     if forbidden_key in serialized_snapshot:
         errors.append(f"snapshot leaked forbidden payload key {forbidden_key!r}")
+
+mock_log = pathlib.Path(snapshot_path).with_name("llm-mock.log")
+if mock_log.exists():
+    log_text = mock_log.read_text(encoding="utf-8", errors="replace")
+    if "phase=artifact_context" not in log_text:
+        errors.append("mock log missing artifact_context phase")
+    if log_text.count("phase=artifact_chunk") < 2:
+        errors.append("mock log missing retried artifact_chunk phase after context graph")
 
 if errors:
     raise SystemExit("\n".join(errors))

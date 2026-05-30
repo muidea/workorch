@@ -20,6 +20,7 @@ type outputModeSelection struct {
 	Priority          string
 	Reason            string
 	Continuation      map[string]any
+	ArtifactPhase     string
 	Policy            LLMOutputRuntimePolicy
 	StateChangeNeeded bool
 }
@@ -107,6 +108,10 @@ func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runMode
 		selection.Priority = "P1"
 		selection.Reason = "open_artifact_continuation"
 		selection.Continuation = continuation
+		if artifactContextPhaseRequested(input, failedStep) {
+			selection.Reason = "open_artifact_continuation_context_required"
+			selection.ArtifactPhase = artifactOutputPhaseContext
+		}
 		return selection
 	}
 	if continuation := mapFromValue(input["artifactContinuationContext"]); len(continuation) > 0 {
@@ -119,6 +124,10 @@ func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runMode
 		selection.Priority = "P2"
 		selection.Reason = "artifact_continuation_recovery"
 		selection.Continuation = continuation
+		if artifactContextPhaseRequested(input, failedStep) {
+			selection.Reason = "artifact_continuation_context_required"
+			selection.ArtifactPhase = artifactOutputPhaseContext
+		}
 		return selection
 	}
 	if schemaInvalidLargePreview(failedStep, policy, attempt) {
@@ -339,6 +348,10 @@ func applyOutputModeRequiredOutput(input map[string]any, selection outputModeSel
 	switch selection.Mode {
 	case outputModeIncrementalArtifact:
 		if continuation := mapFromValue(input["artifactContinuationContext"]); len(continuation) > 0 && !artifactContinuationContextTerminal(continuation) {
+			if selection.ArtifactPhase == artifactOutputPhaseContext {
+				applyArtifactContextRequiredOutput(input, required, selection, continuation)
+				return
+			}
 			applyArtifactChunkRequiredOutput(input, required, selection, continuation)
 			return
 		}
@@ -405,8 +418,40 @@ func clearIncrementalArtifactRequiredOutput(required map[string]any) {
 		"forbiddenTopLevelOutputs",
 		"artifactPlanSchema",
 		"artifactChunkSchema",
+		"mustReturnArtifactContextGraph",
+		"artifactContextGraphSchema",
+		"allowedArtifactContextKinds",
 	} {
 		delete(required, key)
+	}
+}
+
+func applyArtifactContextRequiredOutput(input map[string]any, required map[string]any, selection outputModeSelection, continuation map[string]any) {
+	required["outputMode"] = outputModeIncrementalArtifact
+	required["mustReturnArtifactContextGraph"] = true
+	required["stateChangingEvidenceDeferredUntilApply"] = true
+	required["allowedArtifactContextKinds"] = artifactContextAllowedGraphKinds()
+	required["forbiddenTopLevelOutputs"] = []string{"artifactPlan", "artifactChunk", "artifactChunkRepair", "dodAssessment", "memoryWrites", "patches", "patchRequests", "shellCommands", "mcpToolCalls"}
+	required["artifactContextGraphSchema"] = artifactContextRequiredOutputSchema()
+	delete(required, "mustIncludeStateChangingNode")
+	delete(required, "mustReturnArtifactChunk")
+	delete(required, "artifactChunkSchema")
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["artifactOutputContract"] = map[string]any{
+		"mode":                   outputModeIncrementalArtifact,
+		"phase":                  artifactOutputPhaseContext,
+		"artifactId":             stringFromMap(continuation, "artifactId"),
+		"targetRef":              stringFromMap(continuation, "targetRef"),
+		"expectedSequence":       intFromAny(continuation["expectedSequence"]),
+		"allowedKinds":           artifactContextAllowedGraphKinds(),
+		"maxGraphNodes":          artifactContextMaxGraphNodes,
+		"stateChangingForbidden": true,
+		"schema":                 artifactContextRequiredOutputSchema(),
 	}
 }
 
@@ -437,6 +482,29 @@ func applyArtifactChunkRequiredOutput(input map[string]any, required map[string]
 	}
 }
 
+func artifactContextPhaseRequested(input map[string]any, failedStep *runModel.Step) bool {
+	if boolValue(input["requestedArtifactContext"]) || strings.TrimSpace(stringFromMap(input, "requestedArtifactOutputPhase")) == artifactOutputPhaseContext {
+		return true
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustReturnArtifactContextGraph"]) || strings.TrimSpace(stringFromMap(required, "requestedArtifactOutputPhase")) == artifactOutputPhaseContext {
+		return true
+	}
+	if failedStep == nil || failedStep.Input == nil {
+		return false
+	}
+	if !outputModeIsIncrementalArtifact(failedStep.Input) || artifactOutputPhaseFromInput(failedStep.Input) != artifactOutputPhaseChunk {
+		return false
+	}
+	if _, ok := runtimeGraphSpecFromValue(failedStep.Output[stepOutputKeyExecutionGraph]); ok {
+		return true
+	}
+	if _, ok := runtimeGraphSpecFromValue(mapFromValue(failedStep.Output[stepOutputKeyLLMDecision])[stepOutputKeyExecutionGraph]); ok {
+		return true
+	}
+	return false
+}
+
 func artifactPlanRequiredOutputSchema() map[string]any {
 	return map[string]any{
 		"completionState": "continue",
@@ -449,6 +517,20 @@ func artifactPlanRequiredOutputSchema() map[string]any {
 			"artifactPlan.artifacts[].estimatedBytes",
 		},
 		"mutuallyExclusiveWith": []string{"executionGraph", "artifactChunk", "dodAssessment", "memoryWrites"},
+	}
+}
+
+func artifactContextRequiredOutputSchema() map[string]any {
+	return map[string]any{
+		"completionState": "continue",
+		"requiredFields": []string{
+			"executionGraph.nodes[].id",
+			"executionGraph.nodes[].kind",
+		},
+		"allowedKinds":           artifactContextAllowedGraphKinds(),
+		"maxGraphNodes":          artifactContextMaxGraphNodes,
+		"stateChangingForbidden": true,
+		"mutuallyExclusiveWith":  []string{"artifactPlan", "artifactChunk", "artifactChunkRepair", "dodAssessment", "memoryWrites", "patches", "patchRequests", "shellCommands", "mcpToolCalls"},
 	}
 }
 

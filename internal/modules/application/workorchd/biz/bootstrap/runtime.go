@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"context"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"

@@ -19,7 +19,6 @@ Last Updated: 2026-05-30
 - `blocks/git`
 - `blocks/web`
 - `blocks/ssh`
-- `blocks/approval`
 
 ## Shared Responsibility
 
@@ -46,7 +45,7 @@ block 不拥有：
 - `git/*` -> `blocks/git`
 - `web/*` -> `blocks/web`
 - `ssh/command` -> `blocks/ssh`
-- approval 相关治理动作 -> `blocks/approval`
+- approval 正式状态与治理动作 -> `kernel/approval`
 
 ## Step Kind Registration Matrix
 
@@ -70,7 +69,6 @@ block 不拥有：
 | `web/search` | `blocks/web` | 候选来源发现 |
 | `web/fetch` | `blocks/web` | 来源正文 / 摘要 / metadata 抓取 |
 | `ssh/command` | `blocks/ssh` | 受限远端命令执行 |
-| `approval/*` | `blocks/approval` | 审批动作执行与治理确认 |
 
 约束：
 
@@ -130,7 +128,6 @@ LLM block 输出应保持为：
 | `blocks/git` | operation/branch/headCommit/changedFiles/summary |
 | `blocks/web` | query/finalUrl/provider/resultCount/contentHash/retrievedAt |
 | `blocks/ssh` | target host/session/exitCode/stdoutPreview/stderrPreview |
-| `blocks/approval` | action/state/context/governance linkage |
 
 统一约束：
 
@@ -146,16 +143,11 @@ LLM block 输出应保持为：
   - 只负责 provider-facing request / response，不直接执行 side effect
 - `blocks/mcp` / `blocks/shell` / `blocks/file` / `blocks/git` / `blocks/web` / `blocks/ssh`
   - 负责外部动作执行，但不拥有 Run 终态与 accepted closeout 决策
-- `blocks/approval`
-  - 负责审批动作执行，但不替代 Decision / Approval / Resolution 对象本体
+- approval 不属于 block adapter。Approval 正式状态、resolve 动作和治理关联由 `kernel/approval`
+  承接，并由 orchestrator/governance 选择恢复路径。
 
 ## Source Documents
 
 - `architecture-overview.md`
 - `../20-runtime-flow/planning-execution-flow.md`
 - `../50-product-interface/service-api.md`
-
-## Open Migration Notes
-
-- block kind 注册矩阵和每种 step kind 的更细 contract 仍需继续补充。
-- approval block 的定位仍有一定混合性，后续可能需要和 governance/product 边界继续校正。

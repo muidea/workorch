@@ -36,6 +36,10 @@ Last Updated: 2026-05-30
 - run evidence
   - `ToolCall` / `Patch` / `ValidationResult` / `RuntimeCheckpoint`
   - 只表达运行证据，不直接表达 accepted business outcome
+- run-scoped coverage ledger
+  - `CoverageWorkItem` / `coverageWorkItemContext` 的正式持有和更新输入
+- run-scoped continuation
+  - `ArtifactContinuation` 的正式 internal state 持有
 
 ### `kernel/result`
 
@@ -94,6 +98,7 @@ Last Updated: 2026-05-30
 | --- | --- |
 | run lifecycle | `kernel/run` |
 | run evidence | `kernel/run` 及其 evidence objects |
+| run-scoped coverage ledger / continuation | `kernel/run` |
 | result / artifact closeout | `kernel/result` |
 | formal event persistence / replay input | `kernel/eventstream` |
 
@@ -104,7 +109,3 @@ Last Updated: 2026-05-30
 - `architecture-overview.md`
 - `../90-archive/completed/result-event-development-plan.md`
 - `../90-archive/records/delivery-history.md`
-
-## Open Migration Notes
-
-- workspace outcome / taskProgress 的投影逻辑后续仍需与 read-model 文档对齐。

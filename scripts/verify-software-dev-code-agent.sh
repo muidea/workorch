@@ -16,7 +16,7 @@ go test ./internal/modules/kernel/orchestrator/biz \
   -count=1
 
 echo "-> approval action/context contract"
-go test ./internal/modules/blocks/llm/biz ./internal/modules/blocks/approval/biz ./internal/pkg/events ./internal/pkg/repository \
+go test ./internal/modules/blocks/llm/biz ./internal/modules/kernel/approval/biz ./internal/pkg/events ./internal/pkg/repository \
   -run 'TestNormalizeDecisionOutputPreservesRequiredApprovalActionContext|TestParseLLMExecutionDecisionAllowsNestedGovernanceExtraFields|TestApprovalRepositoryContract|TestDecodeWorkorchEventNormalizesApprovalPayload|TestServiceEnsureApproval' \
   -count=1
 

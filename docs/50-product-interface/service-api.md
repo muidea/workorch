@@ -691,7 +691,7 @@ response struct 为准，而不是单独维护 schema registry。
 | --- | --- | --- |
 | `RunSnapshot` | `coverageWorkItems` / `coverageWorkItemContext` | 当前 run 的 coverage 工作项账本和上下文 |
 | `RunSnapshot` / `RunObservability` | `selectedCapabilities` / `usedCapabilities` | capability 被选中和被实际使用的两层视图 |
-| `RunSnapshot` / `WorkspaceSnapshot` | `artifactContinuations` | incremental artifact 生命周期投影 |
+| `RunSnapshot` / `WorkspaceSnapshot` | `artifactContinuations` | incremental artifact 生命周期投影；默认只返回 metadata，不内嵌 plan/chunk/assembled 正文 |
 | `RunSnapshot` / `RunObservability` | `llmContextBudgets` / `llmUsageTraces` / `llmUsageSummary` | LLM 请求预算与 usage 分层视图 |
 
 ## Pagination Parameters
@@ -741,13 +741,13 @@ response struct 为准，而不是单独维护 schema registry。
 
 ## Query / Cursor Notes
 
-当前文档仍未列出每个端点的完整 query 参数，但已有方向是：
+当前文档在产品设计层只保留 query/cursor 的稳定方向，不逐端点穷举所有 handler 参数：
 
 - `events` 默认使用 `limit` / cursor
 - `status` 支持 `waitState` / `waitTimeoutMillis`
 - detail page 类端点应依赖 page/cursor 结构，而不是默认全量扫描
 
-这部分后续需要继续从 appservice page model 和 `http.go` handler 参数中补齐。
+更细参数枚举若后续继续补写，只应作为字段级索引增强，不改变本文件现有语义边界。
 
 ## Request Body Families
 
@@ -1062,6 +1062,7 @@ GET /api/v1/workorch/runtime/payloads?ref=<runtime-ref>
 - 返回原始内容，不走 JSON envelope
 - `Content-Type` 来自 payload 自身或回退 `application/octet-stream`
 - 响应头带 `X-Workorch-Raw-Ref`
+- 只有显式 raw/detail 打开才允许看到 artifact continuation 相关正文；默认 snapshot/observability 只暴露 metadata
 
 ### `artifacts/content`
 

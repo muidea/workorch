@@ -7,9 +7,11 @@ type ArtifactContinuation struct {
 	WorkspaceID         common.WorkspaceID               `json:"workspaceId"`
 	RunID               common.RunID                     `json:"runId"`
 	RootStepID          common.StepID                    `json:"rootStepId,omitempty"`
+	CurrentStepID       common.StepID                    `json:"currentStepId,omitempty"`
 	ArtifactID          string                           `json:"artifactId"`
 	TargetRef           string                           `json:"targetRef"`
 	Operation           string                           `json:"operation,omitempty"`
+	OutputMode          string                           `json:"outputMode,omitempty"`
 	CoverageTargets     []string                         `json:"coverageTargets,omitempty"`
 	State               common.ArtifactContinuationState `json:"state"`
 	ExpectedSequence    int                              `json:"expectedSequence,omitempty"`

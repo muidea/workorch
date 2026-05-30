@@ -106,7 +106,9 @@ MemoryRecallTrace 是过程证据对象。
 - `source`
 - `policy`
 - `status`
-- `retrievedMemoryIds`
+- `selectedMemoryIds`
+- `candidateMemoryIds`
+- `excludedMemoryIds`
 - `retrievedMemoryHits`
 - `reason`
 - `occurredAt`
@@ -117,6 +119,13 @@ MemoryRecallTrace 是过程证据对象。
 - `activation`
 - `step_input`
 - `recovery`
+
+约束：
+
+- `selectedMemoryIds` 表示最终进入当前运行态上下文的 memory
+- `candidateMemoryIds` 表示被检索和评估过、但未必最终进入上下文的候选集
+- `excludedMemoryIds` 表示被显式过滤或裁剪的 recall 对象
+- `retrievedMemoryHits` 用于解释命中摘要、分值和选择原因，不等于 Memory 正文
 
 #### Recall Ordering Policy
 
@@ -208,8 +217,3 @@ Context / Capability / Memory 层负责表达：
 - `../20-runtime-flow/context-assembly-flow.md`
 - `../40-profiles-capabilities/workspace/soul-routing.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- Soul / Skill / Prompt / Tool / MCP 的 profile-specific 约束后续拆到
-  `40-profiles-capabilities/`。

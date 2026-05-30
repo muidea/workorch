@@ -266,7 +266,3 @@ repair / replan 链的正式输出可以是：
 - `../60-verification/audits/full-chain-assessment-closure-plan.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- provider retry、assessment-only correction、repair-of-repair 等 wrapper 恢复链后续还需补更细规则。

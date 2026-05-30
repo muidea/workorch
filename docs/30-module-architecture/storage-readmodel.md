@@ -337,8 +337,3 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 - `../10-domain-model/event-observability.md`
 - `../50-product-interface/service-api.md`
 - `../60-verification/service-acceptance.md`
-
-## Open Migration Notes
-
-- workspace deliverable boundary 与 internal storage boundary 目前仍与领域层有重叠，需要后续继续收敛。
-- payload refs、artifact blobs、event payload summaries 的完整产品/API 打开方式后续迁到 `50-product-interface/`

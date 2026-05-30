@@ -168,8 +168,3 @@ Workspace 的投影，不得反向覆盖正式 Goal / DoD 定义。
 - `../30-module-architecture/storage-readmodel.md`
 - `../00-core/runtime-stage-contract.md`
 - `../01-overview/current-state.md`
-
-## Open Migration Notes
-
-- Workspace template、Soul routing 等特化能力后续迁移到
-  `40-profiles-capabilities/workspace/`。

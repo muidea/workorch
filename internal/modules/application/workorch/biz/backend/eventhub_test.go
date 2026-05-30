@@ -142,7 +142,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       events.TopicGoalDefined,
 		SubjectID:   "goal-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.GoalPayload("updated goal"),
+		Payload:     events.GoalPayload("updated goal", "", "", "", ""),
 	})
 	if goalEvent.Type != EventGoalDefined || goalEvent.WorkspaceID != "ws-1" || goalEvent.Payload["goalId"] != "goal-1" {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
@@ -151,7 +151,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		Topic:       events.TopicDoDDefined,
 		SubjectID:   "dod-1",
 		WorkspaceID: "ws-1",
-		Payload:     events.DoDPayload([]string{"tests pass"}, common.DoDStateReady),
+		Payload:     events.DoDPayload([]string{"tests pass"}, common.DoDStateReady, "", "", "", ""),
 	})
 	if dodEvent.Type != EventDoDDefined || dodEvent.WorkspaceID != "ws-1" || dodEvent.Payload["doDId"] != "dod-1" {
 		t.Fatalf("dod event = %+v, want converted dod definition event", dodEvent)

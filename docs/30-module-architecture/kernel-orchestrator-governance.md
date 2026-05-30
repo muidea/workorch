@@ -20,6 +20,7 @@ Last Updated: 2026-05-30
 - Step dispatch
 - graph follow-up / completion follow-up
 - runtime repair / replan dispatch
+- context gate recovery routing
 - evidence mapping
 - completion gate
 
@@ -91,6 +92,7 @@ approval 不应承担：
 | 关注点 | 主要 kernel 责任 |
 | --- | --- |
 | step dispatch / follow-up / completion follow-up | `kernel/orchestrator` |
+| context gate fail-fast / read-required / blocker-required / replan-required routing | `kernel/orchestrator` |
 | decision ticket / resolution object | `kernel/decision` |
 | duplicate failure / repair exhausted / auto-governance 协同 | `kernel/governance` |
 | approval formal state / recovery allow-deny input | governance-aligned kernel responsibility |
@@ -103,8 +105,3 @@ approval 不应承担：
 - `../20-runtime-flow/repair-replan-flow.md`
 - `../60-verification/audits/full-chain-assessment-closure-plan.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
-
-## Open Migration Notes
-
-- `duplicate failure`、`repair exhausted`、`ConvergenceContract` 等更细实现仍散在 core/flow 文档中。
-- decision/approval 的产品交互语义继续留在 product/verifier 层，而不是继续堆在本层。

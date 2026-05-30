@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
@@ -179,8 +179,19 @@ func TestService_CreateRun_PublishesRunCreatedEvent(t *testing.T) {
 		WorkspaceID: workspaceID,
 		GoalID:      common.GoalID("goal-created-event"),
 		DoDID:       common.DoDID("dod-created-event"),
+		ExecutionContext: map[string]any{"definitionRevision": map[string]any{
+			"effectiveGoalId": "goal-created-event",
+			"effectiveDoDId":  "dod-created-event",
+		}},
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
+	}
+	created, err := runRepo.Get(ctx, "run-created-event")
+	if err != nil {
+		t.Fatalf("get created run: %v", err)
+	}
+	if created.DefinitionRevision != "goal:goal-created-event|dod:dod-created-event" {
+		t.Fatalf("definitionRevision = %q, want effective goal/dod revision", created.DefinitionRevision)
 	}
 
 	published := hub.Published()

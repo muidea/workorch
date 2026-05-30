@@ -13,6 +13,7 @@ const (
 	artifactOutputPhaseContext     = "artifact_context"
 	artifactOutputPhaseChunk       = "artifact_chunk"
 	artifactOutputPhaseChunkRepair = "artifact_chunk_repair"
+	artifactContextMaxGraphNodes   = 8
 )
 
 var artifactOutputForbiddenActionKeys = []string{
@@ -76,6 +77,9 @@ func validateArtifactContextOutputContract(step *runModel.Step, output map[strin
 	if !ok || len(graph.Nodes) == 0 {
 		return fmt.Errorf("%w: artifact_context output requires bounded executionGraph", common.ErrInvalidArgument)
 	}
+	if len(graph.Nodes) > artifactContextMaxGraphNodes {
+		return fmt.Errorf("%w: artifact_context executionGraph exceeds maxGraphNodes", common.ErrInvalidArgument)
+	}
 	for _, node := range graph.Nodes {
 		if artifactContextForbiddenGraphKind(node.Kind) {
 			return fmt.Errorf("%w: artifact_context executionGraph contains forbidden node kind %q", common.ErrInvalidArgument, node.Kind)
@@ -89,11 +93,23 @@ func validateArtifactContextOutputContract(step *runModel.Step, output map[strin
 
 func artifactContextForbiddenGraphKind(kind string) bool {
 	kind = strings.TrimSpace(kind)
-	switch kind {
-	case "", "patch/apply", "patch/preview", "patch/revert":
+	if kind == "" {
 		return true
-	default:
-		return strings.HasPrefix(kind, "llm/")
+	}
+	return !stringSliceContains(artifactContextAllowedGraphKinds(), kind)
+}
+
+func artifactContextAllowedGraphKinds() []string {
+	return []string{
+		"file/list",
+		"file/read",
+		"shell/command",
+		"mcp/tool_call",
+		"mcp/resource_read",
+		"mcp/prompt_get",
+		"git/read",
+		"web/search",
+		"web/fetch",
 	}
 }
 
@@ -625,12 +641,11 @@ func validateArtifactRepairCompletionState(output map[string]any) error {
 }
 
 func validateArtifactOutputMode(output map[string]any) error {
-	mode := strings.TrimSpace(stringFromMap(output, "outputMode"))
-	if mode == "" {
-		mode = strings.TrimSpace(stringFromMap(mapFromValue(output[stepOutputKeyLLMDecision]), "outputMode"))
+	if _, ok := output["outputMode"]; ok {
+		return fmt.Errorf("%w: incrementalArtifact response must not include outputMode", common.ErrInvalidArgument)
 	}
-	if mode != "" && mode != outputModeIncrementalArtifact {
-		return fmt.Errorf("%w: incrementalArtifact outputMode must be incrementalArtifact", common.ErrInvalidArgument)
+	if _, ok := mapFromValue(output[stepOutputKeyLLMDecision])["outputMode"]; ok {
+		return fmt.Errorf("%w: incrementalArtifact response must not include llmDecision.outputMode", common.ErrInvalidArgument)
 	}
 	return nil
 }

@@ -8,13 +8,14 @@ import (
 )
 
 type CreateRunCommand struct {
-	RunID            common.RunID
-	WorkspaceID      common.WorkspaceID
-	GoalID           common.GoalID
-	DoDID            common.DoDID
-	InitialStepKind  string
-	ExecutionContext map[string]any
-	Priority         int
+	RunID              common.RunID
+	WorkspaceID        common.WorkspaceID
+	GoalID             common.GoalID
+	DoDID              common.DoDID
+	DefinitionRevision string
+	InitialStepKind    string
+	ExecutionContext   map[string]any
+	Priority           int
 }
 
 type StartRunCommand struct{ RunID common.RunID }

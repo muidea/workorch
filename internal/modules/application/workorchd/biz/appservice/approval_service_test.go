@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"

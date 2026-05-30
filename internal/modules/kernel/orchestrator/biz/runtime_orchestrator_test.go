@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
@@ -25,6 +24,7 @@ import (
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"

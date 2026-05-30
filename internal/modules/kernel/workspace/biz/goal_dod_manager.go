@@ -2,7 +2,12 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -118,10 +123,13 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 		return err
 	}
 	goal := &workspaceModel.Goal{
-		ID:          cmd.GoalID,
-		WorkspaceID: cmd.WorkspaceID,
-		Text:        cmd.Text,
+		ID:                 cmd.GoalID,
+		WorkspaceID:        cmd.WorkspaceID,
+		Text:               cmd.Text,
+		DefinitionRevision: definitionRevisionForText("goal", cmd.Text),
+		LineageState:       "active",
 	}
+	m.attachGoalLineage(ctx, goal)
 	if err := m.goals.Create(ctx, goal); err != nil {
 		return err
 	}
@@ -143,7 +151,12 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.Up
 	if err != nil {
 		return err
 	}
+	goal.PreviousDefinitionHash = definitionHashForText(goal.Text)
 	goal.Text = cmd.Text
+	goal.DefinitionRevision = definitionRevisionForText("goal", cmd.Text)
+	if strings.TrimSpace(goal.LineageState) == "" {
+		goal.LineageState = "active"
+	}
 	if err := m.goals.Update(ctx, goal); err != nil {
 		return err
 	}
@@ -167,11 +180,14 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 		return err
 	}
 	dod := &workspaceModel.DoD{
-		ID:          cmd.DoDID,
-		WorkspaceID: cmd.WorkspaceID,
-		Items:       append([]string(nil), cmd.Items...),
-		State:       common.DoDStateReady,
+		ID:                 cmd.DoDID,
+		WorkspaceID:        cmd.WorkspaceID,
+		Items:              append([]string(nil), cmd.Items...),
+		State:              common.DoDStateReady,
+		DefinitionRevision: definitionRevisionForItems("dod", cmd.Items),
+		LineageState:       "active",
 	}
+	m.attachDoDLineage(ctx, dod)
 	if err := m.dods.Create(ctx, dod); err != nil {
 		return err
 	}
@@ -198,8 +214,13 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.Upd
 	if err != nil {
 		return err
 	}
+	dod.PreviousDefinitionHash = definitionHashForItems(dod.Items)
 	dod.Items = append([]string(nil), cmd.Items...)
 	dod.State = common.DoDStateReady
+	dod.DefinitionRevision = definitionRevisionForItems("dod", cmd.Items)
+	if strings.TrimSpace(dod.LineageState) == "" {
+		dod.LineageState = "active"
+	}
 	if err := m.dods.Update(ctx, dod); err != nil {
 		return err
 	}
@@ -255,8 +276,86 @@ func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceMo
 		SubjectType:  "goal",
 		SubjectID:    string(goal.ID),
 		WorkspaceID:  string(goal.WorkspaceID),
-		Payload:      events.GoalPayload(goal.Text),
+		Payload:      events.GoalPayload(goal.Text, goal.DefinitionRevision, goal.PreviousDefinitionHash, goal.PreviousGoalID, goal.LineageState),
 	})
+}
+
+func (m *GoalDoDManager) attachGoalLineage(ctx context.Context, goal *workspaceModel.Goal) {
+	if m == nil || m.goals == nil || goal == nil {
+		return
+	}
+	items, err := m.goals.ListByWorkspaceID(ctx, goal.WorkspaceID)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	previous := items[len(items)-1]
+	if previous == nil {
+		return
+	}
+	goal.PreviousGoalID = previous.ID
+	goal.PreviousDefinitionHash = definitionHashForText(previous.Text)
+}
+
+func (m *GoalDoDManager) attachDoDLineage(ctx context.Context, dod *workspaceModel.DoD) {
+	if m == nil || m.dods == nil || dod == nil {
+		return
+	}
+	items, err := m.dods.ListByWorkspaceID(ctx, dod.WorkspaceID)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	previous := items[len(items)-1]
+	if previous == nil {
+		return
+	}
+	dod.PreviousDoDID = previous.ID
+	dod.PreviousDefinitionHash = definitionHashForItems(previous.Items)
+}
+
+func definitionRevisionForText(prefix string, text string) string {
+	hash := definitionHashForText(text)
+	if hash == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s", prefix, hash)
+}
+
+func definitionHashForText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+func definitionRevisionForItems(prefix string, items []string) string {
+	hash := definitionHashForItems(items)
+	if hash == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s", prefix, hash)
+}
+
+func definitionHashForItems(items []string) string {
+	normalized := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			normalized = append(normalized, item)
+		}
+	}
+	if len(normalized) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join(normalized, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceModel.DoD) error {
@@ -270,6 +369,6 @@ func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceMode
 		SubjectType:  "dod",
 		SubjectID:    string(dod.ID),
 		WorkspaceID:  string(dod.WorkspaceID),
-		Payload:      events.DoDPayload(dod.Items, dod.State),
+		Payload:      events.DoDPayload(dod.Items, dod.State, dod.DefinitionRevision, dod.PreviousDefinitionHash, dod.PreviousDoDID, dod.LineageState),
 	})
 }

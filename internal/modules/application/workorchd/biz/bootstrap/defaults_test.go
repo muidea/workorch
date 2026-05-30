@@ -76,6 +76,22 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	assertStringListContains(t, markers, "--- PASS:")
 }
 
+func TestEmbeddedTemplatesDeclareDefaultSoulIDs(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatalf("loadEmbeddedTemplates: %v", err)
+	}
+	for _, item := range templates {
+		if strings.TrimSpace(item.DefaultSoulID) == "" {
+			t.Fatalf("%s defaultSoulId is empty", item.ID)
+		}
+		executionSoul := item.SoulBindings["execution"]
+		if item.DefaultSoulID != executionSoul {
+			t.Fatalf("%s defaultSoulId = %q, want execution binding %q", item.ID, item.DefaultSoulID, executionSoul)
+		}
+	}
+}
+
 func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuidance(t *testing.T) {
 	souls, err := loadEmbeddedSouls()
 	if err != nil {
@@ -289,6 +305,9 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	}
 	if template.Name == "stale template" || template.SoulBindings["planning"] != "soul-software-dev-planning" {
 		t.Fatalf("software-dev template was not refreshed: %+v", template)
+	}
+	if template.DefaultSoulID != "soul-software-dev-execution" {
+		t.Fatalf("software-dev defaultSoulId = %q, want soul-software-dev-execution", template.DefaultSoulID)
 	}
 	if template.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)

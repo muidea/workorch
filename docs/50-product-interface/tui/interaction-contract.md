@@ -84,6 +84,8 @@ Last Updated: 2026-05-30
   - 默认展示当前 open blocker；历史项通过显式 `/decision list`、`/approval ...` 打开
 - result / artifact deep view
   - 默认展示 compact summary；完整 artifact/path/raw payload 只在显式命令中展开
+  - `artifactContinuations` 若存在，只展示当前 active continuation 的 target/state/progress/
+    failure summary，不在主视图直接展开 plan/chunk/assembled 正文
 - memory / context inspect
   - 默认查看当前 active workspace / run 的 compact context，不把 recall trace 全量堆回主屏
 - long output review
@@ -150,10 +152,12 @@ TUI 中的 “review” 当前应只表达对正式业务结果和当前阻塞�
 - review 可以包括：
   - accepted result summary
   - artifact index / compact context
+  - active artifact continuation 的 metadata-only progress
   - current blocker / latest failure reason
   - compact task progress / recovery suggestion
 - review 不应包括：
   - 默认全量 step/tool/provider/event stream 回放
+  - 默认展示 artifact continuation chunk/assembled 正文
   - 第二套独立的 raw JSON 诊断面板
   - 在 TUI 内重建 Web Console 式治理工作台
 - 若需要更深诊断，应继续通过 backend records、Web Console 或专门 verifier，而不是把默认 TUI 变成综合 debug 工具

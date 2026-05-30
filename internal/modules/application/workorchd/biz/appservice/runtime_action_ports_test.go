@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"

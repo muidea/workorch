@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -18,6 +17,7 @@ import (
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"

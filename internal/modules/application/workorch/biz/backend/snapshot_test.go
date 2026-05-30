@@ -1,10 +1,6 @@
 package backend
 
-import (
-	"testing"
-
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"
-)
+import "testing"
 
 func TestDecodeSnapshotInfoPreservesRunExecutionContext(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
@@ -87,13 +83,13 @@ func TestDecodeSnapshotInfoPreservesWorkspaceGoalsAndDoDs(t *testing.T) {
 }
 
 func TestDecodeSnapshotInfoPreservesClientSnapshotWorkspaceGoalsAndDoDs(t *testing.T) {
-	snapshot, err := decodeSnapshotInfo(client.WorkspaceSnapshot{
-		Workspace: client.Workspace{ID: "ws-1", State: "active"},
-		Goals: []client.Goal{
-			{ID: "goal-1", WorkspaceID: "ws-1", Text: "client goal"},
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-1", "state": "active"},
+		"goals": []any{
+			map[string]any{"id": "goal-1", "workspaceId": "ws-1", "text": "client goal"},
 		},
-		DoDs: []client.DoD{
-			{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"client dod"}, State: "ready"},
+		"dods": []any{
+			map[string]any{"id": "dod-1", "workspaceId": "ws-1", "items": []any{"client dod"}, "state": "ready"},
 		},
 	})
 	if err != nil {

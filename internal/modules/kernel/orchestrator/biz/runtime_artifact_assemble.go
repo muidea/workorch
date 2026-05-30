@@ -65,9 +65,11 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 			WorkspaceID:      run.WorkspaceID,
 			RunID:            run.ID,
 			RootStepID:       step.ID,
+			CurrentStepID:    step.ID,
 			ArtifactID:       artifactID,
 			TargetRef:        targetRef,
 			Operation:        operation,
+			OutputMode:       outputModeIncrementalArtifact,
 			CoverageTargets:  stringSliceFromValue(artifact["coverageTargets"]),
 			State:            common.ArtifactContinuationStateChunking,
 			ExpectedSequence: 1,
@@ -153,6 +155,8 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 	item.BytesWritten += int64(len([]byte(content)))
 	item.LastChunkHash = contentHash
 	item.PreviousChunkTail = chunkMeta.CurrentChunkTail
+	item.CurrentStepID = step.ID
+	item.OutputMode = outputModeIncrementalArtifact
 	item.UpdatedAt = now
 	if final, _ := chunk["isFinal"].(bool); final {
 		item.FinalReceived = true
@@ -207,6 +211,8 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.
 		item.Metadata = map[string]any{}
 	}
 	item.Metadata["lastChunkRepair"] = compactArtifactChunkRepairForLLMContext(repair)
+	item.CurrentStepID = step.ID
+	item.OutputMode = outputModeIncrementalArtifact
 	if strings.TrimSpace(stringFromMap(repair, "nextAction")) == "blocker" {
 		item.State = common.ArtifactContinuationStateFailed
 		item.Metadata["failureReason"] = stringFromMap(repair, "failureReason")
@@ -245,6 +251,8 @@ func (o *RuntimeOrchestrator) publishArtifactContinuationRejected(ctx context.Co
 		"reason": cause.Error(),
 		"stage":  stringFromMap(output, "stage"),
 	}
+	item.CurrentStepID = step.ID
+	item.OutputMode = outputModeIncrementalArtifact
 	item.UpdatedAt = runtimeEvidenceTimestamp()
 	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
 		return err
@@ -369,6 +377,7 @@ func assembleArtifactContinuation(ctx context.Context, repo repository.ArtifactC
 	item.State = common.ArtifactContinuationStateApplying
 	item.BytesWritten = bytes
 	item.RollingHash = rollingHash
+	item.OutputMode = outputModeIncrementalArtifact
 	item.UpdatedAt = runtimeEvidenceTimestamp()
 	if err := repo.Update(ctx, item); err != nil {
 		return nil, "", err
@@ -427,6 +436,7 @@ func artifactContinuationNextStepInput(previous *runModel.Step, item *orchestrat
 			}
 		}
 	}
+	normalizeArtifactContinuationChunkInput(input)
 	input["stateChangingOutputRequired"] = true
 	input["repairObjective"] = repairObjectiveStateChangingOutput
 	input["outputMode"] = outputModeIncrementalArtifact
@@ -453,6 +463,33 @@ func artifactContinuationNextStepInput(previous *runModel.Step, item *orchestrat
 		},
 	}
 	return input
+}
+
+func normalizeArtifactContinuationChunkInput(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	delete(input, "requestedArtifactContext")
+	delete(input, "requestedArtifactOutputPhase")
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		return
+	}
+	clearIncrementalArtifactRequiredOutput(required)
+	required["outputMode"] = outputModeIncrementalArtifact
+	required["mustReturnArtifactChunk"] = true
+	required["stateChangingEvidenceDeferredUntilApply"] = true
+	required["maxArtifactChunkBytes"] = artifactMaxChunkBytesFromInput(input)
+	required["previousChunkTailBytes"] = artifactPreviousTailBytesFromInput(input)
+	required["forbiddenTopLevelOutputs"] = []string{"executionGraph", "dodAssessment", "artifactPlan", "memoryWrites"}
+	required["artifactChunkSchema"] = artifactChunkRequiredOutputSchema()
+	delete(required, "mustIncludeStateChangingNode")
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
 }
 
 func appendArtifactContinuationSequence(existing []int, sequence int) []int {
@@ -581,6 +618,8 @@ func (o *RuntimeOrchestrator) applyAssembledArtifactContinuation(
 	output := artifactContinuationApplyPatchOutput(item, metadata, content)
 	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
 		item.State = common.ArtifactContinuationStateFailed
+		item.CurrentStepID = step.ID
+		item.OutputMode = outputModeIncrementalArtifact
 		if item.Metadata == nil {
 			item.Metadata = map[string]any{}
 		}
@@ -602,6 +641,8 @@ func (o *RuntimeOrchestrator) applyAssembledArtifactContinuation(
 		return err
 	}
 	item.State = common.ArtifactContinuationStateApplied
+	item.CurrentStepID = step.ID
+	item.OutputMode = outputModeIncrementalArtifact
 	item.EvidenceRefs = appendUniqueStrings(item.EvidenceRefs, patchRefs...)
 	item.UpdatedAt = runtimeEvidenceTimestamp()
 	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
@@ -729,6 +770,9 @@ func (o *RuntimeOrchestrator) dispatchInternalArtifactContinuationStep(
 	if item.RunID != run.ID || item.WorkspaceID != run.WorkspaceID {
 		return true, common.ErrConflict
 	}
+	item.CurrentStepID = step.ID
+	item.OutputMode = outputModeIncrementalArtifact
+	_ = o.evidence.ArtifactContinuations.Update(ctx, item)
 	output := map[string]any{}
 	switch step.Kind {
 	case artifactAssembleStepKind:

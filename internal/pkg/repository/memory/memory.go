@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approval "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstream "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -1813,6 +1813,7 @@ func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
 func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
 	cloned := *item
 	cloned.Payload = cloneMap(item.Payload)
+	cloned.PayloadSummary = cloneMap(item.PayloadSummary)
 	return &cloned
 }
 

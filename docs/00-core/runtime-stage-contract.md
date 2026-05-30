@@ -159,140 +159,24 @@ executionGraph
 - `incrementalArtifact` 的任何 continuation 状态推进、chunk 持久化、assemble / apply 调度、step completed 事件和 evidence 记录，都必须发生在当前响应通过 `artifactOutputContract` / mode contract 校验之后。未通过 mode contract 的响应只能记录为 failed step / rejected chunk 诊断，不得先写入 completed step、validation passed、checkpoint completed 或 artifact cursor。
 - 分片期间允许必要的信息补充 tool 调用，但必须作为独立 `artifact_context` 阶段表达。该阶段只允许返回有界、只读或取证用途的 `executionGraph`，用于 `file/list`、`file/read`、`shell/command`、`mcp/tool_call`、`git/*` 等 capability 获取当前上下文；不得与 `artifactPlan`、`artifactChunk` 或 `artifactChunkRepair` 同一响应混用，也不得推进 artifact continuation cursor。
 
-### Artifact Plan 合同
+### Artifact Plan / Chunk / Context Core Boundary
 
-进入 `incrementalArtifact` 后，首轮只允许 LLM 返回小 JSON 的 artifact plan，不得夹带大正文、完整源码、完整文档或可执行 graph：
+core 只保留以下中立不变量：
 
-```json
-{
-  "completionState": "continue",
-  "artifactPlan": {
-    "artifacts": [
-      {
-        "artifactId": "artifact-001",
-        "targetRef": "relative/path.ext",
-        "operation": "create|replace|append",
-        "coverageTargets": ["cwi-001"],
-        "estimatedChunks": 3,
-        "estimatedBytes": 12000
-      }
-    ]
-  }
-}
-```
+- `artifactPlan`、`artifactChunk`、`artifact_context` 是互斥的 mode-specific 输出合同
+- response 顶层不得返回 `outputMode`
+- plan/chunk 不能直接作为 accepted evidence
+- chunk 必须按 runtime 持有的 expected artifact / sequence / hash 合同推进
+- `artifact_context` 只能执行 bounded read，不得推进 chunk cursor
+- raw tail / chunk 正文不得进入默认 LLM-facing context、memory recall、event payload 或 compact projection
 
-Runtime 必须校验：
+更细的 response schema、cursor 字段、continuity 校验、artifact_context 请求形态和运行链，
+统一转入：
 
-- `outputMode` 是 runtime 下发的 request / stage contract 字段，不是 LLM response 顶层字段；LLM response 顶层不得返回 `outputMode`，避免响应 schema 与调度合同互相污染。
-- 每个 `artifactId` 在当前 run / lineage 内唯一、稳定、可排序。
-- `targetRef` 必须位于 workspace deliverable boundary 内，不得指向 runtime internal 目录。
-- `coverageTargets` 必须匹配当前 `coverageTargetSet` / `coverageWorkItemContext` / deliverable coverage。
-- `estimatedChunks` / `estimatedBytes` 只作为调度提示，不作为完成证据。
-- artifact plan 不能替代 state-changing evidence；只有 assemble + apply 后才可产生 evidenceRefs。
-
-### Artifact Chunk 合同
-
-chunk 阶段每轮只允许返回一个 chunk，禁止同一响应同时返回 `executionGraph`、`dodAssessment`、`memoryWrites`、多个 artifact 或多段可执行计划。
-
-Runtime 下发：
-
-```json
-{
-  "outputMode": "artifact_chunk",
-  "expectedArtifactId": "artifact-001",
-  "expectedTargetRef": "relative/path.ext",
-  "expectedSequence": 3,
-  "maxContentBytes": 8192,
-  "previousChunkTailBytes": 300,
-  "previousChunkTailHash": "sha256:...",
-  "stopAfterThisChunk": true,
-  "doNotRepeatPreviousContent": true
-}
-```
-
-LLM 必须返回：
-
-```json
-{
-  "completionState": "continue",
-  "artifactChunk": {
-    "artifactId": "artifact-001",
-    "targetRef": "relative/path.ext",
-    "sequence": 3,
-    "content": "next content bytes",
-    "isFinal": false,
-    "chunkHash": "sha256:...",
-    "startsAfter": "optional previous tail marker",
-    "endsWith": "optional current tail marker"
-  }
-}
-```
-
-Runtime 必须严格校验并持久化：
-
-- `artifactId`、`targetRef`、`sequence` 必须等于 runtime 下发的 expected 值。
-- `content` 不得为空，不得超过 `maxContentBytes`，不得包含 runtime 明确禁止的路径或 internal 管理内容。
-- `sequence` 不得跳号、重复、倒退；`isFinal=true` 后不得继续接收 chunk。
-- `chunkHash` 必须与 content 一致；重试同一 sequence 时 hash 相同视为幂等成功，hash 不同必须拒绝并重试当前 sequence。
-- internal 存储可保存 `previousChunkTail` / `currentChunkTail`，用于连续性校验和重复片段检测；但 LLM-facing `artifactContinuationContext`、event、snapshot、memory recall 和 compact previous output 只能暴露 tail bytes/hash，不能暴露 raw tail 正文。
-- chunk 可建议在行尾、段落、函数、JSON/YAML 行等自然边界结束，但 runtime 不得依赖该语义判断业务正确性；最终以 assemble 后验证为准。
-
-### Artifact Context Tool 合同
-
-当 LLM 在 artifact plan 或 chunk 前无法可靠继续，且需要读取 workspace、调用 MCP / shell / git / file capability 以补充上下文时，runtime 可以下发：
-
-```json
-{
-  "outputMode": "incrementalArtifact",
-  "artifactOutputContract": {
-    "phase": "artifact_context",
-    "mustReturnArtifactContextGraph": true,
-    "forbiddenTopLevelOutputs": ["artifactPlan", "artifactChunk", "artifactChunkRepair", "dodAssessment", "memoryWrites"]
-  },
-  "artifactContinuationContext": {
-    "expectedSequence": 3,
-    "artifactId": "artifact-001",
-    "targetRef": "relative/path.ext"
-  }
-}
-```
-
-该阶段的规则：
-
-- LLM 只能返回一个 bounded `executionGraph`，graph 节点必须是中立 capability 调用；不得包含 state-changing artifact 写入、patch 内容、大正文、DoD accepted assessment 或 memory write。
-- graph 执行完成后，runtime 必须恢复同一个 `artifactContinuationContext` 和 expected sequence，继续派发 `artifact_plan` 或 `artifact_chunk`。tool step output 只能以 compact evidence summary / refs 进入后续 prompt。
-- `artifact_context` 不是新的 RunState，也不是 completion follow-up；它只在 `running` 内部为当前 artifact continuation 补充信息。
-- 如果 context graph 失败，失败按普通 runtime repair / governance 收口，但不得把 artifact cursor 推进到下一 sequence。
-
-Artifact 游标状态必须由 runtime 持有：
-
-```text
-artifactId
-targetRef
-operation
-expectedSequence
-receivedSequences
-receivedChunkHashes
-finalReceived
-bytesWritten
-rollingHash
-lastChunkHash
-previousChunkTail
-coverageTargets
-state
-```
-
-### 连续性与稳定性处理
-
-为确保分片内容连续且可恢复，runtime 必须执行以下中立处理：
-
-- 每轮只请求一个 chunk，并明确 `stopAfterThisChunk=true`。
-- 请求中只携带前一 confirmed chunk 的 tail bytes/hash 等 metadata-only 连续性信号；raw tail 正文仅可留在 runtime internal 存储用于校验，不进入 LLM-facing context 或 evidence。
-- 拒绝完整重复 `previousChunkTail` 的 chunk；对小范围重复或断裂只记录 warning，最终由 assemble validation 判断。
-- 对每个 chunk 保存 `chunkHash`、`rollingHash` 和持久化状态；服务重启后必须能从最后 confirmed sequence 恢复。
-- schema invalid、provider timeout 或 parse failure 只重试当前 chunk，不重跑已确认 artifact plan，也不要求重新生成全部 artifact。
-- 若同一 sequence 多次返回不同 hash，runtime 必须进入 chunk repair 或 artifact replan；不得把不一致内容静默拼接。
-- 若 artifact 组装后验证失败，repair 应针对组装后的具体 targetRef / validation diagnostics，而不是重新要求 LLM 生成全量多文件 JSON。
+- `../20-runtime-flow/planning-execution-flow.md`
+- `../30-module-architecture/llm-provider-assembly.md`
+- `../30-module-architecture/storage-readmodel.md`
+- `../60-verification/core-runtime-verifier.md`
 
 ### 与现有合同的关系
 
@@ -383,104 +267,36 @@ Step input 必须显式声明当前输出模式：
 
 Completion follow-up 必须作为 assessment-only verification 处理。它只能消费已完成 graph / artifact apply 后的 evidence summary 与 compact previous output，必须清理 `stateChangingOutputRequired`、`repairObjective`、`repairActionPackage`、`outputMode`、`requestedOutputMode`、`outputModeSelector`、`artifactOutputContract`、`artifactContinuationContext` 和 `artifactContinuationId`。该规则防止已 applied 的 artifact 在完成确认阶段再次继承 chunk/plan 合同，从而重新启动 artifact plan 或 state-changing repair。
 
-Orchestrator 需要持久化中立的 `ArtifactContinuation`。它属于 runtime internal state，不属于 workspace 交付物：
+Orchestrator 必须持有中立的 `ArtifactContinuation` internal state，用于恢复未完成的
+plan/chunk/assemble/apply 流程；但其字段枚举、状态枚举、事件名和恢复链细节不再在 core 中展开。
 
-```text
-runId
-rootStepId
-currentStepId
-artifactId
-targetRef
-operation
-outputMode
-expectedSequence
-receivedSequences
-finalReceived
-bytesWritten
-rollingHash
-lastChunkHash
-previousChunkTail
-coverageTargets
-state
-createdAt
-updatedAt
-```
+core 只保留以下边界：
 
-`ArtifactContinuation.state` 推荐使用：
+- continuation 属于 runtime internal state，不属于 workspace deliverable
+- continuation 恢复不得要求 LLM 重生成已确认 chunk
+- assemble / apply / validation 之后必须回到普通 evidence / acceptance 闭环
+- 事件与投影默认只暴露 metadata，不暴露正文
 
-| State | 含义 |
-| --- | --- |
-| `planning` | 等待 artifact plan 或校验 plan |
-| `chunking` | 正在逐 sequence 收集 chunk |
-| `assembling` | chunk 已收齐，正在组装完整 artifact |
-| `applying` | 正在通过 state-changing writer / patch / capability 落地 |
-| `applied` | 已形成普通 state-changing evidenceRef |
-| `failed` | 当前 artifact 无法继续自动恢复，需要 repair / replan / blocker |
+具体持久化字段、状态机、事件命名、恢复动作和投影分层统一转入：
 
-Orchestrator 调度链路：
+- `../20-runtime-flow/planning-execution-flow.md`
+- `../30-module-architecture/storage-readmodel.md`
+- `../60-verification/core-runtime-verifier.md`
 
-```text
-LLM state-changing step
-  -> output mode selector
-  -> artifact plan step
-  -> artifact chunk step sequence N
-  -> artifact assemble internal step
-  -> artifact apply state-changing step
-  -> validation graph
-  -> acceptance assessment
-```
+### 配置边界
 
-该链路必须复用现有 step / tool-call / validation / checkpoint / event / evidence 记录能力：
+分片增量输出必须由配置控制，禁止在 core runtime 中写死阈值。
 
-- artifact plan / chunk step 写入普通 step lineage。
-- chunk 接收、hash 校验、sequence 推进必须写 checkpoint。
-- assemble / apply 结果必须产生可引用 evidenceRef。
-- validation / acceptance 仍通过现有 completion gate 与 DoD / Goal coverage gate。
-- run 恢复时必须先恢复 `ArtifactContinuation`，再决定继续 chunk、assemble、apply、validation 或 repair。
+core 只保留以下边界：
 
-失败恢复规则：
+- mode selector 阈值必须可配置
+- 生效阈值必须进入 run-scoped 可观测输入，保证恢复与审计可追溯
+- 产品面不得按具体 template / 语言 / 框架覆盖 core 阈值
 
-- `llm_schema_invalid`、provider timeout、parse failure 发生在 chunk step 时，只重试当前 `expectedSequence`。
-- 当前 sequence 多次 hash 不一致时，进入 chunk repair；不得静默拼接不一致内容。
-- artifact apply 失败时，进入普通 state-changing repair，repair target 是组装后的 `targetRef` 和 apply / validation diagnostics。
-- validation 失败时，不回到 chunking；应针对已落地 artifact 执行普通 repair / validation flow。
-- 若 artifact plan 本身不满足 coverageTargets、target boundary 或 mode contract，拒绝该 plan 并重试 plan step；不得进入 chunking。
+具体配置项、默认值和部署配置要求统一转入：
 
-事件与可观测性应保持中立：
-
-- `/artifact_continuation/created`
-- `/artifact_continuation/chunk_recorded`
-- `/artifact_continuation/chunk_rejected`
-- `/artifact_continuation/assembled`
-- `/artifact_continuation/applied`
-- `/artifact_continuation/failed`
-
-这些事件只描述 artifact id、sequence、targetRef、hash、state、evidenceRefs 和 failure reason，不记录业务判断，也不得暴露超出权限的正文内容。正文内容如需存储，应进入 runtime internal managed directory，并按现有 workspace data boundary 与脱敏规则处理。
-
-### 配置项
-
-分片增量输出必须由配置控制，禁止在 core runtime 中写死阈值。推荐配置项：
-
-| 配置项 | 含义 | 默认建议 |
-| --- | --- | --- |
-| `runtime.llmOutput.maxPatchContentBytes` | 单个 patch / artifact content 允许内嵌到 `executionGraph` 的最大字节数 | `12288` |
-| `runtime.llmOutput.maxGraphBytes` | 单次 LLM JSON graph 建议最大字节数 | `32768` |
-| `runtime.llmOutput.maxGraphFileWrites` | 单次 graph 内允许的 file-write 类状态变更节点数量 | `3` |
-| `runtime.llmOutput.schemaInvalidLargePreviewThreshold` | schema invalid raw preview 达到该阈值后优先切 incrementalArtifact | `8192` |
-| `runtime.llmOutput.maxArtifactChunkBytes` | 单个 artifact chunk content 最大字节数 | `8192` |
-| `runtime.llmOutput.previousChunkTailBytes` | 下一轮请求携带的前一 chunk tail 字节数 | `300` |
-| `runtime.llmOutput.maxChunkRetryAttempts` | 同一 sequence 解析失败、provider timeout 或 hash mismatch 的最大重试次数 | `3` |
-| `runtime.llmOutput.maxArtifactPlanAttempts` | artifact plan 合同失败最大重试次数 | `2` |
-| `runtime.llmOutput.maxArtifactReplanAttempts` | 同一 artifact 重新规划最大次数 | `2` |
-
-配置加载后必须进入 runtime snapshot / run input 中，确保 LLM 请求、event、checkpoint 和后续恢复都能追溯当时使用的阈值。产品面可以展示生效值，但不能让某个业务 profile 在 core 中硬编码覆盖。
-
-部署配置要求：
-
-- `config/file/application.toml` 与 `config/container-file/application.toml` 必须显式包含 `[runtime.llmOutput]` 默认值，避免不同机器使用隐式默认时难以排查。
-- Web “系统配置”只展示和保存这些中立阈值，不允许按具体 workspaceTemplate、语言、框架或业务目标覆盖 core runtime 阈值。
-- 修改阈值后，新 Run 必须在 run input / context budget / checkpoint 中可追溯；历史 Run 继续以当时记录的阈值解释执行过程。
-- 配置文档和部署说明只描述阈值语义、默认值、失败模式和观测入口，不嵌入具体业务场景示例。
+- `../50-product-interface/deployment.md`
+- `../30-module-architecture/llm-provider-assembly.md`
 
 ### 产品展示边界
 
@@ -491,164 +307,48 @@ LLM state-changing step
 - `../50-product-interface/tui/`
 - `../50-product-interface/web-console/overview.md`
 
-### 持久化落点
+### 持久化与投影边界
 
-`ArtifactContinuation` 和 chunk 正文属于 runtime internal managed state，不能写入 workspace 交付目录。推荐路径：
+`ArtifactContinuation` 和 chunk 正文属于 runtime internal managed state，不能写入 workspace 交付目录。
 
-```text
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/metadata.json
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/plan.json
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/chunks/{sequence}.json
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/chunks/{sequence}.content
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/assembled/content
-.workorch-data/internal/workspaces/{workspaceId}/runs/{runId}/artifact-continuations/{continuationId}/assembled/metadata.json
-```
+core 只保留以下边界：
 
-存储规则：
+- continuation content 默认不进入 snapshot summary、event payload、memory recall 或普通 prompt 上下文
+- retention 即使清理正文，也必须保留足够的 hash / bytes / target / evidence 元数据
+- 对外默认只暴露 metadata-only 投影；正文仅通过受控 raw/detail 打开
 
-- `metadata.json` 保存 continuation 状态、游标、hash、targetRef、coverageTargets、retry counters 和 evidenceRefs。
-- `plan.json` 保存已接受 artifact plan，不保存无效或被拒绝的大段正文。
-- `chunks/{sequence}.json` 保存 chunk 元数据、hash、长度、LLM call refs、step refs 和校验结果。
-- `chunks/{sequence}.content` 保存 chunk 正文；正文不进入 memory recall，不进入通用 event payload。
-- `assembled/content` 保存组装后的完整正文，仅在 apply 前作为 runtime internal 临时载荷。
-- `assembled/metadata.json` 保存 total bytes、rolling hash、source chunk refs、apply target 和 apply evidence refs。
+具体 internal layout、projection 分层和 retention 细节统一转入：
 
-LLM-facing context 必须对分片状态使用专用投影：
+- `../30-module-architecture/storage-readmodel.md`
 
-- chunk 请求只投影当前 continuation 游标、`expectedSequence`、tail bytes/hash、artifact/chunk hash、bytes、coverageTargets 和输出约束。
-- 历史 step output 中的 `artifactChunk` 只能保留 artifactId、targetRef、sequence、isFinal、chunkHash、startsAfter、endsWith、contentBytes、contentOmitted 等元数据。
-- artifact plan / chunk repair 只能保留目标、sequence、coverage、估算、失败原因和下一步动作等合同字段。
-- chunk 正文、assembled 正文、raw body、diff-like body 不得通过 `previousStepOutput`、process evidence、event payload、run summary 或 memory recall 进入后续 LLM prompt。
-- artifact chunk 阶段禁止写入 memory；该阶段的正文只属于 runtime internal artifact continuation 存储，不能被显式 `memoryWrites` 包装成长期参考信息。
+### Selector / Schema Boundary
 
-清理策略：
+core 只保留以下边界：
 
-- run 完成后，默认保留 metadata、plan、chunk hash 与 assembled hash。
-- chunk 正文是否保留应由 runtime retention 配置决定；默认可保留在 internal 目录用于审计和恢复，但不得作为 workspace 交付物。
-- 若 retention 禁止保留正文，必须至少保留 hash、bytes、targetRef、sequence 和 apply evidenceRef，保证 evidence 链可解释。
+- `selectOutputMode` 只能选择输出承载模式，不能改写 `ConvergenceContract.State`
+- active continuation 存在时，selector 必须优先恢复 continuation
+- mode-specific response schema 必须互斥
+- incremental response 顶层不得返回 `outputMode`
+- selector 与 schema 细节必须投影进 request-side stage contract，不能只留在内部执行上下文
 
-### Output Mode Selector 优先级
+具体 selector 优先级、stage-contract 字段、response schema 和 repair schema 统一转入：
 
-`selectOutputMode` 必须在以下入口统一调用：
+- `../30-module-architecture/llm-provider-assembly.md`
+- `../20-runtime-flow/planning-execution-flow.md`
 
-- 初始 state-changing execution / repair LLM step 构造前。
-- `llm_schema_invalid` / `llm_decision_invalid` repair 输入构造前。
-- state-changing repair 连续失败且 raw preview 包含长正文时。
-- replan successor 继承 open coverage 且需要 state-changing output 时。
+### Recovery / Evidence Boundary
 
-优先级：
+core 只保留以下边界：
 
-| 优先级 | 条件 | 结果 |
-| --- | --- | --- |
-| P0 | 当前阶段不是 `need_state_change`，或 state-changing output 不允许 | 禁止 incrementalArtifact |
-| P1 | 已存在未完成 `ArtifactContinuation` | 继续当前 continuation |
-| P2 | 当前 chunk / plan / assemble / apply 正在恢复 | 按 continuation state 恢复 |
-| P3 | 连续 schema invalid 且 raw preview 超过阈值，或 raw preview 中存在大量 content-like 字段 | 切 `incrementalArtifact` |
-| P4 | 预计 patch content / graph bytes / file-write 节点数量超过阈值 | 切 `incrementalArtifact` |
-| P5 | LLM 申请 `requestedOutputMode=incrementalArtifact` 且 runtime 估算满足阈值 | 切 `incrementalArtifact` |
-| P6 | 其他情况 | 使用 `executionGraph` |
+- 服务重启恢复不得要求 LLM 重新生成已确认 chunk
+- artifact plan / chunk 不是 final evidence
+- acceptance 只能引用 apply / validation evidence，不能直接引用 chunk satisfied
+- apply / validation evidence 必须继续绑定 artifact 级 `coverageTargets`
 
-selector 只能设置 output mode 与对应 contract，不得改变 `ConvergenceContract.State`。如果 selector 判定不能使用 incrementalArtifact，必须回到原有 `executionGraph` 合同，而不是直接创建 decision ticket。
+更细的恢复动作表和 evidence 映射流程统一转入：
 
-selector 输出必须继续投影到 LLM-facing `Stage Contract`，至少包含：
-
-- `outputMode` / `requestedOutputMode`。
-- `outputModeSelector.priority`、`reason`、`mode`。
-- `llmOutputPolicy` 中影响本轮输出模式的阈值。
-- `artifactOutputContract.mode`、`phase`、chunk bytes、tail bytes、apply evidence stage 等字段。
-- `artifactContinuationId` 与 `artifactContinuationContext` 中的 metadata-only 游标字段。
-
-运行态不得只在 step input 或内部 executionContext 中保存这些字段。如果 `Stage Contract` 不包含 output mode 与 artifact phase，LLM 会继续按普通 graph schema 输出，导致 runtime 进入 schema invalid / repair / replan 循环。该投影仍属于中立阶段合同，不得包含任何具体业务、语言、框架或文件名特化判断。
-
-### LLM Schema
-
-进入 incrementalArtifact 后必须使用独立 schema，避免与普通 graph schema 混用。
-
-`artifactPlan` schema 关键字段：
-
-```text
-completionState: "continue"
-artifactPlan.artifacts[].artifactId
-artifactPlan.artifacts[].targetRef
-artifactPlan.artifacts[].operation
-artifactPlan.artifacts[].coverageTargets[]
-artifactPlan.artifacts[].estimatedChunks
-artifactPlan.artifacts[].estimatedBytes
-```
-
-`artifactChunk` schema 关键字段：
-
-```text
-completionState: "continue"
-artifactChunk.artifactId
-artifactChunk.targetRef
-artifactChunk.sequence
-artifactChunk.content
-artifactChunk.isFinal
-artifactChunk.chunkHash
-artifactChunk.startsAfter
-artifactChunk.endsWith
-```
-
-所有 incremental artifact response schema 都不得包含顶层 `outputMode`。`outputMode`、`artifactOutputContract.phase`、`artifactContinuationContext` 和 selector reason 属于 request-side stage contract；response 只返回当前阶段允许的单一 artifact plan、chunk、chunk repair、context graph、assessment 或 blocker。
-
-`artifactChunkRepair` / artifact replan schema 关键字段：
-
-```text
-completionState: "continue" | "blocked"
-artifactChunkRepair.artifactId
-artifactChunkRepair.targetRef
-artifactChunkRepair.sequence
-artifactChunkRepair.failureReason
-artifactChunkRepair.nextAction: "retry_current_sequence" | "replan_artifact" | "blocker"
-artifactChunkRepair.constraints[]
-```
-
-`blocked` completionState 只允许在显式 `artifactChunkRepair` schema 中使用；普通 `workorch.llmExecutionDecision.v1` 输出仍使用既有 `blocked_on_decision` / `blocked_on_approval` 状态。
-
-Schema 互斥规则：
-
-- `artifactPlan` 响应不得包含 `artifactChunk`、`executionGraph`、`dodAssessment`。
-- `artifactChunk` 响应不得包含 `artifactPlan`、`executionGraph`、`dodAssessment`。
-- `artifactChunkRepair` 响应不得包含大正文，除非 `nextAction=retry_current_sequence` 且正文在新的 `artifactChunk` 响应中返回。
-- `artifact_context` 响应只能包含 bounded `executionGraph`，不得包含 artifact plan/chunk/repair、DoD assessment 或 memory writes。
-- 普通 `executionGraph` 响应不得同时声明 active `artifactChunk`。
-
-### 服务重启恢复
-
-服务重启或 orchestrator 恢复时，必须按 continuation state 决定恢复动作：
-
-| 恢复状态 | 处理 |
-| --- | --- |
-| 无 continuation | 按普通 ConvergenceContract 构造 |
-| `planning` 且无 accepted plan | 重派 artifact plan step |
-| `planning` 且 plan 已接受 | 切到 `chunking`，请求第一个 artifact 的 sequence 1 |
-| `chunking` | 从 `expectedSequence` 继续；已确认 chunk 不重取 |
-| `assembling` | 重新从 confirmed chunks 组装，并复核 rolling hash |
-| `applying` | 检查是否已有 apply evidenceRef；若有则转 `applied`，否则重试 apply |
-| `applied` 但未验证 | 切回 validation graph |
-| `failed` | 进入 artifact repair / replan / blocker，由 ConvergenceContract 决定是否继续 |
-
-恢复不得要求 LLM 重新生成已确认 chunk，也不得因服务重启丢失 sequence、hash 或 coverageTargets。
-
-### Evidence 映射
-
-artifact plan / chunk 不是 final evidence。证据必须在以下节点产生：
-
-```text
-artifact_assembled -> internal payload ready
-artifact_applied -> state-changing evidenceRef
-validation_graph -> validation evidenceRef
-acceptance -> result evidence mapping
-```
-
-coverageTargets 继承规则：
-
-- plan 中的 `coverageTargets` 是 artifact 级目标集合。
-- chunk 默认继承 artifact 级 `coverageTargets`，除非 runtime 明确允许 chunk 细分目标。
-- apply evidence 必须引用 artifact 级 `coverageTargets`。
-- validation evidence 必须引用 apply evidence 或相同 coverage target。
-- acceptance 只能引用 apply / validation evidence，不能直接引用 chunk 作为 satisfied 证据。
+- `../20-runtime-flow/planning-execution-flow.md`
+- `../20-runtime-flow/verification-acceptance-flow.md`
 
 ### Web / TUI 展示边界
 

@@ -238,6 +238,99 @@ func TestOutputModeSelectorContinuesOpenArtifactContinuation(t *testing.T) {
 	}
 }
 
+func TestOutputModeSelectorUsesArtifactContextPhaseWhenContinuationRequestsContext(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-output-mode-context-continuation")
+	continuations := memory.NewArtifactContinuationRepository()
+	if err := continuations.Create(ctx, &orchestratormodel.ArtifactContinuation{
+		ID:               common.ArtifactContinuationID("artifact-continuation-context-001"),
+		WorkspaceID:      common.WorkspaceID("ws-output-mode-context-continuation"),
+		RunID:            runID,
+		RootStepID:       common.StepID(runID + "/step-1"),
+		ArtifactID:       "artifact-001",
+		TargetRef:        "deliverable/target.txt",
+		State:            common.ArtifactContinuationStateChunking,
+		ExpectedSequence: 2,
+		CoverageTargets:  []string{"coverage-001"},
+	}); err != nil {
+		t.Fatalf("seed artifact continuation: %v", err)
+	}
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"requestedArtifactContext":    true,
+	}
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
+		policy:   NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-continuation"}, input, nil, 0)
+
+	if outputModeFromInput(input) != outputModeIncrementalArtifact {
+		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
+	}
+	selector := mapFromValue(input["outputModeSelector"])
+	if selector["reason"] != "open_artifact_continuation_context_required" {
+		t.Fatalf("outputModeSelector = %+v, want artifact context reason", selector)
+	}
+	contract := mapFromValue(input["artifactOutputContract"])
+	if contract["phase"] != artifactOutputPhaseContext || contract["stateChangingForbidden"] != true {
+		t.Fatalf("artifactOutputContract = %+v, want artifact_context read-only contract", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReturnArtifactContextGraph"] != true || required["mustReturnArtifactChunk"] != nil {
+		t.Fatalf("requiredOutput = %+v, want artifact_context contract only", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["allowedArtifactContextKinds"]), "file/read") ||
+		!stringSliceContains(stringSliceFromValue(required["allowedArtifactContextKinds"]), "mcp/tool_call") {
+		t.Fatalf("allowedArtifactContextKinds = %+v, want neutral read/tool allowlist", required["allowedArtifactContextKinds"])
+	}
+}
+
+func TestOutputModeSelectorUsesArtifactContextPhaseAfterChunkReturnedToolGraph(t *testing.T) {
+	runID := common.RunID("run-output-mode-context-after-invalid-chunk")
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"artifactContinuationContext": map[string]any{
+			"id":               "artifact-continuation-context-002",
+			"state":            string(common.ArtifactContinuationStateChunking),
+			"artifactId":       "artifact-001",
+			"targetRef":        "deliverable/target.txt",
+			"expectedSequence": 2,
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/artifact-continue-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"outputMode": outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": artifactOutputPhaseChunk,
+			},
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{
+				"nodes": []map[string]any{{"id": "read-current", "kind": "file/read"}},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-after-invalid-chunk"}, input, failed, 1)
+
+	contract := mapFromValue(input["artifactOutputContract"])
+	if contract["phase"] != artifactOutputPhaseContext {
+		t.Fatalf("artifactOutputContract = %+v, want artifact_context phase", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReturnArtifactContextGraph"] != true {
+		t.Fatalf("requiredOutput = %+v, want artifact_context graph requirement", required)
+	}
+}
+
 func TestOutputModeSelectorReturnsTerminalArtifactContinuationToExecutionGraph(t *testing.T) {
 	ctx := context.Background()
 	input := map[string]any{

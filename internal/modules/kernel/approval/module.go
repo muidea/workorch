@@ -3,9 +3,9 @@ package approval
 import (
 	"context"
 
-	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
-	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalbiz "github.com/muidea/workorch/internal/modules/kernel/approval/biz"
+	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"

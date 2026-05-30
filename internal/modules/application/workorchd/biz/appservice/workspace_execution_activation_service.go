@@ -1006,6 +1006,22 @@ func definitionChangeImpactFromDefinitions(effectiveGoal *workspacemodel.Goal, g
 	}
 }
 
+func definitionRevisionIDFromExecutionContext(input map[string]any) string {
+	revision, _ := input["definitionRevision"].(map[string]any)
+	if len(revision) == 0 {
+		return ""
+	}
+	if id := strings.TrimSpace(stringValueFromMap(revision, "id")); id != "" {
+		return id
+	}
+	goalID := strings.TrimSpace(stringValueFromMap(revision, "effectiveGoalId"))
+	doDID := strings.TrimSpace(stringValueFromMap(revision, "effectiveDoDId"))
+	if goalID == "" && doDID == "" {
+		return ""
+	}
+	return "goal:" + goalID + "|dod:" + doDID
+}
+
 func definitionChangeImpactChanged(impact map[string]any) bool {
 	if len(impact) == 0 {
 		return false
@@ -2445,13 +2461,14 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		}
 		createExecutionContext := executionContextForCreatedWorkspaceRun(runID, workspaceID, goalID, dodID, executionContext, priority)
 		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-			RunID:            runID,
-			WorkspaceID:      workspaceID,
-			GoalID:           goalID,
-			DoDID:            dodID,
-			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
-			ExecutionContext: createExecutionContext,
-			Priority:         priority,
+			RunID:              runID,
+			WorkspaceID:        workspaceID,
+			GoalID:             goalID,
+			DoDID:              dodID,
+			DefinitionRevision: definitionRevisionIDFromExecutionContext(createExecutionContext),
+			InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
+			ExecutionContext:   createExecutionContext,
+			Priority:           priority,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue

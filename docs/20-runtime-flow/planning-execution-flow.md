@@ -253,8 +253,3 @@ planning / execution 主链会沉淀：
 - `../30-module-architecture/storage-readmodel.md`
 - `verification-acceptance-flow.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
-
-## Open Migration Notes
-
-- 模块层的更细 step kind 注册矩阵、参数/输出 schema 仍继续由 `blocks-runtime-adapters.md` 与各 capability 文档承接。
-- software-dev “必须先改代码再补测试”等语义不属于本层，后续放入 profile/capability。

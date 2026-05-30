@@ -8,97 +8,102 @@ import (
 )
 
 const (
-	PayloadKeyTitle                = "title"
-	PayloadKeyDescription          = "description"
-	PayloadKeyDeliverableDirectory = "deliverableDirectory"
-	PayloadKeyInternalDirectory    = "internalDirectory"
-	PayloadKeyGoalID               = "goalId"
-	PayloadKeyDoDID                = "doDId"
-	PayloadKeyText                 = "text"
-	PayloadKeyItems                = "items"
-	PayloadKeyState                = "state"
-	PayloadKeyActiveRunID          = "activeRunId"
-	PayloadKeyBlockingTicketID     = "blockingTicketId"
-	PayloadKeyBlockingApprovalID   = "blockingApprovalId"
-	PayloadKeyFailureReason        = "failureReason"
-	PayloadKeyKind                 = "kind"
-	PayloadKeyInput                = "input"
-	PayloadKeyOutput               = "output"
-	PayloadKeyReason               = "reason"
-	PayloadKeyAction               = "action"
-	PayloadKeyContext              = "context"
-	PayloadKeyResolutionID         = "resolutionId"
-	PayloadKeyType                 = "type"
-	PayloadKeyPayload              = "payload"
-	PayloadKeySummary              = "summary"
-	PayloadKeySourceType           = "sourceType"
-	PayloadKeySourceRef            = "sourceRef"
-	PayloadKeyEvidenceRefs         = "evidenceRefs"
-	PayloadKeyArtifactRefs         = "artifactRefs"
-	PayloadKeyResultID             = "resultId"
-	PayloadKeyArtifactType         = "artifactType"
-	PayloadKeyName                 = "name"
-	PayloadKeyURI                  = "uri"
-	PayloadKeyContentType          = "contentType"
-	PayloadKeyMemoryType           = "memoryType"
-	PayloadKeyContent              = "content"
-	PayloadKeyTags                 = "tags"
-	PayloadKeyImportance           = "importance"
-	PayloadKeyConfidence           = "confidence"
-	PayloadKeyVisibility           = "visibility"
-	PayloadKeyTraceID              = "traceId"
-	PayloadKeyStage                = "stage"
-	PayloadKeyPolicy               = "policy"
-	PayloadKeyStatus               = "status"
-	PayloadKeyProviderID           = "providerId"
-	PayloadKeyOperation            = "operation"
-	PayloadKeyItemType             = "itemType"
-	PayloadKeyItemID               = "itemId"
-	PayloadKeyConfidenceScore      = "confidence"
-	PayloadKeyPolicyMatched        = "policyMatched"
-	PayloadKeyPolicyBlocked        = "policyBlocked"
-	PayloadKeyBudgetBefore         = "budgetBefore"
-	PayloadKeyBudgetAfter          = "budgetAfter"
-	PayloadKeyLLMProviderID        = "llmProviderId"
-	PayloadKeyLLMModel             = "llmModel"
-	PayloadKeyLLMDecisionPreview   = "llmDecisionPreview"
-	PayloadKeyPromptFingerprint    = "promptFingerprint"
-	PayloadKeyResolvedAt           = "resolvedAt"
-	PayloadKeyEscalationReason     = "escalationReason"
-	PayloadKeyRetrievedMemoryIDs   = "retrievedMemoryIds"
-	PayloadKeyPatchID              = "patchId"
-	PayloadKeyStepID               = "stepId"
-	PayloadKeyToolCallID           = "toolCallId"
-	PayloadKeyPatchType            = "patchType"
-	PayloadKeyTargetRef            = "targetRef"
-	PayloadKeyAddedLines           = "addedLines"
-	PayloadKeyDeletedLines         = "deletedLines"
-	PayloadKeyContentHash          = "contentHash"
-	PayloadKeyDiffHash             = "diffHash"
-	PayloadKeyApprovalID           = "approvalId"
-	PayloadKeyRisk                 = "risk"
-	PayloadKeyError                = "error"
-	PayloadKeyWorkspaceID          = "workspaceId"
-	PayloadKeyRunID                = "runId"
-	PayloadKeyModel                = "model"
-	PayloadKeyChunkCount           = "chunkCount"
-	PayloadKeyReceivedBytes        = "receivedBytes"
-	PayloadKeyElapsedMs            = "elapsedMs"
-	PayloadKeyProvider             = "provider"
-	PayloadKeyInputTokens          = "inputTokens"
-	PayloadKeyOutputTokens         = "outputTokens"
-	PayloadKeyTotalTokens          = "totalTokens"
-	PayloadKeyEstimated            = "estimated"
-	PayloadKeyUsageSource          = "usageSource"
-	PayloadKeyRequestBytes         = "requestBytes"
-	PayloadKeyResponseBytes        = "responseBytes"
-	PayloadKeyStreaming            = "streaming"
-	PayloadKeyContextBudget        = "contextBudget"
-	PayloadKeyCacheUsage           = "cacheUsage"
-	PayloadKeyStartedAt            = "startedAt"
-	PayloadKeyCompletedAt          = "completedAt"
-	PayloadKeyDurationMs           = "durationMs"
-	PayloadKeyFailureClass         = "failureClass"
+	PayloadKeyTitle                  = "title"
+	PayloadKeyDescription            = "description"
+	PayloadKeyDeliverableDirectory   = "deliverableDirectory"
+	PayloadKeyInternalDirectory      = "internalDirectory"
+	PayloadKeyGoalID                 = "goalId"
+	PayloadKeyDoDID                  = "doDId"
+	PayloadKeyText                   = "text"
+	PayloadKeyItems                  = "items"
+	PayloadKeyState                  = "state"
+	PayloadKeyActiveRunID            = "activeRunId"
+	PayloadKeyBlockingTicketID       = "blockingTicketId"
+	PayloadKeyBlockingApprovalID     = "blockingApprovalId"
+	PayloadKeyFailureReason          = "failureReason"
+	PayloadKeyDefinitionRevision     = "definitionRevision"
+	PayloadKeyPreviousDefinitionHash = "previousDefinitionHash"
+	PayloadKeyPreviousGoalID         = "previousGoalId"
+	PayloadKeyPreviousDoDID          = "previousDoDId"
+	PayloadKeyLineageState           = "lineageState"
+	PayloadKeyKind                   = "kind"
+	PayloadKeyInput                  = "input"
+	PayloadKeyOutput                 = "output"
+	PayloadKeyReason                 = "reason"
+	PayloadKeyAction                 = "action"
+	PayloadKeyContext                = "context"
+	PayloadKeyResolutionID           = "resolutionId"
+	PayloadKeyType                   = "type"
+	PayloadKeyPayload                = "payload"
+	PayloadKeySummary                = "summary"
+	PayloadKeySourceType             = "sourceType"
+	PayloadKeySourceRef              = "sourceRef"
+	PayloadKeyEvidenceRefs           = "evidenceRefs"
+	PayloadKeyArtifactRefs           = "artifactRefs"
+	PayloadKeyResultID               = "resultId"
+	PayloadKeyArtifactType           = "artifactType"
+	PayloadKeyName                   = "name"
+	PayloadKeyURI                    = "uri"
+	PayloadKeyContentType            = "contentType"
+	PayloadKeyMemoryType             = "memoryType"
+	PayloadKeyContent                = "content"
+	PayloadKeyTags                   = "tags"
+	PayloadKeyImportance             = "importance"
+	PayloadKeyConfidence             = "confidence"
+	PayloadKeyVisibility             = "visibility"
+	PayloadKeyTraceID                = "traceId"
+	PayloadKeyStage                  = "stage"
+	PayloadKeyPolicy                 = "policy"
+	PayloadKeyStatus                 = "status"
+	PayloadKeyProviderID             = "providerId"
+	PayloadKeyOperation              = "operation"
+	PayloadKeyItemType               = "itemType"
+	PayloadKeyItemID                 = "itemId"
+	PayloadKeyConfidenceScore        = "confidence"
+	PayloadKeyPolicyMatched          = "policyMatched"
+	PayloadKeyPolicyBlocked          = "policyBlocked"
+	PayloadKeyBudgetBefore           = "budgetBefore"
+	PayloadKeyBudgetAfter            = "budgetAfter"
+	PayloadKeyLLMProviderID          = "llmProviderId"
+	PayloadKeyLLMModel               = "llmModel"
+	PayloadKeyLLMDecisionPreview     = "llmDecisionPreview"
+	PayloadKeyPromptFingerprint      = "promptFingerprint"
+	PayloadKeyResolvedAt             = "resolvedAt"
+	PayloadKeyEscalationReason       = "escalationReason"
+	PayloadKeyRetrievedMemoryIDs     = "retrievedMemoryIds"
+	PayloadKeyPatchID                = "patchId"
+	PayloadKeyStepID                 = "stepId"
+	PayloadKeyToolCallID             = "toolCallId"
+	PayloadKeyPatchType              = "patchType"
+	PayloadKeyTargetRef              = "targetRef"
+	PayloadKeyAddedLines             = "addedLines"
+	PayloadKeyDeletedLines           = "deletedLines"
+	PayloadKeyContentHash            = "contentHash"
+	PayloadKeyDiffHash               = "diffHash"
+	PayloadKeyApprovalID             = "approvalId"
+	PayloadKeyRisk                   = "risk"
+	PayloadKeyError                  = "error"
+	PayloadKeyWorkspaceID            = "workspaceId"
+	PayloadKeyRunID                  = "runId"
+	PayloadKeyModel                  = "model"
+	PayloadKeyChunkCount             = "chunkCount"
+	PayloadKeyReceivedBytes          = "receivedBytes"
+	PayloadKeyElapsedMs              = "elapsedMs"
+	PayloadKeyProvider               = "provider"
+	PayloadKeyInputTokens            = "inputTokens"
+	PayloadKeyOutputTokens           = "outputTokens"
+	PayloadKeyTotalTokens            = "totalTokens"
+	PayloadKeyEstimated              = "estimated"
+	PayloadKeyUsageSource            = "usageSource"
+	PayloadKeyRequestBytes           = "requestBytes"
+	PayloadKeyResponseBytes          = "responseBytes"
+	PayloadKeyStreaming              = "streaming"
+	PayloadKeyContextBudget          = "contextBudget"
+	PayloadKeyCacheUsage             = "cacheUsage"
+	PayloadKeyStartedAt              = "startedAt"
+	PayloadKeyCompletedAt            = "completedAt"
+	PayloadKeyDurationMs             = "durationMs"
+	PayloadKeyFailureClass           = "failureClass"
 )
 
 type WorkspacePayloadData struct {
@@ -120,25 +125,59 @@ type RunPayloadData struct {
 }
 
 type GoalPayloadData struct {
-	Text string
+	Text                   string
+	DefinitionRevision     string
+	PreviousDefinitionHash string
+	PreviousGoalID         common.GoalID
+	LineageState           string
 }
 
 type DoDPayloadData struct {
-	Items []string
-	State common.DoDState
+	Items                  []string
+	State                  common.DoDState
+	DefinitionRevision     string
+	PreviousDefinitionHash string
+	PreviousDoDID          common.DoDID
+	LineageState           string
 }
 
-func GoalPayload(text string) map[string]any {
-	return map[string]any{
+func GoalPayload(text string, definitionRevision string, previousDefinitionHash string, previousGoalID common.GoalID, lineageState string) map[string]any {
+	ret := map[string]any{
 		PayloadKeyText: text,
 	}
+	if definitionRevision != "" {
+		ret[PayloadKeyDefinitionRevision] = definitionRevision
+	}
+	if previousDefinitionHash != "" {
+		ret[PayloadKeyPreviousDefinitionHash] = previousDefinitionHash
+	}
+	if previousGoalID != "" {
+		ret[PayloadKeyPreviousGoalID] = string(previousGoalID)
+	}
+	if lineageState != "" {
+		ret[PayloadKeyLineageState] = lineageState
+	}
+	return ret
 }
 
-func DoDPayload(items []string, state common.DoDState) map[string]any {
-	return map[string]any{
+func DoDPayload(items []string, state common.DoDState, definitionRevision string, previousDefinitionHash string, previousDoDID common.DoDID, lineageState string) map[string]any {
+	ret := map[string]any{
 		PayloadKeyItems: append([]string(nil), items...),
 		PayloadKeyState: string(state),
 	}
+	if definitionRevision != "" {
+		ret[PayloadKeyDefinitionRevision] = definitionRevision
+	}
+	if previousDefinitionHash != "" {
+		ret[PayloadKeyPreviousDefinitionHash] = previousDefinitionHash
+	}
+	if previousDoDID != "" {
+		ret[PayloadKeyPreviousDoDID] = string(previousDoDID)
+	}
+	if lineageState != "" {
+		ret[PayloadKeyLineageState] = lineageState
+	}
+	return ret
 }
 
 type StepPayloadData struct {
@@ -705,7 +744,17 @@ func DecodeGoalPayload(payload map[string]any) (GoalPayloadData, bool) {
 	if !ok {
 		return GoalPayloadData{}, false
 	}
-	return GoalPayloadData{Text: text}, true
+	definitionRevision, _ := optionalStringField(payload, PayloadKeyDefinitionRevision)
+	previousDefinitionHash, _ := optionalStringField(payload, PayloadKeyPreviousDefinitionHash)
+	previousGoalID, _ := optionalStringField(payload, PayloadKeyPreviousGoalID)
+	lineageState, _ := optionalStringField(payload, PayloadKeyLineageState)
+	return GoalPayloadData{
+		Text:                   text,
+		DefinitionRevision:     definitionRevision,
+		PreviousDefinitionHash: previousDefinitionHash,
+		PreviousGoalID:         common.GoalID(previousGoalID),
+		LineageState:           lineageState,
+	}, true
 }
 
 func DecodeDoDPayload(payload map[string]any) (DoDPayloadData, bool) {
@@ -717,7 +766,18 @@ func DecodeDoDPayload(payload map[string]any) (DoDPayloadData, bool) {
 	if !ok {
 		return DoDPayloadData{}, false
 	}
-	return DoDPayloadData{Items: items, State: common.DoDState(state)}, true
+	definitionRevision, _ := optionalStringField(payload, PayloadKeyDefinitionRevision)
+	previousDefinitionHash, _ := optionalStringField(payload, PayloadKeyPreviousDefinitionHash)
+	previousDoDID, _ := optionalStringField(payload, PayloadKeyPreviousDoDID)
+	lineageState, _ := optionalStringField(payload, PayloadKeyLineageState)
+	return DoDPayloadData{
+		Items:                  items,
+		State:                  common.DoDState(state),
+		DefinitionRevision:     definitionRevision,
+		PreviousDefinitionHash: previousDefinitionHash,
+		PreviousDoDID:          common.DoDID(previousDoDID),
+		LineageState:           lineageState,
+	}, true
 }
 
 func DecodeStepPayload(payload map[string]any) (StepPayloadData, bool) {

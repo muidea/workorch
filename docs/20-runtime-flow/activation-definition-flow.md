@@ -88,6 +88,13 @@ Run 创建后，需要把 activation 结果转化为首个 LLM Step 可消费的
 - 选中的 Skill / Soul / MCP / Memory 上下文
 - 当前 workspace 已知资源摘要
 - 当前 definition revision / lineage
+- 当前 activation 形成的 coverage baseline / 初始 work item scope
+
+稳定要求：
+
+- activation 必须基于当前 effective definition 形成首轮 coverage baseline
+- 若 definition revision 已变化，旧 revision 的 active coverage/work item 不得直接复用为新 run 的初始 scope
+- 首个 step input 至少应能看到当前 definition 对应的初始收敛面，而不是等到 verification / repair 再补建 coverage ledger
 
 #### Successor Activation Inheritance
 
@@ -127,8 +134,3 @@ activation 的正式输出是：
 - `planning-execution-flow.md`
 - `../00-core/runtime-stage-contract.md`
 - `../50-product-interface/service-api.md`
-
-## Open Migration Notes
-
-- Workspace setup draft、template 选择、Soul routing 的 profile-specific 入口后续应迁入
-  `40-profiles-capabilities/workspace/`。

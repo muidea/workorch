@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"

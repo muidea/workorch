@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"

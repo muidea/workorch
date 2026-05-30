@@ -405,7 +405,6 @@ func TestHandleArtifactOutputContinuationCreatesPlanAndDispatchesChunk(t *testin
 	}
 	output := map[string]any{
 		"completionState": "continue",
-		"outputMode":      outputModeIncrementalArtifact,
 		"artifactPlan": map[string]any{
 			"artifacts": []map[string]any{{
 				"artifactId":      "artifact-001",
@@ -500,7 +499,6 @@ func TestHandleArtifactOutputContinuationRecordsChunkAndDispatchesAssemble(t *te
 	content := "assembled content\n"
 	output := map[string]any{
 		"completionState": "continue",
-		"outputMode":      outputModeIncrementalArtifact,
 		"artifactChunk": map[string]any{
 			"artifactId": item.ArtifactID,
 			"targetRef":  item.TargetRef,
@@ -619,7 +617,6 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 	content := "deliverable content\n"
 	output := map[string]any{
 		"completionState": "continue",
-		"outputMode":      outputModeIncrementalArtifact,
 		"artifactChunk": map[string]any{
 			"artifactId": item.ArtifactID,
 			"targetRef":  item.TargetRef,
@@ -791,8 +788,20 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 		RunID: item.RunID,
 		Kind:  llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
-			"outputMode":             outputModeIncrementalArtifact,
-			"artifactContinuationId": string(item.ID),
+			"outputMode":                   outputModeIncrementalArtifact,
+			"artifactContinuationId":       string(item.ID),
+			"requestedArtifactContext":     true,
+			"requestedArtifactOutputPhase": artifactOutputPhaseContext,
+			"stateChangingOutputRequired":  true,
+			"repairObjective":              repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{"requiredOutput": map[string]any{
+				"outputMode":                              outputModeIncrementalArtifact,
+				"mustReturnArtifactContextGraph":          true,
+				"artifactContextGraphSchema":              map[string]any{"type": "executionGraph"},
+				"allowedArtifactContextKinds":             []string{"file/read"},
+				"forbiddenTopLevelOutputs":                []string{"artifactChunk"},
+				"stateChangingEvidenceDeferredUntilApply": true,
+			}},
 			"artifactOutputContract": map[string]any{"phase": artifactOutputPhaseContext},
 			"artifactContinuationContext": map[string]any{
 				"id":               string(item.ID),
@@ -848,8 +857,85 @@ func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testi
 	if phase := stringFromMap(mapFromValue(next.Input["artifactOutputContract"]), "phase"); phase != artifactOutputPhaseChunk {
 		t.Fatalf("next artifact phase = %q, want %s", phase, artifactOutputPhaseChunk)
 	}
+	if _, ok := next.Input["requestedArtifactContext"]; ok {
+		t.Fatalf("next input retained requestedArtifactContext: %+v", next.Input)
+	}
+	if got := stringFromMap(next.Input, "requestedArtifactOutputPhase"); got != "" {
+		t.Fatalf("next requestedArtifactOutputPhase = %q, want empty", got)
+	}
+	required := mapFromValue(mapFromValue(next.Input["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustReturnArtifactContextGraph"]) {
+		t.Fatalf("next requiredOutput retained mustReturnArtifactContextGraph: %+v", required)
+	}
+	if _, ok := required["artifactContextGraphSchema"]; ok {
+		t.Fatalf("next requiredOutput retained artifactContextGraphSchema: %+v", required)
+	}
+	if _, ok := required["allowedArtifactContextKinds"]; ok {
+		t.Fatalf("next requiredOutput retained allowedArtifactContextKinds: %+v", required)
+	}
+	if !boolValue(required["mustReturnArtifactChunk"]) {
+		t.Fatalf("next requiredOutput = %+v, want mustReturnArtifactChunk", required)
+	}
+	if _, ok := next.Input["artifactContextEvidence"]; !ok {
+		t.Fatalf("next input missing artifactContextEvidence: %+v", next.Input)
+	}
 	if intFromAny(mapFromValue(next.Input["artifactContinuationContext"])["expectedSequence"]) != 3 {
 		t.Fatalf("next artifact context = %+v, want expectedSequence 3", next.Input["artifactContinuationContext"])
+	}
+}
+
+func TestArtifactContinuationNextStepInputStaysChunkAfterModeSelection(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-assemble")
+	item := newArtifactContinuationForAssembleTest()
+	item.State = common.ArtifactContinuationStateChunking
+	item.ExpectedSequence = 3
+	continuations := memory.NewArtifactContinuationRepository()
+	if err := continuations.Create(ctx, item); err != nil {
+		t.Fatalf("seed continuation: %v", err)
+	}
+	previous := &runmodel.Step{
+		ID:    common.StepID(runID + "/context"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"outputMode":                   outputModeIncrementalArtifact,
+			"requestedArtifactContext":     true,
+			"requestedArtifactOutputPhase": artifactOutputPhaseContext,
+			"stateChangingOutputRequired":  true,
+			"repairObjective":              repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{"requiredOutput": map[string]any{
+				"outputMode":                              outputModeIncrementalArtifact,
+				"mustReturnArtifactContextGraph":          true,
+				"artifactContextGraphSchema":              map[string]any{"type": "executionGraph"},
+				"allowedArtifactContextKinds":             []string{"file/read"},
+				"stateChangingEvidenceDeferredUntilApply": true,
+			}},
+			"artifactOutputContract": map[string]any{
+				"mode":  outputModeIncrementalArtifact,
+				"phase": artifactOutputPhaseContext,
+			},
+			"artifactContinuationContext": artifactContinuationContext(item),
+		},
+	}
+	input := artifactContinuationNextStepInput(previous, item)
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
+		policy:   NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: runID, WorkspaceID: item.WorkspaceID}, input, nil, 0)
+
+	contract := mapFromValue(input["artifactOutputContract"])
+	if phase := stringFromMap(contract, "phase"); phase != artifactOutputPhaseChunk {
+		t.Fatalf("artifactOutputContract phase = %q, want %s; input=%+v", phase, artifactOutputPhaseChunk, input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if boolValue(required["mustReturnArtifactContextGraph"]) {
+		t.Fatalf("requiredOutput retained context graph requirement after selection: %+v", required)
+	}
+	if !boolValue(required["mustReturnArtifactChunk"]) {
+		t.Fatalf("requiredOutput = %+v, want chunk requirement", required)
 	}
 }
 

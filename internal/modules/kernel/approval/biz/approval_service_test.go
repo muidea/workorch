@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"

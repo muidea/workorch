@@ -264,8 +264,3 @@ verification / acceptance 链最终输出：
 - `../60-verification/audits/full-chain-assessment-closure-plan.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- Workspace outcome / taskProgress 与 latest result/run 的一致性规则还需后续补强。
-- `RunOutcome` / `WorkspaceOutcome` projection 与 completion gate 的更细读模型映射仍需继续展开。

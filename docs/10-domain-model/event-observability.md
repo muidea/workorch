@@ -164,8 +164,3 @@ EventRecord 与 Observability 的边界是：
 - `../50-product-interface/service-api.md`
 - `../90-archive/records/delivery-history.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- Event payload summary / raw detail 的模块实现与打开链路继续由模块层和产品层补细。
-- Workspace / Run outcome 与 taskProgress 的字段级 API 表继续由 product-interface 层维护。

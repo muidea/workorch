@@ -135,9 +135,11 @@ Web Console 是 WorkOrch 的远程控制与观察面，主要服务：
   - `snapshot.goals`
   - `snapshot.dods`
   - `snapshot.runs`
+  - `snapshot.artifactContinuations`（若存在，只作为 active continuation metadata 摘要）
   - `snapshot.decisions` / `snapshot.approvals`
 - run 级：
   - `runSnapshot.results` / `artifacts` / `patches`
+  - `runSnapshot.artifactContinuations`（默认只展示 state/target/progress/hash 摘要，不内嵌正文）
   - `runObservability.timeline` / `closureTraces`
   - `contextBundle.sections` / `recentEvidence`
   - `taskProgress.repairLoop`
@@ -303,6 +305,8 @@ Web Console 当前可显式打开：
 - raw content 只在用户显式展开时打开
 - 默认页面应优先展示 summary / snapshot / observability / page list
 - raw payload / artifact content 不应替代主阅读路径
+- `artifactContinuations` 在 board/detail/observability 中默认只展示 metadata 和进度摘要；
+  plan/chunk/assembled 正文只允许通过显式 raw/detail 打开，不直接嵌入页面主内容
 
 ## Low-Frequency Interaction Boundary
 

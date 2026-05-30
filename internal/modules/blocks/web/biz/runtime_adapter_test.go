@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"

@@ -58,18 +58,26 @@ func (s *Service) ListEvents(ctx context.Context, query repository.EventRecordQu
 
 func eventRecordFromEnvelope(envelope events.Envelope) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
-		ID:           common.EventRecordID(envelope.ID),
-		Version:      envelope.Version,
-		Topic:        envelope.Topic,
-		OccurredAt:   envelope.OccurredAt,
-		SourceModule: envelope.SourceModule,
-		SubjectType:  envelope.SubjectType,
-		SubjectID:    envelope.SubjectID,
-		WorkspaceID:  common.WorkspaceID(envelope.WorkspaceID),
-		RunID:        common.RunID(envelope.RunID),
-		StepID:       common.StepID(envelope.StepID),
-		Payload:      clonePayload(envelope.Payload),
+		ID:             common.EventRecordID(envelope.ID),
+		Version:        envelope.Version,
+		Topic:          envelope.Topic,
+		OccurredAt:     envelope.OccurredAt,
+		SourceModule:   envelope.SourceModule,
+		SubjectType:    envelope.SubjectType,
+		SubjectID:      envelope.SubjectID,
+		WorkspaceID:    common.WorkspaceID(envelope.WorkspaceID),
+		RunID:          common.RunID(envelope.RunID),
+		StepID:         common.StepID(envelope.StepID),
+		Payload:        clonePayload(envelope.Payload),
+		PayloadSummary: eventPayloadSummary(envelope.Payload),
 	}
+}
+
+func eventPayloadSummary(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	return map[string]any{"fieldCount": len(payload)}
 }
 
 func clonePayload(input map[string]any) map[string]any {

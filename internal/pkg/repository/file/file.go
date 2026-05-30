@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	approval "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approval "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decision "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstream "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -1139,6 +1139,8 @@ func (r *EventRecordRepository) eventRecordLogLine(item *eventstream.EventRecord
 	if err := writeFileAtomic(payloadPath, payload, 0o644); err != nil {
 		return eventRecordLogLine{}, err
 	}
+	line.Record.PayloadSummary = eventPayloadSummary(record.Payload)
+	line.Record.PayloadRef = payloadRef
 	line.Record.Payload = nil
 	line.PayloadRef = payloadRef
 	return line, nil
@@ -1211,6 +1213,10 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		}
 		item := cloneEventRecord(&recordLine.Record)
 		if recordLine.PayloadRef != "" {
+			item.PayloadRef = recordLine.PayloadRef
+			if len(item.PayloadSummary) == 0 {
+				item.PayloadSummary = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			}
 			item.Payload = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
 		}
 		if err := fn(item); err != nil {
@@ -1234,6 +1240,26 @@ func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.Even
 	}
 	item.Payload = payload
 	return nil
+}
+
+func eventPayloadSummary(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	ret := map[string]any{
+		"fieldCount": len(payload),
+	}
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 16 {
+		keys = keys[:16]
+		ret["truncated"] = true
+	}
+	ret["fields"] = keys
+	return ret
 }
 
 func (r *EventRecordRepository) readEventPayload(ref string) (map[string]any, error) {
@@ -3186,6 +3212,7 @@ func cloneArtifact(item *resultmodel.Artifact) *resultmodel.Artifact {
 func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
 	cloned := *item
 	cloned.Payload = cloneMap(item.Payload)
+	cloned.PayloadSummary = cloneMap(item.PayloadSummary)
 	return &cloned
 }
 

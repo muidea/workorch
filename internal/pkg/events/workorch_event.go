@@ -377,7 +377,7 @@ func DecodeGoalEvent(envelope Envelope) (GoalEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = GoalPayload(data.Text)
+	envelope.Payload = GoalPayload(data.Text, data.DefinitionRevision, data.PreviousDefinitionHash, data.PreviousGoalID, data.LineageState)
 	return GoalEvent{envelope: envelope, Data: data}, true
 }
 
@@ -395,7 +395,7 @@ func DecodeDoDEvent(envelope Envelope) (DoDEvent, bool) {
 	}
 	envelope = cloneEnvelope(envelope)
 	envelope.Version = spec.CurrentVersion
-	envelope.Payload = DoDPayload(data.Items, data.State)
+	envelope.Payload = DoDPayload(data.Items, data.State, data.DefinitionRevision, data.PreviousDefinitionHash, data.PreviousDoDID, data.LineageState)
 	return DoDEvent{envelope: envelope, Data: data}, true
 }
 

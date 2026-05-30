@@ -3,7 +3,7 @@ package appservice
 import (
 	"context"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"

@@ -41,6 +41,7 @@ Last Updated: 2026-05-29
 - Memory CRUD
 - workspace-scoped recall/search contract
 - memory write policy
+- MemoryRecallTrace 的正式持久化与查询输入
 
 ## Boundary
 
@@ -62,8 +63,3 @@ Last Updated: 2026-05-29
 - `../10-domain-model/context-capability-memory.md`
 - `../20-runtime-flow/context-assembly-flow.md`
 - `../40-profiles-capabilities/mcp/capability-management.md`
-
-## Open Migration Notes
-
-- profile-specific 的 Skill / Soul / MCP 语义后续还要继续迁到 `40-profiles-capabilities/`
-- selectedContext 的 request-side 装配细节后续迁到 `llm-provider-assembly.md`

@@ -71,7 +71,6 @@ WorkOrch 当前可按稳定责任划分为：
 - `blocks/git`
 - `blocks/web`
 - `blocks/ssh`
-- `blocks/approval`
 
 ## Architecture Boundary
 
@@ -135,7 +134,3 @@ blocks 负责：
 
 - `repository-structure.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- 当前旧 `architecture-overview.md` 仍包含过多易漂移内容，后续应继续收缩到本文件所定义的稳定范围。

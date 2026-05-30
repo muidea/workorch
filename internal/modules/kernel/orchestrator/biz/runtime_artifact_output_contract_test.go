@@ -78,6 +78,78 @@ func TestValidateIncrementalArtifactPlanOutputContractRejectsExecutionGraph(t *t
 	}
 }
 
+func TestValidateIncrementalArtifactOutputContractRejectsResponseOutputMode(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-output-mode-response", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-output-mode-response/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_plan",
+			},
+		},
+	}
+	output := map[string]any{
+		"outputMode": outputModeIncrementalArtifact,
+		"artifactPlan": map[string]any{
+			"artifacts": []map[string]any{{
+				"artifactId":      "artifact-001",
+				"targetRef":       "deliverable/main.go",
+				"operation":       "replace",
+				"coverageTargets": []string{"goal-1"},
+				"estimatedChunks": 1,
+				"estimatedBytes":  512,
+			}},
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "must not include outputMode") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want outputMode rejection", err)
+	}
+}
+
+func TestValidateIncrementalArtifactOutputContractRejectsNestedResponseOutputMode(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-nested-output-mode-response", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-nested-output-mode-response/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_plan",
+			},
+		},
+	}
+	output := map[string]any{
+		"artifactPlan": map[string]any{
+			"artifacts": []map[string]any{{
+				"artifactId":      "artifact-001",
+				"targetRef":       "deliverable/main.go",
+				"operation":       "replace",
+				"coverageTargets": []string{"goal-1"},
+				"estimatedChunks": 1,
+				"estimatedBytes":  512,
+			}},
+		},
+		"llmDecision": map[string]any{
+			"completionState": "continue",
+			"outputMode":      outputModeIncrementalArtifact,
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "must not include llmDecision.outputMode") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want nested outputMode rejection", err)
+	}
+}
+
 func TestValidateIncrementalArtifactContextOutputContractAcceptsBoundedToolGraph(t *testing.T) {
 	run := &runmodel.Run{ID: "run-artifact-context-ok", InitialStepKind: llmWorkspaceExecutionStepKind}
 	step := &runmodel.Step{
@@ -111,6 +183,62 @@ func TestValidateIncrementalArtifactContextOutputContractAcceptsBoundedToolGraph
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract() error = %v", err)
+	}
+}
+
+func TestValidateIncrementalArtifactContextOutputContractRejectsNonAllowlistedGraphKind(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-non-allowlisted", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-non-allowlisted/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_context",
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{"id": "custom", "kind": "custom/read"}},
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "forbidden node kind") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want non-allowlisted graph rejection", err)
+	}
+}
+
+func TestValidateIncrementalArtifactContextOutputContractRejectsOversizedGraph(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-oversized", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-oversized/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_context",
+			},
+		},
+	}
+	nodes := make([]map[string]any, 0, artifactContextMaxGraphNodes+1)
+	for idx := 0; idx <= artifactContextMaxGraphNodes; idx++ {
+		nodes = append(nodes, map[string]any{"id": "read", "kind": "file/read"})
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{"nodes": nodes},
+		"llmDecision":               map[string]any{"completionState": "continue"},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "exceeds maxGraphNodes") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want max graph nodes rejection", err)
 	}
 }
 

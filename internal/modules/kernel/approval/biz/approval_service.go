@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"time"
 
-	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
-	approvalModel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
+	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"

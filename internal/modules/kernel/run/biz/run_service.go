@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -52,16 +53,18 @@ func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand
 		return err
 	}
 
+	definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
 	run := &runModel.Run{
-		ID:               cmd.RunID,
-		WorkspaceID:      cmd.WorkspaceID,
-		GoalID:           cmd.GoalID,
-		DoDID:            cmd.DoDID,
-		InitialStepKind:  cmd.InitialStepKind,
-		ExecutionContext: cloneExecutionContext(cmd.ExecutionContext),
-		State:            common.RunStateCreated,
-		Priority:         cmd.Priority,
-		FailureReason:    "",
+		ID:                 cmd.RunID,
+		WorkspaceID:        cmd.WorkspaceID,
+		GoalID:             cmd.GoalID,
+		DoDID:              cmd.DoDID,
+		DefinitionRevision: definitionRevision,
+		InitialStepKind:    cmd.InitialStepKind,
+		ExecutionContext:   cloneExecutionContext(cmd.ExecutionContext),
+		State:              common.RunStateCreated,
+		Priority:           cmd.Priority,
+		FailureReason:      "",
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
@@ -76,9 +79,11 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 
 	run, err := s.runs.Get(ctx, cmd.RunID)
 	if err == nil {
+		definitionRevision := firstNonEmptyString(cmd.DefinitionRevision, runDefinitionRevisionFromExecutionContext(cmd.ExecutionContext))
 		if run.WorkspaceID != cmd.WorkspaceID ||
 			run.GoalID != cmd.GoalID ||
 			run.DoDID != cmd.DoDID ||
+			run.DefinitionRevision != definitionRevision ||
 			run.InitialStepKind != cmd.InitialStepKind ||
 			run.Priority != cmd.Priority ||
 			!reflect.DeepEqual(run.ExecutionContext, cmd.ExecutionContext) {
@@ -90,6 +95,36 @@ func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand
 		return err
 	}
 	return s.CreateRun(ctx, cmd)
+}
+
+func runDefinitionRevisionFromExecutionContext(input map[string]any) string {
+	revision, _ := input["definitionRevision"].(map[string]any)
+	if len(revision) == 0 {
+		return ""
+	}
+	if id := strings.TrimSpace(stringFromMap(revision, "id")); id != "" {
+		return id
+	}
+	goalID := strings.TrimSpace(stringFromMap(revision, "effectiveGoalId"))
+	doDID := strings.TrimSpace(stringFromMap(revision, "effectiveDoDId"))
+	if goalID == "" && doDID == "" {
+		return ""
+	}
+	return "goal:" + goalID + "|dod:" + doDID
+}
+
+func stringFromMap(input map[string]any, key string) string {
+	value, _ := input[key].(string)
+	return value
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func cloneExecutionContext(input map[string]any) map[string]any {

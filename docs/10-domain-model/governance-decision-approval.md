@@ -158,7 +158,3 @@ Decision list、Approval list、governance summary、task progress 只是治理�
 
 - `../00-core/runtime-stage-contract.md`
 - `../50-product-interface/service-api.md`
-
-## Open Migration Notes
-
-- governance 与 replan successor 的更细 flow 动作表仍由 `../20-runtime-flow/repair-replan-flow.md` 承接。

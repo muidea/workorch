@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"

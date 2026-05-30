@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	approvalservice "github.com/muidea/workorch/internal/modules/blocks/approval/service"
+	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"

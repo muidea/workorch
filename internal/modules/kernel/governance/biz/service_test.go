@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"

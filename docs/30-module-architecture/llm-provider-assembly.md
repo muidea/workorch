@@ -49,6 +49,7 @@ Last Updated: 2026-05-30
 - normalized provider context profile
 - request messages / prompt sections
 - contextBudget / request audit metadata
+- output mode selector result / stage-contract projection
 
 ## Request Rendering Direction
 
@@ -61,6 +62,79 @@ provider-facing request 组装应至少负责：
 - raw request/response/stream 的 ref 策略
 
 provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow / product 文档。
+
+## Output Mode Selector Landing
+
+当 runtime 进入 `need_state_change` 且存在大输出风险时，本层必须承接
+`selectOutputMode` 的 provider-facing 组装责任。
+
+本层至少负责：
+
+- 根据中立阈值和当前上下文决定 `executionGraph` 或 `incrementalArtifact`
+- 在 request-side stage contract 中投影：
+  - `outputMode`
+  - `requestedOutputMode`
+  - `outputModeSelector.reason`
+  - `outputModeSelector.priority`
+  - `artifactOutputContract`
+  - `artifactContinuationContext`
+- 当 active continuation 存在时，恢复 continuation 相关 request-side metadata
+
+约束：
+
+- selector 只能选择输出承载模式，不能改写 `ConvergenceContract.State`
+- selector 只能使用中立信号，不能依赖业务类型、语言、框架、文件名或 deliverable 文本
+- selector 结果必须进入 LLM-facing stage contract，不能只保留在 runtime internal executionContext
+
+## Mode-Specific Request Assembly
+
+本层必须对不同输出模式生成互斥的 provider-facing request 形态。
+
+### `executionGraph`
+
+当 mode 为 `executionGraph` 时，本层负责：
+
+- 组装普通 graph / assessment / blocker 相关 schema
+- 清理 incremental-only 字段：
+  - `artifactOutputContract`
+  - `artifactContinuationContext`
+  - `artifactContinuationId`
+  - chunk/plan/repair 专用 contract
+
+### `incrementalArtifact`
+
+当 mode 为 `incrementalArtifact` 时，本层负责：
+
+- 组装 plan / chunk / context / chunk-repair 对应的 request-side stage contract
+- 只暴露 metadata-only continuation cursor
+- 按当前 phase 选择唯一 response schema
+
+最小稳定要求：
+
+- `artifactPlan`、`artifactChunk`、`artifact_context`、`artifactChunkRepair` 互斥
+- response 顶层不得包含 `outputMode`
+- `artifact_context` 只能要求 bounded read graph
+- chunk 请求只能携带 metadata-only 连续性信号，不能把 raw tail 正文重新注入 prompt
+
+## Stage-Contract Projection Boundary
+
+本层对 stage-contract 的 provider-facing 投影至少应覆盖：
+
+- `runtimeStage`
+- `runtimeStageMode`
+- `stateChangingOutputRequired`
+- `repairObjective`
+- `requiredOutput`
+- `outputMode`
+- `artifactOutputContract`
+- `artifactContinuationContext`
+- `outputModeSelector`
+
+约束：
+
+- 当 mode 回落为 `executionGraph` 时，incremental-only 字段必须从当前 step input 中清理
+- completion follow-up / assessment-only correction 不得继承已完成 artifact 的 chunk/plan contract
+- stage-contract 投影缺失时，应视为 request assembly defect，而不是让 LLM 自行猜测输出模式
 
 ## Provider-Specific Cache Mapping
 
@@ -103,9 +177,17 @@ provider request / response / stream 的 request-log verifier 当前应落在本
 - protected fields
 - integrity warnings
 - source refs
+- output mode / selector / artifact phase metadata
 
 这些字段用于证明“provider-facing request 是如何被组装的”，
 而不是直接表达业务状态或 accepted/rejected 结论。
+
+若当前 request 处于 `incrementalArtifact`，request audit 还至少应能说明：
+
+- 当前 `outputMode`
+- 当前 artifact phase
+- continuation id / targetRef / expectedSequence 的 metadata-only 摘要
+- 是否发生 mode 切换、恢复 continuation 或从 continuation 回切普通 verification
 
 ### Protected Field / Gate Metadata Boundary
 
@@ -135,6 +217,8 @@ provider request / response / stream 的 request-log verifier 当前应落在本
 - `coverageTargetSet`
 - `processEvidenceTimeline`
 - `currentProgressDigest`
+- `artifactOutputContract`
+- `artifactContinuationContext`
 
 约束：
 
@@ -143,6 +227,26 @@ provider request / response / stream 的 request-log verifier 当前应落在本
   只能在“原始输入已有 target snapshot，但预算后丢失”时触发
 - `runtime_repair_process_evidence_missing`
   只能在当前确实处于 repair / continuation 且过程证据缺失时触发
+- incremental-only contract 字段只能在当前 mode 为 `incrementalArtifact` 时视为 required；
+  回落到 `executionGraph` 后必须清理，而不是当作缺失 protected field 继续告警
+
+## Incremental Artifact Schema Responsibility
+
+mode-specific schema 的正式维护责任应落在本层及其相邻实现中。
+
+本层至少需要稳定承接：
+
+- artifact plan response schema
+- artifact chunk response schema
+- artifact context graph schema
+- artifact chunk repair / artifact replan schema
+- mode 切换时的 schema 互斥校验
+
+边界：
+
+- 本层负责 provider-facing request/response schema 装配
+- flow 层负责 mode 切换后的链路语义
+- verifier 层负责断言 schema 互斥、mode 投影和 raw-content redaction
 
 ## Model Capability Table And Revision Cache
 
@@ -174,6 +278,7 @@ provider request / response / stream 的 request-log verifier 当前应落在本
 - 本层不负责 accepted / rejected business closeout
 - 本层不负责正式 Goal / DoD definition 版本裁决
 - 本层不负责把 provider-specific cache 策略解释成业务规则
+- 本层不负责决定 artifact 是否业务上满足 DoD；它只负责 mode-specific request assembly
 
 ## Source Documents
 

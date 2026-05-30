@@ -170,6 +170,55 @@ func TestGoalDoDManager_EnsureWorkspaceCreatesMissingWorkspace(t *testing.T) {
 	}
 }
 
+func TestGoalDoDManager_DefinitionLineageFields(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	hub := events.NewMemoryHub()
+	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo, hub)
+	workspaceID := common.WorkspaceID("ws-definition-lineage")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-1", Text: "first goal"}); err != nil {
+		t.Fatalf("define first goal: %v", err)
+	}
+	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-2", Text: "second goal"}); err != nil {
+		t.Fatalf("define second goal: %v", err)
+	}
+	secondGoal, err := goalRepo.Get(ctx, "goal-2")
+	if err != nil {
+		t.Fatalf("get second goal: %v", err)
+	}
+	if secondGoal.DefinitionRevision == "" || secondGoal.PreviousDefinitionHash == "" || secondGoal.PreviousGoalID != "goal-1" || secondGoal.LineageState != "active" {
+		t.Fatalf("second goal lineage = %+v, want revision, previous hash/id and active lineage", secondGoal)
+	}
+
+	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-1", Items: []string{"first dod"}}); err != nil {
+		t.Fatalf("define first dod: %v", err)
+	}
+	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-2", Items: []string{"second dod"}}); err != nil {
+		t.Fatalf("define second dod: %v", err)
+	}
+	secondDoD, err := dodRepo.Get(ctx, "dod-2")
+	if err != nil {
+		t.Fatalf("get second dod: %v", err)
+	}
+	if secondDoD.DefinitionRevision == "" || secondDoD.PreviousDefinitionHash == "" || secondDoD.PreviousDoDID != "dod-1" || secondDoD.LineageState != "active" {
+		t.Fatalf("second dod lineage = %+v, want revision, previous hash/id and active lineage", secondDoD)
+	}
+	published := hub.Published()
+	if len(published) == 0 {
+		t.Fatalf("published events empty, want definition events")
+	}
+	last := published[len(published)-1]
+	if last.Payload[events.PayloadKeyDefinitionRevision] == "" || last.Payload[events.PayloadKeyPreviousDoDID] != "dod-1" {
+		t.Fatalf("last definition event payload = %+v, want dod lineage fields", last.Payload)
+	}
+}
+
 func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()

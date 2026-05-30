@@ -140,7 +140,7 @@ core verifier 需要覆盖：
 | `verify-workorch-runtime-core-flow.sh` | accepted / rejected result 与 `resultPolicy` 闭环 |
 | `verify-workorch-runtime-core-flow.sh` | blocked / superseded / failed run 的 rejected-result 收口 |
 | `verify-workorch-runtime-core-flow.sh` | workspace `activeRunId` 不得指向 terminal run |
-| `verify-workorch-runtime-core-flow.sh` | incremental artifact continuation 恢复后不得跳过 apply/validation |
+| orchestrator / repository / read-model tests | incremental artifact selector、continuation lifecycle、restart recovery 与 metadata-only projection |
 | `verify-incremental-artifact-e2e.sh` | active continuation 默认只暴露 metadata，不暴露正文 |
 | `verify-incremental-artifact-e2e.sh` | continuation 完成后必须收口到 apply/validation evidence 与 accepted/rejected result |
 | `verify-boundary-contract.sh` | reusable runtime / prompt / Web 不得含 software-dev 语义 |
@@ -246,7 +246,8 @@ core verifier 需要覆盖：
 | 规则族 | 本地主要入口 | deployed 主要入口 |
 | --- | --- | --- |
 | stage contract / context gate / closure gate | `verify-workorch-runtime-core-flow.sh` | `verify-llm-workspace-execution.sh` |
-| state change gate / incremental artifact neutrality | orchestrator tests + core flow script | `verify-incremental-artifact-e2e.sh` |
+| state change gate | orchestrator tests + core flow script | `verify-llm-workspace-execution.sh` |
+| incremental artifact neutrality | orchestrator / repository / read-model tests | `verify-incremental-artifact-e2e.sh` |
 | MCP stdio neutral execution | blocks/orchestrator tests | `verify-mcp-stdio-workspace-execution.sh` |
 | boundary neutrality | `verify-boundary-contract.sh` | console/runtime built assets + deployed code path review |
 

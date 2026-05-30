@@ -23,7 +23,6 @@ import (
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/application/workorch"
-	_ "github.com/muidea/workorch/internal/modules/blocks/approval"
 	_ "github.com/muidea/workorch/internal/modules/blocks/file"
 	_ "github.com/muidea/workorch/internal/modules/blocks/git"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -31,6 +30,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
 	_ "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	_ "github.com/muidea/workorch/internal/modules/blocks/web"
+	_ "github.com/muidea/workorch/internal/modules/kernel/approval"
 	_ "github.com/muidea/workorch/internal/modules/kernel/decision"
 	_ "github.com/muidea/workorch/internal/modules/kernel/eventstream"
 	_ "github.com/muidea/workorch/internal/modules/kernel/governance"

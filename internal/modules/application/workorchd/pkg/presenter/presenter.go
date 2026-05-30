@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/observed"
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"

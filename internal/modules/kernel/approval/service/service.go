@@ -3,7 +3,7 @@ package approval
 import (
 	"context"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

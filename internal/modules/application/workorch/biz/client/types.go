@@ -275,17 +275,19 @@ type WorkspaceTemplate struct {
 
 // Event types.
 type EventRecord struct {
-	ID           string         `json:"id"`
-	Version      string         `json:"version"`
-	Topic        string         `json:"topic"`
-	OccurredAt   string         `json:"occurredAt,omitempty"`
-	SourceModule string         `json:"sourceModule,omitempty"`
-	SubjectType  string         `json:"subjectType,omitempty"`
-	SubjectID    string         `json:"subjectId,omitempty"`
-	WorkspaceID  string         `json:"workspaceId,omitempty"`
-	RunID        string         `json:"runId,omitempty"`
-	StepID       string         `json:"stepId,omitempty"`
-	Payload      map[string]any `json:"payload,omitempty"`
+	ID             string         `json:"id"`
+	Version        string         `json:"version"`
+	Topic          string         `json:"topic"`
+	OccurredAt     string         `json:"occurredAt,omitempty"`
+	SourceModule   string         `json:"sourceModule,omitempty"`
+	SubjectType    string         `json:"subjectType,omitempty"`
+	SubjectID      string         `json:"subjectId,omitempty"`
+	WorkspaceID    string         `json:"workspaceId,omitempty"`
+	RunID          string         `json:"runId,omitempty"`
+	StepID         string         `json:"stepId,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	PayloadSummary map[string]any `json:"payloadSummary,omitempty"`
+	PayloadRef     string         `json:"payloadRef,omitempty"`
 }
 
 // Snapshot / Status / Observability types.

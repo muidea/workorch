@@ -246,7 +246,3 @@ evidence/result flow 必须保持以下例外处理：
 - `../90-archive/superseded/workspace-data-layout-plan.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 - `../00-core/runtime-stage-contract.md`
-
-## Open Migration Notes
-
-- raw/detail 打开方式的具体文件布局与 endpoint 细节继续由模块层和 product-interface 层补充。

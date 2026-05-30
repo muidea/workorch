@@ -1993,6 +1993,40 @@ func TestRuntimeAdapterExposesExecutionGraph(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterNormalizesFileGraphTargetRefToPath(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"thoughtSummary":"read the current target through a neutral resource reference",
+		"completionState":"continue",
+		"executionGraph":{
+			"nodes":[
+				{"id":"read-current","kind":"file/read","input":{"targetRef":"deliverable.txt","optional":true}}
+			]
+		}
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	graph, ok := result.Output["executionGraph"].(map[string]any)
+	if result.Output["stage"] != "llm_execution_graph_plan" || !ok {
+		t.Fatalf("output = %+v, want execution graph plan", result.Output)
+	}
+	nodes, ok := graph["nodes"].([]map[string]any)
+	if !ok || len(nodes) != 1 {
+		t.Fatalf("nodes = %+v, want one file/read graph node", graph["nodes"])
+	}
+	input := nodes[0]["input"].(map[string]any)
+	if input["path"] != "deliverable.txt" || input["targetRef"] != "deliverable.txt" {
+		t.Fatalf("node input = %+v, want targetRef preserved and path normalized", input)
+	}
+}
+
 func TestRuntimeAdapterRejectsReservedGovernanceReportGraphPatchTarget(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"completionState":"continue",

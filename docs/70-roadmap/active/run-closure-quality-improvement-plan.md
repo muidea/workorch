@@ -802,7 +802,7 @@ Acceptance criteria:
   idempotent, and opposite terminal states still return conflict. This reduces
   one generic file backend Approval read on each approved/rejected governance
   step before Run resume. Local verification passed with:
-  `go test ./internal/modules/blocks/approval/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
+  `go test ./internal/modules/kernel/approval/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/orchestrator/biz -count=1`
   and `go test ./... -count=1 -p 1`.
 - 2026-05-01: Quantified deployed Approval ensure loaded Approval reuse after
   rebuild/redeploy. Batch `load-20260501074909` kept 5/5 success with no HTTP /
@@ -1885,7 +1885,7 @@ Acceptance criteria:
   DoD validation, Result / Artifact materialization, and evidence chain; it
   only removes response-path read amplification from approval handling. Local
   verification passed with
-  `go test ./internal/modules/blocks/approval/... -count=1`,
+  `go test ./internal/modules/kernel/approval/... -count=1`,
   `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestApproveApprovalWithSessionReusesReturnedApproval|TestBatchResolveApprovalsWithSessionReusesReturnedApprovals|TestApproveApprovalWithBackendReturnsApprovedApproval|TestRejectApprovalWithBackendReturnsRejectedApproval|TestBatchResolveApprovalsWithBackendApprovesInRequestOrder' -count=1`,
   `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./internal/modules/kernel/run/biz -count=1`,
   and `go test ./... -count=1 -p 1`. Deployed quantification is pending the

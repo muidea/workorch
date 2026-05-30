@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
@@ -750,16 +750,18 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	repo := factory()
 
 	first := &eventstreammodel.EventRecord{
-		ID:           common.EventRecordID("event-record-1"),
-		Version:      "workorch.event.v1",
-		Topic:        "/run/state/changed",
-		OccurredAt:   "2026-04-28T00:00:00Z",
-		SourceModule: "kernel/run",
-		SubjectType:  "run",
-		SubjectID:    "run-contract",
-		WorkspaceID:  common.WorkspaceID("ws-contract"),
-		RunID:        common.RunID("run-contract"),
-		Payload:      map[string]any{"state": "running"},
+		ID:             common.EventRecordID("event-record-1"),
+		Version:        "workorch.event.v1",
+		Topic:          "/run/state/changed",
+		OccurredAt:     "2026-04-28T00:00:00Z",
+		SourceModule:   "kernel/run",
+		SubjectType:    "run",
+		SubjectID:      "run-contract",
+		WorkspaceID:    common.WorkspaceID("ws-contract"),
+		RunID:          common.RunID("run-contract"),
+		Payload:        map[string]any{"state": "running"},
+		PayloadSummary: map[string]any{"fieldCount": 1},
+		PayloadRef:     "payloads/event-record-1.json",
 	}
 	second := &eventstreammodel.EventRecord{
 		ID:           common.EventRecordID("event-record-2"),
@@ -794,6 +796,9 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	if fresh.Payload["state"] != "running" {
 		t.Fatalf("event record clone isolation failed: %+v", fresh)
+	}
+	if fresh.PayloadSummary["fieldCount"] != 1 && fresh.PayloadSummary["fieldCount"] != float64(1) || fresh.PayloadRef != "payloads/event-record-1.json" {
+		t.Fatalf("event record summary/ref = %+v/%q, want persisted summary/ref", fresh.PayloadSummary, fresh.PayloadRef)
 	}
 	byRun, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID})
 	if err != nil {
@@ -2060,9 +2065,11 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 		WorkspaceID:         common.WorkspaceID("ws-contract"),
 		RunID:               common.RunID("run-contract"),
 		RootStepID:          common.StepID("run-contract/step-1"),
+		CurrentStepID:       common.StepID("run-contract/step-1"),
 		ArtifactID:          "artifact-001",
 		TargetRef:           "deliverable/example.txt",
 		Operation:           "replace",
+		OutputMode:          "incrementalArtifact",
 		CoverageTargets:     []string{"coverage-001"},
 		State:               common.ArtifactContinuationStatePlanning,
 		ExpectedSequence:    1,
@@ -2088,7 +2095,8 @@ func testArtifactContinuationRepositoryContract(t *testing.T, factory func() rep
 	if err != nil {
 		t.Fatalf("get fresh artifact continuation: %v", err)
 	}
-	if fresh.Metadata["scope"] != "contract" || fresh.CoverageTargets[0] != "coverage-001" || fresh.ReceivedChunkHashes[1] != "hash-001" {
+	if fresh.Metadata["scope"] != "contract" || fresh.CoverageTargets[0] != "coverage-001" || fresh.ReceivedChunkHashes[1] != "hash-001" ||
+		fresh.CurrentStepID != item.CurrentStepID || fresh.OutputMode != "incrementalArtifact" {
 		t.Fatalf("artifact continuation clone isolation failed: %+v", fresh)
 	}
 

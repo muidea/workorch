@@ -88,19 +88,18 @@ Last Updated: 2026-05-30
 
 产品接口层不应重新定义 runtime core 规则或业务对象边界。
 
-## Current Gaps
+## Current Status
 
-当前本层仍未完全收口的重点包括：
+当前本层主设计已经形成稳定入口：
 
 - `service-api.md`
-  - 极少量 response/schema 收尾字段
+  - 已承接 HTTP resource families、response family、raw/detail 打开边界和主要字段语义
 - `deployment.md`
-  - 与 service-acceptance 的职责边界、file backend / deployed instance 差异摘要
+  - 已承接部署入口、配置分区与 deployment-vs-acceptance 边界
 - `tui/*`
-  - workspace monitoring / result-first / decision-approval / local-vs-remote 继续细化
+  - 已承接 result-first、workspace switch、decision/approval 交互与 display consistency
 - `web-console/*`
-  - 页面字段级映射与低频交互补充
+  - 已承接 page-to-API mapping、raw-content 边界、低频交互与表单责任边界
 
-完整目录级缺口总表见：
-
-- `../01-overview/current-unclosed-matrix.md`
+后续若继续补写，主要只应是字段级索引、示例补细和少量产品样例增强，
+而不是重新定义 runtime 或业务对象边界。
