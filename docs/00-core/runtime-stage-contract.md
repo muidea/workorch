@@ -156,6 +156,8 @@ executionGraph
 - 组装后的 artifact 必须通过内部 `patch/apply`、等价 state-changing artifact writer 或 profile 声明的写入 capability 落地。
 - 落地后切回普通 `executionGraph` / `verification`，运行后续验证和 evidence 绑定。
 - chunk 阶段不得直接声明 DoD / Goal satisfied；只能作为 state-changing artifact 的待组装输入。
+- `incrementalArtifact` 的任何 continuation 状态推进、chunk 持久化、assemble / apply 调度、step completed 事件和 evidence 记录，都必须发生在当前响应通过 `artifactOutputContract` / mode contract 校验之后。未通过 mode contract 的响应只能记录为 failed step / rejected chunk 诊断，不得先写入 completed step、validation passed、checkpoint completed 或 artifact cursor。
+- 分片期间允许必要的信息补充 tool 调用，但必须作为独立 `artifact_context` 阶段表达。该阶段只允许返回有界、只读或取证用途的 `executionGraph`，用于 `file/list`、`file/read`、`shell/command`、`mcp/tool_call`、`git/*` 等 capability 获取当前上下文；不得与 `artifactPlan`、`artifactChunk` 或 `artifactChunkRepair` 同一响应混用，也不得推进 artifact continuation cursor。
 
 ### Artifact Plan 合同
 
@@ -234,6 +236,33 @@ Runtime 必须严格校验并持久化：
 - `chunkHash` 必须与 content 一致；重试同一 sequence 时 hash 相同视为幂等成功，hash 不同必须拒绝并重试当前 sequence。
 - internal 存储可保存 `previousChunkTail` / `currentChunkTail`，用于连续性校验和重复片段检测；但 LLM-facing `artifactContinuationContext`、event、snapshot、memory recall 和 compact previous output 只能暴露 tail bytes/hash，不能暴露 raw tail 正文。
 - chunk 可建议在行尾、段落、函数、JSON/YAML 行等自然边界结束，但 runtime 不得依赖该语义判断业务正确性；最终以 assemble 后验证为准。
+
+### Artifact Context Tool 合同
+
+当 LLM 在 artifact plan 或 chunk 前无法可靠继续，且需要读取 workspace、调用 MCP / shell / git / file capability 以补充上下文时，runtime 可以下发：
+
+```json
+{
+  "outputMode": "incrementalArtifact",
+  "artifactOutputContract": {
+    "phase": "artifact_context",
+    "mustReturnArtifactContextGraph": true,
+    "forbiddenTopLevelOutputs": ["artifactPlan", "artifactChunk", "artifactChunkRepair", "dodAssessment", "memoryWrites"]
+  },
+  "artifactContinuationContext": {
+    "expectedSequence": 3,
+    "artifactId": "artifact-001",
+    "targetRef": "relative/path.ext"
+  }
+}
+```
+
+该阶段的规则：
+
+- LLM 只能返回一个 bounded `executionGraph`，graph 节点必须是中立 capability 调用；不得包含 state-changing artifact 写入、patch 内容、大正文、DoD accepted assessment 或 memory write。
+- graph 执行完成后，runtime 必须恢复同一个 `artifactContinuationContext` 和 expected sequence，继续派发 `artifact_plan` 或 `artifact_chunk`。tool step output 只能以 compact evidence summary / refs 进入后续 prompt。
+- `artifact_context` 不是新的 RunState，也不是 completion follow-up；它只在 `running` 内部为当前 artifact continuation 补充信息。
+- 如果 context graph 失败，失败按普通 runtime repair / governance 收口，但不得把 artifact cursor 推进到下一 sequence。
 
 Artifact 游标状态必须由 runtime 持有：
 
@@ -444,7 +473,7 @@ LLM state-changing step
 | `runtime.llmOutput.maxArtifactPlanAttempts` | artifact plan 合同失败最大重试次数 | `2` |
 | `runtime.llmOutput.maxArtifactReplanAttempts` | 同一 artifact 重新规划最大次数 | `2` |
 
-配置加载后必须进入 runtime snapshot / run input 中，确保 LLM 请求、event、checkpoint 和后续恢复都能追溯当时使用的阈值。Web / TUI 可以展示生效值，但不能让某个业务 profile 在 core 中硬编码覆盖。
+配置加载后必须进入 runtime snapshot / run input 中，确保 LLM 请求、event、checkpoint 和后续恢复都能追溯当时使用的阈值。产品面可以展示生效值，但不能让某个业务 profile 在 core 中硬编码覆盖。
 
 部署配置要求：
 
@@ -453,15 +482,14 @@ LLM state-changing step
 - 修改阈值后，新 Run 必须在 run input / context budget / checkpoint 中可追溯；历史 Run 继续以当时记录的阈值解释执行过程。
 - 配置文档和部署说明只描述阈值语义、默认值、失败模式和观测入口，不嵌入具体业务场景示例。
 
-### Web / TUI 进度展示
+### 产品展示边界
 
-`incrementalArtifact` 是运行中承载大输出的内部 continuation，不是用户交付物本身。Web / TUI 展示必须遵守以下规则：
+`incrementalArtifact` 是运行中的内部 continuation，不是用户交付物本身。core 只要求产品面默认展示 continuation metadata，而不是正文内容。
 
-- 只展示 metadata：`targetRef`、`state`、`expectedSequence`、`receivedSequences` 数量、`bytesWritten`、`coverageTargets`、`rollingHash` / `lastChunkHash` 简要值、`failureReason` 和 evidence refs。
-- 禁止展示或传输 chunk `content`、assembled content、raw body、diff-like body、完整 plan 正文或内部 metadata map。
-- Web Workspace Detail 可以在目标成果或运行证据区域展示 `Artifact Continuation` 表格，用于说明当前大输出是否正在 plan/chunk/assemble/apply。
-- TUI 主视图和底部状态栏只显示当前活跃 continuation 的紧凑进度，例如目标、状态、已接收 sequence 数和失败摘要；事件到达后自动刷新，不提供正文查看命令。
-- 如果 continuation 已 `applied`，用户-facing 结果应转向正式 `Result` / `Artifact` / validation evidence；continuation 只作为过程证据保留。
+具体展示规则统一转入：
+
+- `../50-product-interface/tui/`
+- `../50-product-interface/web-console/overview.md`
 
 ### 持久化落点
 
@@ -562,7 +590,7 @@ artifactChunk.startsAfter
 artifactChunk.endsWith
 ```
 
-所有 incremental artifact response schema 都不得包含顶层 `outputMode`。`outputMode`、`artifactOutputContract.phase`、`artifactContinuationContext` 和 selector reason 属于 request-side stage contract；response 只返回当前阶段允许的单一 artifact plan、chunk、chunk repair、graph、assessment 或 blocker。
+所有 incremental artifact response schema 都不得包含顶层 `outputMode`。`outputMode`、`artifactOutputContract.phase`、`artifactContinuationContext` 和 selector reason 属于 request-side stage contract；response 只返回当前阶段允许的单一 artifact plan、chunk、chunk repair、context graph、assessment 或 blocker。
 
 `artifactChunkRepair` / artifact replan schema 关键字段：
 
@@ -583,6 +611,7 @@ Schema 互斥规则：
 - `artifactPlan` 响应不得包含 `artifactChunk`、`executionGraph`、`dodAssessment`。
 - `artifactChunk` 响应不得包含 `artifactPlan`、`executionGraph`、`dodAssessment`。
 - `artifactChunkRepair` 响应不得包含大正文，除非 `nextAction=retry_current_sequence` 且正文在新的 `artifactChunk` 响应中返回。
+- `artifact_context` 响应只能包含 bounded `executionGraph`，不得包含 artifact plan/chunk/repair、DoD assessment 或 memory writes。
 - 普通 `executionGraph` 响应不得同时声明 active `artifactChunk`。
 
 ### 服务重启恢复
@@ -621,35 +650,24 @@ coverageTargets 继承规则：
 - validation evidence 必须引用 apply evidence 或相同 coverage target。
 - acceptance 只能引用 apply / validation evidence，不能直接引用 chunk 作为 satisfied 证据。
 
-### Web / TUI 展示
+### Web / TUI 展示边界
 
-Web / TUI 应展示分片增量输出的进度，但不得展示大段正文：
+core 只要求增量 artifact 流程具备可投影的进度 metadata，不在本文展开产品展示规则。
 
-- 当前 output mode。
-- 当前 artifact targetRef。
-- 当前 sequence / estimatedChunks / finalReceived。
-- bytesWritten / maxArtifactChunkBytes。
-- continuation state。
-- 最近 chunk accepted/rejected reason。
-- assembled / applied / validation 状态。
-- apply evidenceRef / validation evidenceRef。
+产品面的展示要求统一转入：
 
-主视图可显示短摘要和进度条；详情页可显示 metadata、hash 和 failure reason。正文内容默认不展示，除非用户显式打开内部诊断视图并具备权限。
+- `../50-product-interface/tui/`
+- `../50-product-interface/web-console/overview.md`
 
-### 测试验收矩阵
+### 验证与历史边界
 
-Core 只保留边界：`incrementalArtifact` 必须具备中立验收覆盖，至少验证
+core 只保留边界：`incrementalArtifact` 必须具备中立验收覆盖，至少覆盖
 mode selector、artifact plan/chunk/apply/validation、服务重启恢复、event metadata-only
 和 coverage target 准入。
 
-历史验收矩阵与专项清单已迁入：
+具体验证矩阵与历史收口记录统一转入：
 
-- `../90-archive/completed/core-runtime-closure-history.md`
-
-### 实现待办项清单
-
-`incrementalArtifact` 的 IA 清单与 IA-37 收口说明已迁入：
-
+- `../60-verification/core-runtime-verifier.md`
 - `../90-archive/completed/core-runtime-closure-history.md`
 
 ## 阶段转换合同
@@ -1127,19 +1145,15 @@ Run activation 必须把当前有效的 profile/template contract 组装进 `exe
 
 `executionContextPackage` 交给 LLM 的 `executionContract` 必须保留完整结构，尤其是 profile 下的 `acceptanceDimensions`、`deliverableExpectations`、`evidenceRequirements` 及其 `required`、`acceptedStepKinds`、`rejectedStepKinds` 等字段。Goal / DoD / 历史上下文可以按预算压缩，但 contract 不能被压缩成数组数量或摘要，否则 LLM 无法按 profile 约束做决策，runtime 也会在后续 verification / repair 阶段反复纠偏。
 
-### 软件开发 profile 示例
+### Profile 映射边界
 
-该示例只作为 profile 映射，不得写入 core runtime 特判。
+具体 profile 示例、术语和交付习惯不在 core 中展开。
 
-| 中立 stage | profile 行为 |
-| --- | --- |
-| `exploration` | 读取仓库结构、相关文件、已有测试和文档，形成问题摘要 |
-| `planning` | 拆分实现 unit、DoD 覆盖点、验证命令 |
-| `execution` | 生成 state-changing artifact，可映射为 patch/file edit |
-| `verification` | 运行测试、检查 diff、收集 runtime evidence |
-| `acceptance` | 对照 Goal / DoD 写 accepted/rejected result |
-| `repair` | 针对失败 evidence 生成定向修复 |
-| `replan` | 原实现路径不成立时创建 successor plan |
+profile 映射统一转入：
+
+- `../40-profiles-capabilities/overview.md`
+- `../40-profiles-capabilities/software-dev/goal-coverage-and-dod.md`
+- `../40-profiles-capabilities/software-dev/code-agent.md`
 
 ## Memory / Recall 合同
 

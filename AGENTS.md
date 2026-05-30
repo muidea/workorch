@@ -1,19 +1,37 @@
-# WorkOrch Agent Instructions
+# Repository Guidelines
 
-Before changing WorkOrch functionality, read `docs/00-core/runtime-stage-contract.md`.
+## Project Structure & Module Organization
 
-That document is the authoritative design contract for WorkOrch runtime evolution. Changes that affect runtime behavior, orchestration flow, LLM execution, memory / recall, soul / skill / tool / MCP capability selection, repair / replan, verification / acceptance, or profile mapping must be designed, implemented, and verified against it.
+WorkOrch is a Go service with an embedded Web console. Main entry points live in `application/workorch`. Core runtime code is under `internal/modules/kernel`, reusable packages under `internal/pkg`, application adapters under `internal/modules/application`, and initiator wiring under `internal/initiators`. Web console source is in `web/workorch-console`; production assets are generated during build. Runtime docs are under `docs/`, with `docs/00-core/runtime-stage-contract.md` as the orchestration source of truth.
 
-Changes that affect LLM provider request rendering, prompt sections, context budget, cache planning, cache usage projection, provider adapters, memory recall, or runtime evidence packaging must also be checked against `docs/00-core/runtime-request-cache-note.md`.
+## Build, Test, and Development Commands
 
-Core runtime changes must remain functionally neutral. Do not hard-code software development, code patching, test framework, language stack, or business-domain behavior into the core runtime. Put feature-specific behavior in profile / capability layers.
+- `make deps`: download Go modules and install console dependencies.
+- `make build`: build console assets and the `./bin/workorch` binary.
+- `make run`: run the service with `config`.
+- `make run-file`: run with file-backed storage from `config/file`.
+- `make fmt-check`: verify Go formatting.
+- `make test`: run `go test ./...`.
+- `make vet`: run `go vet ./...`.
+- `make verify-boundary-contract`: check runtime/Web business neutrality.
+- `make verify-ci-mvp-file`: run CI-safe deployed-instance checks with mock providers.
 
-LLM cache behavior is a core runtime contract. Keep the provider-facing stable prefix stable:
+## Coding Style & Naming Conventions
 
-- `C0` may contain only long-lived system/language/schema/runtime JSON contract text.
-- `C1` contains current Goal/DoD definition content and may change only when definition revision changes.
-- `C2` contains declarative capability/governance contracts and may change only when capability or governance policy changes.
-- Runtime-stage details such as `assessmentOnly`, `stateChangingOutputRequired`, `repairObjective`, provider retry, recovery mode, current failure, current progress, memory recall, tool results, snapshots, and requested action must live in `C3`/`C4`/`C5`, not in `C0`.
-- If a change can make `stablePrefixHash` vary within the same run without a stable contract change, treat it as a request rendering bug and add or update regression tests.
+Use `gofmt` for Go and keep package names short, lowercase, and role-oriented. Prefer existing module boundaries and helper APIs. Web code uses TypeScript, React, Vite, and Ant Design; place page-level code under `web/workorch-console/src`. Do not commit generated runtime data from `.workorch-data`, `.workorch-workspaces`, `bin`, or `node_modules`.
 
-If older docs or local closure plans conflict with the stage contract and neutrality design, treat `docs/00-core/runtime-stage-contract.md` as the source of truth and update the older docs or profile-specific docs instead of weakening the core contract.
+## Testing Guidelines
+
+Add focused Go tests beside changed code using `*_test.go`. For runtime, LLM request assembly, event projection, TUI, and presenter changes, include contract regression tests. Run targeted `go test ./path -count=1` first, then broader `make test` or relevant `make verify-*` targets.
+
+## Commit & Pull Request Guidelines
+
+History uses concise imperative summaries such as `fix runtime incremental artifact convergence` and `docs: reorganize workorch documentation structure`. Keep commits scoped. PRs should describe behavior changes, verification commands, config or migration impact, and screenshots for Web console UI changes.
+
+## Agent-Specific Runtime Constraints
+
+Before changing runtime behavior, read `docs/00-core/runtime-stage-contract.md`. For LLM request rendering, context budget, cache planning, provider adapters, memory recall, or evidence packaging, also read `docs/00-core/runtime-request-cache-note.md`.
+
+Core runtime must remain functionally neutral. Do not hard-code software development, language stacks, test frameworks, MCP-specific behavior, or business-domain logic into orchestrator core. Put feature behavior in profile, capability, template, or adapter layers.
+
+Keep the provider-facing LLM cache prefix stable: long-lived system/schema/runtime contracts belong in `C0`, Goal/DoD definitions in `C1`, declarative capability/governance contracts in `C2`, and volatile runtime details in `C3` through `C5`. Treat unexpected `stablePrefixHash` drift as a request rendering bug.

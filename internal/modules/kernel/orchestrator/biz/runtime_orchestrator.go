@@ -1508,8 +1508,17 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := validateRepairPatchOutputTargetRelevance(step, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch output contract failed", err)
 	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		if outputModeIsIncrementalArtifact(step.Input) {
+			_ = o.publishArtifactContinuationRejected(ctx, run, step, output, err)
+		}
+		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime execution contract failed", err)
+	}
 	if err := validateRuntimeStateChangingOutputBeforeSideEffects(run, step, output); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime state-changing contract gate failed", err)
+	}
+	if handled, err := o.handleArtifactOutputContinuation(ctx, run, step, toolCall, output, workspace); handled || err != nil {
+		return err
 	}
 	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
@@ -1555,13 +1564,6 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return err
 	}
 	if err := o.publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
-		return err
-	}
-
-	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
-		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime execution contract failed", err)
-	}
-	if handled, err := o.handleArtifactOutputContinuation(ctx, run, step, output, workspace); handled || err != nil {
 		return err
 	}
 
@@ -1644,6 +1646,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	graphSpecs, graphSteps := o.readyGraphStepSpecsWithSteps(ctx, run, step)
 	if len(graphSpecs) > 0 {
 		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
+	}
+	if handled, err := o.resumeArtifactContinuationAfterContextGraph(ctx, run, step, output, workspace); handled || err != nil {
+		return err
 	}
 	if shouldDispatchGraphFollowUp(run, step, output) {
 		var input map[string]any
@@ -1815,6 +1820,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	}
 	if boolValue(step.Input["stateChangingOutputRequired"]) {
 		if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+			if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
+				return nil
+			}
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
 				return nil
 			}

@@ -418,7 +418,7 @@ func TestHandleArtifactOutputContinuationCreatesPlanAndDispatchesChunk(t *testin
 		},
 	}
 
-	handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, output, workspace)
+	handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, &runmodel.ToolCall{ID: "tool-plan"}, output, workspace)
 	if err != nil {
 		t.Fatalf("handleArtifactOutputContinuation() error = %v", err)
 	}
@@ -511,7 +511,7 @@ func TestHandleArtifactOutputContinuationRecordsChunkAndDispatchesAssemble(t *te
 		},
 	}
 
-	handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, output, workspace)
+	handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, &runmodel.ToolCall{ID: "tool-chunk"}, output, workspace)
 	if err != nil {
 		t.Fatalf("handleArtifactOutputContinuation() error = %v", err)
 	}
@@ -630,7 +630,7 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 		},
 	}
 
-	if handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, output, workspace); err != nil || !handled {
+	if handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, &runmodel.ToolCall{ID: "tool-coverage"}, output, workspace); err != nil || !handled {
 		t.Fatalf("handleArtifactOutputContinuation() handled=%v error=%v", handled, err)
 	}
 	updatedRun, err := runRepo.Get(ctx, run.ID)
@@ -650,6 +650,206 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 	missing := stringSet(coverageMissingEvidenceKinds(sourceChange))
 	if missing["state_change"] || !missing["validation"] {
 		t.Fatalf("source_change missingEvidenceKinds = %+v, want validation only after artifact apply", coverageMissingEvidenceKinds(sourceChange))
+	}
+}
+
+func TestHandleArtifactOutputContinuationCompletesStepAfterValidModeContract(t *testing.T) {
+	ctx := context.Background()
+	continuations := memory.NewArtifactContinuationRepository()
+	stepRepo := memory.NewStepRepository()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	run := &runmodel.Run{ID: "run-artifact-complete-after-contract", WorkspaceID: "ws-artifact-complete-after-contract", InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	step := &runmodel.Step{
+		ID:    "run-artifact-complete-after-contract/001-plan",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract":      map[string]any{"phase": artifactOutputPhasePlan},
+		},
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	workspace := &workspacemodel.Workspace{ID: run.WorkspaceID, Title: "ws", State: common.WorkspaceStateRunning, DeliverableDirectory: t.TempDir()}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runs:       runRepo,
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ArtifactContinuations: continuations,
+			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+			ToolCalls:             memory.NewToolCallRepository(),
+			ValidationResults:     memory.NewValidationResultRepository(),
+		},
+		eventHub: events.NewMemoryHub(),
+	}
+	output := map[string]any{
+		"completionState": "continue",
+		"artifactPlan": map[string]any{
+			"artifacts": []map[string]any{{
+				"artifactId":      "artifact-001",
+				"targetRef":       "deliverable/main.go",
+				"operation":       "replace",
+				"coverageTargets": []string{"goal-1"},
+				"estimatedChunks": 1,
+				"estimatedBytes":  128,
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v", err)
+	}
+	handled, err := orch.handleArtifactOutputContinuation(ctx, run, step, &runmodel.ToolCall{ID: "tool-plan"}, output, workspace)
+	if err != nil || !handled {
+		t.Fatalf("handleArtifactOutputContinuation() handled=%v error=%v", handled, err)
+	}
+	stored, err := stepRepo.Get(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if stored.State != common.StepStateCompleted {
+		t.Fatalf("step state = %s, want completed after valid mode contract", stored.State)
+	}
+}
+
+func TestPublishArtifactContinuationRejectedDoesNotAdvanceCursor(t *testing.T) {
+	ctx := context.Background()
+	continuations := memory.NewArtifactContinuationRepository()
+	item := newArtifactContinuationForAssembleTest()
+	item.State = common.ArtifactContinuationStateChunking
+	item.ExpectedSequence = 2
+	item.ReceivedSequences = []int{1}
+	if err := continuations.Create(ctx, item); err != nil {
+		t.Fatalf("seed continuation: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
+		eventHub: events.NewMemoryHub(),
+	}
+	step := &runmodel.Step{
+		ID:    "run-assemble/002-chunk",
+		RunID: item.RunID,
+		Input: map[string]any{
+			"outputMode":             outputModeIncrementalArtifact,
+			"artifactContinuationId": string(item.ID),
+			"artifactContinuationContext": map[string]any{
+				"id":               string(item.ID),
+				"expectedSequence": 2,
+			},
+		},
+	}
+
+	if err := orch.publishArtifactContinuationRejected(ctx, &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID}, step, map[string]any{"stage": "llm_artifact_chunk"}, common.ErrInvalidArgument); err != nil {
+		t.Fatalf("publishArtifactContinuationRejected() error = %v", err)
+	}
+	updated, err := continuations.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get continuation: %v", err)
+	}
+	if updated.ExpectedSequence != 2 || len(updated.ReceivedSequences) != 1 {
+		t.Fatalf("continuation = %+v, want cursor unchanged", updated)
+	}
+	if last := mapFromValue(updated.Metadata["lastRejectedOutput"]); stringFromMap(last, "stepId") != string(step.ID) {
+		t.Fatalf("lastRejectedOutput = %+v, want rejected step metadata", updated.Metadata["lastRejectedOutput"])
+	}
+}
+
+func TestResumeArtifactContinuationAfterContextGraphDispatchesNextChunk(t *testing.T) {
+	ctx := context.Background()
+	continuations := memory.NewArtifactContinuationRepository()
+	stepRepo := memory.NewStepRepository()
+	runRepo := memory.NewRunRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	item := newArtifactContinuationForAssembleTest()
+	item.State = common.ArtifactContinuationStateChunking
+	item.ExpectedSequence = 3
+	item.ReceivedSequences = []int{1, 2}
+	if err := continuations.Create(ctx, item); err != nil {
+		t.Fatalf("seed continuation: %v", err)
+	}
+	run := &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind, State: common.RunStateRunning}
+	workspace := &workspacemodel.Workspace{ID: item.WorkspaceID, DeliverableDirectory: t.TempDir()}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	step := &runmodel.Step{
+		ID:    "run-assemble/002-context",
+		RunID: item.RunID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"outputMode":             outputModeIncrementalArtifact,
+			"artifactContinuationId": string(item.ID),
+			"artifactOutputContract": map[string]any{"phase": artifactOutputPhaseContext},
+			"artifactContinuationContext": map[string]any{
+				"id":               string(item.ID),
+				"artifactId":       item.ArtifactID,
+				"targetRef":        item.TargetRef,
+				"expectedSequence": item.ExpectedSequence,
+			},
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{"nodes": []map[string]any{{"id": "read", "kind": "file/read"}}},
+		},
+		State: common.StepStateCompleted,
+	}
+	if err := stepRepo.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	graphStep := &runmodel.Step{
+		ID:    "run-assemble/graph-001-read",
+		RunID: item.RunID,
+		Kind:  "file/read",
+		Input: map[string]any{
+			"previousStepId":            string(step.ID),
+			stepInputKeyGraphRootStepID: string(step.ID),
+			stepInputKeyGraphNodeID:     "read",
+		},
+		Output: map[string]any{"status": "completed", "summary": "read current artifact context"},
+		State:  common.StepStateCompleted,
+	}
+	if err := stepRepo.Create(ctx, graphStep); err != nil {
+		t.Fatalf("seed graph step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runtime:    &stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runs:       runRepo,
+		steps:      stepRepo,
+		workspaces: workspaceRepo,
+		evidence:   RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
+		eventHub:   events.NewMemoryHub(),
+	}
+
+	handled, err := orch.resumeArtifactContinuationAfterContextGraph(ctx, run, graphStep, graphStep.Output, workspace)
+	if err != nil || !handled {
+		t.Fatalf("resumeArtifactContinuationAfterContextGraph() handled=%v error=%v", handled, err)
+	}
+	steps, err := stepRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	next := artifactContinuationTestStepWithKind(steps, llmWorkspaceExecutionStepKind, step.ID)
+	if next == nil {
+		t.Fatalf("steps = %+v, want next artifact continuation llm step", steps)
+	}
+	if phase := stringFromMap(mapFromValue(next.Input["artifactOutputContract"]), "phase"); phase != artifactOutputPhaseChunk {
+		t.Fatalf("next artifact phase = %q, want %s", phase, artifactOutputPhaseChunk)
+	}
+	if intFromAny(mapFromValue(next.Input["artifactContinuationContext"])["expectedSequence"]) != 3 {
+		t.Fatalf("next artifact context = %+v, want expectedSequence 3", next.Input["artifactContinuationContext"])
 	}
 }
 

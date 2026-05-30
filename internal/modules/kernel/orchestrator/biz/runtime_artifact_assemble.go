@@ -18,6 +18,7 @@ func (o *RuntimeOrchestrator) handleArtifactOutputContinuation(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
+	toolCall *runModel.ToolCall,
 	output map[string]any,
 	workspace *workspaceModel.Workspace,
 ) (bool, error) {
@@ -28,16 +29,18 @@ func (o *RuntimeOrchestrator) handleArtifactOutputContinuation(
 		return false, fmt.Errorf("%w: artifact continuation repository is required", common.ErrInvalidArgument)
 	}
 	switch artifactOutputPhaseFromInput(step.Input) {
+	case artifactOutputPhaseContext:
+		return false, nil
 	case artifactOutputPhaseChunk:
-		return true, o.recordArtifactContinuationChunk(ctx, run, step, output, workspace)
+		return true, o.recordArtifactContinuationChunk(ctx, run, step, toolCall, output, workspace)
 	case artifactOutputPhaseChunkRepair:
-		return true, o.recordArtifactContinuationChunkRepair(ctx, run, step, output)
+		return true, o.recordArtifactContinuationChunkRepair(ctx, run, step, toolCall, output)
 	default:
-		return true, o.createArtifactContinuationsFromPlan(ctx, run, step, output, workspace)
+		return true, o.createArtifactContinuationsFromPlan(ctx, run, step, toolCall, output, workspace)
 	}
 }
 
-func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any, workspace *workspaceModel.Workspace) error {
+func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any, workspace *workspaceModel.Workspace) error {
 	plan, ok, err := artifactOutputMap(output, "artifactPlan")
 	if err != nil {
 		return err
@@ -89,7 +92,7 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 	}
 	output["artifactContinuations"] = created
 	output["stateChangingEvidenceDeferredUntilApply"] = true
-	if err := o.persistArtifactContinuationStepOutput(ctx, step, output); err != nil {
+	if err := o.completeArtifactContinuationLLMStep(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
 	if len(createdItems) == 0 {
@@ -98,7 +101,7 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 	return o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationLLMStepID(run.ID, createdItems[0]), initialStepKind(run), artifactContinuationNextStepInput(step, createdItems[0]), workspace)
 }
 
-func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any, workspace *workspaceModel.Workspace) error {
+func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any, workspace *workspaceModel.Workspace) error {
 	chunk, ok, err := artifactOutputMap(output, "artifactChunk")
 	if err != nil {
 		return err
@@ -169,7 +172,7 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 			output[stepOutputKeyLLMDecision] = decision
 		}
 	}
-	if err := o.persistArtifactContinuationStepOutput(ctx, step, output); err != nil {
+	if err := o.completeArtifactContinuationLLMStep(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
 	if !item.FinalReceived {
@@ -178,7 +181,7 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 	return o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationAssembleStepID(run.ID, item.ID), artifactAssembleStepKind, artifactContinuationInternalStepInput(item), workspace)
 }
 
-func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
+func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
 	repair, ok, err := artifactOutputMap(output, "artifactChunkRepair")
 	if err != nil {
 		return err
@@ -216,18 +219,100 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.
 		return err
 	}
 	output["artifactContinuationContext"] = artifactContinuationContext(item)
-	if err := o.persistArtifactContinuationStepOutput(ctx, step, output); err != nil {
-		return err
-	}
-	return nil
+	return o.completeArtifactContinuationLLMStep(ctx, run, step, toolCall, output)
 }
 
-func (o *RuntimeOrchestrator) persistArtifactContinuationStepOutput(ctx context.Context, step *runModel.Step, output map[string]any) error {
+func (o *RuntimeOrchestrator) publishArtifactContinuationRejected(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any, cause error) error {
+	if o == nil || o.evidence.ArtifactContinuations == nil || run == nil || step == nil || cause == nil {
+		return nil
+	}
+	continuationID := common.ArtifactContinuationID(strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(mapFromValue(step.Input["artifactContinuationContext"]), "id"),
+		stringFromMap(step.Input, "artifactContinuationId"),
+	)))
+	if continuationID == "" {
+		return nil
+	}
+	item, err := o.evidence.ArtifactContinuations.Get(ctx, continuationID)
+	if err != nil {
+		return nil
+	}
+	if item.Metadata == nil {
+		item.Metadata = map[string]any{}
+	}
+	item.Metadata["lastRejectedOutput"] = map[string]any{
+		"stepId": string(step.ID),
+		"reason": cause.Error(),
+		"stage":  stringFromMap(output, "stage"),
+	}
+	item.UpdatedAt = runtimeEvidenceTimestamp()
+	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
+		return err
+	}
+	return o.publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationChunkRejected, cause)
+}
+
+func (o *RuntimeOrchestrator) resumeArtifactContinuationAfterContextGraph(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any, workspace *workspaceModel.Workspace) (bool, error) {
+	if o == nil || o.evidence.ArtifactContinuations == nil || run == nil || step == nil || step.Input == nil {
+		return false, nil
+	}
+	contextStep := step
+	if outputModeFromInput(contextStep.Input) != outputModeIncrementalArtifact ||
+		artifactOutputPhaseFromInput(contextStep.Input) != artifactOutputPhaseContext {
+		rootStepID := graphRootStepID(step)
+		if rootStepID == "" || rootStepID == step.ID || o.steps == nil {
+			return false, nil
+		}
+		rootStep, err := o.steps.Get(ctx, rootStepID)
+		if err != nil {
+			return true, err
+		}
+		contextStep = rootStep
+	}
+	if contextStep == nil || contextStep.Input == nil ||
+		outputModeFromInput(contextStep.Input) != outputModeIncrementalArtifact ||
+		artifactOutputPhaseFromInput(contextStep.Input) != artifactOutputPhaseContext {
+		return false, nil
+	}
+	if _, ok := runtimeGraphSpecFromStep(contextStep); !ok {
+		return false, nil
+	}
+	continuationID := common.ArtifactContinuationID(strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(mapFromValue(contextStep.Input["artifactContinuationContext"]), "id"),
+		stringFromMap(contextStep.Input, "artifactContinuationId"),
+	)))
+	if continuationID == "" {
+		return true, fmt.Errorf("%w: artifact context continuation id is required", common.ErrInvalidArgument)
+	}
+	item, err := o.evidence.ArtifactContinuations.Get(ctx, continuationID)
+	if err != nil {
+		return true, err
+	}
+	if item.RunID != run.ID || item.WorkspaceID != run.WorkspaceID {
+		return true, common.ErrConflict
+	}
+	if item.State != common.ArtifactContinuationStatePlanning &&
+		item.State != common.ArtifactContinuationStateChunking {
+		return true, nil
+	}
+	nextInput := artifactContinuationNextStepInput(contextStep, item)
+	nextInput["artifactContextEvidence"] = compactStepOutputForLLMContext(output)
+	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), nextInput, workspace)
+}
+
+func (o *RuntimeOrchestrator) completeArtifactContinuationLLMStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
 	if o == nil || o.steps == nil || step == nil {
 		return nil
 	}
+	step.State = common.StepStateCompleted
 	step.Output = output
-	return o.steps.Update(ctx, step)
+	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
+		return err
+	}
+	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
+		return err
+	}
+	return o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
 }
 
 func assembleArtifactContinuation(ctx context.Context, repo repository.ArtifactContinuationRepository, item *orchestratormodel.ArtifactContinuation) (*orchestratormodel.ArtifactContinuationAssembledMetadata, string, error) {

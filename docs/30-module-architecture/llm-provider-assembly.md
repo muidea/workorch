@@ -180,7 +180,3 @@ provider request / response / stream 的 request-log verifier 当前应落在本
 - `../00-core/runtime-request-cache-note.md`
 - `../00-core/runtime-stage-contract.md`
 - `../60-verification/core-runtime-verifier.md`
-
-## Open Migration Notes
-
-- 当前很多 request rendering 规则仍写在 core contract 中，后续需要继续收束到本层。

@@ -119,6 +119,107 @@ planning/execution 主链中，file / git / web capability 的稳定角色至少
 - file/git/web 的业务解释由 profile/capability 层细化，不下沉到本 flow
 - 大正文、raw payload、大 diff、网页正文都优先通过摘要 + ref，而不是塞入默认主链输出
 
+### 6. Incremental Artifact Output Flow
+
+当 `need_state_change` 的目标预计无法稳定放入单次 `executionGraph` JSON 时，
+planning/execution 主链必须允许切换到 `incrementalArtifact`。
+
+该模式的职责是：
+
+- 用小 envelope 承载 plan/chunk
+- 让 runtime 持有 continuation cursor
+- 在 assemble/apply 后回到普通 verification / acceptance 闭环
+
+它不负责：
+
+- 改写 `ConvergenceContract.State`
+- 直接表达 accepted Result
+- 绕过 evidence / validation / acceptance gate
+
+稳定主链：
+
+```text
+planning/execution
+-> output mode selector
+-> artifact_plan
+-> artifact_chunk*
+-> assemble
+-> apply
+-> validation / follow-up
+-> verification / acceptance
+```
+
+约束：
+
+- `incrementalArtifact` 只是 `need_state_change` 的输出承载模式，不是新的 runtime stage
+- plan/chunk 阶段不得直接 satisfied DoD / Goal / deliverable coverage
+- assemble/apply 前不得把 chunk 正文当成正式业务证据
+- 只有 apply/validation 产生的 evidence refs 才能进入 acceptance 候选集
+
+#### Mode Selection Boundary
+
+本 flow 层只承接 mode 切换后的运行链，不重写 selector 细节。
+
+最小稳定语义：
+
+- selector 只能在 `executionGraph` 与 `incrementalArtifact` 之间选择输出模式
+- 切换到 `incrementalArtifact` 后，当前 LLM step 只允许返回该 mode 对应的单一结构
+- 若 selector 回落到 `executionGraph`，当前 step input 中的 artifact continuation contract 必须被清理
+
+selector 阈值、schema 和 request-side 细节见：
+
+- `../00-core/runtime-stage-contract.md`
+- `../30-module-architecture/llm-provider-assembly.md`
+
+#### Artifact Context Read Phase
+
+分片过程中若缺少 concrete target context，允许进入受控 `artifact_context` 读阶段。
+
+稳定规则：
+
+- 只允许 bounded read / list / command / fetch
+- 该阶段只能补上下文，不能推进 chunk cursor
+- `artifact_context` 输出必须是独立的只读 `executionGraph`
+- 不得与 `artifactPlan`、`artifactChunk`、`dodAssessment` 混在同一响应
+
+#### Assemble / Apply / Validation Routing
+
+artifact chunk 全部通过合同校验后，主链必须进入：
+
+1. assemble
+2. apply
+3. validation / follow-up
+
+稳定要求：
+
+- assemble 只生成 runtime internal payload，不直接生成 accepted evidence
+- apply 才是正式 state-changing 落点
+- validation 负责把 apply evidence 绑定到 `coverageTargets` / current work item scope
+- 若 apply 失败、hash 不一致、sequence 缺失或 chunk 合同失效，必须进入 repair /
+  retry / governance 分流，而不是静默丢弃 continuation
+
+#### Continuation Resume Boundary
+
+服务重启、provider retry、schema repair、repair-of-repair 或 follow-up 后，
+若当前 run 存在未完成 continuation，planning/execution 主链必须先恢复 continuation 再继续。
+
+恢复时至少应保留：
+
+- `artifactContinuationId`
+- 当前 phase / state
+- expected sequence
+- targetRef / artifactId
+- accepted plan / chunk hashes / tail hash
+- latest apply / validation evidence refs
+
+恢复后：
+
+- 继续 chunking，或
+- 进入 assemble/apply/validation，或
+- 转入 repair / governance
+
+但不得把未完成 continuation 误投影为普通 graph follow-up。
+
 ## Key Flow Guarantees
 
 - LLM 输出是结构化建议，只有进入 Step output 后才产生业务意义
@@ -128,6 +229,7 @@ planning/execution 主链中，file / git / web capability 的稳定角色至少
 - file / git / web capability 参与 execution 主链，但不直接拥有 closeout 语义
 - graph 并发只属于调度优化，不改变 verification / acceptance 的收口顺序
 - execution 不得以无限只读 graph 代替真实 state-changing output
+- `incrementalArtifact` 只能作为 state-changing 的输出承载，不得绕过 apply/validation/acceptance
 - 缺失 LLM 配置或 provider 不可用必须清晰失败，不能静默 fallback 成已完成运行
 - Soul / Skill / MCP / Memory 都应作为一等 execution context 输入，而不是拼接型 prompt helper
 
@@ -147,6 +249,8 @@ planning / execution 主链会沉淀：
 ## Source Documents
 
 - `../00-core/runtime-stage-contract.md`
+- `../30-module-architecture/llm-provider-assembly.md`
+- `../30-module-architecture/storage-readmodel.md`
 - `verification-acceptance-flow.md`
 - `../70-roadmap/active/run-closure-quality-improvement-plan.md`
 

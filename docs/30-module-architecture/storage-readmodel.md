@@ -47,6 +47,43 @@ run 级对象应按 itemized 文件组织，而不是单个大 JSON map 重写�
 - validation metadata
 - result / artifact records
 - LLM call request / response / usage
+- artifact continuation metadata / plan / chunk / assembled payload
+
+### Artifact Continuation Persistence Boundary
+
+当 runtime 启用 `incrementalArtifact` 时，本层必须把 continuation 视为
+run-scoped internal state，而不是 workspace deliverable。
+
+至少需要持久化：
+
+- continuation metadata
+  - `artifactContinuationId`
+  - `runId`
+  - current state / phase
+  - `artifactId`
+  - `targetRef`
+  - `coverageTargets`
+  - selector / retry / hash metadata
+- accepted artifact plan
+- chunk metadata
+- chunk content
+- assembled metadata
+- assembled content
+
+稳定边界：
+
+- continuation 正文默认不进入 snapshot summary / list projection
+- plan/chunk/assembled content 不得写入 workspace deliverable 根
+- continuation content 不得默认作为 memory recall 或 event payload 正文
+- 只有 compact metadata、状态摘要、hash、bytes、evidence refs 和 raw/detail ref
+  可以进入 read model
+
+典型 internal layout 应保持 run-scoped、itemized、可重放；具体路径命名可演进，
+但必须满足：
+
+- reload 后 continuation 可恢复
+- chunk 顺序与 hash 可重建
+- applied / failed terminal state 可区分 open continuation
 
 ### Raw Payload Strategy
 
@@ -74,6 +111,13 @@ read model 应以：
 
 summary / detail 使用 compact metadata、summary、evidence refs 和分页 detail；
 raw 仅通过显式 ref 打开。
+
+对 `incrementalArtifact` 的投影还必须补充：
+
+- workspace / run snapshot 只投影 active continuation summary
+- observability / detail 可以投影 plan/chunk/apply/validation 状态、sequence 进度、
+  bytes、hash 摘要和 failure reason
+- raw open path 只在显式 detail/raw 打开时暴露 plan/chunk/assembled content
 
 ### Snapshot Projection Structure
 
@@ -131,6 +175,24 @@ Coverage / ledger 相关的读模型也必须分层：
 - profile-specific claim 判断
 - accepted / rejected 的最终业务裁决
 
+### Artifact Continuation Projection Direction
+
+当 run 存在 active `ArtifactContinuation` 时，read-model 至少应支持以下投影分层：
+
+| 投影层 | 最小内容 |
+| --- | --- |
+| workspace summary | 当前是否存在 active continuation、targetRef、state、sequence progress、failure summary |
+| run snapshot | continuation metadata、output mode、apply/validation 进度、evidence refs |
+| run observability | chunk timeline、hash/bytes、plan accepted/rejected、assemble/apply diagnostics |
+| raw/detail | plan 正文、chunk content、assembled content、full metadata |
+
+约束：
+
+- summary/snapshot 不得内嵌 chunk content 或 assembled body
+- observability 默认展示 compact metadata 与 refs，不直接暴露正文
+- raw/detail 打开必须继续走受控 ref / endpoint
+- continuation projection 不能替代正式 Result / Artifact / Validation projection
+
 ## File Backend Rules
 
 - overwrite 写入必须使用原子写策略
@@ -156,6 +218,7 @@ storage/read-model 层对 detail endpoint 的支撑关系至少应保持：
 | --- | --- |
 | `steps` / `tool-calls` / `runtime-checkpoints` | itemized run evidence records |
 | `results` / `artifacts` / `patches` / `validation-results` | result / artifact / patch / validation repositories |
+| `artifact-continuations` | continuation metadata / plan / chunk / assembled repositories |
 | `decisions` / `approvals` | governance repositories + resolution/approval state |
 | `events` | append-only event storage + page query |
 | `runtime/payloads` / `artifacts/content` | payload ref / artifact URI resolution + file backend content open |

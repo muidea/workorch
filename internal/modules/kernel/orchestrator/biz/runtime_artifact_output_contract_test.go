@@ -78,6 +78,104 @@ func TestValidateIncrementalArtifactPlanOutputContractRejectsExecutionGraph(t *t
 	}
 }
 
+func TestValidateIncrementalArtifactContextOutputContractAcceptsBoundedToolGraph(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-ok", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-ok/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_context",
+			},
+			"artifactContinuationContext": map[string]any{
+				"id":               "cont-001",
+				"artifactId":       "artifact-001",
+				"targetRef":        "deliverable/main.go",
+				"expectedSequence": 2,
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":    "read-current",
+				"kind":  "file/read",
+				"input": map[string]any{"targetRef": "deliverable/main.go"},
+			}},
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v", err)
+	}
+}
+
+func TestValidateIncrementalArtifactContextOutputContractRejectsArtifactChunk(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-mixed", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-mixed/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_context",
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{"id": "read-current", "kind": "file/read"}},
+		},
+		"artifactChunk": map[string]any{
+			"artifactId": "artifact-001",
+			"targetRef":  "deliverable/main.go",
+			"sequence":   1,
+			"content":    "package main\n",
+			"isFinal":    false,
+			"chunkHash":  "sha256:df1d036cbbf3df46e2045071e082245ece204c7f53ecf0a4e022bff9bb228f47",
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "must not include artifactChunk") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want artifactChunk rejection", err)
+	}
+}
+
+func TestValidateIncrementalArtifactContextOutputContractRejectsPatchApplyGraph(t *testing.T) {
+	run := &runmodel.Run{ID: "run-artifact-context-patch", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-artifact-context-patch/llm-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"outputMode":                  outputModeIncrementalArtifact,
+			"artifactOutputContract": map[string]any{
+				"phase": "artifact_context",
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{"id": "write", "kind": "patch/apply"}},
+		},
+		"llmDecision": map[string]any{"completionState": "continue"},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if err == nil || !strings.Contains(err.Error(), "forbidden node kind") {
+		t.Fatalf("validateLLMExecutionOutputContract() error = %v, want forbidden graph rejection", err)
+	}
+}
+
 func TestValidateIncrementalArtifactPlanOutputContractRejectsMissingCoverageTargets(t *testing.T) {
 	run := &runmodel.Run{ID: "run-artifact-plan-coverage", InitialStepKind: llmWorkspaceExecutionStepKind}
 	step := &runmodel.Step{

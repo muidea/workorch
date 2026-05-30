@@ -305,7 +305,7 @@ docs/
 - `20-runtime-flow/context-assembly-flow.md`
 - `20-runtime-flow/planning-execution-flow.md`
 - `60-verification/audits/codex-request-context-comparison.md`
-- `90-archive/completed/90-archive/completed/runtime-recovery-governance-closure-design.md`
+- `90-archive/completed/runtime-recovery-governance-closure-design.md`
 - `20-runtime-flow/verification-acceptance-flow.md`
 - `60-verification/audits/full-chain-assessment-closure-plan.md`
 - `70-roadmap/active/run-closure-quality-improvement-plan.md`
@@ -447,7 +447,7 @@ docs/
 | `70-roadmap/active/auto-governance-ticket-approval-plan.md` | `70-roadmap/active/auto-governance-ticket-approval-plan.md` | 迁移 | 活跃计划 |
 | `40-profiles-capabilities/builtin-templates-and-souls.md` | `40-profiles-capabilities/builtin-templates-and-souls.md` | 重写迁移 | profile/capability 主入口 |
 | `20-runtime-flow/context-assembly-flow.md` | `20-runtime-flow/context-assembly-flow.md` | 内容迁移 | 稳定的上下文组织规则进入 flow |
-| `50-product-interface/deployment.md` | `50-product-interface/50-product-interface/deployment.md` | 重命名迁移 | 产品接口层 |
+| `50-product-interface/deployment.md` | `50-product-interface/deployment.md` | 重命名迁移 | 产品接口层 |
 | `60-verification/audits/design-implementation-audit-2026-05-12.md` | `60-verification/audits/design-implementation-audit-2026-05-12.md` | 迁移 | 审计 |
 | `20-runtime-flow/verification-acceptance-flow.md` | `20-runtime-flow/verification-acceptance-flow.md` + `20-runtime-flow/verification-acceptance-flow.md` | 拆分归档 | 稳定规则进入 flow |
 | `10-domain-model/context-capability-memory.md` | `10-domain-model/context-capability-memory.md` + `20-runtime-flow/context-assembly-flow.md` + `10-domain-model/context-capability-memory.md` | 拆分 | 规则沉淀后仅保留活跃待办 |
@@ -465,9 +465,9 @@ docs/
 | `70-roadmap/active/run-closure-quality-improvement-plan.md` | `20-runtime-flow/verification-acceptance-flow.md` + `70-roadmap/active/run-closure-quality-improvement-plan.md` | 拆分 | 稳定规则沉淀 |
 | `60-verification/audits/runtime-contract-conformance-audit.md` | `60-verification/audits/runtime-contract-conformance-audit.md` | 迁移 | runtime contract audit |
 | `90-archive/completed/runtime-expansion-plan.md` | `90-archive/completed/runtime-expansion-plan.md` | 归档 | 已完成 |
-| `90-archive/completed/runtime-recovery-governance-closure-design.md` | `20-runtime-flow/repair-replan-flow.md` + `90-archive/completed/90-archive/completed/runtime-recovery-governance-closure-design.md` | 拆分归档 | 稳定规则进入 flow |
+| `90-archive/completed/runtime-recovery-governance-closure-design.md` | `20-runtime-flow/repair-replan-flow.md` + `90-archive/completed/runtime-recovery-governance-closure-design.md` | 拆分归档 | 稳定规则进入 flow |
 | `90-archive/records/single-workspace-performance-optimization-record.md` | `90-archive/records/single-workspace-performance-optimization-record.md` | 归档 | 性能记录 |
-| `90-archive/completed/software-dev-code-agent-closure-plan.md` | `40-profiles-capabilities/software-dev/code-agent.md` + `90-archive/completed/90-archive/completed/software-dev-code-agent-closure-plan.md` | 拆分归档 | stable profile rule + 历史 closure |
+| `90-archive/completed/software-dev-code-agent-closure-plan.md` | `40-profiles-capabilities/software-dev/code-agent.md` + `90-archive/completed/software-dev-code-agent-closure-plan.md` | 拆分归档 | stable profile rule + 历史 closure |
 | `70-roadmap/active/software-dev-dod-repair-closure-plan.md` | `70-roadmap/active/software-dev-dod-repair-closure-plan.md` | 迁移 | 活跃专项 |
 | `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md` | `40-profiles-capabilities/software-dev/goal-coverage-and-dod.md` | 迁移 | software-dev 主设计 |
 | `40-profiles-capabilities/software-dev/lsp-bridge-integration.md` | `40-profiles-capabilities/software-dev/lsp-bridge-integration.md` | 迁移 | software-dev 能力扩展 |

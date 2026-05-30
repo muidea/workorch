@@ -162,6 +162,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
 		}
 	}
+	if handled, err := o.resumeArtifactContinuationAfterContextGraph(ctx, currentRun, last, last.Output, workspace); handled || err != nil {
+		return err
+	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
 		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}

@@ -10,6 +10,7 @@ import (
 
 const (
 	artifactOutputPhasePlan        = "artifact_plan"
+	artifactOutputPhaseContext     = "artifact_context"
 	artifactOutputPhaseChunk       = "artifact_chunk"
 	artifactOutputPhaseChunkRepair = "artifact_chunk_repair"
 )
@@ -42,6 +43,8 @@ func validateIncrementalArtifactOutputContract(run *runModel.Run, step *runModel
 	}
 	phase := artifactOutputPhaseFromInput(step.Input)
 	switch phase {
+	case artifactOutputPhaseContext:
+		return validateArtifactContextOutputContract(step, output)
 	case artifactOutputPhaseChunk:
 		return validateArtifactChunkOutputContract(step, output)
 	case artifactOutputPhaseChunkRepair:
@@ -49,6 +52,61 @@ func validateIncrementalArtifactOutputContract(run *runModel.Run, step *runModel
 	default:
 		return validateArtifactPlanOutputContract(run, step, output)
 	}
+}
+
+func validateArtifactContextOutputContract(step *runModel.Step, output map[string]any) error {
+	forbidden := []string{
+		"artifactPlan",
+		"artifactChunk",
+		"artifactChunkRepair",
+		stepOutputKeyDoDAssessment,
+		stepOutputKeyMemoryWrites,
+		stepOutputKeyPatches,
+		"patchRequests",
+		"shellCommands",
+		"mcpToolCalls",
+		stepOutputKeyNextStep,
+		stepOutputKeyNextKind,
+		stepOutputKeyNextInput,
+	}
+	if err := validateArtifactOutputForbiddenFields(output, forbidden); err != nil {
+		return err
+	}
+	graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph])
+	if !ok || len(graph.Nodes) == 0 {
+		return fmt.Errorf("%w: artifact_context output requires bounded executionGraph", common.ErrInvalidArgument)
+	}
+	for _, node := range graph.Nodes {
+		if artifactContextForbiddenGraphKind(node.Kind) {
+			return fmt.Errorf("%w: artifact_context executionGraph contains forbidden node kind %q", common.ErrInvalidArgument, node.Kind)
+		}
+		if artifactContextNodeContainsLargePayload(node.Input) {
+			return fmt.Errorf("%w: artifact_context executionGraph node input contains large payload", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func artifactContextForbiddenGraphKind(kind string) bool {
+	kind = strings.TrimSpace(kind)
+	switch kind {
+	case "", "patch/apply", "patch/preview", "patch/revert":
+		return true
+	default:
+		return strings.HasPrefix(kind, "llm/")
+	}
+}
+
+func artifactContextNodeContainsLargePayload(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{"content", "diff", "patch", "body", "fullContent", "artifactChunk", "artifactPlan"} {
+		if len(strings.TrimSpace(stringRawFromMap(input, key))) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func validateArtifactPlanOutputContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {

@@ -26,7 +26,7 @@
 
 ---
 
-## 二、Runtime 核心流程契约（已合并至 workorch-runtime-stage-contract-neutrality-design.md）
+## 二、Runtime 核心流程契约（当前权威入口：`../../00-core/runtime-stage-contract.md`）
 
 ### 2.1 已正确实现的核心契约（13 条）
 
@@ -72,7 +72,7 @@
 
 ---
 
-## 三、架构设计文档（workorch-architecture-design.md）
+## 三、架构设计文档（当前权威入口：`../../30-module-architecture/overview.md`）
 
 ### 3.1 一致项
 
@@ -101,7 +101,7 @@
 
 ---
 
-## 四、恢复治理设计（runtime-recovery-governance-closure-design.md）
+## 四、恢复治理设计（当前 active 规则入口：`../../20-runtime-flow/repair-replan-flow.md`；历史归档：`../../90-archive/completed/runtime-recovery-governance-closure-design.md`）
 
 ### 4.1 设计与实现一致的规则（22 条）
 
