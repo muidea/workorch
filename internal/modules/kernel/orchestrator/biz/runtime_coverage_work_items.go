@@ -283,6 +283,7 @@ func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[stri
 		return nil, nil
 	}
 	existingByKey := map[string]map[string]any{}
+	existingByTextKey := map[string]map[string]any{}
 	historicalItems := coverageHistoricalItemsFromContext(executionContext)
 	for _, item := range mapSliceFromValue(executionContext[coverageWorkItemsKey]) {
 		if strings.TrimSpace(stringFromMap(item, "definitionRevision")) != revision {
@@ -293,10 +294,18 @@ func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[stri
 		if key != "" {
 			existingByKey[key] = item
 		}
+		if textKey := coverageWorkItemTextKey(
+			stringFromMap(item, "source"),
+			stringFromMap(item, "sourceScope"),
+			stringFromMap(item, "targetText"),
+		); textKey != "" {
+			existingByTextKey[textKey] = item
+		}
 	}
 	items := make([]map[string]any, 0, len(sources))
 	seen := map[string]bool{}
 	matchedExistingKeys := map[string]bool{}
+	matchedExistingTextKeys := map[string]bool{}
 	for _, source := range sources {
 		key := coverageWorkItemSourceKey(source)
 		if key == "" || seen[key] {
@@ -314,6 +323,14 @@ func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[stri
 				}
 			}
 		}
+		if len(existing) == 0 {
+			if textKey := coverageWorkItemTextKey(source.Source, source.SourceScope, source.TargetText); textKey != "" {
+				if candidate := existingByTextKey[textKey]; len(candidate) > 0 {
+					existing = candidate
+					matchedExistingTextKeys[textKey] = true
+				}
+			}
+		}
 		if existingKey != "" && len(existing) > 0 {
 			matchedExistingKeys[existingKey] = true
 		}
@@ -323,7 +340,11 @@ func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[stri
 	supersededKeys := make([]string, 0, len(existingByKey))
 	for key := range existingByKey {
 		if !seen[key] && !matchedExistingKeys[key] {
-			supersededKeys = append(supersededKeys, key)
+			item := existingByKey[key]
+			textKey := coverageWorkItemTextKey(stringFromMap(item, "source"), stringFromMap(item, "sourceScope"), stringFromMap(item, "targetText"))
+			if textKey == "" || !matchedExistingTextKeys[textKey] {
+				supersededKeys = append(supersededKeys, key)
+			}
 		}
 	}
 	sort.Strings(supersededKeys)
@@ -724,6 +745,9 @@ func coverageWorkItemFocusPriority(item map[string]any) int {
 	}
 	missing := stringSet(coverageMissingEvidenceKinds(item))
 	status := strings.TrimSpace(stringFromMap(item, "status"))
+	if len(missing) == 0 && status == "evidence_ready" {
+		return 4
+	}
 	switch {
 	case status == "failed" && missing["state_change"]:
 		return 0
@@ -1337,6 +1361,16 @@ func coverageWorkItemSourceAliasKeys(source coverageWorkItemSource) []string {
 		ret = append(ret, strings.Join([]string{source.Source, source.SourceScope, alias}, ":"))
 	}
 	return compactUniqueStrings(ret)
+}
+
+func coverageWorkItemTextKey(source, scope, text string) string {
+	source = strings.TrimSpace(source)
+	scope = strings.TrimSpace(scope)
+	normalized := normalizeDoDCoverageText(text)
+	if source == "" || scope == "" || normalized == "" {
+		return ""
+	}
+	return strings.Join([]string{source, scope, normalized}, ":")
 }
 
 func coverageRequirementPrefix(id string) string {

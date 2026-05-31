@@ -1134,13 +1134,15 @@ Core 可以基于 profile contract 为 work item 计算 `requiredEvidenceKinds`�
 - 叶子化：Goal / DoD 文本的拆分只能做结构性叶子化，例如 Markdown list item、编号条目、明确子项、profile 已声明 coverage target；不得按业务关键词继续扩展出额外隐含目标。父级标题和分组项保留为 `parentContext`，不得重复生成 active item。
 - 统一 requirement catalog：`coverageWorkItems` baseline、`normalizedRunGoalCoverageItems`、`dodAssessment.goalCoverage` completion gate 与 failed coverage repair 必须使用同一套 effective Goal / DoD 叶子抽取、文本归一化和稳定 requirement ID 规则。不得出现 ledger 认为某 source 已覆盖、而 acceptance gate 使用另一套抽取口径重新判定缺失的分裂状态。
 - Markdown 表格属于通用结构语法：表头行与分隔线只能作为结构上下文，不得生成 active work item；数据行在语法上可判定为叶子项时必须按顺序进入 Goal coverage catalog。该规则只基于 Markdown 结构，不得识别表格里的领域词、工具名、语言或业务含义。
+- 当结构规则调整导致 requirement 序号变化，但 source / sourceScope / 规范化 targetText 仍一致时，successor baseline 必须继承已有 accepted / rejected evidence lineage，并重写为当前 canonical `sourceRequirementId`。这只修复同一 source 的结构性重编号，不允许把不同文本或不同 scope 的 evidence 合并。
 - 一源一项：同一个 `normalizedSourceKey` 在同一 `definitionRevision` 内最多只能有一个 active work item；若一个 source 需要多种 evidence，用 `requiredEvidenceKinds` 表达，不得拆成多个语义重复的 work item。
 - 多源不合并：不同 Goal leaf / DoD item / deliverable expectation 即使文本相似，也不得默认合并；只有它们具有相同 canonical source key 或 profile 明确声明等价映射时，才允许共享 evidence refs，但仍要保留各自的 work item 状态。
 - 不从 reason 扩张：failed assessment 的 `reason`、`nextActions`、`knownLimitations`、`residualRisks` 可以帮助描述 `currentGap`，但不能单独生成新的 work item；只有其中存在可机械回链到 baseline source 的 `goalRequirementId`、DoD item、deliverable id 或 coverage target 时，才能更新对应 work item。
+- failed `goalCoverage.items[]` 只有能通过 `goalRequirementId`、结构别名或规范化文本映射到当前 Goal leaf catalog 时，才能进入 repair `coverageTargetSet`。若 LLM 只返回“覆盖映射缺失”等泛化失败文案，runtime 必须把它作为 assessment 诊断保留，不得提升为新的 active Goal target 或让后续验证绑定到不存在的 synthetic requirement。
 - 不从实现方案扩张：计划、patch summary、测试名、文件名、工具输出、memory、LLM 自述或历史 ticket 不能成为新的 active coverage source；它们只能成为 evidence candidate、diagnostic 或 target evidence。
 - 完整性门禁：进入 acceptance 前，runtime 必须能证明 baseline 中每个 required source 都有 active / satisfied / blocked / skipped-with-reason work item，或者有明确 `excludedReason`。若缺失 work item，必须先补齐账本或 fail-fast，不得让 LLM 基于不完整 coverage 直接 accepted。
 - 排除原因：允许排除的 source 仅限 superseded definition、父级容器项、profile 声明 optional 且未被 Goal/DoD 激活、用户明确移除或治理决策明确放弃。排除必须保留 `excludedReason` 与 source ref，不能静默丢弃。
-- 顺序稳定：work item 顺序必须按 baseline source 顺序稳定生成；后续状态变化不得重排 source 顺序，避免 LLM request 与 Web/TUI 显示在多轮执行中来回漂移。
+- 顺序稳定：work item 顺序必须按 baseline source 顺序稳定生成；后续状态变化不得重排 source 顺序，避免 LLM request 与 Web/TUI 显示在多轮执行中来回漂移。焦点排序必须优先处理仍缺 required evidence kind 的 open / failed item；已经具备 accepted evidence、只等待 assessment 的 `evidence_ready` item，即使保留历史 rejected evidence，也不得抢占仍缺证据的 item。
 
 阶段拆分与更新规则：
 

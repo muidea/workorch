@@ -4874,6 +4874,7 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 	}
 	seen := map[string]bool{}
 	ret := make([]map[string]any, 0)
+	workItemContext := coverageWorkItemContextFromInput(input)
 	add := func(kind string, item map[string]any, targetText string) {
 		targetText = strings.TrimSpace(targetText)
 		if targetText == "" {
@@ -4912,6 +4913,9 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		add("dod", item, stringFromMap(item, "item"))
 	}
 	for _, item := range missingGoalCoverageFromInput(input) {
+		if !missingGoalCoverageItemMatchesWorkItemContext(item, workItemContext) {
+			continue
+		}
 		add("goal", item, firstNonEmptyString(
 			stringFromMap(item, "goalRequirementId"),
 			missingGoalCoverageRequirementText(item),
@@ -4925,7 +4929,7 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 			stringFromMap(item, "requirement"),
 		))
 	}
-	for _, item := range coverageTargetSetFromWorkItemContext(coverageWorkItemContextFromInput(input)) {
+	for _, item := range coverageTargetSetFromWorkItemContext(workItemContext) {
 		add(firstNonEmptyString(stringFromMap(item, "kind"), stringFromMap(item, "sourceScope"), "coverage"), item, firstNonEmptyString(
 			stringFromMap(item, "targetText"),
 			stringFromMap(item, "coverageTargetToken"),
@@ -4937,6 +4941,58 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 	}
 	if len(ret) > maxLLMContextSliceItems {
 		ret = ret[:maxLLMContextSliceItems]
+	}
+	return ret
+}
+
+func missingGoalCoverageItemMatchesWorkItemContext(item map[string]any, context map[string]any) bool {
+	if len(item) == 0 || len(context) == 0 {
+		return true
+	}
+	items := coverageWorkItemCandidateItemsFromContext(context)
+	hasGoalItems := false
+	tokens := coverageTokensFromAssessmentItem(item)
+	for _, candidate := range items {
+		if strings.TrimSpace(stringFromMap(candidate, "sourceScope")) != "goal_leaf" &&
+			strings.TrimSpace(stringFromMap(candidate, "kind")) != "goal" {
+			continue
+		}
+		hasGoalItems = true
+		update := coverageWorkItemUpdate{TargetTokens: tokens}
+		if coverageWorkItemMatchesUpdate(candidate, update) {
+			return true
+		}
+	}
+	return !hasGoalItems
+}
+
+func coverageWorkItemCandidateItemsFromContext(context map[string]any) []map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 {
+			return
+		}
+		key := firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "normalizedSourceKey"),
+			stringFromMap(item, "targetText"),
+		)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, item)
+	}
+	for _, key := range []string{"currentFocus", "currentFocusItems", "unresolvedItems", "ledgerSummary"} {
+		add(mapFromValue(context[key]))
+		for _, item := range mapSliceFromValue(context[key]) {
+			add(item)
+		}
 	}
 	return ret
 }

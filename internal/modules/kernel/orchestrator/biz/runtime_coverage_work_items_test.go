@@ -319,6 +319,49 @@ func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *test
 	}
 }
 
+func TestCoverageWorkItemsRebuildInheritsLineageByNormalizedSourceText(t *testing.T) {
+	goalText := strings.Join([]string{
+		"| Capability | Parameters | Purpose |",
+		"| --- | --- | --- |",
+		"| alpha | path | resolve target |",
+	}, "\n")
+	run := &runmodel.Run{
+		ID: "run-cwi-text-lineage",
+		ExecutionContext: map[string]any{
+			"definitionRevision": "rev-current",
+			"goal":               map[string]any{"text": goalText},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                     "cwi-009",
+				"definitionRevision":     "rev-current",
+				"normalizedSourceKey":    "goal:goal_leaf:goal-req-002-legacy",
+				"source":                 "goal",
+				"sourceScope":            "goal_leaf",
+				"sourceRequirementId":    "goal-req-002-legacy",
+				"sourcePath":             "goal.leaves[1]",
+				"targetText":             "| alpha | path | resolve target |",
+				"status":                 "evidence_ready",
+				"acceptedEvidenceRefs":   []string{"run-prev/graph/001-alpha"},
+				"acceptedEvidenceByKind": map[string]any{"validation": []string{"run-prev/graph/001-alpha"}},
+			}},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want canonical key rebuild")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 1 {
+		t.Fatalf("coverageWorkItems = %+v, want one table data row", items)
+	}
+	item := items[0]
+	if got := stringFromMap(item, "sourceRequirementId"); got == "goal-req-002-legacy" || !strings.HasPrefix(got, "goal-req-001-") {
+		t.Fatalf("sourceRequirementId = %q, want rebuilt canonical first data row id", got)
+	}
+	if refs := stringSliceFromValue(item["acceptedEvidenceRefs"]); len(refs) != 1 || refs[0] != "run-prev/graph/001-alpha" {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want inherited lineage by normalized text", refs)
+	}
+}
+
 func TestCoverageWorkItemsReplanSuccessorMovesStaleSourcesToHistory(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-replan-stale-source",
@@ -630,6 +673,80 @@ func TestCoverageWorkItemContextPrioritizesFailedItemsOverEvidenceReadyTopK(t *t
 	ledger := mapSliceFromValue(context["ledgerSummary"])
 	if len(ledger) != 4 || stringFromMap(ledger[0], "id") != "cwi-001" || stringFromMap(ledger[3], "id") != "cwi-004" {
 		t.Fatalf("ledgerSummary = %+v, want original source order preserved", ledger)
+	}
+}
+
+func TestCoverageWorkItemsPrioritizeMissingEvidenceBeforeAssessmentPendingWithRejectedHistory(t *testing.T) {
+	revision := "rev-focus-missing"
+	items := []map[string]any{
+		{
+			"id":                     "cwi-001",
+			"definitionRevision":     revision,
+			"source":                 "goal",
+			"sourceScope":            "goal_leaf",
+			"sourceRequirementId":    "goal-req-001",
+			"sourcePath":             "goal.leaves[0]",
+			"targetText":             "missing validation leaf",
+			"normalizedSourceKey":    "goal:goal_leaf:goal-req-001",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "open",
+			"acceptedEvidenceByKind": map[string]any{},
+		},
+		{
+			"id":                     "cwi-002",
+			"definitionRevision":     revision,
+			"source":                 "dod",
+			"sourceScope":            "dod_item",
+			"sourceRequirementId":    "dod-item-001",
+			"sourcePath":             "dod.items[0]",
+			"targetText":             "assessment pending leaf",
+			"normalizedSourceKey":    "dod:dod_item:dod-item-001",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "evidence_ready",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/001-ok"}},
+			"acceptedEvidenceRefs":   []string{"run/graph/001-ok"},
+			"rejectedEvidenceByKind": map[string]any{"validation": []string{"run/graph/000-old-fail"}},
+			"rejectedEvidenceRefs":   []string{"run/graph/000-old-fail"},
+		},
+	}
+
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "id") != "cwi-001" {
+		t.Fatalf("currentFocus = %+v, want missing evidence item before assessment-pending item with old rejected refs", focus)
+	}
+}
+
+func TestCoverageTargetSetSkipsUnlinkedGoalCoverageFailureWhenCatalogPresent(t *testing.T) {
+	context := coverageWorkItemContextFromItems("rev-current", []map[string]any{{
+		"id":                    "cwi-001",
+		"definitionRevision":    "rev-current",
+		"source":                "goal",
+		"sourceScope":           "goal_leaf",
+		"sourceRequirementId":   "goal-req-001-alpha",
+		"sourcePath":            "goal.leaves[0]",
+		"targetText":            "alpha requirement",
+		"normalizedSourceKey":   "goal:goal_leaf:goal-req-001-alpha",
+		"requiredEvidenceKinds": []string{"validation"},
+		"status":                "open",
+	}}, nil, nil)
+	input := map[string]any{
+		"missingGoalCoverage": []map[string]any{{
+			"goalRequirementId": "goal-req-unlinked",
+			"item":              "generic coverage mapping was incomplete",
+			"state":             "failed",
+		}},
+		coverageWorkItemContextKey: context,
+	}
+
+	targets := coverageTargetSetFromRepairInput(input)
+
+	if len(targets) != 1 {
+		t.Fatalf("coverageTargetSet = %+v, want only catalog-backed goal item", targets)
+	}
+	if got := stringFromMap(targets[0], "sourceRequirementId"); got != "goal-req-001-alpha" {
+		t.Fatalf("coverageTargetSet = %+v, want unlinked failed goalCoverage item skipped", targets)
 	}
 }
 
