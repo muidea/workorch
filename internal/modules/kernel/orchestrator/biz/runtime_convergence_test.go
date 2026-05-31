@@ -2644,6 +2644,63 @@ func TestRuntimeRepairFollowUpToolFailureWithConcreteTargetNeedsStateChange(t *t
 	}
 }
 
+func TestRuntimeRepairFollowUpToolLocatorInvalidNeedsEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-tool-locator-invalid",
+		WorkspaceID:     "ws-tool-locator-invalid",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-tool-locator-invalid/graph-001/002-call-tool",
+		RunID: run.ID,
+		Kind:  "mcp/tool_call",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageExecution,
+			stepInputKeyGraphNodeID:     "call_tool",
+			stepInputKeyGraphRootStepID: string(run.ID) + "/step-1",
+		},
+		Output: map[string]any{
+			"status":              "failed",
+			"operation":           "mcp/tool_call",
+			"serverId":            "semantic-capability",
+			"tool":                "definition.lookup",
+			"error":               "mcp tool definition.lookup failed: column is beyond end of line",
+			failureOutputKeyClass: failureClassMCPRuntime,
+			failureOutputKeySignature: "class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|" +
+				"serverId=semantic-capability|tool=definition.lookup|failureTargets=target.txt|error=column is beyond end of line",
+			"input": map[string]any{
+				"path": "target.txt",
+				"line": 10,
+				"col":  200,
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{steps: memory.NewStepRepository()}
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, errors.New("column is beyond end of line"))
+	contract := mapFromValue(input["convergenceContract"])
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+
+	if stringFromMap(contract, "state") != convergenceStateNeedEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_evidence for invalid capability locator", contract)
+	}
+	if input["stateChangingOutputRequired"] != nil || input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("repair input = %+v, want evidence acquisition without state-changing output", input)
+	}
+	if required["mustProduceConcreteFailureEvidence"] != true || !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "mcp/tool_call") {
+		t.Fatalf("requiredOutput = %+v, want bounded capability evidence acquisition", required)
+	}
+	if boolValue(pkg["capabilityInputLocatorInvalid"]) != true {
+		t.Fatalf("repairActionPackage = %+v, want locator invalid marker", pkg)
+	}
+}
+
 func TestAssessmentOnlyContractCorrectionStepInputAppliesConvergenceContract(t *testing.T) {
 	step := &runmodel.Step{
 		ID:   "run-assessment-correction/step-1",

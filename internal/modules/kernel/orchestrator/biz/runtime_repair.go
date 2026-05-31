@@ -2700,6 +2700,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		}
 	}
+	markCapabilityInputLocatorEvidenceRequired(input, failedStep)
 	coverageContext := mapFromValue(failedStep.Output[coverageWorkItemContextKey])
 	if len(coverageContext) == 0 {
 		coverageContext = mapFromValue(mapFromValue(failedStep.Output["runtimeDiagnostics"])[coverageWorkItemContextKey])
@@ -4420,6 +4421,9 @@ func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[
 }
 
 func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if repairContextHasCapabilityInputLocatorInvalid(input, pkg) {
+		return false
+	}
 	requireCurrentSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
 		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"])
 	if len(input) > 0 {
@@ -5281,6 +5285,9 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 		messages = append(messages, extractStructuredFailureMessages(text)...)
 	}
 	ret := map[string]any{}
+	if capabilityInputLocatorInvalidOutput(output) {
+		ret["capabilityInputLocatorInvalid"] = true
+	}
 	if sources = limitedStrings(compactUniqueStrings(sources), 8); len(sources) > 0 {
 		ret["sources"] = sources
 	}
@@ -6201,6 +6208,9 @@ func recoveryBudgetScope(lineageType string, rootStepID common.StepID, failureCl
 
 func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, execErr error) bool {
 	if failedStep == nil {
+		return false
+	}
+	if capabilityInputLocatorInvalidFailure(failedStep) {
 		return false
 	}
 	if runtimeContextIntegrityGateFailure(failedStep) {

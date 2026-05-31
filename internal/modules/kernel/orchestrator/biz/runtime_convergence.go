@@ -103,6 +103,15 @@ func BuildConvergenceContract(
 		contract.GovernanceReason = governanceReason
 		return contract
 	}
+	if convergenceCapabilityInputLocatorNeedsEvidence(input, failedStep) {
+		contract.State = convergenceStateNeedEvidence
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+		contract.ConcreteFailureEvidenceRequired = true
+		contract.RepairActionPackage = capabilityInputLocatorEvidencePackage(input, failedStep)
+		return contract
+	}
 	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 && convergenceFailedAcceptedStateChangingEvidenceStep(input, failedStep, pkg) {
 		populateProfileStateChangingEvidenceConvergenceContract(input, &contract, pkg)
 		return contract
@@ -1023,6 +1032,12 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		pkg["evidenceAcquisitionRequired"] = true
 		sanitizeRepairActionPackageTargetEvidence(pkg)
 		input["repairActionPackage"] = pkg
+		if boolValue(pkg["capabilityInputLocatorInvalid"]) {
+			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+				"The current failure is an invalid capability input locator. Acquire valid input evidence before retrying the capability or producing state-changing output.",
+				"Do not modify deliverables merely to make the previous invalid locator coordinate become valid.",
+			)
+		}
 	case convergenceStateNeedStateChange:
 		setRuntimeStage(input, runtimeStageRepair)
 		input[stepInputKeySoulStage] = soulStageExecution
@@ -1657,6 +1672,9 @@ func convergenceCoverageVerificationEvidenceGap(input map[string]any, failedStep
 }
 
 func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) bool {
+	if convergenceCapabilityInputLocatorNeedsEvidence(input, failedStep) {
+		return true
+	}
 	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
 		return true
 	}
@@ -1668,6 +1686,10 @@ func convergenceNeedsEvidence(input map[string]any, failedStep *runModel.Step) b
 		return true
 	}
 	return repairActionPackageRequiresEvidenceAcquisition(mapFromValue(input["repairActionPackage"]))
+}
+
+func convergenceCapabilityInputLocatorNeedsEvidence(input map[string]any, failedStep *runModel.Step) bool {
+	return capabilityInputLocatorInvalidFailure(failedStep) || inputHasCapabilityInputLocatorInvalid(input)
 }
 
 func convergenceStateChangeCannotAdvanceWithoutTarget(input map[string]any, failedStep *runModel.Step) bool {
