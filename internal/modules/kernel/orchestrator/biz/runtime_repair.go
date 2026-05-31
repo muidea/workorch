@@ -5166,6 +5166,7 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 	sources := make([]string, 0, len(texts))
 	targets := explicitFailureTargetsForSignature(output)
 	hasCapabilityInputTargets := len(capabilityInputFailureTargets(output)) > 0
+	hasExternalCapabilityCallIdentity := externalCapabilityFailureHasCallIdentity(output)
 	externalRefs := []string{}
 	identifiers := []string{}
 	messages := []string{}
@@ -5177,7 +5178,7 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 			continue
 		}
 		sources = append(sources, source)
-		if shouldExtractFailureTextTargets(source, hasCapabilityInputTargets) {
+		if shouldExtractFailureTextTargets(source, hasCapabilityInputTargets, hasExternalCapabilityCallIdentity) {
 			for _, ref := range extractStructuredFailureLineRefs(text) {
 				key := fmt.Sprintf("%s:%v:%v", ref["targetRef"], ref["line"], ref["column"])
 				if seenLineRefs[key] {
@@ -5230,9 +5231,9 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 	return ret
 }
 
-func shouldExtractFailureTextTargets(source string, hasCapabilityInputTargets bool) bool {
+func shouldExtractFailureTextTargets(source string, hasCapabilityInputTargets bool, hasExternalCapabilityCallIdentity bool) bool {
 	if !hasCapabilityInputTargets {
-		return true
+		return !hasExternalCapabilityCallIdentity
 	}
 	source = strings.ToLower(strings.TrimSpace(source))
 	return strings.Contains(source, "signature") ||
@@ -7203,6 +7204,7 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	if step == nil {
 		return nil
 	}
+	suppressOutputSignatureTargets := externalCapabilityFailureSuppressesTextTargets(step.Output)
 	seen := map[string]bool{}
 	var ret []string
 	add := func(value string) {
@@ -7216,15 +7218,19 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	for _, target := range failureTargetsForSignature(step.Output) {
 		add(target)
 	}
-	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Output, failureOutputKeySignature)) {
-		add(target)
-	}
-	if !currentFailureIsCoverageAssessmentOnly(step) {
-		for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig)) {
+	if !suppressOutputSignatureTargets {
+		for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Output, failureOutputKeySignature)) {
 			add(target)
 		}
-		for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
-			add(target)
+	}
+	if !currentFailureIsCoverageAssessmentOnly(step) {
+		if !suppressOutputSignatureTargets {
+			for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig)) {
+				add(target)
+			}
+			for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
+				add(target)
+			}
 		}
 	}
 	if reassessment := mapFromValue(step.Input["strategyReassessment"]); len(reassessment) > 0 {
@@ -7233,11 +7239,14 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 		}
 	}
 	failedOutput := mapFromValue(step.Output["failedStepOutput"])
+	suppressFailedOutputSignatureTargets := externalCapabilityFailureSuppressesTextTargets(failedOutput)
 	for _, target := range failureTargetsForSignature(failedOutput) {
 		add(target)
 	}
-	for _, target := range failureTargetsFromSignatureText(stringFromMap(failedOutput, failureOutputKeySignature)) {
-		add(target)
+	if !suppressFailedOutputSignatureTargets {
+		for _, target := range failureTargetsFromSignatureText(stringFromMap(failedOutput, failureOutputKeySignature)) {
+			add(target)
+		}
 	}
 	class := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass))
 	signature := strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature))
@@ -7247,6 +7256,10 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 		}
 	}
 	return ret
+}
+
+func externalCapabilityFailureSuppressesTextTargets(output map[string]any) bool {
+	return externalCapabilityFailureHasCallIdentity(output) && len(explicitFailureTargetsForSignature(output)) == 0
 }
 
 func failureTargetsFromSignatureText(signature string) []string {

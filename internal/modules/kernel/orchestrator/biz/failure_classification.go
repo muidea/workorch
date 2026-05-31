@@ -350,6 +350,9 @@ func failureTargetsForSignature(output map[string]any) []string {
 	if targets := explicitFailureTargetsForSignature(output); len(targets) > 0 {
 		return targets
 	}
+	if externalCapabilityFailureHasCallIdentity(output) {
+		return nil
+	}
 	text := strings.Join([]string{
 		stringFromMap(output, "stderr"),
 		stringFromMap(output, "stdout"),
@@ -414,9 +417,7 @@ func capabilityInputFailureTargets(output map[string]any) []string {
 	if len(output) == 0 {
 		return nil
 	}
-	if strings.TrimSpace(stringFromMap(output, "serverId")) == "" &&
-		strings.TrimSpace(stringFromMap(output, "tool")) == "" &&
-		strings.TrimSpace(stringFromMap(output, "operation")) == "" {
+	if !externalCapabilityFailureHasCallIdentity(output) {
 		return nil
 	}
 	input := mapFromValue(output["input"])
@@ -430,6 +431,33 @@ func capabilityInputFailureTargets(output map[string]any) []string {
 		}
 	}
 	return targets
+}
+
+func externalCapabilityFailureHasCallIdentity(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	if mapHasExternalCapabilityCallIdentity(output) {
+		return true
+	}
+	return mapHasExternalCapabilityCallIdentity(mapFromValue(output["runtimeDiagnostics"]))
+}
+
+func mapHasExternalCapabilityCallIdentity(values map[string]any) bool {
+	if len(values) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(values, "serverId")) != "" ||
+		strings.TrimSpace(stringFromMap(values, "tool")) != "" {
+		return true
+	}
+	for _, key := range []string{"kind", "operation"} {
+		value := strings.TrimSpace(stringFromMap(values, key))
+		if value == "mcp/tool_call" {
+			return true
+		}
+	}
+	return strings.HasPrefix(strings.TrimSpace(stringFromMap(values, "stage")), "mcp_")
 }
 
 func normalizedFailureTarget(value string) string {

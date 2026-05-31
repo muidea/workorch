@@ -93,6 +93,68 @@ func TestMCPFailureTargetsPreferToolInputOverInternalDiagnostics(t *testing.T) {
 	}
 }
 
+func TestMCPFailureWithoutExplicitTargetDoesNotPromoteInternalDiagnostics(t *testing.T) {
+	output := map[string]any{
+		"operation": "mcp/tool_call",
+		"serverId":  "mcp-semantic",
+		"tool":      "initialize",
+		"stage":     "mcp_tool_call_failed",
+		"error":     "mcp tool initialize failed: missing dependency",
+		"stderr": strings.Join([]string{
+			`provider: 2026/05/31 12:10:23 client.go:480: ignore notification`,
+			`provider: 2026/05/31 12:10:24 client.go:434: process exited`,
+		}, "\n"),
+		"runtimeDiagnostics": map[string]any{
+			"operation": "mcp/tool_call",
+			"serverId":  "mcp-semantic",
+			"tool":      "initialize",
+		},
+		failureOutputKeySignature: "class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|serverId=mcp-semantic|tool=initialize|operation=mcp/tool_call|failureTargets=client.go|error=missing dependency",
+		"lastFailureDiagnostics": map[string]any{
+			"stderrPreview":           `provider: 2026/05/31 12:10:23 client.go:480: ignore notification`,
+			failureOutputKeySignature: "class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|serverId=mcp-semantic|tool=initialize|operation=mcp/tool_call|failureTargets=client.go|error=missing dependency",
+		},
+	}
+
+	if targets := failureTargetsForSignature(output); len(targets) != 0 {
+		t.Fatalf("failureTargetsForSignature = %#v, want no promoted internal diagnostic target", targets)
+	}
+
+	signature := runtimeFailureSignature(failureClassMCPRuntime, &runmodel.Step{Kind: "mcp/tool_call", Output: output}, output, errors.New("missing dependency"))
+	if strings.Contains(signature, "failureTargets=client.go") {
+		t.Fatalf("signature = %q, must not promote internal diagnostic target", signature)
+	}
+	if !strings.Contains(signature, "serverId=mcp-semantic") || !strings.Contains(signature, "tool=initialize") {
+		t.Fatalf("signature = %q, want external capability identity scope", signature)
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, nil, failureClassMCPRuntime, signature)
+	if refs := stringSliceFromValue(signals["targetRefs"]); stringSliceContains(refs, "client.go") {
+		t.Fatalf("structuredFailureSignals = %#v, must not promote internal diagnostic target", signals)
+	}
+	step := &runmodel.Step{
+		Kind:   "mcp/tool_call",
+		Output: output,
+		Input: map[string]any{
+			stepInputKeyRepairOfFailureSig: stringFromMap(output, failureOutputKeySignature),
+		},
+	}
+	if refs := failureTargetRepairRefs(step); stringSliceContains(refs, "client.go") {
+		t.Fatalf("failureTargetRepairRefs = %#v, must not promote internal diagnostic target", refs)
+	}
+	messages := stringSliceFromValue(signals["messages"])
+	foundDiagnostic := false
+	for _, message := range messages {
+		if strings.Contains(message, "client.go") {
+			foundDiagnostic = true
+			break
+		}
+	}
+	if !foundDiagnostic {
+		t.Fatalf("messages = %#v, want diagnostic text retained as message", messages)
+	}
+}
+
 func TestStructuredFailureSignalsIgnoresNestedFailedStepOutputInternalLogTargets(t *testing.T) {
 	output := map[string]any{
 		"stage":               "llm_context_integrity_failed",
