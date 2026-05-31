@@ -2156,7 +2156,7 @@ func processEvidenceValidity(step *runModel.Step) string {
 		return "stale_or_rejected"
 	}
 	switch class {
-	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassRateLimited, failureClassProviderStreamIncomplete:
+	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassRateLimited, failureClassProviderStreamIncomplete, failureClassProviderProtocolInvalid:
 		return "diagnostic_only"
 	case failureClassLLMDecisionInvalid:
 		return "stale_or_rejected"

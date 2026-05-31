@@ -15,6 +15,7 @@ import (
 const (
 	failureClassProviderUnavailable      = "provider_unavailable"
 	failureClassProviderSchemaDrift      = "provider_schema_drift"
+	failureClassProviderProtocolInvalid  = "provider_protocol_invalid"
 	failureClassProviderTimeout          = "provider_timeout"
 	failureClassContextTooLarge          = "context_too_large"
 	failureClassRateLimited              = "rate_limited"
@@ -65,6 +66,8 @@ func classifyRuntimeFailure(step *runModel.Step, output map[string]any, summary 
 		class = failureClassRuntime
 	} else if isLLMProviderAuthOrConfigFailure(lowerStage, execErr, output) {
 		class = failureClassAuthOrConfigError
+	} else if isLLMProviderProtocolInvalidFailure(lowerStage) {
+		class = failureClassProviderProtocolInvalid
 	} else if isLLMDecisionContractFailureStage(lowerStage) {
 		class = failureClassLLMDecisionInvalid
 	} else if isLLMProviderSchemaFailure(lowerStage) {
@@ -224,12 +227,15 @@ func isRuntimeContractFailure(lowerStage string, execErr error, output map[strin
 func isLLMProviderSchemaFailure(lowerStage string) bool {
 	switch lowerStage {
 	case "llm_provider_schema_drift",
-		"llm_provider_response_schema_invalid",
-		"llm_provider_protocol_invalid":
+		"llm_provider_response_schema_invalid":
 		return true
 	default:
 		return false
 	}
+}
+
+func isLLMProviderProtocolInvalidFailure(lowerStage string) bool {
+	return lowerStage == "llm_provider_protocol_invalid"
 }
 
 func isLLMDecisionContractFailureStage(stage string) bool {

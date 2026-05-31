@@ -1593,11 +1593,12 @@ Approval auto-governance 只能依赖中立风险信号、当前 Goal / DoD 边�
 
 Provider retry / config blocker 的边界必须基于中立失败形态：
 
-- `timeout`、`rate limit`、`context too large`、`provider stream incomplete`、已完成 stream 但内容为空的 `provider stream error`、未带明确配置错误标记的 `provider unavailable / request failed / provider error` 等瞬时 provider 执行失败，应先消耗 provider retry 预算。
+- `timeout`、`rate limit`、`context too large`、`provider stream incomplete`、流式协议中断 / upstream internal stream error / provider protocol invalid 且未出现明确配置错误标记、已完成 stream 但内容为空的 `provider stream error`、未带明确配置错误标记的 `provider unavailable / request failed / provider error` 等瞬时 provider 执行失败，应先消耗 provider retry 预算。
 - `auth or config`、`schema drift`、明确不支持的 provider operation、明确 client/config unavailable、4xx、缺失 provider / model / credential 等配置型失败，可以直接进入 provider/config blocker。
 - provider/config blocker 的 `attempts` 必须记录真实已失败 provider retry 次数，`maxAttempts` 才记录预算上限；不得在未实际重试时把 `attempts` 写成预算上限。
 - provider retry 不得消费或重置业务 repair/replan 预算；它只表示 runtime LLM provider 调用基础设施暂时未产生可用 LLM 输出。
 - LLM 已经返回可解析 decision，但 decision 因 runtime 输出合同或准入合同被拒绝时，不属于 provider transient failure。包括 `executionGraph patch/apply input invalid`、`patch describes a non-substantive state-change placeholder`、`scoped state-changing runtime repair requires bounded verification`、`strategyReassessment.required`、invalid decision/schema contract 等等价中立合同错误，必须继续进入 runtime repair / repair-of-repair / blocker 治理，并继承 `repairActionPackage`、target snapshot、current failure 与 stage contract。
+- `llm_context_integrity_failed`、context gate fail-fast/read-required、provider retry wrapper、schema repair wrapper 和其他 runtime envelope failure 只能作为诊断 lineage；不得被提升为 replan successor / provider retry / repair follow-up 的 primary actionable failure、`currentGap` 或 `repairActionPackage.currentFailure`。若 wrapper failure 已被后续代码修复或 decision 恢复，successor 必须继续从 coverage ledger、原始 actionable failure、current run evidence 或 stage contract 重建当前缺口，不能把已失效的 wrapper 错误再次提交给 LLM。
 
 ### LLM 运行期动态绑定
 

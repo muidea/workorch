@@ -10891,6 +10891,96 @@ func TestRuntimeOrchestrator_ProviderRetryAttemptCountIgnoresSuccessfulProviderR
 	}
 }
 
+func TestRuntimeOrchestrator_ProviderProtocolInvalidUsesProviderRetry(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-protocol-retry")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   stepRepo,
+		policy: NormalizeRuntimePolicy(RuntimePolicy{
+			MaxProviderRetryAttempts: 3,
+		}),
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-provider-protocol-retry",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	failed := &runmodel.Step{
+		ID:    common.StepID(runID + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_provider_protocol_invalid",
+			"error":                   "invalid argument: llm provider protocol invalid: stream error: stream ID 191; INTERNAL_ERROR; received from peer",
+			failureOutputKeyClass:     failureClassProviderProtocolInvalid,
+			failureOutputKeySignature: "class=provider_protocol_invalid|kind=llm/workspace_execution|stage=llm_provider_protocol_invalid",
+		},
+	}
+	if err := stepRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+
+	action := orch.recoveryActionForFailedStep(ctx, run, failed)
+	if action != runtimeRecoveryActionProviderRetry {
+		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionProviderRetry)
+	}
+	input := orch.providerRetryStepInput(failed, 1, errors.New("stream error: stream ID 191; INTERNAL_ERROR; received from peer"))
+	if input[stepInputKeyProviderRetryFollowUp] != true || input[stepInputKeyProviderRetryAttempt] != 1 {
+		t.Fatalf("provider retry input = %+v, want retry attempt 1", input)
+	}
+	scope := mapFromValue(input[stepInputKeyRecoveryBudgetScope])
+	if scope["failureClass"] != failureClassProviderProtocolInvalid {
+		t.Fatalf("recovery budget scope = %+v, want provider protocol class", scope)
+	}
+}
+
+func TestReplanContinuationIgnoresContextGateWrapperAsPrimaryFailure(t *testing.T) {
+	continuation := map[string]any{
+		stepInputKeyCurrentProgressDigest: map[string]any{
+			"currentGap": "invalid argument: llm context gate fail_fast: repair_action_package_required_output_missing",
+			"lastObservedFailure": map[string]any{
+				"stepId":                  "run-context-wrapper/repair-001",
+				"kind":                    llmWorkspaceExecutionStepKind,
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_context_integrity_failed|error=invalid argument: llm context gate fail_fast: repair_action_package_required_output_missing",
+				"failureReason":           "invalid argument: llm context gate fail_fast: repair_action_package_required_output_missing",
+				"evidenceValidity":        "actionable_failure",
+			},
+		},
+		stepInputKeyProcessEvidenceTimeline: []map[string]any{
+			{
+				"stepId":                  "run-context-wrapper/repair-001",
+				"kind":                    llmWorkspaceExecutionStepKind,
+				"state":                   string(common.StepStateFailed),
+				"stage":                   "llm_context_integrity_failed",
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_context_integrity_failed",
+				"failureReason":           "invalid argument: llm context gate fail_fast: repair_action_package_required_output_missing",
+				"evidenceValidity":        "actionable_failure",
+			},
+		},
+	}
+
+	if primary := primaryActionableFailureFromReplanContinuation(continuation); len(primary) > 0 {
+		t.Fatalf("primaryActionableFailureFromReplanContinuation = %+v, want context gate wrapper ignored", primary)
+	}
+	digest := currentProgressDigestFromPrimaryActionableFailure(map[string]any{
+		"failedStepId":            "run-context-wrapper/repair-001",
+		"failedStepKind":          llmWorkspaceExecutionStepKind,
+		failureOutputKeyClass:     failureClassRuntime,
+		failureOutputKeySignature: "class=runtime_failed|kind=llm/workspace_execution|stage=llm_context_integrity_failed",
+		"reason":                  "invalid argument: llm context gate fail_fast: repair_action_package_required_output_missing",
+		"evidenceValidity":        "actionable_failure",
+	})
+	if len(digest) > 0 {
+		t.Fatalf("currentProgressDigestFromPrimaryActionableFailure = %+v, want context gate wrapper ignored", digest)
+	}
+}
+
 func TestRuntimeOrchestrator_ProviderRetryInputDoesNotCarryRuntimeRepairMarkers(t *testing.T) {
 	rootStepID := common.StepID("run-provider-retry-input/root")
 	input := providerRetryStepInput(&runmodel.Step{

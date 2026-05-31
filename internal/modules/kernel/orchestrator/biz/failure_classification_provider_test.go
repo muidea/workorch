@@ -136,6 +136,25 @@ func TestClassifyRuntimeFailureProviderSchemaDriftRemainsProviderFailure(t *test
 	}
 }
 
+func TestClassifyRuntimeFailureProviderProtocolInvalidIsRetryableClass(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_provider_protocol_invalid",
+			"error": "invalid argument: llm provider protocol invalid: stream error: stream ID 191; INTERNAL_ERROR; received from peer",
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("invalid argument: llm provider protocol invalid: stream error: stream ID 191; INTERNAL_ERROR; received from peer"))
+	if classification.Class != failureClassProviderProtocolInvalid {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassProviderProtocolInvalid)
+	}
+	if !isLLMProviderFailureStage("llm_provider_protocol_invalid") || !isProviderFailureClass(classification.Class) {
+		t.Fatalf("provider protocol invalid not treated as provider failure: classification=%+v", classification)
+	}
+}
+
 func TestClassifyRuntimeFailureDoDCoverageMissingHasPriorityOverAuthKeywords(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-x/step-1"),

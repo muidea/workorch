@@ -951,7 +951,7 @@ func isRetryableLLMProviderRuntimeFailure(run *runModel.Run, step *runModel.Step
 		return true
 	}
 	switch stringFromMap(step.Output, failureOutputKeyClass) {
-	case failureClassProviderTimeout, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete:
+	case failureClassProviderTimeout, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete, failureClassProviderProtocolInvalid:
 		return true
 	default:
 		return false
@@ -1557,6 +1557,7 @@ func isProviderFailureClass(class string) bool {
 	switch class {
 	case failureClassProviderUnavailable,
 		failureClassProviderSchemaDrift,
+		failureClassProviderProtocolInvalid,
 		failureClassProviderTimeout,
 		failureClassContextTooLarge,
 		failureClassRateLimited,
@@ -4053,7 +4054,10 @@ func runtimeRepairWrapperFailureOutput(output map[string]any) bool {
 	}, "\n"))
 	return class == failureClassLLMDecisionInvalid ||
 		stage == "llm_schema_invalid" ||
+		stage == "llm_context_integrity_failed" ||
 		strings.Contains(text, "invalid llm decision json") ||
+		strings.Contains(text, "llm context gate") ||
+		strings.Contains(text, "context integrity") ||
 		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
 		strings.Contains(text, "state-changing llm repair step returned no state-changing output") ||
 		strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply") ||
@@ -5079,7 +5083,7 @@ func repairActionBudgetState(input map[string]any, pkg map[string]any) map[strin
 	}
 	class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(pkg, failureOutputKeyClass)))
 	switch class {
-	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete:
+	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete, failureClassProviderProtocolInvalid:
 		ret["budgetKind"] = "provider_retry"
 	case failureClassLLMDecisionInvalid:
 		ret["budgetKind"] = "llm_schema_repair"
