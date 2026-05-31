@@ -131,6 +131,134 @@ func TestEnforceProviderRequestBudgetFailsWhenCoverageWorkItemFocusMissing(t *te
 	}
 }
 
+func TestProviderContextBudgetAllowsAssessmentOnlyRepairPackageWithoutRequiredOutput(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-assessment-budget",
+		RunID:       "run-assessment-budget",
+		StepID:      "run-assessment-budget/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal":                  map[string]any{"text": "goal"},
+			"dod":                   map[string]any{"items": []any{"dod"}},
+			"runtimeRepairFollowUp": true,
+			"runtimeStage":          "verification",
+			"assessmentOnly":        true,
+			"repairObjective":       "complete_dod_goal_coverage_assessment",
+			"convergenceContract": map[string]any{
+				"state":           "need_assessment",
+				"runtimeStage":    "verification",
+				"repairObjective": "complete_dod_goal_coverage_assessment",
+			},
+			"coverageWorkItemContext": map[string]any{
+				"summary": map[string]any{"total": 1, "open": 1},
+				"currentFocus": map[string]any{
+					"id":                           "cwi-001",
+					"definitionRevision":           "rev-current",
+					"sourceScope":                  "goal_leaf",
+					"sourceRequirementId":          "goal-leaf-001",
+					"targetText":                   "goal leaf",
+					"status":                       "evidence_ready",
+					"currentGap":                   "required evidence kinds present; coverage assessment required",
+					"requiredEvidenceKinds":        []string{"validation"},
+					"acceptedEvidenceRefs":         []string{"run-001/verify"},
+					"rejectedEvidenceRefs":         []string{},
+					"nextAllowedConvergenceStates": []string{"need_assessment"},
+				},
+				"currentFocusItems": []map[string]any{{
+					"id":                           "cwi-001",
+					"definitionRevision":           "rev-current",
+					"sourceScope":                  "goal_leaf",
+					"sourceRequirementId":          "goal-leaf-001",
+					"targetText":                   "goal leaf",
+					"status":                       "evidence_ready",
+					"currentGap":                   "required evidence kinds present; coverage assessment required",
+					"requiredEvidenceKinds":        []string{"validation"},
+					"acceptedEvidenceRefs":         []string{"run-001/verify"},
+					"rejectedEvidenceRefs":         []string{},
+					"nextAllowedConvergenceStates": []string{"need_assessment"},
+				}},
+			},
+			"repairActionPackage": map[string]any{
+				"currentFailure": map[string]any{
+					"failedStepId": "run-assessment-budget/graph-001/validate",
+					"reason":       "validation action was rejected by runtime policy",
+				},
+				"coverageTargetSet": []map[string]any{{
+					"sourceRequirementId": "goal-leaf-001",
+					"targetText":          "goal leaf",
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         64 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil {
+		t.Fatalf("contextBudget = nil, want metadata")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "repair_action_package_required_output_missing") {
+		t.Fatalf("integrityWarnings = %+v, want assessment-only package without requiredOutput accepted", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateReason == "repair_action_package_required_output_missing" {
+		t.Fatalf("contextGateReason = %q, want no requiredOutput gate for assessment-only package", got.ContextBudget.ContextGateReason)
+	}
+}
+
+func TestProviderContextBudgetRequiresExecutableRepairPackageRequiredOutput(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-executable-budget",
+		RunID:       "run-executable-budget",
+		StepID:      "run-executable-budget/repair-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal":                        map[string]any{"text": "goal"},
+			"dod":                         map[string]any{"items": []any{"dod"}},
+			"runtimeRepairFollowUp":       true,
+			"runtimeStage":                "repair",
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"currentFailure": map[string]any{
+					"failedStepId": "run-executable-budget/graph-001/action",
+					"reason":       "state-changing output is missing",
+				},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         64 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil || got.ContextBudget.ContextGateAction != providerContextGateFailFast {
+		t.Fatalf("contextBudget = %+v, want fail_fast", got.ContextBudget)
+	}
+	if got.ContextBudget.ContextGateReason != "repair_action_package_required_output_missing" {
+		t.Fatalf("contextGateReason = %q, want repair_action_package_required_output_missing", got.ContextBudget.ContextGateReason)
+	}
+}
+
 func TestProviderCoverageWorkItemWarningsAcceptCurrentFocusItems(t *testing.T) {
 	input := map[string]any{
 		"coverageWorkItemContext": map[string]any{

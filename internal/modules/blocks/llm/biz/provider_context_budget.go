@@ -833,7 +833,7 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 		if boolValue(required["mustDeclareCoverageTargets"]) && len(coverageTargetsFromProviderInput(input)) == 0 {
 			warnings = append(warnings, "must_declare_coverage_targets_without_target_set")
 		}
-		if (boolValue(input["runtimeRepairFollowUp"]) || boolValue(input["stateChangingOutputRequired"])) && len(required) == 0 {
+		if providerInputRequiresRepairActionPackageRequiredOutput(input, pkg) && len(required) == 0 {
 			warnings = append(warnings, "repair_action_package_required_output_missing")
 		}
 	}
@@ -847,6 +847,24 @@ func providerContextIntegrityWarnings(input map[string]any, protected protectedG
 	warnings = append(warnings, providerSemanticContextWarnings(input)...)
 	warnings = append(warnings, missingProtectedRepairSnapshotWarnings(input, repairTargets)...)
 	return uniqueStrings(warnings)
+}
+
+func providerInputRequiresRepairActionPackageRequiredOutput(input map[string]any, pkg map[string]any) bool {
+	if len(input) == 0 || len(pkg) == 0 {
+		return false
+	}
+	contract := recordFromAny(input["convergenceContract"])
+	if boolValue(input["assessmentOnly"]) ||
+		stringValue(input["repairObjective"]) == "complete_dod_goal_coverage_assessment" ||
+		stringValue(contract["state"]) == "need_assessment" {
+		return false
+	}
+	return boolValue(input["runtimeRepairFollowUp"]) ||
+		boolValue(input["stateChangingOutputRequired"]) ||
+		boolValue(input["concreteFailureEvidenceRequired"]) ||
+		boolValue(input["boundedValidationRequired"]) ||
+		boolValue(input["evidenceRepairRequired"]) ||
+		boolValue(pkg["evidenceAcquisitionRequired"])
 }
 
 func providerSemanticContextWarnings(input map[string]any) []string {
