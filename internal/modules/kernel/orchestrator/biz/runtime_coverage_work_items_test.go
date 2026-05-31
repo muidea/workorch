@@ -504,6 +504,89 @@ func TestCoverageWorkItemsRequireStateChangeForRequiredCoverageWhenRunRequiresSt
 	}
 }
 
+func TestCoverageWorkItemContextPrioritizesFailedItemsOverEvidenceReadyTopK(t *testing.T) {
+	revision := "rev-current"
+	items := []map[string]any{
+		{
+			"id":                    "cwi-001",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-001",
+			"sourcePath":            "goal.leaves[0]",
+			"targetText":            "first ready leaf",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-001",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "evidence_ready",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/001"}},
+			"acceptedEvidenceRefs":   []string{"run/graph/001"},
+		},
+		{
+			"id":                    "cwi-002",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-002",
+			"sourcePath":            "goal.leaves[1]",
+			"targetText":            "second ready leaf",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-002",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "evidence_ready",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/002"}},
+			"acceptedEvidenceRefs":   []string{"run/graph/002"},
+		},
+		{
+			"id":                    "cwi-003",
+			"definitionRevision":    revision,
+			"source":                "goal",
+			"sourceScope":           "goal_leaf",
+			"sourceRequirementId":   "goal-leaf-003",
+			"sourcePath":            "goal.leaves[2]",
+			"targetText":            "third ready leaf",
+			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-003",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "evidence_ready",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/003"}},
+			"acceptedEvidenceRefs":   []string{"run/graph/003"},
+		},
+		{
+			"id":                    "cwi-004",
+			"definitionRevision":    revision,
+			"source":                "dod",
+			"sourceScope":           "dod_item",
+			"sourceRequirementId":   "dod-item-004",
+			"sourcePath":            "dod.items[3]",
+			"targetText":            "failed validation leaf",
+			"normalizedSourceKey":   "dod:dod_item:dod-item-004",
+			"requiredEvidenceKinds": []string{"validation"},
+			"status":                "failed",
+			"currentGap":            "latest validation evidence was rejected",
+			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/004-precheck"}},
+			"acceptedEvidenceRefs":   []string{"run/graph/004-precheck"},
+			"rejectedEvidenceByKind": map[string]any{"validation": []string{"run/graph/004-verify"}},
+			"rejectedEvidenceRefs":   []string{"run/graph/004-verify"},
+		},
+	}
+
+	context := coverageWorkItemContextFromItems(revision, items, nil, nil)
+
+	focus := mapFromValue(context["currentFocus"])
+	if stringFromMap(focus, "id") != "cwi-004" {
+		t.Fatalf("currentFocus = %+v, want failed item before evidence_ready items", focus)
+	}
+	if states := stringSliceFromValue(focus["nextAllowedConvergenceStates"]); !stringSliceContains(states, convergenceStateNeedValidation) {
+		t.Fatalf("currentFocus.nextAllowedConvergenceStates = %+v, want need_validation", states)
+	}
+	targets := coverageTargetSetFromWorkItemContext(context)
+	if len(targets) == 0 || stringFromMap(targets[0], "coverageWorkItemId") != "cwi-004" {
+		t.Fatalf("coverageTargetSet = %+v, want failed focus first", targets)
+	}
+	ledger := mapSliceFromValue(context["ledgerSummary"])
+	if len(ledger) != 4 || stringFromMap(ledger[0], "id") != "cwi-001" || stringFromMap(ledger[3], "id") != "cwi-004" {
+		t.Fatalf("ledgerSummary = %+v, want original source order preserved", ledger)
+	}
+}
+
 func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-advance",

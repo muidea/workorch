@@ -236,9 +236,9 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	if contract == nil {
 		return false
 	}
-	if boolValue(input[stepInputKeyAssessmentOnly]) ||
-		boolValue(input["assessmentOnlyContractCorrection"]) ||
-		strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
+	if boolValue(input["assessmentOnlyContractCorrection"]) ||
+		(strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" &&
+			!coverageWorkItemContextHasActionableFailure(coverageWorkItemContextFromInput(input))) {
 		return false
 	}
 	if !coverageWorkItemConvergenceEligible(input) {
@@ -349,11 +349,41 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RepairActionPackage["requiredOutput"] = required
 		return true
 	}
+	if coverageWorkItemFocusHasActionableFailure(focus) {
+		contract.State = convergenceStateNeedValidation
+		contract.RuntimeStage = runtimeStageVerification
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required["mustReferenceCoverageWorkItem"] = true
+		contract.RepairActionPackage["requiredOutput"] = required
+		return true
+	}
 	contract.State = convergenceStateNeedAssessment
 	contract.RuntimeStage = runtimeStageVerification
 	contract.RuntimeStageMode = "strict_convergence"
 	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
 	return true
+}
+
+func coverageWorkItemContextHasActionableFailure(context map[string]any) bool {
+	if coverageWorkItemFocusHasActionableFailure(mapFromValue(context["currentFocus"])) {
+		return true
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		if coverageWorkItemFocusHasActionableFailure(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageWorkItemFocusHasActionableFailure(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(item, "status")) == "failed" ||
+		len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0
 }
 
 func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, focus map[string]any) bool {
@@ -1237,12 +1267,23 @@ func mechanicalConcreteValidationContractCanContinue(input map[string]any, contr
 }
 
 func convergenceAssessmentOnly(input map[string]any, failedStep *runModel.Step) bool {
-	if boolValue(input[stepInputKeyAssessmentOnly]) ||
-		boolValue(input["assessmentOnlyContractCorrection"]) ||
+	if boolValue(input[stepInputKeyAssessmentOnly]) {
+		return !coverageAssessmentOnlyFailureHasActionableGap(failedStep)
+	}
+	if boolValue(input["assessmentOnlyContractCorrection"]) ||
 		boolValue(input[stepInputKeyGraphLimitFollowUp]) {
-		return true
+		return !coverageAssessmentOnlyFailureHasActionableGap(failedStep)
 	}
 	return doDCoverageContractCorrectionRequired(failedStep) && !coverageCorrectionNeedsConcreteEvidence(failedStep)
+}
+
+func coverageAssessmentOnlyFailureHasActionableGap(failedStep *runModel.Step) bool {
+	if !assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep) {
+		return false
+	}
+	return len(missingDoDItemsFromStep(failedStep)) > 0 ||
+		len(missingGoalCoverageFromStep(failedStep)) > 0 ||
+		len(missingDeliverableCoverageFromStep(failedStep)) > 0
 }
 
 func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step) bool {

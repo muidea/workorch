@@ -1706,7 +1706,7 @@ func assessmentOnlyCoverageCorrectionFailedWithActionableGaps(step *runModel.Ste
 	if satisfied, ok := assessment["satisfied"].(bool); ok && satisfied {
 		return false
 	}
-	return len(missingDoDItemsFromFailureOutput(step.Output)) > 0 ||
+	return len(missingDoDItemsFromStep(step)) > 0 ||
 		len(missingGoalCoverageFromFailureOutput(step.Output)) > 0 ||
 		len(missingDeliverableCoverageFromFailureOutput(step.Output)) > 0
 }

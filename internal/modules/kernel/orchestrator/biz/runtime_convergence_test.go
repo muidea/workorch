@@ -1267,6 +1267,82 @@ func TestApplyConvergenceContractNeedAssessmentStripsExecutableContract(t *testi
 	}
 }
 
+func TestBuildConvergenceContractAssessmentOnlyFailedGapSwitchesToValidation(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		stepInputKeyAssessmentOnly:   true,
+		"repairObjective":            "complete_dod_goal_coverage_assessment",
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-001",
+				"sourceScope":           "dod_item",
+				"sourceRequirementId":   "dod-item-001",
+				"targetText":            "remaining validation claim",
+				"status":                "failed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"rejectedEvidenceRefs":  []string{"run/graph/001-verify"},
+			},
+			"currentFocusItems": []map[string]any{{
+				"id":                    "cwi-001",
+				"sourceScope":           "dod_item",
+				"sourceRequirementId":   "dod-item-001",
+				"targetText":            "remaining validation claim",
+				"status":                "failed",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{},
+				"rejectedEvidenceRefs":  []string{"run/graph/001-verify"},
+			}},
+			"summary": map[string]any{"total": 1, "failed": 1},
+		},
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{"failureClass": failureClassDoDCoverageMissing},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{{
+					"item":         "remaining validation claim",
+					"state":        "failed",
+					"evidenceRefs": []string{"run/graph/001-verify"},
+				}},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedValidation, contract)
+	}
+	if contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repairObjective = %q, want %q", contract.RepairObjective, repairObjectiveConcreteValidationEvidence)
+	}
+	targets := mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])
+	if len(targets) != 1 || stringFromMap(targets[0], "targetText") != "remaining validation claim" {
+		t.Fatalf("coverageTargetSet = %+v, want failed work item target", targets)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyAssessmentOnly] != nil ||
+		applied[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		applied["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("applied = %+v, want concrete validation repair without assessment-only", applied)
+	}
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract", required)
+	}
+}
+
 func TestBuildConvergenceContractPromotesConcreteValidationTargetEvidenceToStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,

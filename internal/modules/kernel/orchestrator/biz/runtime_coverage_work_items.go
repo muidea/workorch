@@ -701,13 +701,18 @@ func coverageWorkItemFocusPriority(item map[string]any) int {
 		return 100
 	}
 	missing := stringSet(coverageMissingEvidenceKinds(item))
+	status := strings.TrimSpace(stringFromMap(item, "status"))
 	switch {
-	case missing["state_change"]:
+	case status == "failed" && missing["state_change"]:
 		return 0
-	case missing["validation"] || missing["artifact"]:
+	case missing["state_change"]:
 		return 1
-	default:
+	case status == "failed" || len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0:
 		return 2
+	case missing["validation"] || missing["artifact"]:
+		return 3
+	default:
+		return 4
 	}
 }
 
@@ -757,6 +762,16 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 
 func coverageWorkItemNextStates(item map[string]any) []string {
 	missing := stringSet(coverageMissingEvidenceKinds(item))
+	if strings.TrimSpace(stringFromMap(item, "status")) == "failed" {
+		switch {
+		case missing["state_change"]:
+			return []string{convergenceStateNeedEvidence, convergenceStateNeedStateChange}
+		case missing["validation"] || missing["artifact"] || len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0:
+			return []string{convergenceStateNeedValidation}
+		default:
+			return []string{convergenceStateNeedValidation, convergenceStateNeedAssessment}
+		}
+	}
 	if missing["external_dependency"] || missing["decision"] || missing["approval"] {
 		return []string{convergenceStateNeedGovernance}
 	}

@@ -1220,6 +1220,7 @@ LLM-facing 投影规则：
 
 - `coverageWorkItemContext.summary` 必须始终进入 P2 Coverage Scope，提供总体数量和状态，避免 LLM 误以为只剩最近失败项。
 - `currentFocus` 必须包含本轮可行动的 top-k unresolved work items。严格收敛阶段至少包含 1 个 unresolved item；若没有 unresolved item，应说明进入 acceptance / result 的原因。
+- `currentFocus` top-k 选择必须优先保留当前可行动失败项：`status=failed`、存在 `rejectedEvidenceRefs`、或 `currentGap` 指向最新失败证据的 work item，不得被较早的 `evidence_ready` / assessment pending 项挤出。若失败项已具备 required evidence 但 assessment 未通过，其 `nextAllowedConvergenceStates` 至少必须包含 `need_validation` 或 `need_assessment`，并优先生成 `coverageTargetSet`，避免重复评估已准备项而遗漏真实失败项。
 - `currentFocus[].targetText`、`requiredEvidenceKinds`、`missingEvidenceKinds`、`currentGap`、`acceptedEvidenceRefs`、`rejectedEvidenceRefs` 是指导 LLM 正向收口的最小必要字段，不能被 summary 替代。
 - `ledgerSummary` 只保留非 focus work item 的 id、sourceScope、status、关键 evidence refs 和 omitted reason；不得把全量历史 reason、raw output 或长 evidence body 放入 LLM request。
 - full ledger 可以落盘并通过 raw payload ref 引用；LLM request 默认只带 summary + currentFocus + 必要 ledgerSummary，避免单 JSON 膨胀。
@@ -1240,6 +1241,7 @@ Current action 合同必须由 work item 派生，而不是由自由文本失败
 - 若 `currentFocus` 缺少 `state_change` 且已有 concrete target evidence，current action 应是 `need_state_change`，要求 state-changing artifact 或真实 blocker。
 - 若 `currentFocus` 已有 state-changing evidence 但缺少 validation，current action 应是 `need_validation`，要求 bounded validation evidence。
 - 若 `currentFocus` evidence kinds 齐备但 assessment 不完整，current action 应是 `need_assessment`，要求结构化 DoD / Goal / deliverable coverage assessment。
+- 若上一轮 `assessmentOnly=true` 返回 failed `dodAssessment`，且 failed assessment 能映射到 `currentFocus` / `coverageTargetSet` / missing DoD / missing Goal / missing deliverable 中的可行动 coverage gap，下一轮不得继续把同一缺口建模为纯 assessment-only correction。Runtime 必须转入 `need_validation`、`need_evidence` 或 `need_state_change` 中最小可行动状态；只有 assessment schema/shape 缺失、可复用候选证据需要重新归档，或真实治理 blocker 时，才允许继续 assessment-only。
 - 若 `currentFocus` 依赖用户信息、外部权限、审批或 runtime 依赖，current action 才能是 `need_governance` / `blocked`。
 - 若 `currentFocus.evidenceRole=supplemental_evidence` 且缺少 concrete implementation target evidence，current action 不得是 primary `need_state_change`。Runtime 应先进入 `need_evidence` / `need_validation`，或等待已有 primary target evidence；补充型 artifact 只能补充 evidence ledger，不能替代真实 primary state change。
 - 若 `currentFocus.evidenceRole=primary_state_change`，runtime 可以在 profile / Soul / capability 允许的范围内要求 state-changing artifact，但仍必须满足 target relevance、coverageTargets、非占位、bounded verification 和后续 acceptance evidence 约束。
