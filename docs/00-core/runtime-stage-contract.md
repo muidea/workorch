@@ -1098,6 +1098,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
   "sourceDoDId": "dod-xxx",
   "definitionRevision": "rev-xxx",
   "sourceRequirementId": "goal-req-001",
+  "sourceRequirementAliases": ["goal-leaf-001"],
   "sourcePath": "goal.leaves[0]",
   "targetText": "leaf requirement text",
   "evidenceRole": "primary_state_change",
@@ -1116,6 +1117,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
 
 - `source` / `sourceScope` 必须使用中立枚举，例如 `goal` / `goal_leaf`、`dod` / `dod_item`、`acceptance_dimension`、`deliverable`、`result_gap`。它们只表达 coverage 来源，不表达业务类型。
 - `sourceGoalId`、`sourceDoDId`、`definitionRevision`、`sourceRequirementId`、`sourcePath`、`normalizedSourceKey` 必须指向当前有效定义或其可追踪叶子项；不得基于历史 superseded Goal / DoD 继续生成新的 active work item。
+- `sourceRequirementAliases` 只能保存同一 source 的稳定结构别名，例如历史 positional leaf id、profile 声明 id 或等价的非业务标识。alias 只能用于 profile evidence requirement、历史 lineage、coverage target 和 assessment item 的机械匹配，不得成为新的 active source，也不得覆盖 canonical `sourceRequirementId`。
 - `targetText` 只保存叶子要求文本或 profile 已声明的 coverage target 文本，不解释业务含义。
 - `evidenceRole` 只能来自 profile / template / governance 的结构化声明，取值限定为 `primary_state_change`、`supplemental_evidence` 或空。空值表示没有额外角色声明，不得被 core 按名称推断。`supplemental_evidence` work item 可以要求 evidence、validation、snapshot 或 ledger 写入，但不得在缺少 concrete implementation target evidence 时启动 primary state-changing patch。
 - `requiredEvidenceKinds` 只能使用中立 evidence kind，例如 `state_change`、`validation`、`artifact`、`decision`、`approval`、`external_dependency`。Core 不得把这些 kind 解释为代码、测试、文档、数据集、天气查询或任何具体业务对象。
@@ -1130,6 +1132,8 @@ Core 可以基于 profile contract 为 work item 计算 `requiredEvidenceKinds`�
 
 - Baseline 构造：每次 activation、Goal/DoD 变更、replan successor、rejected result continuation 或 acceptance repair 前，runtime 必须先构造当前 effective coverage baseline。baseline 至少包含当前有效 Goal 叶子需求、DoD 条目、profile required acceptance dimensions、profile required deliverable expectations，以及当前 rejected / failed assessment 中仍未关闭的 coverage source。
 - 叶子化：Goal / DoD 文本的拆分只能做结构性叶子化，例如 Markdown list item、编号条目、明确子项、profile 已声明 coverage target；不得按业务关键词继续扩展出额外隐含目标。父级标题和分组项保留为 `parentContext`，不得重复生成 active item。
+- 统一 requirement catalog：`coverageWorkItems` baseline、`normalizedRunGoalCoverageItems`、`dodAssessment.goalCoverage` completion gate 与 failed coverage repair 必须使用同一套 effective Goal / DoD 叶子抽取、文本归一化和稳定 requirement ID 规则。不得出现 ledger 认为某 source 已覆盖、而 acceptance gate 使用另一套抽取口径重新判定缺失的分裂状态。
+- Markdown 表格属于通用结构语法：表头行与分隔线只能作为结构上下文，不得生成 active work item；数据行在语法上可判定为叶子项时必须按顺序进入 Goal coverage catalog。该规则只基于 Markdown 结构，不得识别表格里的领域词、工具名、语言或业务含义。
 - 一源一项：同一个 `normalizedSourceKey` 在同一 `definitionRevision` 内最多只能有一个 active work item；若一个 source 需要多种 evidence，用 `requiredEvidenceKinds` 表达，不得拆成多个语义重复的 work item。
 - 多源不合并：不同 Goal leaf / DoD item / deliverable expectation 即使文本相似，也不得默认合并；只有它们具有相同 canonical source key 或 profile 明确声明等价映射时，才允许共享 evidence refs，但仍要保留各自的 work item 状态。
 - 不从 reason 扩张：failed assessment 的 `reason`、`nextActions`、`knownLimitations`、`residualRisks` 可以帮助描述 `currentGap`，但不能单独生成新的 work item；只有其中存在可机械回链到 baseline source 的 `goalRequirementId`、DoD item、deliverable id 或 coverage target 时，才能更新对应 work item。
@@ -1443,7 +1447,7 @@ Graph expansion limit assessment 是 assessment-only coverage correction 的一�
 
 当 repair exhausted ticket 的来源是 DoD / Goal / deliverable coverage 收口，并且 ticket context 或 failed step input 中的 `coverageTargetSet` / `missingDoDItems` 已包含可追踪的 completed action evidence candidate，runtime 不得仅因缺少 file-level `failureTargetScope` 就停在人工 decision。此类 evidence candidate 只能是中立可执行或可验收动作，例如 `patch/apply`、`shell/command`、`mcp/tool_call`、`git/write` 且 `state=completed`；`file/read`、`file/list`、failed evidence、memory-only evidence 或纯摘要文本不能触发自动恢复。满足条件时，runtime 应关闭 stale repair-exhausted blocker，并进入有界 assessment / validation / replan，基于已有 coverage evidence 判断是否能收口或需要继续取证。该规则只根据 evidence kind / state / traceability 工作，不解释具体业务语义。
 
-Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
+Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、表格表头、表格分隔线、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求；Markdown 表格数据行若表达独立要求，应按原始顺序成为叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
 为避免格式差异造成误判，runtime 可以对 Goal / DoD 覆盖文本做中立归一化后再比较，例如去除 Markdown 装饰、标点、空白，并对长文本做保守近似匹配；但不得把完全不同的需求机械合并为同一项，也不得用这种近似匹配替代真实 evidenceRefs。DoD item coverage 可使用包含关系处理“完整原文 vs 归一化条目”的格式差异；Goal leaf coverage 不得使用包含关系接受宽泛合并条目。
 

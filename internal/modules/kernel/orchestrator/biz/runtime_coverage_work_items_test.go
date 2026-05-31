@@ -74,6 +74,49 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsUseSameGoalLeavesAsDoDAssessmentGate(t *testing.T) {
+	goalText := strings.Join([]string{
+		"### Capability Table",
+		"| Capability | Parameters | Purpose |",
+		"| --- | --- | --- |",
+		"| alpha | path | resolve target |",
+		"| beta | content | update target |",
+	}, "\n")
+	run := &runmodel.Run{
+		ID: "run-cwi-goal-table",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-cwi-table",
+				"text": goalText,
+			},
+		},
+	}
+
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want table data leaves")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	required := normalizedRunGoalCoverageItems(run)
+	if len(items) != len(required) {
+		t.Fatalf("coverage work items = %+v, required goal items = %+v, want same count", items, required)
+	}
+	if len(items) != 2 {
+		t.Fatalf("coverage work item count = %d, want 2 data rows", len(items))
+	}
+	for idx, requiredItem := range required {
+		item := items[idx]
+		if got := stringFromMap(item, "sourceRequirementId"); got != requiredItem.id {
+			t.Fatalf("sourceRequirementId[%d] = %q, want %q", idx, got, requiredItem.id)
+		}
+		if got := stringFromMap(item, "targetText"); got != requiredItem.raw {
+			t.Fatalf("targetText[%d] = %q, want %q", idx, got, requiredItem.raw)
+		}
+		if strings.Contains(stringFromMap(item, "targetText"), "Capability | Parameters") {
+			t.Fatalf("table header was treated as a leaf requirement: %+v", item)
+		}
+	}
+}
+
 func TestBuildConvergenceContractUsesProfileStateChangingEvidenceRequirement(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-convergence",
@@ -99,6 +142,9 @@ func TestBuildConvergenceContractUsesProfileStateChangingEvidenceRequirement(t *
 		stepInputKeyRuntimeStage:          runtimeStageRepair,
 		stepInputKeyRuntimeStageMode:      "strict_convergence",
 		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairActionPackage": map[string]any{
+			"repairTargetSet": []string{"deliverable.txt"},
+		},
 	}
 
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
@@ -508,59 +554,59 @@ func TestCoverageWorkItemContextPrioritizesFailedItemsOverEvidenceReadyTopK(t *t
 	revision := "rev-current"
 	items := []map[string]any{
 		{
-			"id":                    "cwi-001",
-			"definitionRevision":    revision,
-			"source":                "goal",
-			"sourceScope":           "goal_leaf",
-			"sourceRequirementId":   "goal-leaf-001",
-			"sourcePath":            "goal.leaves[0]",
-			"targetText":            "first ready leaf",
-			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-001",
-			"requiredEvidenceKinds": []string{"validation"},
-			"status":                "evidence_ready",
+			"id":                     "cwi-001",
+			"definitionRevision":     revision,
+			"source":                 "goal",
+			"sourceScope":            "goal_leaf",
+			"sourceRequirementId":    "goal-leaf-001",
+			"sourcePath":             "goal.leaves[0]",
+			"targetText":             "first ready leaf",
+			"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-001",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "evidence_ready",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/001"}},
 			"acceptedEvidenceRefs":   []string{"run/graph/001"},
 		},
 		{
-			"id":                    "cwi-002",
-			"definitionRevision":    revision,
-			"source":                "goal",
-			"sourceScope":           "goal_leaf",
-			"sourceRequirementId":   "goal-leaf-002",
-			"sourcePath":            "goal.leaves[1]",
-			"targetText":            "second ready leaf",
-			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-002",
-			"requiredEvidenceKinds": []string{"validation"},
-			"status":                "evidence_ready",
+			"id":                     "cwi-002",
+			"definitionRevision":     revision,
+			"source":                 "goal",
+			"sourceScope":            "goal_leaf",
+			"sourceRequirementId":    "goal-leaf-002",
+			"sourcePath":             "goal.leaves[1]",
+			"targetText":             "second ready leaf",
+			"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-002",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "evidence_ready",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/002"}},
 			"acceptedEvidenceRefs":   []string{"run/graph/002"},
 		},
 		{
-			"id":                    "cwi-003",
-			"definitionRevision":    revision,
-			"source":                "goal",
-			"sourceScope":           "goal_leaf",
-			"sourceRequirementId":   "goal-leaf-003",
-			"sourcePath":            "goal.leaves[2]",
-			"targetText":            "third ready leaf",
-			"normalizedSourceKey":   "goal:goal_leaf:goal-leaf-003",
-			"requiredEvidenceKinds": []string{"validation"},
-			"status":                "evidence_ready",
+			"id":                     "cwi-003",
+			"definitionRevision":     revision,
+			"source":                 "goal",
+			"sourceScope":            "goal_leaf",
+			"sourceRequirementId":    "goal-leaf-003",
+			"sourcePath":             "goal.leaves[2]",
+			"targetText":             "third ready leaf",
+			"normalizedSourceKey":    "goal:goal_leaf:goal-leaf-003",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "evidence_ready",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/003"}},
 			"acceptedEvidenceRefs":   []string{"run/graph/003"},
 		},
 		{
-			"id":                    "cwi-004",
-			"definitionRevision":    revision,
-			"source":                "dod",
-			"sourceScope":           "dod_item",
-			"sourceRequirementId":   "dod-item-004",
-			"sourcePath":            "dod.items[3]",
-			"targetText":            "failed validation leaf",
-			"normalizedSourceKey":   "dod:dod_item:dod-item-004",
-			"requiredEvidenceKinds": []string{"validation"},
-			"status":                "failed",
-			"currentGap":            "latest validation evidence was rejected",
+			"id":                     "cwi-004",
+			"definitionRevision":     revision,
+			"source":                 "dod",
+			"sourceScope":            "dod_item",
+			"sourceRequirementId":    "dod-item-004",
+			"sourcePath":             "dod.items[3]",
+			"targetText":             "failed validation leaf",
+			"normalizedSourceKey":    "dod:dod_item:dod-item-004",
+			"requiredEvidenceKinds":  []string{"validation"},
+			"status":                 "failed",
+			"currentGap":             "latest validation evidence was rejected",
 			"acceptedEvidenceByKind": map[string]any{"validation": []string{"run/graph/004-precheck"}},
 			"acceptedEvidenceRefs":   []string{"run/graph/004-precheck"},
 			"rejectedEvidenceByKind": map[string]any{"validation": []string{"run/graph/004-verify"}},

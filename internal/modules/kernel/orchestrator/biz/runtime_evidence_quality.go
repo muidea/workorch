@@ -471,10 +471,14 @@ func evidenceKindRequirementItemAliases(item map[string]any) []string {
 		"item",
 		"raw",
 		"requirement",
+		"sourceRequirementId",
 		"targetText",
 		"coverageTargetToken",
 	} {
 		add(stringFromMap(item, key))
+	}
+	for _, value := range stringSliceFromValue(item["sourceRequirementAliases"]) {
+		add(value)
 	}
 	return ret
 }

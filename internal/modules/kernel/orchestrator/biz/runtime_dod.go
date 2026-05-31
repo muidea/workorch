@@ -1069,15 +1069,15 @@ func normalizedRunGoalCoverageItems(run *runModel.Run) []normalizedDoDItem {
 	ret := make([]normalizedDoDItem, 0)
 	seen := map[string]bool{}
 	for _, text := range goalTexts {
-		for _, raw := range goalCoverageRawItems(text) {
-			normalized := normalizeDoDCoverageText(raw)
+		for _, leaf := range goalCoverageLeafItems(text) {
+			normalized := normalizeDoDCoverageText(leaf.Text)
 			if normalized == "" || seen[normalized] || goalItemCoveredByDoD(normalized, doDCoverage) {
 				continue
 			}
 			seen[normalized] = true
 			ret = append(ret, normalizedDoDItem{
 				id:                   goalCoverageRequirementID(len(ret)+1, normalized),
-				raw:                  raw,
+				raw:                  leaf.Text,
 				normalized:           normalized,
 				kind:                 doDItemKindLeaf,
 				requiredEvidenceHint: neutralCoverageEvidenceHint("Goal requirement"),
@@ -1125,20 +1125,10 @@ func runGoalTexts(run *runModel.Run) []string {
 }
 
 func goalCoverageRawItems(text string) []string {
-	lines := strings.Split(text, "\n")
-	ret := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = trimDoDItemText(strings.TrimSpace(line))
-		if line == "" || isDoDHeading(line) {
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		if classifyDoDItemKind(line) != doDItemKindLeaf {
-			continue
-		}
-		ret = append(ret, line)
+	leaves := goalCoverageLeafItems(text)
+	ret := make([]string, 0, len(leaves))
+	for _, leaf := range leaves {
+		ret = append(ret, leaf.Text)
 	}
 	if len(ret) == 0 {
 		text = strings.TrimSpace(text)

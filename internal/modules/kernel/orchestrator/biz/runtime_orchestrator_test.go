@@ -18411,6 +18411,42 @@ func TestNormalizedRunGoalCoverageItemsIncludeStableRequirementIDs(t *testing.T)
 	}
 }
 
+func TestNormalizedRunGoalCoverageItemsIgnoreMarkdownTableHeader(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-goal-coverage-table",
+		WorkspaceID: "ws-goal-coverage-table",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": strings.Join([]string{
+					"| Capability | Parameters | Purpose |",
+					"| --- | --- | --- |",
+					"| alpha | path | resolve target |",
+					"| beta | content | update target |",
+				}, "\n"),
+			},
+		},
+	}
+
+	items := normalizedRunGoalCoverageItems(run)
+	if len(items) != 2 {
+		t.Fatalf("goal coverage items = %+v, want table data rows only", items)
+	}
+	if got := items[0].raw; got != "| alpha | path | resolve target |" {
+		t.Fatalf("first goal coverage raw = %q, want alpha data row", got)
+	}
+	if got := items[1].raw; got != "| beta | content | update target |" {
+		t.Fatalf("second goal coverage raw = %q, want beta data row", got)
+	}
+	for _, item := range items {
+		if strings.Contains(item.raw, "Capability | Parameters") {
+			t.Fatalf("table header was treated as goal coverage item: %+v", item)
+		}
+		if !strings.HasPrefix(item.id, "goal-req-") {
+			t.Fatalf("goal item id = %q, want stable goal requirement id", item.id)
+		}
+	}
+}
+
 func TestValidatedCompletionDoDAssessmentRejectsImplicitGoalCoverageWithoutGoalCoverageMap(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-implicit",

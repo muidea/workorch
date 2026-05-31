@@ -28,6 +28,7 @@ type coverageWorkItemSource struct {
 	SourceGoalID        string
 	SourceDoDID         string
 	SourceRequirementID string
+	SourceAliases       []string
 	SourcePath          string
 	TargetText          string
 	EvidenceRole        string
@@ -295,18 +296,33 @@ func buildCoverageWorkItemsForRun(run *runModel.Run) ([]map[string]any, map[stri
 	}
 	items := make([]map[string]any, 0, len(sources))
 	seen := map[string]bool{}
+	matchedExistingKeys := map[string]bool{}
 	for _, source := range sources {
 		key := coverageWorkItemSourceKey(source)
 		if key == "" || seen[key] {
 			continue
 		}
 		seen[key] = true
-		item := coverageWorkItemFromSource(len(items)+1, revision, key, source, existingByKey[key], run)
+		existingKey := key
+		existing := existingByKey[key]
+		if len(existing) == 0 {
+			for _, aliasKey := range coverageWorkItemSourceAliasKeys(source) {
+				if candidate := existingByKey[aliasKey]; len(candidate) > 0 {
+					existing = candidate
+					existingKey = aliasKey
+					break
+				}
+			}
+		}
+		if existingKey != "" && len(existing) > 0 {
+			matchedExistingKeys[existingKey] = true
+		}
+		item := coverageWorkItemFromSource(len(items)+1, revision, key, source, existing, run)
 		items = append(items, item)
 	}
 	supersededKeys := make([]string, 0, len(existingByKey))
 	for key := range existingByKey {
-		if !seen[key] {
+		if !seen[key] && !matchedExistingKeys[key] {
 			supersededKeys = append(supersededKeys, key)
 		}
 	}
@@ -362,15 +378,17 @@ func coverageWorkItemSources(executionContext map[string]any) ([]coverageWorkIte
 			return
 		}
 		goalID := strings.TrimSpace(stringFromMap(goal, "id"))
-		for idx, leaf := range coverageLeafTexts(stringFromMap(goal, "text")) {
+		for idx, leaf := range goalCoverageLeafItems(stringFromMap(goal, "text")) {
+			legacyID := fmt.Sprintf("%sgoal-leaf-%03d", coverageRequirementPrefix(goalID), idx+1)
 			sources = append(sources, coverageWorkItemSource{
 				Source:              "goal",
 				SourceScope:         "goal_leaf",
 				SourceGoalID:        goalID,
-				SourceRequirementID: fmt.Sprintf("%sgoal-leaf-%03d", coverageRequirementPrefix(goalID), idx+1),
+				SourceRequirementID: goalCoverageRequirementID(idx+1, normalizeDoDCoverageText(leaf.Text)),
+				SourceAliases:       compactUniqueStrings([]string{legacyID}),
 				SourcePath:          fmt.Sprintf("%sgoal.leaves[%d]", pathPrefix, idx),
-				TargetText:          leaf["text"],
-				ParentContext:       leaf["parent"],
+				TargetText:          leaf.Text,
+				ParentContext:       leaf.Parent,
 			})
 		}
 	}
@@ -556,6 +574,9 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 	if source.SourceDoDID != "" {
 		item["sourceDoDId"] = source.SourceDoDID
 	}
+	if len(source.SourceAliases) > 0 {
+		item["sourceRequirementAliases"] = source.SourceAliases
+	}
 	if source.ParentContext != "" {
 		item["parentContext"] = source.ParentContext
 	}
@@ -570,11 +591,12 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWorkItemSource) []string {
 	kinds := []string{"validation"}
 	target := map[string]any{
-		"kind":                source.SourceScope,
-		"source":              source.Source,
-		"id":                  source.SourceRequirementID,
-		"targetText":          source.TargetText,
-		"coverageTargetToken": source.SourceRequirementID,
+		"kind":                     source.SourceScope,
+		"source":                   source.Source,
+		"id":                       source.SourceRequirementID,
+		"targetText":               source.TargetText,
+		"coverageTargetToken":      source.SourceRequirementID,
+		"sourceRequirementAliases": source.SourceAliases,
 	}
 	for _, requirement := range coverageTargetEvidenceKindRequirements(run, []map[string]any{target}) {
 		if profileRequirementRequiresStateChangingEvidence(requirement) {
@@ -744,19 +766,20 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"id":                    stringFromMap(item, "id"),
-		"source":                stringFromMap(item, "source"),
-		"sourceScope":           stringFromMap(item, "sourceScope"),
-		"evidenceRole":          stringFromMap(item, "evidenceRole"),
-		"definitionRevision":    stringFromMap(item, "definitionRevision"),
-		"sourceRequirementId":   stringFromMap(item, "sourceRequirementId"),
-		"sourcePath":            stringFromMap(item, "sourcePath"),
-		"targetText":            stringFromMap(item, "targetText"),
-		"normalizedSourceKey":   stringFromMap(item, "normalizedSourceKey"),
-		"requiredEvidenceKinds": stringSliceFromValue(item["requiredEvidenceKinds"]),
-		"missingEvidenceKinds":  coverageMissingEvidenceKinds(item),
-		"status":                firstNonEmptyString(stringFromMap(item, "status"), "open"),
-		"currentGap":            stringFromMap(item, "currentGap"),
+		"id":                       stringFromMap(item, "id"),
+		"source":                   stringFromMap(item, "source"),
+		"sourceScope":              stringFromMap(item, "sourceScope"),
+		"evidenceRole":             stringFromMap(item, "evidenceRole"),
+		"definitionRevision":       stringFromMap(item, "definitionRevision"),
+		"sourceRequirementId":      stringFromMap(item, "sourceRequirementId"),
+		"sourceRequirementAliases": stringSliceFromValue(item["sourceRequirementAliases"]),
+		"sourcePath":               stringFromMap(item, "sourcePath"),
+		"targetText":               stringFromMap(item, "targetText"),
+		"normalizedSourceKey":      stringFromMap(item, "normalizedSourceKey"),
+		"requiredEvidenceKinds":    stringSliceFromValue(item["requiredEvidenceKinds"]),
+		"missingEvidenceKinds":     coverageMissingEvidenceKinds(item),
+		"status":                   firstNonEmptyString(stringFromMap(item, "status"), "open"),
+		"currentGap":               stringFromMap(item, "currentGap"),
 	}
 }
 
@@ -848,15 +871,16 @@ func coverageFlattenEvidenceRefs(byKind map[string][]string, fallback []string) 
 
 func coverageWorkItemLedgerSummary(item map[string]any, inFocus bool) map[string]any {
 	ret := map[string]any{
-		"id":                      stringFromMap(item, "id"),
-		"sourceScope":             stringFromMap(item, "sourceScope"),
-		"evidenceRole":            stringFromMap(item, "evidenceRole"),
-		"sourceRequirementId":     stringFromMap(item, "sourceRequirementId"),
-		"status":                  firstNonEmptyString(stringFromMap(item, "status"), "open"),
-		"missingEvidenceKinds":    coverageMissingEvidenceKinds(item),
-		"acceptedEvidenceRefs":    latestCoverageEvidenceRefs(stringSliceFromValue(item["acceptedEvidenceRefs"]), 2),
-		"rejectedEvidenceRefs":    latestCoverageEvidenceRefs(stringSliceFromValue(item["rejectedEvidenceRefs"]), 2),
-		"omittedFromCurrentFocus": !inFocus,
+		"id":                       stringFromMap(item, "id"),
+		"sourceScope":              stringFromMap(item, "sourceScope"),
+		"evidenceRole":             stringFromMap(item, "evidenceRole"),
+		"sourceRequirementId":      stringFromMap(item, "sourceRequirementId"),
+		"sourceRequirementAliases": stringSliceFromValue(item["sourceRequirementAliases"]),
+		"status":                   firstNonEmptyString(stringFromMap(item, "status"), "open"),
+		"missingEvidenceKinds":     coverageMissingEvidenceKinds(item),
+		"acceptedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["acceptedEvidenceRefs"]), 2),
+		"rejectedEvidenceRefs":     latestCoverageEvidenceRefs(stringSliceFromValue(item["rejectedEvidenceRefs"]), 2),
+		"omittedFromCurrentFocus":  !inFocus,
 	}
 	if !inFocus {
 		ret["omittedReason"] = "context_budget_top_k"
@@ -1033,6 +1057,7 @@ func coverageWorkItemMatchesUpdate(item map[string]any, update coverageWorkItemU
 		stringFromMap(item, "targetText"),
 		stringFromMap(item, "sourcePath"),
 	}
+	candidates = append(candidates, stringSliceFromValue(item["sourceRequirementAliases"])...)
 	for _, token := range update.TargetTokens {
 		for _, candidate := range candidates {
 			if coverageRepairTokenMatches(token, candidate) {
@@ -1302,6 +1327,18 @@ func coverageWorkItemSourceKey(source coverageWorkItemSource) string {
 	return strings.Join([]string{source.Source, source.SourceScope, id}, ":")
 }
 
+func coverageWorkItemSourceAliasKeys(source coverageWorkItemSource) []string {
+	ret := make([]string, 0, len(source.SourceAliases))
+	for _, alias := range source.SourceAliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		ret = append(ret, strings.Join([]string{source.Source, source.SourceScope, alias}, ":"))
+	}
+	return compactUniqueStrings(ret)
+}
+
 func coverageRequirementPrefix(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -1310,15 +1347,20 @@ func coverageRequirementPrefix(id string) string {
 	return id + "-"
 }
 
-func coverageLeafTexts(text string) []map[string]string {
+type goalCoverageLeafItem struct {
+	Text   string
+	Parent string
+}
+
+func goalCoverageLeafItems(text string) []goalCoverageLeafItem {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
 	lines := strings.Split(text, "\n")
-	ret := make([]map[string]string, 0)
+	ret := make([]goalCoverageLeafItem, 0)
 	parent := ""
-	for _, raw := range lines {
+	for idx, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -1327,10 +1369,22 @@ func coverageLeafTexts(text string) []map[string]string {
 			parent = strings.TrimSpace(strings.TrimLeft(line, "# "))
 			continue
 		}
+		if isMarkdownTableSeparatorLine(line) {
+			continue
+		}
+		if isMarkdownTableRowLine(line) {
+			if nextNonEmptyLineIsMarkdownTableSeparator(lines, idx) {
+				continue
+			}
+			if normalized := normalizeDoDCoverageText(line); normalized != "" {
+				ret = append(ret, goalCoverageLeafItem{Text: line, Parent: parent})
+			}
+			continue
+		}
 		if match := coverageMarkdownLeafPattern.FindStringSubmatch(line); len(match) == 2 {
 			leaf := strings.TrimSpace(match[1])
 			if leaf != "" && !coverageTextLooksContainer(leaf) {
-				ret = append(ret, map[string]string{"text": leaf, "parent": parent})
+				ret = append(ret, goalCoverageLeafItem{Text: leaf, Parent: parent})
 			}
 			continue
 		}
@@ -1338,12 +1392,13 @@ func coverageLeafTexts(text string) []map[string]string {
 			parent = strings.TrimSuffix(line, ":")
 			continue
 		}
-		if len(lines) == 1 {
-			ret = append(ret, map[string]string{"text": line})
+		line = trimDoDItemText(line)
+		if line != "" && classifyDoDItemKind(line) == doDItemKindLeaf {
+			ret = append(ret, goalCoverageLeafItem{Text: line, Parent: parent})
 		}
 	}
 	if len(ret) == 0 && !coverageTextLooksContainer(text) {
-		ret = append(ret, map[string]string{"text": text})
+		ret = append(ret, goalCoverageLeafItem{Text: text})
 	}
 	return ret
 }
@@ -1351,6 +1406,59 @@ func coverageLeafTexts(text string) []map[string]string {
 func coverageTextLooksContainer(text string) bool {
 	text = strings.TrimSpace(text)
 	return text == "" || strings.HasPrefix(text, "#") || strings.HasSuffix(text, ":") || strings.HasSuffix(text, "：")
+}
+
+func isMarkdownTableRowLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, "|") {
+		return false
+	}
+	return strings.HasPrefix(line, "|") || strings.HasSuffix(line, "|")
+}
+
+func nextNonEmptyLineIsMarkdownTableSeparator(lines []string, idx int) bool {
+	for next := idx + 1; next < len(lines); next++ {
+		line := strings.TrimSpace(lines[next])
+		if line == "" {
+			continue
+		}
+		return isMarkdownTableSeparatorLine(line)
+	}
+	return false
+}
+
+func isMarkdownTableSeparatorLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, "|") {
+		return false
+	}
+	line = strings.Trim(line, "|")
+	cells := strings.Split(line, "|")
+	if len(cells) == 0 {
+		return false
+	}
+	hasSeparator := false
+	for _, cell := range cells {
+		cell = strings.TrimSpace(cell)
+		if cell == "" {
+			continue
+		}
+		dashes := 0
+		for _, r := range cell {
+			switch r {
+			case '-':
+				dashes++
+			case ':':
+			default:
+				return false
+			}
+		}
+		if dashes < 3 {
+			return false
+		}
+		hasSeparator = true
+	}
+	return hasSeparator
 }
 
 func stableCoverageJSON(value any) string {
