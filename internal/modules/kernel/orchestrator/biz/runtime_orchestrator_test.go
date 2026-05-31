@@ -17358,6 +17358,72 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitRoutesToAssessmentOnly(t
 	}
 }
 
+func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidationEvidenceGraph(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	runID := common.RunID("run-graph-limit-validation-evidence")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-graph-limit-validation-evidence",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+	}
+	for i := 0; i < maxGraphFollowUpExpansionAttempts; i++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{"graphFollowUp": true},
+			Output: map[string]any{
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: fmt.Sprintf("patch-%d", i), Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": fmt.Sprintf("file-%d.txt", i), "content": "ok"}},
+				}},
+			},
+		}
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed expansion step: %v", err)
+		}
+	}
+	current := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-validation"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphFollowUp":              true,
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+				{ID: "verify", Kind: "shell/command", Input: map[string]any{"command": "true"}},
+			}},
+		},
+	}
+	if err := stepRepo.Create(ctx, current); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+
+	handled, err := orch.validateGraphExpansionBoundary(ctx, run, current, nil, current.Output, nil)
+	if err != nil {
+		t.Fatalf("validate graph expansion boundary: %v", err)
+	}
+	if handled {
+		t.Fatalf("handled = true, want concrete validation evidence graph to bypass graph expansion assessment")
+	}
+	if boolValue(current.Output["ignoredExecutionGraph"]) {
+		t.Fatalf("concrete validation graph was ignored: %+v", current.Output)
+	}
+}
+
 func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrection(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

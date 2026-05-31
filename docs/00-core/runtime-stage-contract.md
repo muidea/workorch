@@ -1448,6 +1448,8 @@ Completion / assessment 必须遵守“最新非 superseded 证据优先”规�
 
 Graph expansion limit assessment 是 assessment-only coverage correction 的一种来源，而不是特殊业务流程。当前 follow-up 图扩展达到 runtime 上限时，runtime 必须把 assessment 转为严格证据收口：输入应包含 `runEvidenceSummary`、`latestClosureEvidence`、`supersededFailureEvidence` 和具体 evidence guidance；LLM 只能用可追踪 step / patch / validation evidence 证明 satisfied coverage，不得用 run ID、memory-only ref 或旧失败证据替代。
 
+Graph expansion limit 只用于限制递归式 LLM planning / follow-up 图扩展，不能拦截已经形成的有界 concrete validation evidence graph。若 follow-up 输出的 `executionGraph` 只包含可执行验证证据节点（如 `shell/command`、`mcp/tool_call`）及只读辅助节点，且不包含 `llm/workspace_execution`、`patch/apply`、`patch/preview` 或未知 kind，runtime 必须继续派发这些验证节点以补齐 evidence，而不是直接丢弃图并进入 graph-limit assessment。该规则只基于中立 step kind 与 verification evidence contract，不得按语言、文件、工具名称或业务类型判断。
+
 为了防止长流程中 LLM 过程步骤淹没关键证据，runtime 在构造 `runEvidenceSummary` 时必须按中立证据价值裁剪：优先保留已完成/失败的 action evidence、state-changing artifact evidence、validation evidence 和可用于 closure 的步骤；普通 LLM 过程输出只能作为辅助上下文。该排序只基于 step kind、state、evidence quality 与可追踪性，不解析命令内容、语言、测试框架或业务语义。
 
 当 graph expansion limit assessment 的 failed `dodAssessment` / `goalCoverage` / `deliverableCoverage` 暴露 coverage 缺口时，后续 repair 输入必须将缺口与可候选的最新 action evidence 绑定，例如 `missingDoDItems[].evidenceCandidates` 或 `missingGoalCoverage[].evidenceCandidates`。若候选证据存在，优先进行 assessment-only correction；若候选证据不存在或不足，才进入 concrete validation evidence repair 或治理终态。core 不能因为处于 graph expansion limit 路径就跳过 coverage correction，也不能因缺少领域判断而直接要求 state-changing patch。
