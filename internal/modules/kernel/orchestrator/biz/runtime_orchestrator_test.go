@@ -20467,6 +20467,57 @@ func TestValidateLLMExecutionOutputContractAllowsGoalCoverageRawTarget(t *testin
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCoverageTargetPatchWhenFailureScopeIsDiagnosticOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-coverage-diagnostic-scope",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-coverage-diagnostic-scope/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"repairOfFailureSignature":        "class=shell_command_failed|failureTargets=metadata.lock,dependency.lock|exitCode=1",
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "deliverable",
+				"targetText": "coverage_map",
+			}},
+			stepInputKeyWorkspaceFileManifest: []map[string]any{
+				{"path": "metadata.lock"},
+				{"path": "dependency.lock"},
+				{"path": "coverage_map.json"},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "write-coverage-map",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "coverage_map.json",
+					"content":   "{\"items\":[]}\n",
+					"coverageTargets": []map[string]any{{
+						"kind":       "deliverable",
+						"targetText": "coverage_map",
+					}},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage-targeted patch allowed despite diagnostic failure scope", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairPatchWithoutExplicitTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-no-explicit-target",

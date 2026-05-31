@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,71 @@ func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("workspace create blocked waiting for nested CLI result event")
+	}
+}
+
+func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
+	large := strings.Repeat("x", 1024*1024)
+	resource := resourceMap(RunInfo{
+		ID:          "run-1",
+		WorkspaceID: "ws-1",
+		GoalID:      "goal-1",
+		DoDID:       "dod-1",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal":               map[string]any{"text": "goal text"},
+			"dod":                map[string]any{"items": []any{"dod item"}},
+			"operatorInputQueue": []map[string]any{{"content": "continue"}},
+			"processEvidenceTimeline": []any{
+				map[string]any{"content": large},
+			},
+		},
+	})
+
+	contextMap, ok := resource["ExecutionContext"].(map[string]any)
+	if !ok || contextMap == nil {
+		t.Fatalf("ExecutionContext = %+v, want compact context", resource["ExecutionContext"])
+	}
+	if _, ok := contextMap["processEvidenceTimeline"]; ok {
+		t.Fatalf("ExecutionContext contains processEvidenceTimeline, want heavy runtime fields omitted")
+	}
+	goal, _ := contextMap["goal"].(map[string]any)
+	if goal["text"] != "goal text" {
+		t.Fatalf("goal = %+v, want preserved display context", goal)
+	}
+	queue, _ := contextMap["operatorInputQueue"].([]map[string]any)
+	if len(queue) != 1 {
+		t.Fatalf("operatorInputQueue = %+v, want preserved operator input queue", contextMap["operatorInputQueue"])
+	}
+}
+
+func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
+	resource := resourceMap(WorkspaceSnapshotInfo{
+		Workspace: WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateRunning},
+		Runs: []RunInfo{{
+			ID:          "run-1",
+			State:       common.RunStateRunning,
+			GoalID:      "goal-1",
+			DoDID:       "dod-1",
+			WorkspaceID: "ws-1",
+			ExecutionContext: map[string]any{
+				"goal":              map[string]any{"text": "goal text"},
+				"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 1024)}},
+			},
+		}},
+	})
+
+	runs, _ := resource["Runs"].([]map[string]any)
+	if len(runs) != 1 {
+		t.Fatalf("Runs = %+v, want one compact run", resource["Runs"])
+	}
+	contextMap, _ := runs[0]["ExecutionContext"].(map[string]any)
+	if _, ok := contextMap["coverageWorkItems"]; ok {
+		t.Fatalf("run context contains coverageWorkItems, want compact snapshot run context")
+	}
+	goal, _ := contextMap["goal"].(map[string]any)
+	if goal["text"] != "goal text" {
+		t.Fatalf("goal = %+v, want preserved run goal context", goal)
 	}
 }
 

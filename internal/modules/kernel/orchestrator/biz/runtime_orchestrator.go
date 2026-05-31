@@ -2674,6 +2674,9 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 	if primaryDiagnosticRequestHasInferredRelatedShapeRepair(step, request, primaryDiagnosticRepairContractForStep(step)) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
+	if repairPatchRequestDeclaresCurrentCoverageTarget(step, request) {
+		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
+	}
 	if repairPatchTargetRefIsGroundedRootCauseCandidate(step.Input, request.TargetRef, targetRefs) {
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
@@ -2681,6 +2684,20 @@ func validateRepairPatchTargetRelevance(step *runModel.Step, request runtimePatc
 		return validateRepeatedRepairRootCauseTargetConsistency(step, request)
 	}
 	return fmt.Errorf("%w: runtime repair patch/apply target %q is not related to failure target scope %v; patch a current failure target or return a real governance blocker", common.ErrInvalidArgument, request.TargetRef, limitedStrings(targetRefs, 5))
+}
+
+func repairPatchRequestDeclaresCurrentCoverageTarget(step *runModel.Step, request runtimePatchRequest) bool {
+	if step == nil || step.Input == nil || !coverageBoundStateChangingOutputRequired(nil, step) {
+		return false
+	}
+	allowedTargets := coverageBoundTargetTokens(step)
+	if len(allowedTargets) == 0 {
+		return false
+	}
+	if patchNodeDeclaresCoverageTargets(request.Extra, allowedTargets) {
+		return true
+	}
+	return patchNodeDeclaresCoverageTargets(map[string]any{"coverageTargets": request.CoverageTargets}, allowedTargets)
 }
 
 func validatePrimaryDiagnosticPatchOutputContract(step *runModel.Step, output map[string]any) error {

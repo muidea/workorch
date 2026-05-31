@@ -730,6 +730,22 @@ func resourceMap(v any) map[string]any {
 	if v == nil {
 		return nil
 	}
+	switch typed := v.(type) {
+	case RunInfo:
+		return runInfoResourceMap(typed)
+	case *RunInfo:
+		if typed == nil {
+			return nil
+		}
+		return runInfoResourceMap(*typed)
+	case WorkspaceSnapshotInfo:
+		return workspaceSnapshotResourceMap(typed)
+	case *WorkspaceSnapshotInfo:
+		if typed == nil {
+			return nil
+		}
+		return workspaceSnapshotResourceMap(*typed)
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil
@@ -739,6 +755,101 @@ func resourceMap(v any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func runInfoResourceMap(run RunInfo) map[string]any {
+	return map[string]any{
+		"ID":                 string(run.ID),
+		"WorkspaceID":        string(run.WorkspaceID),
+		"GoalID":             string(run.GoalID),
+		"DoDID":              string(run.DoDID),
+		"ExecutionContext":   compactRunExecutionContext(run.ExecutionContext),
+		"State":              string(run.State),
+		"Priority":           run.Priority,
+		"BlockingTicketID":   string(run.BlockingTicketID),
+		"BlockingApprovalID": string(run.BlockingApprovalID),
+		"FailureReason":      run.FailureReason,
+	}
+}
+
+func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any {
+	slim := snapshot
+	slim.Runs = nil
+	resource := resourceMapAlias(slim)
+	if resource == nil {
+		return nil
+	}
+	runs := make([]map[string]any, 0, len(snapshot.Runs))
+	for _, run := range snapshot.Runs {
+		runs = append(runs, runInfoResourceMap(run))
+	}
+	resource["Runs"] = runs
+	return resource
+}
+
+func resourceMapAlias(v any) map[string]any {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func compactRunExecutionContext(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"goal",
+		"goals",
+		"dod",
+		"dods",
+		"operatorInputQueue",
+		"latestOperatorInput",
+	} {
+		if value, ok := context[key]; ok {
+			ret[key] = cloneCLIResultValue(value, 0)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func cloneCLIResultValue(value any, depth int) any {
+	if depth >= 6 {
+		return nil
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		ret := make(map[string]any, len(typed))
+		for k, v := range typed {
+			ret[k] = cloneCLIResultValue(v, depth+1)
+		}
+		return ret
+	case []map[string]any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if cloned, ok := cloneCLIResultValue(item, depth+1).(map[string]any); ok {
+				ret = append(ret, cloned)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]any, 0, len(typed))
+		for _, item := range typed {
+			ret = append(ret, cloneCLIResultValue(item, depth+1))
+		}
+		return ret
+	default:
+		return value
+	}
 }
 
 func resourceMaps[T any](items []T) []map[string]any {
