@@ -181,6 +181,98 @@ func TestBuildConvergenceContractKeepsPrimaryStateChangeWhenProfileWriteEvidence
 	}
 }
 
+func TestBuildConvergenceContractProfileStateChangePreservesCurrentTargetSnapshot(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-current-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+		"runtimeRepairAttempt":            5,
+		failureOutputKeyClass:             failureClassRuntime,
+		failureOutputKeySignature:         "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=strategy_reassessment_wrapper",
+		"strategyReassessment": map[string]any{
+			"required":      true,
+			"failedSurface": "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=strategy_reassessment_wrapper",
+		},
+		"coverageTargetSet": []map[string]any{
+			{
+				"kind":                "deliverable",
+				"item":                "source_change",
+				"coverageTargetToken": "source_change",
+				"targetText":          "source_change",
+				"state":               "failed",
+				"source":              "deliverableCoverage",
+			},
+			{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+				"source":              "deliverableCoverage",
+			},
+		},
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "target.txt",
+			"exists":           true,
+			"content":          "old\n",
+			"contentHash":      "hash-target",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-convergence-profile-current-target/repair-005",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage": "llm_execution_graph_plan",
+			"error": "invalid argument: strategyReassessment.required=true requires state-changing patch output",
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "target.txt" || targets[0]["contentHash"] != "hash-target" {
+		t.Fatalf("targetSnapshots = %+v, want current failure target snapshot", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) ||
+		!boolValue(required["mustPatchDirectlyFromProvidedSnapshot"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want current-snapshot direct patch contract", required)
+	}
+	reassessment := mapFromValue(pkg["strategyReassessment"])
+	if got := stringFromMap(reassessment, "failedSurface"); got != "targetRef=target.txt" {
+		t.Fatalf("strategyReassessment.failedSurface = %q, want concrete target surface", got)
+	}
+}
+
 func TestBuildConvergenceContractUsesUnfocusedCoverageWorkItemStateChange(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-unfocused-cwi-state-change",

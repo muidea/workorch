@@ -1228,6 +1228,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if boolValue(mapFromValue(input["repairActionPackage"])["capabilityPolicyRepairRequired"]) {
 		return nil
 	}
+	refreshRepairStrategyReassessment(input)
 	targets := coverageTargetSetFromRepairInput(input)
 	if len(targets) == 0 {
 		targets = mapSliceFromValue(input["coverageTargetSet"])
@@ -1298,6 +1299,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required["coverageTargetMatchRule"] = "state-changing evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	required["evidenceKindRequirementRule"] = "when a coverage target has profile evidenceRequirements, include at least one accepted state-changing evidence node with the required kind and operation before claiming the target satisfied; acceptedOperations constrains the required evidence node, not necessary supporting capability nodes"
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
+	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
 		required["mustIncludePrimaryStateChangingNode"] = true
 		required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
@@ -1309,6 +1311,31 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func mergeCurrentRepairTargetEvidenceForProfileStateChange(input map[string]any, pkg map[string]any, required map[string]any) {
+	if len(input) == 0 || len(pkg) == 0 || len(required) == 0 {
+		return
+	}
+	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
+		existing := mapSliceFromValue(pkg["targetSnapshots"])
+		merged := mergeRepairTargetSnapshots(existing, targets)
+		if len(merged) > 0 {
+			pkg["targetSnapshots"] = merged
+			pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(merged)
+			required["mustTargetFailureScope"] = true
+			required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+			applyCurrentSnapshotDirectPatchContract(required)
+			required["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
+		}
+	}
+	if targetSet := repairActionTargetSet(input, pkg); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+		required["mustTargetRepairTargetSet"] = true
+	}
+	if reassessment := mapFromValue(input["strategyReassessment"]); len(reassessment) > 0 {
+		pkg["strategyReassessment"] = compactLLMContextMap(reassessment, 1)
+	}
 }
 
 func coverageTargetsRequirePrimaryStateChangingOutput(targets []map[string]any, requirements []profileEvidenceKindRequirement) bool {
