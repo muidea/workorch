@@ -269,7 +269,9 @@ Step input 必须显式声明当前输出模式：
 | artifact repair | 当前 chunk correction 或 artifact replan request | 重跑全部历史 chunk、直接 accepted |
 | assemble/apply 后 | 普通 `executionGraph` / validation / assessment | 继续 chunking 已 final 的 artifact |
 
-Completion follow-up 必须作为 assessment-only verification 处理。它只能消费已完成 graph / artifact apply 后的 evidence summary 与 compact previous output，必须清理 `stateChangingOutputRequired`、`repairObjective`、`repairActionPackage`、`outputMode`、`requestedOutputMode`、`outputModeSelector`、`artifactOutputContract`、`artifactContinuationContext` 和 `artifactContinuationId`。该规则防止已 applied 的 artifact 在完成确认阶段再次继承 chunk/plan 合同，从而重新启动 artifact plan 或 state-changing repair。
+Completion follow-up 默认作为 assessment-only verification 处理。它只能消费已完成 graph / artifact apply 后的 evidence summary 与 compact previous output，必须先清理 `stateChangingOutputRequired`、`repairObjective`、`repairActionPackage`、`outputMode`、`requestedOutputMode`、`outputModeSelector`、`artifactOutputContract`、`artifactContinuationContext` 和 `artifactContinuationId`。该规则防止已 applied 的 artifact 在完成确认阶段再次继承 chunk/plan 合同，从而重新启动 artifact plan 或 state-changing repair。
+
+上述 assessment-only 默认规则不能覆盖未收敛的 coverage work item。若 completion follow-up、graph expansion limit follow-up 或等价 continuation 的 `coverageWorkItemContext.currentFocus` / `currentFocusItems` / `unresolvedItems` 仍存在 `state_change`、`validation`、`artifact`、`assessment` 或 governance 类缺口，runtime 必须从 coverage ledger 重建 `coverageTargetSet` 与 `ConvergenceContract`，再由合同决定进入 `need_evidence`、`need_state_change`、`need_validation`、`need_assessment` 或 `need_governance`。这类请求不得只保留最近 step 摘要和普通 assessment-only 标记；LLM-facing input 必须继续携带 `repairActionPackage.requiredOutput`、`coverageWorkItemContext` 与可映射的 `coverageTargetSet`。该规则只依据中立 coverage/evidence 状态，不得按业务类型、文件名、语言或工具名称推断修复策略。
 
 Orchestrator 必须持有中立的 `ArtifactContinuation` internal state，用于恢复未完成的
 plan/chunk/assemble/apply 流程；但其字段枚举、状态枚举、事件名和恢复链细节不再在 core 中展开。
@@ -1388,7 +1390,7 @@ primary focus 选择规则：
 - Core 不得根据文件名、命令名、测试框架、语言、协议、供应商、业务关键词或自然语言 summary 判断 work item 应该由“功能实现”还是“测试验证”关闭。
 - 当缺口被 profile 解释为软件开发能力时，`software-dev` template 可以要求先核对现有实现、再决定补功能代码或补测试断言；这个策略必须停留在 software-dev Soul / profile contract 中，不得下沉到 core runtime。
 
-Follow-up、repair、provider retry、replan successor 和 validation 输入必须从 coverage ledger / 等价状态视图重建上下文，至少包含未关闭 coverage targets、最近 accepted evidence、最近 rejected evidence 及原因、当前 failure surface、`repairObjective`、`stateChangingOutputRequired`、`requiredOutput`、`currentExecutionProgress` 与 `processEvidenceTimeline`。若 follow-up 输入只包含最近 step 摘要而缺少 Goal / DoD coverage contract，runtime 必须先补齐上下文或 fail-fast，不得让 LLM 基于低价值 smoke evidence 继续生成 state-changing 输出或 failed assessment。
+Follow-up、repair、provider retry、replan successor、graph expansion limit follow-up 和 validation 输入必须从 coverage ledger / 等价状态视图重建上下文，至少包含未关闭 coverage targets、最近 accepted evidence、最近 rejected evidence 及原因、当前 failure surface、`repairObjective`、`stateChangingOutputRequired`、`requiredOutput`、`currentExecutionProgress` 与 `processEvidenceTimeline`。若 follow-up 输入只包含最近 step 摘要而缺少 Goal / DoD coverage contract，runtime 必须先补齐上下文或 fail-fast，不得让 LLM 基于低价值 smoke evidence 继续生成 state-changing 输出或 failed assessment。
 
 当上述 coverage repair 因 repair 输出合同违规而再次进入 repair-of-repair，例如 patch/apply 缺少 `coverageTargets`、返回只读 graph、返回未声明 state-changing intent 或缺少 bounded verification 的 shell/tool graph，或 LLM decision JSON 无效，runtime 必须继承上一轮 `missingDoDItems`、`missingGoalCoverage`、`missingDeliverableCoverage`、候选 evidence、已完成 action evidence、当前失败信息和最近 repair 尝试摘要。`repairActionPackage` 必须携带中立 `coverageRepairRequired=true`、`coverageTargetSet`、`currentExecutionProgress` 与 `requiredOutput.mustDeclareCoverageTargets=true`。这里的 `currentExecutionProgress` 只保留 step id、kind、state、命令/patch 摘要、stdout/stderr 预览、覆盖缺口计数和失败摘要，不得复制大段 patch content、历史 raw LLM 输出或被拒绝的失败正文。该规则保证 LLM 能看到“已有内容、当前进展、遇到的问题和仍未关闭的覆盖目标”，同时避免单 JSON 膨胀和失败产物复用。
 

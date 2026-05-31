@@ -4326,7 +4326,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out := map[string]any{}
 	for key, value := range existing {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON":
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "mustReferenceCoverageWorkItem":
 			out[key] = value
 		}
 	}

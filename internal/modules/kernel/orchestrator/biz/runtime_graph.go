@@ -1027,7 +1027,8 @@ func llmCompletionFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[
 
 func llmCompletionFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := llmCompletionFollowUpStepInput(run, step)
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	input = enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
 func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
@@ -1065,7 +1066,72 @@ func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFrom
 		"Prefer later successful evidence in the same neutral scope over earlier failed evidence.",
 		"If the available evidence is insufficient, mark only the unsupported item failed/skipped and state the exact missing evidence.",
 	}
-	return input
+	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
+}
+
+func restoreCoverageWorkItemContinuationConvergenceContract(run *runModel.Run, input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	context := coverageWorkItemContextFromInput(input)
+	if !coverageWorkItemContinuationHasUnresolvedEvidenceGap(context) {
+		return input
+	}
+	applyCoverageWorkItemContext(input, context)
+	if len(mapFromValue(input["repairActionPackage"])) == 0 {
+		input["repairActionPackage"] = map[string]any{}
+	}
+	ensureCoverageRepairTargetSet(input)
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+	return ApplyConvergenceContract(input, contract)
+}
+
+func coverageWorkItemContinuationHasUnresolvedEvidenceGap(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	for _, item := range coverageWorkItemContinuationFocusItems(context) {
+		if len(item) == 0 {
+			continue
+		}
+		status := strings.TrimSpace(stringFromMap(item, "status"))
+		if status == "satisfied" {
+			continue
+		}
+		if coverageWorkItemFocusHasActionableFailure(item) {
+			return true
+		}
+		missing := stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))
+		if len(missing) == 0 {
+			missing = stringSet(coverageMissingEvidenceKinds(item))
+		}
+		for _, kind := range []string{"state_change", "validation", "artifact", "assessment", "decision", "approval", "external_dependency"} {
+			if missing[kind] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageWorkItemContinuationFocusItems(context map[string]any) []map[string]any {
+	items := make([]map[string]any, 0)
+	if focus := mapFromValue(context["currentFocus"]); len(focus) > 0 {
+		items = append(items, focus)
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		if len(item) > 0 {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		for _, item := range mapSliceFromValue(context["unresolvedItems"]) {
+			if len(item) > 0 {
+				items = append(items, item)
+			}
+		}
+	}
+	return items
 }
 
 func noActionableContinuationFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {
@@ -1274,19 +1340,21 @@ func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx cont
 	if err != nil {
 		return input
 	}
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	input = enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
 func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
 	input := llmCompletionFollowUpStepInput(run, step)
 	if o == nil || o.steps == nil || run == nil {
-		return input
+		return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
-		return input
+		return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 	}
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	input = enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
 func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID {

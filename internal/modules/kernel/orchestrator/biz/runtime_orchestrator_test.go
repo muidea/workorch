@@ -16737,6 +16737,122 @@ func TestGraphExpansionLimitAssessmentInputIncludesLatestClosureEvidence(t *test
 	}
 }
 
+func TestCompletionFollowUpRestoresCoverageStateChangeConvergenceContract(t *testing.T) {
+	runID := common.RunID("run-completion-cwi-state-change")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-completion-cwi-state-change",
+		DoDID:       "dod",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-completion-cwi-state-change",
+				"text": "deliver observable behavior",
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":           "version_control_snapshot",
+							"required":     true,
+							"evidenceRole": "primary_state_change",
+						}},
+					},
+				},
+			},
+		},
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:     common.StepID(runID + "/graph-005/001-previous"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}
+
+	input := llmCompletionFollowUpStepInputFromSteps(run, step, []*runmodel.Step{step})
+
+	if input[stepInputKeyAssessmentOnly] == true {
+		t.Fatalf("input = %+v, want coverage convergence contract to clear assessment-only", input)
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true {
+		t.Fatalf("input = %+v, want state-changing repair convergence contract", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	targets := mapSliceFromValue(input["coverageTargetSet"])
+	if len(targets) == 0 || targets[0]["sourceRequirementId"] != "version_control_snapshot" {
+		t.Fatalf("coverageTargetSet = %+v, want focused coverage work item target", input["coverageTargetSet"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReferenceCoverageWorkItem"] != true || required["mustDeclareCoverageTargets"] != true {
+		t.Fatalf("requiredOutput = %+v, want coverage-bound state-changing output contract", required)
+	}
+}
+
+func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-graph-limit-cwi-validation")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-graph-limit-cwi-validation",
+		DoDID:       "dod",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"id":    "dod-validation",
+				"items": []string{"focused behavior is validated"},
+			},
+		},
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	stepRepo := memory.NewStepRepository()
+	anchor := &runmodel.Step{
+		ID:     common.StepID(runID + "/follow-up-graph-previous"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}
+	if err := stepRepo.Create(ctx, anchor); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	steps, err := stepRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+
+	input := orch.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
+
+	if input[stepInputKeyAssessmentOnly] == true {
+		t.Fatalf("input = %+v, want coverage convergence contract to clear graph-limit assessment-only", input)
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true {
+		t.Fatalf("input = %+v, want concrete validation convergence contract", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustDeclareCoverageTargets"] != true ||
+		required["mustReferenceCoverageWorkItem"] != true {
+		t.Fatalf("requiredOutput = %+v, want coverage-bound validation contract", required)
+	}
+	targets := mapSliceFromValue(input["coverageTargetSet"])
+	if len(targets) != 1 || targets[0]["sourceRequirementId"] != "dod-validation-dod-item-001" {
+		t.Fatalf("coverageTargetSet = %+v, want focused coverage work item target", input["coverageTargetSet"])
+	}
+}
+
 func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 	runID := common.RunID("run-evidence-priority")
 	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+3)
