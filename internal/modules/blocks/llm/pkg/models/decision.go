@@ -263,6 +263,9 @@ type PatchRequest struct {
 	TargetRef       string `json:"targetRef"`
 	Content         string `json:"content,omitempty"`
 	Diff            string `json:"diff,omitempty"`
+	OldText         string `json:"oldText,omitempty"`
+	NewText         string `json:"newText,omitempty"`
+	Occurrence      int    `json:"occurrence,omitempty"`
 	Summary         string `json:"summary,omitempty"`
 	BaseHash        string `json:"baseHash,omitempty"`
 	ApprovalID      string `json:"approvalId,omitempty"`

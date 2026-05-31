@@ -779,6 +779,8 @@ WorkspaceTemplate / Soul 的配置约束，不允许下沉为 orchestrator 的�
 
 能力边界属于 runtime capability contract，不属于业务领域规则。Core 可以声明“某 capability 不支持 delete、content 不能为空、diff 必须完整”等中立能力事实；但不能据此推断某个业务文件是否应该删除、保留或重命名。
 
+LLM adapter 对 `patchRequests` 做 provider drift 规范化时，只能规范化字段名、`operation/create/write` 等别名和不支持的外壳差异，不得丢弃 patch 语义字段。`text_replace` 的 `oldText`、`newText`、`occurrence`、`baseHash`，`file_write` 的 `content`，`unified_diff` 的 `diff`，以及 `coverageTargets` 必须完整传递到 runtime patch 准入层。若 adapter 丢弃这些字段，runtime 会把合法状态变更误判为 schema/patch invalid，导致 repair-of-repair 偏离原始失败面。
+
 ### 本地 HTTP 能力边界
 
 Runtime 可以限制 LLM 通过 shell 调用 WorkOrch 自身管理面 HTTP API，但该限制必须按“管理面路径”识别，不得按 `localhost`、`127.0.0.1` 或固定端口一刀切。`/api/v1/workorch/*`、`/runs`、`/observability`、`/metrics` 等 WorkOrch 管理面路径必须经过 `runtimeCapabilities.serviceAPIs` 显式声明；未声明的管理面路径应被拒绝并进入 repair。

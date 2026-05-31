@@ -812,6 +812,48 @@ func TestRuntimeAdapterNormalizesPatchTypeCreateProviderDrift(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPreservesTextReplacePatchFields(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{
+		"completionState":"continue",
+		"patchRequests":[{
+			"patchType":"text_replace",
+			"targetRef":"validation_report.md",
+			"oldText":"old",
+			"newText":"new",
+			"occurrence":2,
+			"baseHash":"sha256:abc"
+		}]
+	}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute runtime step: %v", err)
+	}
+	patches, ok := result.Output["patches"].([]map[string]any)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("patches = %#v, want one normalized patch request", result.Output["patches"])
+	}
+	patch := patches[0]
+	if patch["patchType"] != "text_replace" ||
+		patch["targetRef"] != "validation_report.md" ||
+		patch["oldText"] != "old" ||
+		patch["newText"] != "new" ||
+		patch["occurrence"] != 2 ||
+		patch["baseHash"] != "sha256:abc" {
+		t.Fatalf("patch = %+v, want text_replace fields preserved", patch)
+	}
+	decision := result.Output["llmDecision"].(map[string]any)
+	decisionPatch := decision["patchRequests"].([]any)[0].(map[string]any)
+	if decisionPatch["oldText"] != "old" || decisionPatch["newText"] != "new" || decisionPatch["occurrence"] != float64(2) {
+		t.Fatalf("llmDecision.patchRequests[0] = %+v, want text_replace fields preserved", decisionPatch)
+	}
+}
+
 func TestRuntimeAdapterRejectsReservedGovernanceReportPatchTarget(t *testing.T) {
 	provider := &staticProvider{payload: []byte(`{
 		"completionState":"continue",

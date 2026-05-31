@@ -17918,6 +17918,130 @@ func TestRuntimeOrchestrator_KnownActionableDecisionRoutesToRepair(t *testing.T)
 	}
 }
 
+func TestRuntimeOrchestrator_ReadableResourceDecisionRoutesToRepairWithHumanFields(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	call := 0
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		call++
+		if call == 1 {
+			return map[string]any{
+				"status":                           "completed",
+				"stage":                            "llm_decision_required",
+				stepOutputKeyBlockDecisionReason:   "need readable workspace source to continue",
+				stepOutputKeyBlockDecisionKind:     decisioncommon.ResolutionTypeProvideMissingInfo,
+				stepOutputKeyBlockDecisionQuestion: "Please provide pkg/lsp/server.go content.",
+				stepOutputKeyBlockDecisionContext: map[string]any{
+					"knownValues": map[string]any{
+						"currentFailure": "validation needs source inspection",
+					},
+					"missingFields":       []any{"pkg/lsp/server.go content"},
+					"requiresHumanFields": []any{"pkg/lsp/server.go content"},
+				},
+			}, nil
+		}
+		if !boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
+			t.Fatalf("repair input = %+v, want runtime repair follow-up", request.Input)
+		}
+		return map[string]any{
+			"status": "completed",
+			"stage":  "llm_dod_assessment",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied":   true,
+				"summary":     "readable resource decision repaired",
+				"goalOutcome": "resource was available to runtime",
+				"items": []map[string]any{{
+					"item":         "inspect source",
+					"state":        "satisfied",
+					"evidenceRefs": []string{string(request.StepID)},
+				}},
+			},
+		}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:            memory.NewResultRepository(),
+			Artifacts:          memory.NewArtifactRepository(),
+			ToolCalls:          memory.NewToolCallRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	deliverableDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(deliverableDir, "pkg", "lsp"), 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deliverableDir, "pkg", "lsp", "server.go"), []byte("package lsp\n"), 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-readable-resource-decision")
+	runID := common.RunID("run-readable-resource-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDir, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          common.GoalID("goal-readable-resource-decision"),
+		DoDID:           common.DoDID("dod-readable-resource-decision"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []any{"inspect source"}},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStep(ctx, run, "run-readable-resource-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		stepInputKeySoulStage:        soulStageExecution,
+	}); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %+v, want no decision ticket for readable workspace resource", tickets)
+	}
+	failed, err := stepRepo.Get(ctx, "run-readable-resource-decision/step-1")
+	if err != nil {
+		t.Fatalf("get first step: %v", err)
+	}
+	if failed.State != common.StepStateFailed || failed.Output["continuableDecisionConvertedToRepair"] != true {
+		t.Fatalf("step = %+v, want readable resource decision converted to repair", failed)
+	}
+	converted := mapFromValue(failed.Output["convertedDecision"])
+	contextMap := mapFromValue(converted["context"])
+	if !stringSliceContains(stringListFromValue(contextMap["readableResources"]), "pkg/lsp/server.go") {
+		t.Fatalf("converted context = %+v, want readable resource recorded", contextMap)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if call != 2 || runItem.State != common.RunStateCompleted {
+		t.Fatalf("call=%d run=%+v, want completed after readable resource repair", call, runItem)
+	}
+}
+
 func TestProviderRetryStepInputUsesAssessmentOnlyModeForCompletionGateFollowUp(t *testing.T) {
 	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
 		{ID: "verify", Kind: "graph/mock"},

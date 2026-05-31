@@ -3643,9 +3643,14 @@ func patchOutput(requests []llmmodels.PatchRequest) []map[string]any {
 			"targetRef":  request.TargetRef,
 			"content":    request.Content,
 			"diff":       request.Diff,
+			"oldText":    request.OldText,
+			"newText":    request.NewText,
 			"summary":    request.Summary,
 			"baseHash":   request.BaseHash,
 			"approvalId": request.ApprovalID,
+		}
+		if request.Occurrence > 0 {
+			patch["occurrence"] = request.Occurrence
 		}
 		if request.CoverageTargets != nil {
 			patch["coverageTargets"] = request.CoverageTargets
