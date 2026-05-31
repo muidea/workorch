@@ -1009,6 +1009,8 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input[stepInputKeySoulStage] = soulStageExecution
 		input["repairObjective"] = repairObjectiveAcquireFailureEvidence
 		input["concreteFailureEvidenceRequired"] = true
+		delete(input, stepInputKeyAssessmentOnly)
+		delete(input, "assessmentOnlyReason")
 		delete(input, "stateChangingOutputRequired")
 		delete(input, "boundedValidationRequired")
 		delete(input, "evidenceRepairRequired")
@@ -1354,7 +1356,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if len(targets) == 0 {
 		return nil
 	}
-	requirements := coverageTargetEvidenceKindRequirements(run, targets)
+	requirements := coverageTargetEvidenceKindRequirementsFromInput(run, input, targets)
 	if len(requirements) == 0 {
 		return nil
 	}
@@ -1514,7 +1516,33 @@ func coverageTargetsRequirePrimaryStateChangingOutput(targets []map[string]any, 
 }
 
 func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {
+	return coverageTargetEvidenceKindRequirementsFromList(profileEvidenceKindRequirements(run), targets)
+}
+
+func coverageTargetEvidenceKindRequirementsFromInput(run *runModel.Run, input map[string]any, targets []map[string]any) []profileEvidenceKindRequirement {
 	requirements := profileEvidenceKindRequirements(run)
+	if len(requirements) == 0 {
+		requirements = profileEvidenceKindRequirementsFromInput(input)
+	}
+	return coverageTargetEvidenceKindRequirementsFromList(requirements, targets)
+}
+
+func profileEvidenceKindRequirementsFromInput(input map[string]any) []profileEvidenceKindRequirement {
+	if len(input) == 0 {
+		return nil
+	}
+	if requirements := profileEvidenceKindRequirementsFromExecutionContext(input); len(requirements) > 0 {
+		return requirements
+	}
+	for _, key := range []string{"executionContextPackage", "executionContext"} {
+		if requirements := profileEvidenceKindRequirementsFromExecutionContext(mapFromValue(input[key])); len(requirements) > 0 {
+			return requirements
+		}
+	}
+	return nil
+}
+
+func coverageTargetEvidenceKindRequirementsFromList(requirements []profileEvidenceKindRequirement, targets []map[string]any) []profileEvidenceKindRequirement {
 	if len(requirements) == 0 || len(targets) == 0 {
 		return nil
 	}

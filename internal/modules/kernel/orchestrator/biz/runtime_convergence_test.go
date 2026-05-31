@@ -529,6 +529,196 @@ func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCo
 	}
 }
 
+func TestRuntimeRepairFollowUpProfileEvidenceKindFailurePreemptsAssessmentOnly(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-profile-evidence-kind-gap",
+		WorkspaceID:     "ws-profile-evidence-kind-gap",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-profile-evidence-kind-gap/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+		},
+		Output: map[string]any{
+			"error": "invalid argument: satisfied dodAssessment deliverable item \"version_control_snapshot\" references insufficient evidence \"run/graph/001-read\"; requires evidence from step kinds: git/write",
+			"runtimeDiagnostics": map[string]any{
+				"kind":  "dod_evidence_quality_gap",
+				"scope": "deliverable",
+				"missingDeliverableCoverage": []map[string]any{{
+					"kind":         "leaf",
+					"item":         "version_control_snapshot",
+					"state":        "failed",
+					"source":       "evidenceKind",
+					"evidenceRefs": []string{"run/graph/001-read"},
+					"reason":       "requires evidence from step kinds: git/write",
+				}},
+			},
+		},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, nil)
+	contract := mapFromValue(input["convergenceContract"])
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want profile-required state-changing evidence repair", contract)
+	}
+	if input[stepInputKeyAssessmentOnly] != nil || input["stateChangingOutputRequired"] != true || input["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("repair input = %+v, want executable state-changing repair", input)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want profile accepted kind/operation", required)
+	}
+}
+
+func TestBuildConvergenceContractProfileEvidenceKindFailureIgnoresReadyCoverageNoise(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-profile-evidence-kind-gap-with-ready-noise",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		"missingDeliverableCoverage": []map[string]any{{
+			"item":         "version_control_snapshot",
+			"kind":         "deliverable",
+			"source":       "deliverableCoverage",
+			"state":        "failed",
+			"evidenceRefs": []string{"run/graph/001-read"},
+		}},
+		"coverageTargetSet": []map[string]any{{
+			"item":                "version_control_snapshot",
+			"kind":                "deliverable",
+			"source":              "deliverableCoverage",
+			"state":               "failed",
+			"targetText":          "version_control_snapshot",
+			"coverageTargetToken": "version_control_snapshot",
+		}, {
+			"kind":                "goal",
+			"source":              "goal",
+			"sourceScope":         "goal_leaf",
+			"sourceRequirementId": "goal-ready",
+			"state":               "evidence_ready",
+			"targetText":          "already ready goal",
+			"coverageTargetToken": "goal-ready",
+		}},
+		"repairActionPackage": map[string]any{
+			"repairObjective": repairObjectiveStateChangingOutput,
+			"coverageTargetSet": []map[string]any{{
+				"item":                "version_control_snapshot",
+				"kind":                "deliverable",
+				"source":              "deliverableCoverage",
+				"state":               "failed",
+				"targetText":          "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+			}, {
+				"kind":                "goal",
+				"source":              "goal",
+				"sourceScope":         "goal_leaf",
+				"sourceRequirementId": "goal-ready",
+				"state":               "evidence_ready",
+				"targetText":          "already ready goal",
+				"coverageTargetToken": "goal-ready",
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-profile-evidence-kind-gap-with-ready-noise/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: dodAssessment is not satisfied"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want profile-required state-changing evidence repair despite ready coverage noise", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput = %+v, want profile-required accepted kind", required)
+	}
+}
+
+func TestBuildConvergenceContractUsesInputProfileEvidenceContractWhenRunContextMissing(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-evidence-input-contract"}
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"repairObjective":          "complete_dod_goal_coverage_assessment",
+		"executionContextPackage": map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+		"missingDeliverableCoverage": []map[string]any{{
+			"item":         "version_control_snapshot",
+			"kind":         "deliverable",
+			"source":       "deliverableCoverage",
+			"state":        "failed",
+			"evidenceRefs": []string{"run/graph/001-read"},
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-profile-evidence-input-contract/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: dodAssessment is not satisfied"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want input profile contract to drive state-changing evidence repair", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("requiredOutput = %+v, want input profile accepted kind/operation", required)
+	}
+}
+
 func TestBuildConvergenceContractMatchesAnnotatedCoverageTargetScope(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-annotated-target",

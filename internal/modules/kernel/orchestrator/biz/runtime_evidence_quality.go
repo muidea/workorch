@@ -335,7 +335,14 @@ func profileEvidenceKindRequirements(run *runModel.Run) []profileEvidenceKindReq
 	if run == nil || len(run.ExecutionContext) == 0 {
 		return nil
 	}
-	executionContract := mapFromValue(run.ExecutionContext["executionContract"])
+	return profileEvidenceKindRequirementsFromExecutionContext(run.ExecutionContext)
+}
+
+func profileEvidenceKindRequirementsFromExecutionContext(executionContext map[string]any) []profileEvidenceKindRequirement {
+	if len(executionContext) == 0 {
+		return nil
+	}
+	executionContract := mapFromValue(executionContext["executionContract"])
 	profileContracts := mapFromValue(executionContract["profileContracts"])
 	if len(profileContracts) == 0 {
 		return nil
