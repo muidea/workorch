@@ -288,7 +288,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		}
 	}
 	if missing["state_change"] {
-		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus) {
+		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, focus) {
 			contract.State = convergenceStateNeedStateChange
 			contract.RuntimeStage = runtimeStageRepair
 			contract.RuntimeStageMode = "strict_convergence"
@@ -356,7 +356,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	return true
 }
 
-func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus map[string]any) bool {
+func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, focus map[string]any) bool {
 	if len(focus) == 0 {
 		return false
 	}
@@ -364,7 +364,18 @@ func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(focus map[stri
 	if len(missing) == 0 {
 		missing = stringSet(coverageMissingEvidenceKinds(focus))
 	}
-	return missing["state_change"] && strings.TrimSpace(stringFromMap(focus, "sourceScope")) != ""
+	if !missing["state_change"] || strings.TrimSpace(stringFromMap(focus, "sourceScope")) == "" {
+		return false
+	}
+	role := normalizedCoverageEvidenceRole(stringFromMap(focus, "evidenceRole"))
+	if role == "supplemental_evidence" {
+		return false
+	}
+	if role == "primary_state_change" {
+		return true
+	}
+	return len(coverageTargetEvidenceKindRequirements(run, []map[string]any{focus})) == 0 &&
+		normalizeEvidenceKindRequirementScope(stringFromMap(focus, "sourceScope")) != "deliverable"
 }
 
 func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evidenceKind string) bool {
@@ -669,6 +680,7 @@ func profileStateChangingPackageMatchesCoverageTargets(pkg map[string]any, targe
 		requirement := profileEvidenceKindRequirement{
 			Scope:              stringFromMap(item, "scope"),
 			ID:                 stringFromMap(item, "id"),
+			EvidenceRole:       normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")),
 			AcceptedStepKinds:  stringSliceFromValue(item["acceptedStepKinds"]),
 			AcceptedOperations: stringSliceFromValue(item["acceptedOperations"]),
 		}
@@ -1296,6 +1308,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		requirementSummaries = append(requirementSummaries, map[string]any{
 			"scope":              normalizeEvidenceKindRequirementScope(requirement.Scope),
 			"id":                 requirement.ID,
+			"evidenceRole":       requirement.EvidenceRole,
 			"acceptedStepKinds":  compactUniqueStrings(requirement.AcceptedStepKinds),
 			"acceptedOperations": compactUniqueStrings(requirement.AcceptedOperations),
 			"requireDirect":      requirement.RequireDirect,

@@ -185,11 +185,11 @@
             { "id": "deliverable", "required": false, "description": "Build artifact, binary, package, document, or other user-facing deliverable" }
           ],
           "deliverableExpectations": [
-            { "id": "source_change", "required": true, "description": "Source, configuration, documentation, or workspace state change directly related to Goal" },
-            { "id": "validation_report", "required": true, "description": "Validation command, test report, lint/static check, or justified skipped validation" },
-            { "id": "coverage_map", "required": true, "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks" },
-            { "id": "version_control_snapshot", "required": true, "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence" },
-            { "id": "user_deliverable", "required": true, "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data" }
+            { "id": "source_change", "required": true, "evidenceRole": "primary_state_change", "description": "Source, configuration, documentation, or workspace state change directly related to Goal" },
+            { "id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence", "description": "Validation command, test report, lint/static check, or justified skipped validation" },
+            { "id": "coverage_map", "required": true, "evidenceRole": "supplemental_evidence", "description": "Mapping between Goal leaves, DoD items, acceptance dimensions, evidenceRefs, and residual risks" },
+            { "id": "version_control_snapshot", "required": true, "evidenceRole": "supplemental_evidence", "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence" },
+            { "id": "user_deliverable", "required": true, "evidenceRole": "supplemental_evidence", "description": "Goal-specific user-facing artifact such as binary, package, service endpoint, document, or generated data" }
           ],
           "evidenceRequirements": [
             {
@@ -243,6 +243,7 @@
             {
               "id": "version_control_snapshot",
               "scope": "deliverable",
+              "evidenceRole": "supplemental_evidence",
               "requireDirectEvidence": true,
               "acceptedStepKinds": ["git/write"],
               "acceptedOperations": ["commit"],

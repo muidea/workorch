@@ -4363,7 +4363,7 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
 		return
 	}
-	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
+	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageRunFromRepairInput(input), coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
 		requiredOutput["mustIncludeStateChangingNode"] = true
 		requiredOutput["mustIncludePrimaryStateChangingNode"] = true
 		requiredOutput["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
@@ -4389,6 +4389,20 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 		"concrete_failure_evidence_acquired_then_target_scoped_repair",
 		"failed_assessment_or_blocker_when_evidence_cannot_be_acquired",
 	}
+}
+
+func coverageRunFromRepairInput(input map[string]any) *runModel.Run {
+	if len(input) == 0 {
+		return nil
+	}
+	executionContract := mapFromValue(input["executionContract"])
+	if len(executionContract) == 0 {
+		executionContract = mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["executionContract"])
+	}
+	if len(executionContract) == 0 {
+		return nil
+	}
+	return &runModel.Run{ExecutionContext: map[string]any{"executionContract": executionContract}}
 }
 
 func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {

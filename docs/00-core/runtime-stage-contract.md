@@ -745,6 +745,12 @@ Goal 文本硬编码 Git 行为。Soul 的 `allowedToolKinds` 必须与提示词
   `commit_meaningful_changes`，core 不得根据该值推导具体业务修改内容。
 - `profileContracts.<profile>.deliverableExpectations[]` 可声明
   `version_control_snapshot` 或等价中立交付物 id，并设置 `required=true`。
+- `profileContracts.<profile>.deliverableExpectations[]` 与
+  `profileContracts.<profile>.evidenceRequirements[]` 可以声明中立
+  `evidenceRole`。`primary_state_change` 表示该 source 可作为 primary
+  state-changing focus；`supplemental_evidence` 表示该 source 只是报告、账本、
+  快照、提交或其他补充 evidence artifact。Core 只能读取该结构字段，不得通过
+  deliverable id、文件名、语言、测试框架或业务关键词推断角色。
 - `profileContracts.<profile>.evidenceRequirements[]` 可声明该交付物的可接受证据
   step kind，例如 `git/write`；必要时还可声明 `acceptedOperations`，例如
   `commit`。core 只校验 evidenceRefs 是否可追踪、step kind / operation 是否匹配，
@@ -1093,6 +1099,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
   "sourceRequirementId": "goal-req-001",
   "sourcePath": "goal.leaves[0]",
   "targetText": "leaf requirement text",
+  "evidenceRole": "primary_state_change",
   "normalizedSourceKey": "goal:goal-req-001",
   "requiredEvidenceKinds": ["state_change", "validation"],
   "status": "open",
@@ -1109,6 +1116,7 @@ Core 可以从当前 definition revision 的 Goal / DoD / deliverable coverage �
 - `source` / `sourceScope` 必须使用中立枚举，例如 `goal` / `goal_leaf`、`dod` / `dod_item`、`acceptance_dimension`、`deliverable`、`result_gap`。它们只表达 coverage 来源，不表达业务类型。
 - `sourceGoalId`、`sourceDoDId`、`definitionRevision`、`sourceRequirementId`、`sourcePath`、`normalizedSourceKey` 必须指向当前有效定义或其可追踪叶子项；不得基于历史 superseded Goal / DoD 继续生成新的 active work item。
 - `targetText` 只保存叶子要求文本或 profile 已声明的 coverage target 文本，不解释业务含义。
+- `evidenceRole` 只能来自 profile / template / governance 的结构化声明，取值限定为 `primary_state_change`、`supplemental_evidence` 或空。空值表示没有额外角色声明，不得被 core 按名称推断。`supplemental_evidence` work item 可以要求 evidence、validation、snapshot 或 ledger 写入，但不得在缺少 concrete implementation target evidence 时启动 primary state-changing patch。
 - `requiredEvidenceKinds` 只能使用中立 evidence kind，例如 `state_change`、`validation`、`artifact`、`decision`、`approval`、`external_dependency`。Core 不得把这些 kind 解释为代码、测试、文档、数据集、天气查询或任何具体业务对象。
 - `status` 只能表达中立进展：`open`、`in_progress`、`evidence_ready`、`satisfied`、`failed`、`blocked`。它不得替代 run / step 的 `planning`、`execution`、`repair`、`verification`、`acceptance` 等主状态。
 - `acceptedEvidenceRefs` / `rejectedEvidenceRefs` 必须引用可追踪 step / artifact / result / decision evidence；不可追踪的 run id、memory-only ref、自然语言总结或旧失败 wrapper 不得关闭 work item。
@@ -1232,6 +1240,8 @@ Current action 合同必须由 work item 派生，而不是由自由文本失败
 - 若 `currentFocus` 已有 state-changing evidence 但缺少 validation，current action 应是 `need_validation`，要求 bounded validation evidence。
 - 若 `currentFocus` evidence kinds 齐备但 assessment 不完整，current action 应是 `need_assessment`，要求结构化 DoD / Goal / deliverable coverage assessment。
 - 若 `currentFocus` 依赖用户信息、外部权限、审批或 runtime 依赖，current action 才能是 `need_governance` / `blocked`。
+- 若 `currentFocus.evidenceRole=supplemental_evidence` 且缺少 concrete implementation target evidence，current action 不得是 primary `need_state_change`。Runtime 应先进入 `need_evidence` / `need_validation`，或等待已有 primary target evidence；补充型 artifact 只能补充 evidence ledger，不能替代真实 primary state change。
+- 若 `currentFocus.evidenceRole=primary_state_change`，runtime 可以在 profile / Soul / capability 允许的范围内要求 state-changing artifact，但仍必须满足 target relevance、coverageTargets、非占位、bounded verification 和后续 acceptance evidence 约束。
 
 LLM 输出回写规则：
 

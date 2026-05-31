@@ -1861,8 +1861,8 @@ func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverage
 				"profileContracts": map[string]any{
 					"neutral": map[string]any{
 						"deliverableExpectations": []map[string]any{
-							{"id": "source_change", "required": true},
-							{"id": "validation_report", "required": true},
+							{"id": "source_change", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence"},
 						},
 					},
 				},
@@ -1891,6 +1891,47 @@ func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverage
 	targets := mapSliceFromValue(mapFromValue(contract.RepairActionPackage)["coverageTargetSet"])
 	if len(targets) == 0 || stringFromMap(targets[0], "sourceRequirementId") != "source_change" {
 		t.Fatalf("coverageTargetSet = %+v, want source_change focus target", targets)
+	}
+}
+
+func TestBuildConvergenceContractDefersSupplementalDeliverableStateChangeWithoutTargetEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-supplemental-deliverable-cwi",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"id": "goal-supplemental-deliverable-cwi", "text": "deliver observable behavior"},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "evidence_ledger", "required": true, "evidenceRole": "supplemental_evidence"},
+						},
+					},
+				},
+			},
+		},
+	}
+	ensureRunCoverageWorkItems(run)
+	input := map[string]any{
+		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
+		stepInputKeyRuntimeStage:          runtimeStageVerification,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"repairObjective":                 repairObjectiveConcreteValidationEvidence,
+	}
+
+	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
+
+	if contract.State == convergenceStateNeedStateChange {
+		t.Fatalf("contract = %+v, supplemental evidence item must not start primary state change without target evidence", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if boolValue(required["mustIncludePrimaryStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want no primary state-changing node for supplemental evidence focus", required)
+	}
+	focus := mapFromValue(mapFromValue(contract.RepairActionPackage)[coverageWorkItemContextKey])["currentFocus"]
+	if role := stringFromMap(mapFromValue(focus), "evidenceRole"); role != "supplemental_evidence" {
+		t.Fatalf("currentFocus.evidenceRole = %q, want supplemental_evidence", role)
 	}
 }
 
@@ -2106,6 +2147,7 @@ func TestRuntimeRepairFollowUpSchemaInvalidWithRejectedContinuationKeepsStateCha
 					"id":                  "cwi-source-change",
 					"sourceScope":         "deliverable",
 					"sourceRequirementId": "source_change",
+					"evidenceRole":        "primary_state_change",
 					"missingEvidenceKinds": []string{
 						"validation",
 						"state_change",

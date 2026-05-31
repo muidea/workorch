@@ -524,6 +524,13 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if required, _ := item["required"].(bool); !required {
 			t.Fatalf("software-dev deliverableExpectation %q required = false, want true", id)
 		}
+		role, _ := item["evidenceRole"].(string)
+		if id == "source_change" && role != "primary_state_change" {
+			t.Fatalf("software-dev deliverableExpectation %q evidenceRole = %q, want primary_state_change", id, role)
+		}
+		if id != "source_change" && role != "supplemental_evidence" {
+			t.Fatalf("software-dev deliverableExpectation %q evidenceRole = %q, want supplemental_evidence", id, role)
+		}
 		requiredDeliverables[id] = true
 	}
 	for id, seen := range requiredDeliverables {
@@ -553,6 +560,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if id == "version_control_snapshot" {
 			if scope, _ := item["scope"].(string); scope != "deliverable" {
 				t.Fatalf("version_control_snapshot evidence scope = %q, want deliverable", scope)
+			}
+			if role, _ := item["evidenceRole"].(string); role != "supplemental_evidence" {
+				t.Fatalf("version_control_snapshot evidenceRole = %q, want supplemental_evidence", role)
 			}
 			accepted, ok := item["acceptedStepKinds"].([]any)
 			if !ok {

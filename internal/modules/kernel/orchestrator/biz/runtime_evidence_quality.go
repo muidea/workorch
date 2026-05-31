@@ -27,6 +27,7 @@ type doDAssessmentEvidenceQualityError struct {
 type profileEvidenceKindRequirement struct {
 	Scope                string
 	ID                   string
+	EvidenceRole         string
 	AcceptedStepKinds    []string
 	AcceptedOperations   []string
 	RejectedStepKinds    []string
@@ -360,6 +361,7 @@ func profileEvidenceKindRequirements(run *runModel.Run) []profileEvidenceKindReq
 			req := profileEvidenceKindRequirement{
 				Scope:                scope,
 				ID:                   id,
+				EvidenceRole:         normalizedCoverageEvidenceRole(stringFromMap(raw, "evidenceRole")),
 				AcceptedStepKinds:    stringSliceFromValue(raw["acceptedStepKinds"]),
 				AcceptedOperations:   stringSliceFromValue(raw["acceptedOperations"]),
 				RejectedStepKinds:    stringSliceFromValue(raw["rejectedStepKinds"]),

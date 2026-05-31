@@ -30,6 +30,7 @@ type coverageWorkItemSource struct {
 	SourceRequirementID string
 	SourcePath          string
 	TargetText          string
+	EvidenceRole        string
 	ParentContext       string
 	ExcludedReason      string
 }
@@ -438,6 +439,7 @@ func profileCoverageWorkItemSources(executionContext map[string]any) []coverageW
 				SourceRequirementID: id,
 				SourcePath:          fmt.Sprintf("executionContract.profileContracts.%s.acceptanceDimensions[%d]", profileName, idx),
 				TargetText:          text,
+				EvidenceRole:        normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")),
 			})
 		}
 		for idx, item := range mapSliceFromValue(profile["deliverableExpectations"]) {
@@ -455,6 +457,7 @@ func profileCoverageWorkItemSources(executionContext map[string]any) []coverageW
 				SourceRequirementID: id,
 				SourcePath:          fmt.Sprintf("executionContract.profileContracts.%s.deliverableExpectations[%d]", profileName, idx),
 				TargetText:          text,
+				EvidenceRole:        normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")),
 			})
 		}
 	}
@@ -544,6 +547,9 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 		"currentGap":             coverageCurrentGap(missingKinds),
 		"reason":                 firstNonEmptyString(stringFromMap(existing, "reason"), "derived from current effective coverage baseline"),
 	}
+	if source.EvidenceRole != "" {
+		item["evidenceRole"] = source.EvidenceRole
+	}
 	if source.SourceGoalID != "" {
 		item["sourceGoalId"] = source.SourceGoalID
 	}
@@ -586,6 +592,20 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 
 func coverageSourceCanCarryStateChange(source coverageWorkItemSource) bool {
 	return normalizeEvidenceKindRequirementScope(source.SourceScope) == "deliverable"
+}
+
+func normalizedCoverageEvidenceRole(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	role = strings.ReplaceAll(role, "-", "_")
+	role = strings.ReplaceAll(role, " ", "_")
+	switch role {
+	case "primary", "primary_state_change", "implementation", "direct_state_change":
+		return "primary_state_change"
+	case "supplemental", "supplemental_evidence", "evidence", "ledger", "report", "snapshot", "validation":
+		return "supplemental_evidence"
+	default:
+		return ""
+	}
 }
 
 func coverageWorkItemContextFromItems(revision string, items []map[string]any, excludedSources []map[string]any, historicalItems []map[string]any) map[string]any {
@@ -722,6 +742,7 @@ func coverageWorkItemSummary(item map[string]any) map[string]any {
 		"id":                    stringFromMap(item, "id"),
 		"source":                stringFromMap(item, "source"),
 		"sourceScope":           stringFromMap(item, "sourceScope"),
+		"evidenceRole":          stringFromMap(item, "evidenceRole"),
 		"definitionRevision":    stringFromMap(item, "definitionRevision"),
 		"sourceRequirementId":   stringFromMap(item, "sourceRequirementId"),
 		"sourcePath":            stringFromMap(item, "sourcePath"),
@@ -814,6 +835,7 @@ func coverageWorkItemLedgerSummary(item map[string]any, inFocus bool) map[string
 	ret := map[string]any{
 		"id":                      stringFromMap(item, "id"),
 		"sourceScope":             stringFromMap(item, "sourceScope"),
+		"evidenceRole":            stringFromMap(item, "evidenceRole"),
 		"sourceRequirementId":     stringFromMap(item, "sourceRequirementId"),
 		"status":                  firstNonEmptyString(stringFromMap(item, "status"), "open"),
 		"missingEvidenceKinds":    coverageMissingEvidenceKinds(item),
