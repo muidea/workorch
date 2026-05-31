@@ -342,6 +342,60 @@ func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 	}
 }
 
+func TestEvidenceAcquisitionFollowUpRestoresCurrentFailureFromRepairOfScope(t *testing.T) {
+	runID := common.RunID("run-evidence-follow-up-repair-of-scope")
+	source := &runModel.Step{
+		ID:    common.StepID(runID + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			stepInputKeyRepairOfFailureClass:  failureClassMCPRuntime,
+			stepInputKeyRepairOfFailureSig:    "class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|node=lookup-symbol|serverId=semantic-capability|tool=references|targetRef=target.txt|operation=mcp/tool_call|failureTargets=target.txt|error=no identifier found",
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "none_observed_in_recent_process_evidence",
+				"nextRequiredAction": "continue_current_stage_contract",
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+					"acceptedKinds":                      []string{"file/read", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"workspaceId": string(common.WorkspaceID("ws-evidence-follow-up-repair-of-scope")),
+	}
+	evidence := []map[string]any{{
+		"kind":   "file/read",
+		"stepId": string(runID) + "/graph-001/001-read-target",
+		"output": map[string]any{
+			"stage":       "file_read",
+			"status":      "completed",
+			"path":        "target.txt",
+			"exists":      true,
+			"content":     "package demo\n",
+			"contentHash": "hash-current",
+			"size":        13,
+			"truncated":   false,
+		},
+	}}
+
+	out := restoreRepairContractAfterConcreteEvidenceAcquisition(input, source, evidence)
+	pkg := mapFromValue(out["repairActionPackage"])
+	currentFailure := mapFromValue(pkg["currentFailure"])
+
+	if currentFailure["failureClass"] != failureClassMCPRuntime ||
+		currentFailure["failureSignature"] != source.Input[stepInputKeyRepairOfFailureSig] {
+		t.Fatalf("currentFailure = %+v, want repairOf failure scope restored", currentFailure)
+	}
+	if currentFailure["targetScope"] != "serverId=semantic-capability|tool=references|node=lookup-symbol" {
+		t.Fatalf("currentFailure = %+v, want capability failure scope from repairOf signature", currentFailure)
+	}
+}
+
 func TestEvidenceAcquisitionFollowUpPrefersRejectedResultGapOverHistoricalReplan(t *testing.T) {
 	runID := common.RunID("run-evidence-follow-up-rejected-result")
 	source := &runModel.Step{

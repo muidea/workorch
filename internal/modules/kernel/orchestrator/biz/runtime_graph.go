@@ -1731,6 +1731,7 @@ func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[
 		return currentFailure
 	}
 	for _, source := range []map[string]any{
+		input,
 		pkg,
 		replanContinuationFailureContextForCurrentProgress(mapFromValue(input["executionContextPackage"])),
 		replanContinuationTicketContextForCurrentProgress(mapFromValue(input["executionContextPackage"])),
@@ -1750,10 +1751,16 @@ func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[
 		}
 		add("failedStepId", stringFromMap(source, "failedStepId"))
 		add("failedStepKind", stringFromMap(source, "failedStepKind"))
-		add("failureClass", stringFromMap(source, failureOutputKeyClass))
-		add("failureSignature", stringFromMap(source, failureOutputKeySignature))
+		add("failureClass", firstNonEmptyString(stringFromMap(source, failureOutputKeyClass), stringFromMap(source, stepInputKeyRepairOfFailureClass)))
+		signature := firstNonEmptyString(stringFromMap(source, failureOutputKeySignature), stringFromMap(source, stepInputKeyRepairOfFailureSig))
+		add("failureSignature", signature)
 		add("targetScope", stringFromMap(source, "failureTargetScope"))
 		add("targetRef", repairActionTargetRefFromScope(stringFromMap(source, "failureTargetScope")))
+		if strings.TrimSpace(stringFromMap(source, "failureTargetScope")) == "" && strings.TrimSpace(signature) != "" {
+			scope := runtimeFailureTargetScope(signature)
+			add("targetScope", scope)
+			add("targetRef", repairActionTargetRefFromScope(scope))
+		}
 		add("reason", firstNonEmptyString(stringFromMap(source, "failureReason"), stringFromMap(source, "reason")))
 		add("error", stringFromMap(source, "error"))
 		if output := mapFromValue(source["failedStepOutput"]); len(output) > 0 {
