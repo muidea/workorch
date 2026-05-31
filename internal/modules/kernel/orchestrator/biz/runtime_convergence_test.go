@@ -1733,6 +1733,56 @@ func TestBuildConvergenceContractUsesLatestActionEvidenceAsConcreteTarget(t *tes
 	}
 }
 
+func TestBuildConvergenceContractPreservesValidationFocusAfterInvalidStateChangingRepair(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		"repairObjective":                 repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired":     true,
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                           "cwi-validation",
+				"status":                       "failed",
+				"sourceRequirementId":          "req-validation",
+				"sourceScope":                  "dod_item",
+				"targetText":                   "path compatibility must be validated",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{"validation"},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef": "target.txt",
+				"exists":    true,
+			}},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/repair-invalid-patch",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: input,
+		Output: map[string]any{
+			"stage":               "llm_execution_graph_plan",
+			failureOutputKeyClass: failureClassRuntime,
+			"error":               "invalid argument: executionGraph patch/apply input invalid: invalid argument: patch describes a non-substantive state-change placeholder",
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": input}, nil)
+	if contract.State != convergenceStateNeedValidation {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedValidation)
+	}
+	if contract.RuntimeStage != runtimeStageVerification || contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("contract = %+v, want concrete validation evidence contract", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true || required["mustIncludeStateChangingNode"] == true {
+		t.Fatalf("requiredOutput = %+v, want validation-only repair contract", required)
+	}
+}
+
 func TestBuildConvergenceContractRequiresEvidenceWhenStateChangeOnlyHasRuntimeFieldTargets(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:      runtimeStageRepair,

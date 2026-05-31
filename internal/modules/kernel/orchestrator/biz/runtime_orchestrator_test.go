@@ -20509,6 +20509,46 @@ func TestValidateLLMExecutionOutputContractAllowsVerificationEvidenceGraph(t *te
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsVerificationGraphWithReadOnlyEvidenceSupport(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-runtime-stage-follow-up-evidence-support-graph",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-runtime-stage-follow-up-evidence-support-graph/follow-up-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":          true,
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+			stepInputKeyGraphNodeID:  "validate_implementation",
+			stepInputKeySoulStage:    soulStageValidation,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":    "run_tests",
+					"kind":  shellcommon.StepKindCommand,
+					"input": map[string]any{"command": "test-runner", "args": []string{"./..."}},
+				},
+				{
+					"id":        "read_snapshot",
+					"kind":      gitcommon.StepKindRead,
+					"dependsOn": []string{"run_tests"},
+					"input":     map[string]any{"operation": gitcommon.OperationLog},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want verification graph with read-only support allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsVerificationFollowUpStateChangingEvidenceGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-runtime-stage-follow-up-state-changing-evidence-graph",

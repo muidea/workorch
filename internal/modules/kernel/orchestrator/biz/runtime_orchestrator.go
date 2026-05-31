@@ -4461,6 +4461,7 @@ func patchNodeCoverageTargetTokens(input map[string]any) []string {
 			for _, key := range []string{
 				"coverageTargetToken",
 				"goalRequirementId",
+				"sourceRequirementId",
 				"targetText",
 				"item",
 				"raw",
@@ -4881,9 +4882,11 @@ func graphIsConcreteValidationEvidenceGraph(graph runtimemodel.BlockExecutionGra
 	}
 	hasEvidenceProducer := false
 	for _, node := range graph.Nodes {
-		switch canonicalRuntimeGraphNodeKind(node.Kind) {
-		case "file/read", "file/list", "mcp/resource_read", "mcp/prompt_get":
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		if graphNodeIsReadOnlyEvidenceSupportKind(kind) {
 			continue
+		}
+		switch kind {
 		case "shell/command", "mcp/tool_call":
 			hasEvidenceProducer = true
 		case "patch/preview", "patch/apply", llmWorkspaceExecutionStepKind:
@@ -4893,6 +4896,16 @@ func graphIsConcreteValidationEvidenceGraph(graph runtimemodel.BlockExecutionGra
 		}
 	}
 	return hasEvidenceProducer
+}
+
+func graphNodeIsReadOnlyEvidenceSupportKind(kind string) bool {
+	kind = canonicalRuntimeGraphNodeKind(kind)
+	switch kind {
+	case "file/read", "file/list", "mcp/resource_read", "mcp/prompt_get":
+		return true
+	default:
+		return strings.HasSuffix(kind, "/read") || strings.HasSuffix(kind, "/list")
+	}
 }
 
 func graphHasDeclaredUngatedStateChangingToolNode(graph runtimemodel.BlockExecutionGraph) bool {

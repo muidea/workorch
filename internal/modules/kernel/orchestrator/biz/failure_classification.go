@@ -644,6 +644,8 @@ func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
 		"executiongraph patch/apply input invalid",
 		"patch diff contains redacted runtime markers",
 		"patch content contains redacted runtime markers",
+		"patch describes a non-substantive",
+		"patch text_replace oldtext/newtext must describe",
 		"invalid llm decision json",
 		"strategyreassessment.required=true",
 		"state-changing repair contract",

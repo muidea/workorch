@@ -820,6 +820,58 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-source-requirement-id",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "**Goal**: keep evidence aligned"},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "goal-leaf-001",
+							"scope":             "goal_coverage",
+							"acceptedStepKinds": []string{"mcp/tool_call"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	if !ensureRunCoverageWorkItems(run) {
+		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	}
+	step := &runmodel.Step{
+		ID:    "run-cwi-source-requirement-id/001-verify",
+		RunID: run.ID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"coverageTargets": []map[string]any{{
+				"sourceRequirementId": "goal-leaf-001",
+				"sourceScope":         "goal_leaf",
+				"targetText":          "Goal: keep evidence aligned",
+			}},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "runtime_observation",
+			},
+		},
+		Output: map[string]any{"stage": "mcp_tool_call_completed"},
+	}
+
+	if !updateRunCoverageWorkItemsFromCompletedStep(run, step) {
+		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed = false, want sourceRequirementId-linked evidence")
+	}
+	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
+	if got := stringFromMap(item, "status"); got != "evidence_ready" {
+		t.Fatalf("status = %q, want evidence_ready", got)
+	}
+	if refs := mapStringSliceValue(item["acceptedEvidenceByKind"])["validation"]; len(refs) == 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want validation refs", item["acceptedEvidenceByKind"])
+	}
+}
+
 func TestCoverageWorkItemsRejectUnclosedAssessmentEvidence(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-cwi-reject",

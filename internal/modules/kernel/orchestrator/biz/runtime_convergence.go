@@ -520,7 +520,13 @@ func coverageWorkItemConvergenceEligible(input map[string]any) bool {
 }
 
 func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any, failedStep *runModel.Step) bool {
-	if len(input) == 0 || failedStep == nil || !stateChangingSchemaInvalidRepair(failedStep) {
+	if len(input) == 0 || failedStep == nil {
+		return false
+	}
+	if runtimeFailureIsLLMContractLoop(failedStep) && convergenceCoverageFocusRequiresValidation(input) {
+		return true
+	}
+	if !stateChangingSchemaInvalidRepair(failedStep) {
 		return false
 	}
 	if inputRequiresConcreteValidationEvidence(input) || inputRequiresConcreteValidationEvidence(failedStep.Input) {
@@ -531,6 +537,28 @@ func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any,
 		return true
 	}
 	return false
+}
+
+func convergenceCoverageFocusRequiresValidation(input map[string]any) bool {
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 {
+		return false
+	}
+	focus := coverageWorkItemPrimaryFocus(context)
+	if len(focus) == 0 {
+		return false
+	}
+	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
+	if len(missing) == 0 {
+		missing = stringSet(coverageMissingEvidenceKinds(focus))
+	}
+	if missing["state_change"] {
+		return false
+	}
+	if missing["validation"] || missing["artifact"] {
+		return true
+	}
+	return stringSliceContains(stringSliceFromValue(focus["nextAllowedConvergenceStates"]), convergenceStateNeedValidation)
 }
 
 func convergenceMustPreserveAssessmentSchemaRepair(input map[string]any, failedStep *runModel.Step) bool {

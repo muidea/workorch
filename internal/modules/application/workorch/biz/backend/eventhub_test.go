@@ -59,7 +59,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	}
 }
 
-func TestEventHubBackendCLICommandUsesSynchronousResponseWithoutSendTimeout(t *testing.T) {
+func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing.T) {
 	ctx := context.Background()
 	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
 	if err != nil {
