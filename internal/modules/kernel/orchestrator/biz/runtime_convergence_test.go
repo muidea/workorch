@@ -111,7 +111,7 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
-func TestBuildConvergenceContractKeepsPrimaryStateChangeWhenProfileWriteEvidenceIsSupplementary(t *testing.T) {
+func TestBuildConvergenceContractDefersPrimaryStateChangeWithoutTargetWhenProfileWriteEvidenceIsSupplementary(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-mixed",
 		ExecutionContext: map[string]any{
@@ -161,23 +161,23 @@ func TestBuildConvergenceContractKeepsPrimaryStateChangeWhenProfileWriteEvidence
 
 	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
 
-	if contract.State != convergenceStateNeedStateChange {
-		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedEvidence)
 	}
 	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
-	if !boolValue(required["mustIncludeStateChangingNode"]) ||
-		!boolValue(required["mustIncludePrimaryStateChangingNode"]) {
-		t.Fatalf("requiredOutput = %+v, want primary state-changing requirement preserved", required)
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["mustIncludePrimaryStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want primary state-changing deferred until target evidence exists", required)
 	}
-	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
-		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
-		t.Fatalf("requiredOutput.acceptedKinds = %+v, want primary patch/apply and supplementary git/write", required["acceptedKinds"])
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want evidence acquisition kinds only", required["acceptedKinds"])
 	}
 	if len(stringSliceFromValue(required["acceptedOperations"])) != 0 {
-		t.Fatalf("requiredOutput.acceptedOperations = %+v, want no global operation narrowing for mixed coverage targets", required["acceptedOperations"])
+		t.Fatalf("requiredOutput.acceptedOperations = %+v, want no operation narrowing before target evidence exists", required["acceptedOperations"])
 	}
-	if !stringSliceContains(stringSliceFromValue(required["primaryAcceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput.primaryAcceptedKinds = %+v, want default primary state-changing kinds", required["primaryAcceptedKinds"])
+	if !boolValue(required["profileEvidenceRequirementDeferred"]) {
+		t.Fatalf("requiredOutput = %+v, want profile evidence deferred marker", required)
 	}
 }
 
@@ -732,6 +732,111 @@ func TestBuildConvergenceContractDropsStaleProfileStateChangeWhenCurrentGoalCove
 	targets := mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])
 	if len(targets) != 1 || targets[0]["goalRequirementId"] != "goal-req-usage" {
 		t.Fatalf("coverageTargetSet = %+v, want current goal gap only", targets)
+	}
+}
+
+func TestBuildConvergenceContractDefersPrimaryProfileStateChangeWithoutTargetEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-primary-state-change-without-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []any{map[string]any{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"coverageRepairRequired":     true,
+		"coverageTargetSet": []map[string]any{
+			{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+			},
+			{
+				"kind":                "dod",
+				"item":                "behavior must be verified",
+				"coverageTargetToken": "behavior must be verified",
+				"targetText":          "behavior must be verified",
+				"state":               "failed",
+			},
+			{
+				"kind":                "goal",
+				"item":                "goal still lacks accepted evidence",
+				"coverageTargetToken": "goal still lacks accepted evidence",
+				"targetText":          "goal still lacks accepted evidence",
+				"state":               "failed",
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{
+				{
+					"kind":                "deliverable",
+					"item":                "version_control_snapshot",
+					"coverageTargetToken": "version_control_snapshot",
+					"targetText":          "version_control_snapshot",
+					"state":               "failed",
+				},
+				{
+					"kind":                "dod",
+					"item":                "behavior must be verified",
+					"coverageTargetToken": "behavior must be verified",
+					"targetText":          "behavior must be verified",
+					"state":               "failed",
+				},
+				{
+					"kind":                "goal",
+					"item":                "goal still lacks accepted evidence",
+					"coverageTargetToken": "goal still lacks accepted evidence",
+					"targetText":          "goal still lacks accepted evidence",
+					"state":               "failed",
+				},
+			},
+			"currentExecutionProgress": map[string]any{
+				"latestActionEvidence": []map[string]any{{
+					"kind":  "mcp/tool_call",
+					"state": "completed",
+				}},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-primary-state-change-without-target/assessment",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{failureOutputKeyClass: failureClassDoDCoverageMissing, "stage": "llm_dod_assessment", "error": "invalid argument: dodAssessment is not satisfied"},
+		State:  common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
+	}
+	if !contract.ConcreteFailureEvidenceRequired || contract.RepairObjective != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("contract = %+v, want bounded evidence acquisition", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["mustIncludePrimaryStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want no state-changing artifact before concrete target evidence", required)
+	}
+	if !boolValue(required["profileEvidenceRequirementDeferred"]) {
+		t.Fatalf("requiredOutput = %+v, want profile evidence requirement deferred marker", required)
 	}
 }
 

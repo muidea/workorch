@@ -1023,6 +1023,18 @@ state-changing evidence requirement 重新提供了 concrete implementation targ
 才允许进入 state-changing repair；否则必须进入 bounded validation evidence、evidence
 acquisition、assessment correction 或真实 blocker。
 
+Profile-declared evidence requirement 只能声明“该 coverage target 最终需要哪类中立证据”，
+不能替代 primary implementation target evidence。若未关闭的 Goal / DoD / deliverable 同时
+需要主交付物状态变更和 profile-specific 写入证据，但当前上下文没有
+`failureTargetRepairContext`、`patchRepairContext`、`targetSnapshots`、可准入
+`repairTargetSet`、line refs 或等价当前实现目标证据，runtime 不得直接构造
+`mustIncludeStateChangingNode=true` 的 repair 合同；应先进入 bounded evidence acquisition，
+要求 LLM 获取当前 target refs / snapshots / diagnostics。profile evidence requirement
+必须作为 deferred requirement 保留，待 target evidence 可追踪后再恢复为 state-changing
+contract。纯 profile evidence target（例如不依赖具体实现文件的审计/提交/登记类证据）可以
+继续按自身 accepted kind 执行，但不得因此放宽 primary implementation repair 的 target
+准入。
+
 同一 coverage gap 已经过至少一轮 validation-only repair 仍未关闭，并且当前输入仍缺少 concrete implementation target evidence 时，不得继续把下一轮建模为纯 `evidence_gap`。Runtime 必须把该循环标记为 repeated validation-only repair，并升格到 implementation repair path：若已有 target evidence，则要求 state-changing artifact；若仍无 target evidence，则先进入 bounded implementation-target evidence acquisition，而不是继续执行宽泛测试/验证。该规则只比较 repair attempt、coverage target、target evidence 与 state-changing evidence 的结构化状态，不按文件类型、语言、测试框架或业务关键词做判断。
 
 当 state-changing repair 输入已经携带 `missingDoDItems`、`missingGoalCoverage` 或 `missingDeliverableCoverage` 时，返回的 `patch/apply` 至少必须有一个节点声明中立 `coverageTargets`，并且目标必须匹配对应缺口的原始 DoD item 文本、`goalRequirementId`、Goal coverage item 文本或 deliverable coverage 文本。该字段只表达“这个 state-changing artifact 试图关闭哪个 coverage gap”，不表示 runtime 认可其业务正确性；最终是否满足仍由后续 validation / acceptance evidence 判断。若 patch 不能绑定任何具体缺口，应返回 failed `dodAssessment` 或 blocker，而不是提交泛化骨架、marker、报告或只具备形式变更的 patch。
@@ -1515,6 +1527,13 @@ State-changing patch 不能只是为了满足 runtime contract 或 repair conver
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
 
 失败目标引用不仅来自结构化 `failureTargets` / `targetRef` / `failureSignature`。当非 LLM 执行步骤的 `stdout`、`stderr`、`error`、`reason`、`lastFailureDiagnostics` 或 `failedStepOutput` 中以中立路径/line-ref 形态出现 workspace 资源引用时，runtime 必须把这些引用纳入 `structuredFailureSignals.targetRefs`，再通过当前 workspace manifest 唯一解析为 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`。若同一失败同时存在能力调用输入目标与 stderr/stdout 诊断路径，输入目标优先；诊断路径只有在能与输入目标同源或通过 manifest 唯一解析为补充资源时才可提升，否则只保留为诊断消息。该抽取只能依赖路径形态、line-ref、manifest 和当前资源快照，不得依赖命令名、语言、测试框架或文件命名约定。若目标无法唯一解析，必须保留诊断摘要并要求读取/阻塞，而不能让 LLM 在缺少当前快照的情况下生成固定 state-changing artifact。
+
+嵌套 wrapper 的 `failedStepOutput.stdout/stderr` 默认只作为历史诊断摘要，不得直接产生强
+`targetRefs`。嵌套 failed output 只有显式 `failureSignature.failureTargets`、
+`runtimeDiagnostics.targetRef` / `failureTargets`、`targetRef`、`conflictRef` 或已通过 manifest
+唯一落地的 line refs 可以进入 `structuredFailureSignals.targetRefs`。工具或 capability 实现自身
+日志中的内部源码路径、client 文件、依赖栈路径和行号必须保留为 message / diagnostic source，
+不能进入 `failureTargetRepairContext`、`repairTargetSet`、`targetSnapshots` 或 patch 目标准入。
 
 结构化 failure target 抽取必须过滤明显不是 workspace 资源的中立噪声，例如单独的运行产物标签、duration / numeric measurement、runtime contract 字段名、URL、空路径和无法通过 manifest 唯一解析的裸 token。过滤规则只能基于通用路径形态、扩展名形态、数值形态和 workspace manifest，不得基于具体命令、语言或测试框架。过滤后的 token 仍可作为 diagnostic message / identifier 保留，但不得进入 `targetRefs`、`failureTargetRepairContext` 或 `repairTargetSet`。
 

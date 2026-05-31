@@ -104,13 +104,7 @@ func BuildConvergenceContract(
 		return contract
 	}
 	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 && convergenceFailedAcceptedStateChangingEvidenceStep(input, failedStep, pkg) {
-		contract.State = convergenceStateNeedStateChange
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveStateChangingOutput
-		contract.StateChangingOutputRequired = true
-		contract.RepairActionPackage = pkg
-		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		populateProfileStateChangingEvidenceConvergenceContract(input, &contract, pkg)
 		return contract
 	}
 	if convergenceMustPreserveAssessmentSchemaRepair(input, failedStep) {
@@ -164,26 +158,14 @@ func BuildConvergenceContract(
 	}
 	if convergenceNeedsValidation(input, failedStep) {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
-			contract.State = convergenceStateNeedStateChange
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveStateChangingOutput
-			contract.StateChangingOutputRequired = true
-			contract.RepairActionPackage = pkg
-			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+			populateProfileStateChangingEvidenceConvergenceContract(input, &contract, pkg)
 			return contract
 		}
 		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
 	}
 	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
-		contract.State = convergenceStateNeedStateChange
-		contract.RuntimeStage = runtimeStageRepair
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = repairObjectiveStateChangingOutput
-		contract.StateChangingOutputRequired = true
-		contract.RepairActionPackage = pkg
-		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		populateProfileStateChangingEvidenceConvergenceContract(input, &contract, pkg)
 		return contract
 	}
 	if convergenceAssessmentOnly(input, failedStep) {
@@ -225,6 +207,29 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func populateProfileStateChangingEvidenceConvergenceContract(input map[string]any, contract *ConvergenceContract, pkg map[string]any) {
+	if contract == nil {
+		return
+	}
+	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+		contract.State = convergenceStateNeedEvidence
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+		contract.ConcreteFailureEvidenceRequired = true
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return
+	}
+	contract.State = convergenceStateNeedStateChange
+	contract.RuntimeStage = runtimeStageRepair
+	contract.RuntimeStageMode = "strict_convergence"
+	contract.RepairObjective = repairObjectiveStateChangingOutput
+	contract.StateChangingOutputRequired = true
+	contract.RepairActionPackage = pkg
+	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 }
 
 func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[string]any, contract *ConvergenceContract) bool {
@@ -275,11 +280,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	}
 	if coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
-			contract.State = convergenceStateNeedStateChange
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveStateChangingOutput
-			contract.StateChangingOutputRequired = true
+			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
 			contract.RepairActionPackage = pkg
 			contract.RepairActionPackage[coverageWorkItemContextKey] = context
 			contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
@@ -1337,6 +1338,9 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
 	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
+		if !repairHasImplementationTargetEvidence(input, pkg) {
+			return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
+		}
 		required["mustIncludePrimaryStateChangingNode"] = true
 		required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
 		required["primaryStateChangingRule"] = "when unresolved coverage targets include general deliverable, goal, or DoD state change beyond profile-specific write evidence, include a primary state-changing artifact before any supplementary evidence-only write such as snapshot/commit"
@@ -1346,6 +1350,31 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"profile_required_state_changing_evidence_produced_then_verify",
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
+	return pkg
+}
+
+func profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg map[string]any, previousRequired map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required := evidenceAcquisitionRequiredOutput(mapFromValue(previousRequired))
+	required["mustDeclareCoverageTargets"] = true
+	required["coverageTargetMatchRule"] = "evidence acquisition must stay bounded to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	required["profileEvidenceRequirementDeferred"] = true
+	required["profileEvidenceRequirementRule"] = "profile state-changing evidence remains required after concrete implementation target evidence is acquired; do not emit primary state-changing output until a current target snapshot, targetRef, lineRef, or equivalent implementation target evidence is available"
+	delete(required, "mustIncludePrimaryStateChangingNode")
+	delete(required, "primaryAcceptedKinds")
+	delete(required, "primaryStateChangingRule")
+	delete(required, "acceptedOperations")
+	pkg["requiredOutput"] = required
+	pkg["evidenceAcquisitionRequired"] = true
+	pkg["concreteFailureEvidenceRequired"] = true
+	pkg["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	pkg["exitCriteria"] = []string{
+		"concrete_implementation_target_evidence_acquired_then_profile_state_change",
+		"failed_assessment_or_blocker_when_required_evidence_cannot_be_acquired",
+	}
+	stripRepairActionPackageImplementationTargetEvidence(pkg)
 	return pkg
 }
 

@@ -5268,8 +5268,13 @@ func repairFailureSignalTexts(output map[string]any, execErr error, failureClass
 		}
 	}
 	if failedOutput := mapFromValue(output["failedStepOutput"]); len(failedOutput) > 0 {
-		for _, key := range []string{"stderr", "stdout", "error", "reason", failureOutputKeySignature} {
+		for _, key := range []string{"error", "reason", failureOutputKeySignature} {
 			add("failedStepOutput."+key, stringFromMap(failedOutput, key))
+		}
+		if diagnostics := mapFromValue(failedOutput["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			for _, key := range []string{"targetRef", "conflictRef"} {
+				add("failedStepOutput.runtimeDiagnostics."+key, stringFromMap(diagnostics, key))
+			}
 		}
 	}
 	add("execErr", errorString(execErr))

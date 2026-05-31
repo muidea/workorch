@@ -93,6 +93,38 @@ func TestMCPFailureTargetsPreferToolInputOverInternalDiagnostics(t *testing.T) {
 	}
 }
 
+func TestStructuredFailureSignalsIgnoresNestedFailedStepOutputInternalLogTargets(t *testing.T) {
+	output := map[string]any{
+		"stage":               "llm_context_integrity_failed",
+		failureOutputKeyClass: failureClassRuntime,
+		"failedStepOutput": map[string]any{
+			"stage": "mcp_tool_call_failed",
+			"stderr": strings.Join([]string{
+				`provider: 2026/05/31 10:07:40 client.go:480: ignore notification`,
+				`provider: 2026/05/31 10:07:41 client.go:442: internal stderr details`,
+			}, "\n"),
+			failureOutputKeySignature: "class=mcp_runtime_failed|kind=mcp/tool_call|failureTargets=src/symbol.go|error=column is beyond end of line",
+			"runtimeDiagnostics": map[string]any{
+				"targetRef": "src/symbol.go",
+			},
+		},
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, nil, failureClassRuntime, "")
+	refs := stringSliceFromValue(signals["targetRefs"])
+	if !stringSliceContains(refs, "src/symbol.go") {
+		t.Fatalf("structuredFailureSignals = %#v, want explicit nested failed step target", signals)
+	}
+	if stringSliceContains(refs, "client.go") {
+		t.Fatalf("structuredFailureSignals = %#v, must not promote nested stderr internal log target", signals)
+	}
+	step := &runmodel.Step{Output: output}
+	targets := failureTargetRepairRefs(step)
+	if !stringSliceContains(targets, "src/symbol.go") || stringSliceContains(targets, "client.go") {
+		t.Fatalf("failureTargetRepairRefs = %#v, want explicit target without nested stderr noise", targets)
+	}
+}
+
 func TestRepairActionPackageAnchorsPrimaryFailureAcrossWrapperFailure(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,
