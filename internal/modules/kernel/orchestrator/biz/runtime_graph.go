@@ -1370,11 +1370,11 @@ func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID 
 
 func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
 	if o == nil || o.steps == nil || run == nil {
-		return graphFollowUpStepInput(run, step)
+		return restoreCoverageWorkItemContinuationConvergenceContract(run, graphFollowUpStepInput(run, step))
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
-		return graphFollowUpStepInput(run, step)
+		return restoreCoverageWorkItemContinuationConvergenceContract(run, graphFollowUpStepInput(run, step))
 	}
 	return o.graphFollowUpStepInputFromSteps(run, step, steps)
 }
@@ -1384,7 +1384,8 @@ func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run,
 	evidence := o.completedGraphEvidenceFromSteps(run, step, steps)
 	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
 	input = restoreRepairContractAfterConcreteEvidenceAcquisition(input, evidenceAcquisitionSourceStep(step, steps), evidence)
-	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	input = enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
+	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
 func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[string]any) map[string]any {

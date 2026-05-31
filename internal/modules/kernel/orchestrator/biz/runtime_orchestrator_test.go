@@ -16853,6 +16853,52 @@ func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContrac
 	}
 }
 
+func TestGraphFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T) {
+	runID := common.RunID("run-graph-follow-up-cwi-validation")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-graph-follow-up-cwi-validation",
+		DoDID:       "dod",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"id":    "dod-graph-validation",
+				"items": []string{"focused graph follow-up behavior is validated"},
+			},
+		},
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	anchor := &runmodel.Step{
+		ID:     common.StepID(runID + "/graph-001/002-verify"),
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed", "stdout": "bounded validation candidate"},
+	}
+	orch := &RuntimeOrchestrator{}
+
+	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor})
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true {
+		t.Fatalf("input = %+v, want concrete validation convergence contract", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustDeclareCoverageTargets"] != true ||
+		required["mustReferenceCoverageWorkItem"] != true {
+		t.Fatalf("requiredOutput = %+v, want coverage-bound validation contract", required)
+	}
+	targets := mapSliceFromValue(input["coverageTargetSet"])
+	if len(targets) != 1 || targets[0]["sourceRequirementId"] != "dod-graph-validation-dod-item-001" {
+		t.Fatalf("coverageTargetSet = %+v, want focused coverage work item target", input["coverageTargetSet"])
+	}
+}
+
 func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 	runID := common.RunID("run-evidence-priority")
 	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+3)
