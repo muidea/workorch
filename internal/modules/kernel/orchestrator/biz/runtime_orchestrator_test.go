@@ -5073,6 +5073,82 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverage
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputIgnoresHistoricalTargetForCoverageAssessmentFailure(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "client.go"), []byte("package demo\n"), 0o644); err != nil {
+		t.Fatalf("seed client.go: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-repair-dod-coverage-historical-target")
+	runID := common.RunID("run-repair-dod-coverage-historical-target")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/provider-retry-assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:       runtimeStageVerification,
+			stepInputKeyRuntimeStageMode:   "strict_convergence",
+			stepInputKeyRepairOfFailureSig: "class=tool_failed|kind=mcp/tool_call|failureTargets=client.go|error=historical tool failure",
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|error=invalid argument: dodassessment is not satisfied",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "Coverage still lacks accepted validation evidence.",
+				"items": []map[string]any{{
+					"item":  "deliver verified behavior",
+					"state": "failed",
+				}},
+			},
+			"missingDoDItems": []map[string]any{{
+				"item":  "deliver verified behavior",
+				"state": "failed",
+			}},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence || boolValue(input["stateChangingOutputRequired"]) {
+		t.Fatalf("repair input = %+v, want bounded validation evidence instead of historical target state-changing repair", input)
+	}
+	if targets := mapSliceFromValue(input["failureTargetRepairContext"]); len(targets) != 0 {
+		t.Fatalf("failureTargetRepairContext = %+v, want no target from historical repairOfFailureSignature", targets)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if targets := mapSliceFromValue(pkg["targetSnapshots"]); len(targets) != 0 {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want no historical target snapshots", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		boolValue(required["mustTargetFailureScope"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want validation evidence contract without patch target scope", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputKeepsRepeatedValidationGapAsEvidenceWithoutTarget(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()

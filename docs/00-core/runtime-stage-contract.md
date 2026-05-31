@@ -1010,6 +1010,19 @@ Shell / tool 调用不得被用来隐藏实际目标变更，再通过一个无�
 - `evidence_gap`：verification 阶段只证明“缺少 concrete evidence / 未执行验证 / evidence 不足”，或只恢复出 `coverageTargetSet` / missing DoD / missing Goal / missing deliverable，但尚未形成实现错误诊断、target refs、line refs、当前 target snapshot、patch repair context 或等价 implementation target evidence 时，repair 应携带 `repairObjective=produce_concrete_validation_evidence`，允许受限 tool / shell / mcp 验证图生成证据，且必须清除顶层 `stateChangingOutputRequired` 和旧的 patch-only required output；若该验证图后续产生确定性失败，再由新的失败证据触发 state-changing repair。
 - `hybrid_gap`：validation / completion 阶段已经具备明确 coverage gap，并且当前代码/graph evidence 已提示至少一部分缺口需要 state-changing implementation 或 state-changing test updates 才能关闭。此时 runtime 不应把 failed `dodAssessment` 仅视为纯 assessment 结果；应显式把 repair 目标提升为“优先输出 bounded state-changing repair graph，必要时附带对应 verification nodes”，避免先输出 failed assessment 再由 runtime 被动二次归约。
 
+Failed `dodAssessment` / `dod_coverage_missing` 是当前 coverage assessment 结果，不是历史
+repair lineage 的 continuation target。若当前失败 step 只表达 coverage assessment 未通过，
+runtime 不得从 provider retry wrapper、`repairOfFailureSignature`、旧 `failureSignature`、
+governance history、replan lineage 或旧 repair target refs 中继承 `failureTargets` 作为当前
+implementation target evidence。此类历史目标只能保留为 historical / diagnostic signal；
+当前 repair package 可以携带 `coverageTargetSet`、missing Goal / DoD / deliverable、
+evidence refs / candidates、current progress 与 recent attempts，但必须清除旧
+`targetSnapshots`、`failureTargetRepairContext`、`repairTargetSet`、patch-only
+`requiredOutput` 和等价实现目标证据。只有当前 assessment 自身或 profile-declared
+state-changing evidence requirement 重新提供了 concrete implementation target evidence，
+才允许进入 state-changing repair；否则必须进入 bounded validation evidence、evidence
+acquisition、assessment correction 或真实 blocker。
+
 同一 coverage gap 已经过至少一轮 validation-only repair 仍未关闭，并且当前输入仍缺少 concrete implementation target evidence 时，不得继续把下一轮建模为纯 `evidence_gap`。Runtime 必须把该循环标记为 repeated validation-only repair，并升格到 implementation repair path：若已有 target evidence，则要求 state-changing artifact；若仍无 target evidence，则先进入 bounded implementation-target evidence acquisition，而不是继续执行宽泛测试/验证。该规则只比较 repair attempt、coverage target、target evidence 与 state-changing evidence 的结构化状态，不按文件类型、语言、测试框架或业务关键词做判断。
 
 当 state-changing repair 输入已经携带 `missingDoDItems`、`missingGoalCoverage` 或 `missingDeliverableCoverage` 时，返回的 `patch/apply` 至少必须有一个节点声明中立 `coverageTargets`，并且目标必须匹配对应缺口的原始 DoD item 文本、`goalRequirementId`、Goal coverage item 文本或 deliverable coverage 文本。该字段只表达“这个 state-changing artifact 试图关闭哪个 coverage gap”，不表示 runtime 认可其业务正确性；最终是否满足仍由后续 validation / acceptance evidence 判断。若 patch 不能绑定任何具体缺口，应返回 failed `dodAssessment` 或 blocker，而不是提交泛化骨架、marker、报告或只具备形式变更的 patch。

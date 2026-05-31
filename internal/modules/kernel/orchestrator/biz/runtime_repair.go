@@ -3269,6 +3269,25 @@ func runtimeRepairLastFailureDiagnostics(failedStep *runModel.Step) map[string]a
 	return compactLLMContextMap(ret, 1)
 }
 
+func currentFailureIsCoverageAssessmentOnly(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Output, failureOutputKeyClass),
+		stringFromMap(step.Output, "failureClass"),
+	))
+	stage := strings.TrimSpace(stringFromMap(step.Output, "stage"))
+	if class == failureClassDoDCoverageMissing && (stage == "llm_dod_assessment" || stage == "llm_execution_graph_plan") {
+		return true
+	}
+	diagnostics := mapFromValue(step.Output["runtimeDiagnostics"])
+	if strings.TrimSpace(stringFromMap(diagnostics, "kind")) == failureClassDoDCoverageMissing {
+		return true
+	}
+	return false
+}
+
 func runtimeRepairShouldReturnToRejectedResultContinuation(run *runModel.Run, failedStep *runModel.Step) bool {
 	if run == nil || failedStep == nil || failedStep.Input == nil {
 		return false
@@ -7195,11 +7214,13 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Output, failureOutputKeySignature)) {
 		add(target)
 	}
-	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig)) {
-		add(target)
-	}
-	for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
-		add(target)
+	if !currentFailureIsCoverageAssessmentOnly(step) {
+		for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, stepInputKeyRepairOfFailureSig)) {
+			add(target)
+		}
+		for _, target := range failureTargetsFromSignatureText(stringFromMap(step.Input, failureOutputKeySignature)) {
+			add(target)
+		}
 	}
 	if reassessment := mapFromValue(step.Input["strategyReassessment"]); len(reassessment) > 0 {
 		for _, target := range failureTargetRepairRefsFromStrategyReassessment(reassessment) {

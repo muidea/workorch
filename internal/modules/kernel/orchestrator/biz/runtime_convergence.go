@@ -528,6 +528,7 @@ func populateConcreteValidationConvergenceContract(input map[string]any, contrac
 		required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 	}
 	contract.RepairActionPackage["requiredOutput"] = required
+	stripRepairActionPackageImplementationTargetEvidence(contract.RepairActionPackage)
 	contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 }
 
@@ -999,6 +1000,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 			pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
 		}
 		pkg["requiredOutput"] = required
+		stripRepairActionPackageImplementationTargetEvidence(pkg)
 		input["repairActionPackage"] = pkg
 	case convergenceStateNeedAssessment:
 		setRuntimeStage(input, runtimeStageVerification)
@@ -1032,6 +1034,40 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		}
 	}
 	return input
+}
+
+func stripRepairActionPackageImplementationTargetEvidence(pkg map[string]any) {
+	if len(pkg) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"targetEvidence",
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"repairTargetSet",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"primaryDiagnosticRepair",
+	} {
+		delete(pkg, key)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	for _, key := range []string{
+		"mustTargetFailureScope",
+		"mustTargetRepairTargetSet",
+		"targetRelation",
+		"mustUseCurrentTargetSnapshot",
+		"mustPatchDirectlyFromProvidedSnapshot",
+		"sameGraphReadPatchRule",
+		"fileWriteExistingTargetRule",
+		"primaryDiagnosticMatchRule",
+		"mustAddressPrimaryDiagnostics",
+	} {
+		delete(required, key)
+	}
+	if len(required) > 0 {
+		pkg["requiredOutput"] = required
+	}
 }
 
 func clearConvergenceDerivedOutputModeFields(input map[string]any) {
