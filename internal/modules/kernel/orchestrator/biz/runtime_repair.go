@@ -5144,11 +5144,9 @@ func repairActionTargetRefs(targets []map[string]any) []string {
 
 func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr error, failureClass string, failureSignature string) map[string]any {
 	texts := repairFailureSignalTexts(output, execErr, failureClass, failureSignature)
-	if len(texts) == 0 {
-		return nil
-	}
 	sources := make([]string, 0, len(texts))
-	targets := []string{}
+	targets := explicitFailureTargetsForSignature(output)
+	hasCapabilityInputTargets := len(capabilityInputFailureTargets(output)) > 0
 	externalRefs := []string{}
 	identifiers := []string{}
 	messages := []string{}
@@ -5160,27 +5158,29 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 			continue
 		}
 		sources = append(sources, source)
-		for _, ref := range extractStructuredFailureLineRefs(text) {
-			key := fmt.Sprintf("%s:%v:%v", ref["targetRef"], ref["line"], ref["column"])
-			if seenLineRefs[key] {
-				continue
+		if shouldExtractFailureTextTargets(source, hasCapabilityInputTargets) {
+			for _, ref := range extractStructuredFailureLineRefs(text) {
+				key := fmt.Sprintf("%s:%v:%v", ref["targetRef"], ref["line"], ref["column"])
+				if seenLineRefs[key] {
+					continue
+				}
+				seenLineRefs[key] = true
+				lineRefs = append(lineRefs, ref)
+				if targetRef := stringFromMap(ref, "targetRef"); targetRef != "" {
+					targets = append(targets, targetRef)
+				}
+				if len(lineRefs) >= maxLLMContextSliceItems {
+					break
+				}
 			}
-			seenLineRefs[key] = true
-			lineRefs = append(lineRefs, ref)
-			if targetRef := stringFromMap(ref, "targetRef"); targetRef != "" {
-				targets = append(targets, targetRef)
-			}
-			if len(lineRefs) >= maxLLMContextSliceItems {
-				break
-			}
-		}
-		for _, targetRef := range extractStructuredFailureTargetRefs(text) {
-			if structuredFailureRefLooksExternalReference(targetRef) {
-				externalRefs = append(externalRefs, targetRef)
-				continue
-			}
-			if structuredFailureTargetRefGroundedBySourceOrText(source, text, targetRef) {
-				targets = append(targets, targetRef)
+			for _, targetRef := range extractStructuredFailureTargetRefs(text) {
+				if structuredFailureRefLooksExternalReference(targetRef) {
+					externalRefs = append(externalRefs, targetRef)
+					continue
+				}
+				if structuredFailureTargetRefGroundedBySourceOrText(source, text, targetRef) {
+					targets = append(targets, targetRef)
+				}
 			}
 		}
 		identifiers = append(identifiers, extractStructuredFailureIdentifiers(text)...)
@@ -5209,6 +5209,16 @@ func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr er
 		return nil
 	}
 	return ret
+}
+
+func shouldExtractFailureTextTargets(source string, hasCapabilityInputTargets bool) bool {
+	if !hasCapabilityInputTargets {
+		return true
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	return strings.Contains(source, "signature") ||
+		strings.HasSuffix(source, "targetref") ||
+		strings.Contains(source, "runtimediagnostics")
 }
 
 func repairFailureSignalTexts(output map[string]any, execErr error, failureClass string, failureSignature string) map[string]string {

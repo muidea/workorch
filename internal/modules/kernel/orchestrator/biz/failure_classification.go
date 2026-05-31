@@ -347,6 +347,9 @@ func failureTargetsForSignature(output map[string]any) []string {
 	if len(output) == 0 {
 		return nil
 	}
+	if targets := explicitFailureTargetsForSignature(output); len(targets) > 0 {
+		return targets
+	}
 	text := strings.Join([]string{
 		stringFromMap(output, "stderr"),
 		stringFromMap(output, "stdout"),
@@ -377,6 +380,57 @@ func failureTargetsForSignature(output map[string]any) []string {
 }
 
 var failureTargetLocatorPattern = regexp.MustCompile(`(?m)(?:^|[\s"'(])([A-Za-z0-9_.\/\\-]+\.[A-Za-z0-9_+-]+):[0-9]+(?::[0-9]+)?`)
+
+func explicitFailureTargetsForSignature(output map[string]any) []string {
+	seen := map[string]bool{}
+	ret := []string{}
+	add := func(value string) {
+		target := normalizedFailureTarget(value)
+		if target == "" || !runtimeRepairTargetRefAdmissible(target) || seen[target] {
+			return
+		}
+		seen[target] = true
+		ret = append(ret, target)
+	}
+	add(stringFromMap(output, "targetRef"))
+	add(stringFromMap(output, "conflictRef"))
+	for _, target := range stringSliceFromValue(output["failureTargets"]) {
+		add(target)
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add(stringFromMap(diagnostics, "targetRef"))
+		add(stringFromMap(diagnostics, "conflictRef"))
+		for _, target := range stringSliceFromValue(diagnostics["failureTargets"]) {
+			add(target)
+		}
+	}
+	for _, target := range capabilityInputFailureTargets(output) {
+		add(target)
+	}
+	return limitedStrings(ret, 5)
+}
+
+func capabilityInputFailureTargets(output map[string]any) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(stringFromMap(output, "serverId")) == "" &&
+		strings.TrimSpace(stringFromMap(output, "tool")) == "" &&
+		strings.TrimSpace(stringFromMap(output, "operation")) == "" {
+		return nil
+	}
+	input := mapFromValue(output["input"])
+	if len(input) == 0 {
+		return nil
+	}
+	targets := []string{}
+	for _, key := range []string{"targetRef", "path", "file"} {
+		if value := stringFromMap(input, key); strings.TrimSpace(value) != "" {
+			targets = append(targets, value)
+		}
+	}
+	return targets
+}
 
 func normalizedFailureTarget(value string) string {
 	value = strings.TrimSpace(strings.Trim(value, `"'()[]{}<>`))

@@ -51,6 +51,48 @@ func TestStructuredFailureSignalsExtractsNeutralPathLineIdentifier(t *testing.T)
 	}
 }
 
+func TestMCPFailureTargetsPreferToolInputOverInternalDiagnostics(t *testing.T) {
+	output := map[string]any{
+		"operation": "mcp/tool_call",
+		"serverId":  "mcp-semantic",
+		"tool":      "lookup_references",
+		"stage":     "mcp_tool_call_failed",
+		"error":     "mcp tool lookup_references failed: column is beyond end of line",
+		"input": map[string]any{
+			"path": "src/symbol.go",
+			"line": 1,
+			"col":  13,
+		},
+		"stderr": strings.Join([]string{
+			`provider: 2026/05/31 10:07:40 client.go:480: ignore notification`,
+			`provider: 2026/05/31 10:07:41 client.go:442: internal stderr details`,
+		}, "\n"),
+		"runtimeDiagnostics": map[string]any{
+			"operation":      "mcp/tool_call",
+			"serverId":       "mcp-semantic",
+			"tool":           "lookup_references",
+			"targetRef":      "src/symbol.go",
+			"failureTargets": []string{"src/symbol.go"},
+		},
+	}
+
+	targets := failureTargetsForSignature(output)
+	if len(targets) != 1 || targets[0] != "src/symbol.go" {
+		t.Fatalf("failureTargetsForSignature = %#v, want only tool input target", targets)
+	}
+
+	signature := runtimeFailureSignature(failureClassMCPRuntime, &runmodel.Step{Kind: "mcp/tool_call", Output: output}, output, errors.New("column is beyond end of line"))
+	if !strings.Contains(signature, "failureTargets=src/symbol.go") || strings.Contains(signature, "failureTargets=client.go") {
+		t.Fatalf("signature = %q, want input target without internal diagnostic target", signature)
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, nil, failureClassMCPRuntime, signature)
+	refs := stringSliceFromValue(signals["targetRefs"])
+	if !stringSliceContains(refs, "src/symbol.go") || stringSliceContains(refs, "client.go") {
+		t.Fatalf("structuredFailureSignals = %#v, want input target without internal diagnostic target", signals)
+	}
+}
+
 func TestRepairActionPackageAnchorsPrimaryFailureAcrossWrapperFailure(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

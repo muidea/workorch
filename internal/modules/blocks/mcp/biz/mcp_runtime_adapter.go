@@ -221,6 +221,9 @@ func (a *RuntimeAdapter) executeHTTPOperation(ctx context.Context, request runti
 		output["status"] = "failed"
 		output["stage"] = failedStage(spec)
 		output["error"] = err.Error()
+		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
+			output["runtimeDiagnostics"] = diagnostics
+		}
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
@@ -259,6 +262,9 @@ func (a *RuntimeAdapter) executeStdioOperation(ctx context.Context, request runt
 		output["status"] = "failed"
 		output["stage"] = failedStage(spec)
 		output["error"] = err.Error()
+		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
+			output["runtimeDiagnostics"] = diagnostics
+		}
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
@@ -294,6 +300,9 @@ func (a *RuntimeAdapter) executeLongLivedStdioOperation(ctx context.Context, req
 		output["status"] = "failed"
 		output["stage"] = failedStage(spec)
 		output["error"] = err.Error()
+		if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
+			output["runtimeDiagnostics"] = diagnostics
+		}
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
@@ -589,6 +598,9 @@ func failureOutput(spec operationSpec, stage string, err error) map[string]any {
 	if err != nil {
 		output["error"] = err.Error()
 	}
+	if diagnostics := capabilityFailureDiagnostics(spec); len(diagnostics) > 0 {
+		output["runtimeDiagnostics"] = diagnostics
+	}
 	return output
 }
 
@@ -622,6 +634,53 @@ func baseOutput(spec operationSpec) map[string]any {
 		output["summary"] = spec.Summary
 	}
 	return output
+}
+
+func capabilityFailureDiagnostics(spec operationSpec) map[string]any {
+	diagnostics := map[string]any{
+		"operation": spec.Operation,
+		"serverId":  spec.ServerID,
+	}
+	if spec.Tool != "" {
+		diagnostics["tool"] = spec.Tool
+	}
+	if spec.URI != "" {
+		diagnostics["uri"] = spec.URI
+		diagnostics["targetRef"] = spec.URI
+	}
+	if spec.Prompt != "" {
+		diagnostics["prompt"] = spec.Prompt
+	}
+	if target := firstCapabilityInputTarget(spec); target != "" {
+		diagnostics["targetRef"] = target
+		diagnostics["failureTargets"] = []string{target}
+	}
+	return diagnostics
+}
+
+func firstCapabilityInputTarget(spec operationSpec) string {
+	for _, key := range []string{"targetRef", "path", "file", "uri", "resourceUri"} {
+		if target := normalizedCapabilityInputTarget(spec.Input[key]); target != "" {
+			return target
+		}
+	}
+	return ""
+}
+
+func normalizedCapabilityInputTarget(value any) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || strings.Contains(text, "://") {
+		return text
+	}
+	text = filepath.ToSlash(text)
+	for strings.HasPrefix(text, "./") {
+		text = strings.TrimPrefix(text, "./")
+	}
+	return strings.Trim(text, "/")
 }
 
 func parseHTTPResponsePayload(raw []byte, contentType string, requestedStream bool) (any, []any) {

@@ -553,6 +553,8 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 
 外部 capability 调用失败的 target scope 必须优先使用 capability 调用身份，而不是 stderr / stdout 中的内部诊断路径。对 `mcp/tool_call` 或等价外部能力失败，scope 应优先来自 `serverId`、`tool`、`node` / operation；只有缺少 capability 调用身份时才回退到 `failureTargets`、`targetRef` 或诊断路径。能力实现自身日志中的文件名、行号或内部源码路径只能作为 diagnostic evidence，不能覆盖 capability target scope，也不能让不同业务无关的 capability 调用互相消耗同一 repair budget。该规则只基于 step kind、stage、server/tool/node 等中立字段，不绑定具体 MCP server、语言、工具或业务语义。
 
+外部 capability 失败的 actionable target evidence 必须优先使用调用输入中的显式资源引用，例如 `input.targetRef`、`input.path`、`input.file`、`input.uri` 或 `runtimeDiagnostics.targetRef` / `failureTargets`。这些字段表示本次能力调用实际作用的 workspace 资源，应进入 `lastFailureDiagnostics.failureTargets`、`failureSignature.failureTargets` 和 `structuredFailureSignals.targetRefs`。只有缺少这类显式输入目标时，runtime 才能从 stderr/stdout/error/reason 中按中立路径形态抽取目标。stderr/stdout 中由能力实现自身输出的源码路径、内部 client 文件、日志位置或依赖工具栈路径不得覆盖显式输入目标；它们只能作为 bounded diagnostic message 保留。该优先级规则只识别通用字段名与路径形态，不解释工具含义、语言类型或业务目标。
+
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
 当当前失败 step 同时携带历史 `repairOfFailureSignature` 和自身 `failureSignature` 时，scope 判定必须优先使用当前失败 step 输出中的 `failureSignature` / `failureClass`。历史 repair lineage 只能作为上下文与来源说明，不得覆盖当前失败证据。真正的 provider/runtime 调度外壳若只记录了 provider retry 状态且没有新的有效失败签名，可以继续按原始 repair scope 计数；除此以外，repair-follow-up 自身产生的 runtime contract violation、patch contract violation、验证失败或能力失败都必须作为当前失败证据进入下一轮治理。该规则适用于所有中立失败类型，尤其用于避免“上一轮失败签名”串线到新的执行超时、验证失败或能力 contract violation。
@@ -1499,7 +1501,7 @@ State-changing patch 不能只是为了满足 runtime contract 或 repair conver
 
 Runtime 可以把失败证据中的目标引用解析为当前 workspace 中的已知资源快照，但只能使用中立路径匹配和 manifest 事实；不能把某个 profile 的文件命名、测试约定或技术栈规则写入 core repair。
 
-失败目标引用不仅来自结构化 `failureTargets` / `targetRef` / `failureSignature`。当非 LLM 执行步骤的 `stdout`、`stderr`、`error`、`reason`、`lastFailureDiagnostics` 或 `failedStepOutput` 中以中立路径/line-ref 形态出现 workspace 资源引用时，runtime 必须把这些引用纳入 `structuredFailureSignals.targetRefs`，再通过当前 workspace manifest 唯一解析为 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`。该抽取只能依赖路径形态、line-ref、manifest 和当前资源快照，不得依赖命令名、语言、测试框架或文件命名约定。若目标无法唯一解析，必须保留诊断摘要并要求读取/阻塞，而不能让 LLM 在缺少当前快照的情况下生成固定 state-changing artifact。
+失败目标引用不仅来自结构化 `failureTargets` / `targetRef` / `failureSignature`。当非 LLM 执行步骤的 `stdout`、`stderr`、`error`、`reason`、`lastFailureDiagnostics` 或 `failedStepOutput` 中以中立路径/line-ref 形态出现 workspace 资源引用时，runtime 必须把这些引用纳入 `structuredFailureSignals.targetRefs`，再通过当前 workspace manifest 唯一解析为 `failureTargetRepairContext` 与 `repairActionPackage.targetSnapshots`。若同一失败同时存在能力调用输入目标与 stderr/stdout 诊断路径，输入目标优先；诊断路径只有在能与输入目标同源或通过 manifest 唯一解析为补充资源时才可提升，否则只保留为诊断消息。该抽取只能依赖路径形态、line-ref、manifest 和当前资源快照，不得依赖命令名、语言、测试框架或文件命名约定。若目标无法唯一解析，必须保留诊断摘要并要求读取/阻塞，而不能让 LLM 在缺少当前快照的情况下生成固定 state-changing artifact。
 
 结构化 failure target 抽取必须过滤明显不是 workspace 资源的中立噪声，例如单独的运行产物标签、duration / numeric measurement、runtime contract 字段名、URL、空路径和无法通过 manifest 唯一解析的裸 token。过滤规则只能基于通用路径形态、扩展名形态、数值形态和 workspace manifest，不得基于具体命令、语言或测试框架。过滤后的 token 仍可作为 diagnostic message / identifier 保留，但不得进入 `targetRefs`、`failureTargetRepairContext` 或 `repairTargetSet`。
 

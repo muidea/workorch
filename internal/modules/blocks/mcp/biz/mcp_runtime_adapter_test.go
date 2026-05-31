@@ -205,6 +205,55 @@ func TestRuntimeAdapterFailsHTTPToolResultError(t *testing.T) {
 	if result.Output["status"] != "failed" || result.Output["stage"] != "mcp_tool_call_failed" {
 		t.Fatalf("output = %+v, want failed tool call", result.Output)
 	}
+	diagnostics := result.Output["runtimeDiagnostics"].(map[string]any)
+	if _, ok := diagnostics["targetRef"]; ok {
+		t.Fatalf("runtimeDiagnostics = %+v, did not expect target without input target", diagnostics)
+	}
+}
+
+func TestRuntimeAdapterFailureDiagnosticsIncludeToolInputTarget(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{{"type": "text", "text": "column is beyond end of line"}},
+			"isError": true,
+		})
+	}))
+	defer server.Close()
+
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-http-tool-target"),
+		Name:          "http tool target",
+		Transport:     "http",
+		Endpoint:      server.URL,
+		Enabled:       true,
+		AllowedTools:  []string{"lookup.references"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		Kind: "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-http-tool-target",
+			"tool":     "lookup.references",
+			"input": map[string]any{
+				"path": "src/symbol.go",
+				"line": 1,
+				"col":  13,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "column is beyond end of line") {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want MCP tool result error", err)
+	}
+	diagnostics := result.Output["runtimeDiagnostics"].(map[string]any)
+	if diagnostics["targetRef"] != "src/symbol.go" {
+		t.Fatalf("runtimeDiagnostics = %+v, want tool input target", diagnostics)
+	}
+	targets := diagnostics["failureTargets"].([]string)
+	if len(targets) != 1 || targets[0] != "src/symbol.go" {
+		t.Fatalf("failureTargets = %#v, want tool input target", diagnostics["failureTargets"])
+	}
 }
 
 func TestRuntimeAdapterRejectsDisallowedTool(t *testing.T) {
