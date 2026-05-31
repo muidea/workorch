@@ -299,6 +299,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Run != nil {
+			if !m.runMessageBelongsToActiveWorkspace("", msg.Run) {
+				return m, nil
+			}
 			m.running = true
 			m.activeRunID = string(msg.Run.ID)
 			m.applyRunStarted(msg.Run)
@@ -323,6 +326,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case RunControlMsg:
+		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			if isTransientContextError(msg.Error) {
 				return m, nil
@@ -1608,6 +1614,19 @@ func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
 		FetchWorkspaceContext(m.be, m.activeWorkspaceID),
 		m.requestWorkspaceListRefresh(),
 	)
+}
+
+func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *backend.RunInfo) bool {
+	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return true
+	}
+	if strings.TrimSpace(workspaceID) != "" {
+		return workspaceID == m.activeWorkspaceID
+	}
+	if run != nil && run.WorkspaceID != "" {
+		return string(run.WorkspaceID) == m.activeWorkspaceID
+	}
+	return true
 }
 
 func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) {

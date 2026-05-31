@@ -55,6 +55,7 @@ type RunStatus struct {
 }
 
 type StepQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -70,6 +71,7 @@ type StepPage struct {
 }
 
 type ToolCallQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -85,6 +87,7 @@ type ToolCallPage struct {
 }
 
 type RuntimeCheckpointQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -100,6 +103,7 @@ type RuntimeCheckpointPage struct {
 }
 
 type ResultQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -115,6 +119,7 @@ type ResultPage struct {
 }
 
 type PatchQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -130,6 +135,7 @@ type PatchPage struct {
 }
 
 type ValidationResultQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int
@@ -145,6 +151,7 @@ type ValidationResultPage struct {
 }
 
 type ArtifactQuery struct {
+	WorkspaceID   string
 	RunID         string
 	CursorAfterID string
 	Limit         int

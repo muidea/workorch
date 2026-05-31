@@ -69,6 +69,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspace.ID)
 	if err := ensureWorkspaceManagedConfigs(workspace.InternalDirectory, workspace.ContextHints); err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
@@ -2458,7 +2459,7 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		return "", err
 	}
 	for attempt := 0; attempt < 8; attempt++ {
-		runID, err := nextWorkspaceExecutionRunID(ctx, exports.Repositories.Runs)
+		runID, err := nextWorkspaceExecutionRunID(ctx, exports.Repositories.Runs, workspaceID)
 		if err != nil {
 			return "", err
 		}
@@ -2481,7 +2482,7 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		if err := recordActivationMemoryRecallTrace(ctx, exports, runID, workspaceID, createExecutionContext); err != nil {
 			return "", err
 		}
-		startCtx := common.ContextWithRuntimeLLMProviderID(ctx, llmProviderID)
+		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, llmProviderID), workspaceID)
 		if err := exports.Services.RunService.EnsureStarted(startCtx, runmodule.StartRunCommand{RunID: runID}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				run, getErr := exports.Repositories.Runs.Get(ctx, runID)
@@ -2503,11 +2504,11 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 	return "", common.ErrConflict
 }
 
-func nextWorkspaceExecutionRunID(ctx context.Context, runs repository.RunRepository) (common.RunID, error) {
-	if runs == nil {
+func nextWorkspaceExecutionRunID(ctx context.Context, runs repository.RunRepository, workspaceID common.WorkspaceID) (common.RunID, error) {
+	if runs == nil || workspaceID == "" {
 		return "", common.ErrInvalidArgument
 	}
-	items, err := runs.List(ctx)
+	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return "", err
 	}

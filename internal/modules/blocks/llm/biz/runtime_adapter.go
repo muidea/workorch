@@ -3531,13 +3531,13 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 		ServiceAPIs: []llmmodels.ServiceAPICapability{
 			{
 				Method:       "GET",
-				PathTemplate: "/api/v1/workorch/runs/{runId}/snapshot",
-				Description:  "Read the current run snapshot. Use the active runId from the provider request.",
+				PathTemplate: "/api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot",
+				Description:  "Read the current run snapshot. Use the workspaceId and active runId from the provider request.",
 				ReadOnly:     true,
 			},
 			{
 				Method:       "GET",
-				PathTemplate: "/api/v1/workorch/runs/{runId}/observability",
+				PathTemplate: "/api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/observability",
 				Description:  "Read the current run observability timeline and evidence counters.",
 				ReadOnly:     true,
 			},

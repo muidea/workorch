@@ -572,7 +572,7 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchApply) ||
 		!runtimeCapabilitiesContainBlock(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchRevert) ||
-		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/runs/{runId}/snapshot") {
+		!runtimeCapabilitiesContainServiceAPI(provider.request.RuntimeCapabilities, "GET", "/api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot") {
 		t.Fatalf("runtime capabilities = %+v, want declared block and service API catalog", provider.request.RuntimeCapabilities)
 	}
 	if description := runtimeCapabilityBlockDescription(provider.request.RuntimeCapabilities, llmcommon.RuntimeBlockKindPatchPreview); !strings.Contains(description, "complete, concrete, and directly applicable") {
@@ -1620,7 +1620,7 @@ func TestProviderCachePlanKeepsStablePrefixForAssessmentOnlyMode(t *testing.T) {
 				{Kind: llmcommon.RuntimeBlockKindPatchApply, Description: "apply patch"},
 			},
 			ServiceAPIs: []llmmodels.ServiceAPICapability{
-				{Method: "GET", PathTemplate: "/api/v1/workorch/runs/{runId}/snapshot", ReadOnly: true},
+				{Method: "GET", PathTemplate: "/api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot", ReadOnly: true},
 			},
 			ShellPolicy: llmmodels.ShellRuntimePolicy{Enabled: true},
 		},
@@ -2991,7 +2991,7 @@ func TestParseLLMExecutionDecisionRejectsUndeclaredLocalWorkorchServiceAPI(t *te
 
 func TestParseLLMExecutionDecisionAcceptsDeclaredLocalWorkorchServiceAPI(t *testing.T) {
 	for _, payload := range []string{
-		`{"completionState":"continue","shellCommands":[{"command":"curl","args":["-s","http://127.0.0.1:8080/api/v1/workorch/runs/run-1/snapshot"]}]}`,
+		`{"completionState":"continue","shellCommands":[{"command":"curl","args":["-s","http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-1/runs/run-1/snapshot"]}]}`,
 		`{"completionState":"continue","executionGraph":{"nodes":[{"id":"metrics","kind":"shell/command","input":{"command":"curl","args":["-s","http://localhost:8080/metrics"]}}]}}`,
 	} {
 		decision, err := ParseLLMExecutionDecision([]byte(payload))

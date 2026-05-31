@@ -154,6 +154,28 @@ func (blockingUnsubscribeHub) Send(magicevent.Event) magicevent.Result {
 
 func (blockingUnsubscribeHub) Terminate(_ context.Context) {}
 
+type recordingLaneHub struct {
+	events []magicevent.Event
+	lanes  []string
+}
+
+func (h *recordingLaneHub) Subscribe(string, magicevent.Observer) {}
+
+func (h *recordingLaneHub) Unsubscribe(string, magicevent.Observer) {}
+
+func (h *recordingLaneHub) Post(event magicevent.Event) {
+	h.events = append(h.events, event)
+	h.lanes = append(h.lanes, event.LaneKey())
+}
+
+func (h *recordingLaneHub) Send(event magicevent.Event) magicevent.Result {
+	h.events = append(h.events, event)
+	h.lanes = append(h.lanes, event.LaneKey())
+	return nil
+}
+
+func (h *recordingLaneHub) Terminate(_ context.Context) {}
+
 func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
@@ -164,6 +186,33 @@ func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	published := hub.Published()
 	if len(published) != 1 || published[0].Topic != TopicStepDispatched {
 		t.Fatalf("published = %+v, want one step dispatched event", published)
+	}
+}
+
+func TestMagicHubUsesWorkspaceLaneForWorkspaceScopedEvents(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+		t.Fatalf("publish workspace a event: %v", err)
+	}
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicStepStateChanged, WorkspaceID: "ws-b", RunID: "run-001"}); err != nil {
+		t.Fatalf("publish workspace b event: %v", err)
+	}
+	if len(rawHub.lanes) != 2 || rawHub.lanes[0] != "workspace/ws-a" || rawHub.lanes[1] != "workspace/ws-b" {
+		t.Fatalf("lanes = %v, want workspace-scoped lanes", rawHub.lanes)
+	}
+}
+
+func TestMagicHubFallsBackToTopicLaneForGlobalEvents(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand}); err != nil {
+		t.Fatalf("publish global event: %v", err)
+	}
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+TopicCLICommand {
+		t.Fatalf("lanes = %v, want topic fallback lane", rawHub.lanes)
 	}
 }
 

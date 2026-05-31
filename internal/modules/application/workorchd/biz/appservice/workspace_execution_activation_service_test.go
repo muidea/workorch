@@ -704,6 +704,50 @@ func TestActivateWorkspaceExecutionWithBackendUsesNumericRunSequence(t *testing.
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendScopesNumericRunSequenceByWorkspace(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspaceA, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-sequence-a", "activation run sequence workspace a", "", "workspaces/activation-run-sequence-a")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend a: %v", err)
+	}
+	goalA, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspaceA.ID, "activation run sequence goal a")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend a: %v", err)
+	}
+	dodA, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspaceA.ID, []string{"activation run sequence dod a"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend a: %v", err)
+	}
+	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceA.ID, "run-099", goalA.ID, dodA.ID); err != nil {
+		t.Fatalf("CreateRunWithBackend workspace a seed: %v", err)
+	}
+
+	workspaceB, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-sequence-b", "activation run sequence workspace b", "", "workspaces/activation-run-sequence-b")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend b: %v", err)
+	}
+	goalB, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspaceB.ID, "activation run sequence goal b")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend b: %v", err)
+	}
+	dodB, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspaceB.ID, []string{"activation run sequence dod b"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend b: %v", err)
+	}
+	if _, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspaceB.ID, "run-002", goalB.ID, dodB.ID); err != nil {
+		t.Fatalf("CreateRunWithBackend workspace b seed: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspaceB.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID != "run-003" {
+		t.Fatalf("activation run id = %q, want run-003 scoped to workspace b", item.Run.ID)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendContinuesRunSequenceAfterRestart(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()

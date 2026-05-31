@@ -170,3 +170,25 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 		t.Fatalf("status current step = %s/%s/%s, want mapped current step fields", status.CurrentStepID, status.CurrentStepKind, status.CurrentStepState)
 	}
 }
+
+func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":{"id":"run-001","workspaceId":"ws-remote","state":"running"}}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-remote")
+	status, err := be.Run().Status(ctx, common.RunID("run-001"))
+	if err != nil {
+		t.Fatalf("remote run status: %v", err)
+	}
+	if status.WorkspaceID != "ws-remote" || status.ID != "run-001" {
+		t.Fatalf("status = %+v, want scoped workspace/run", status)
+	}
+}

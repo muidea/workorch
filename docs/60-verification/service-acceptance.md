@@ -115,7 +115,7 @@ Last Updated: 2026-05-30
 - `POST /workspaces/:workspaceId/goals`
 - `POST /workspaces/:workspaceId/dods`
 - `POST /workspaces/:workspaceId/runs`
-- `POST /runs/:runId/start`
+- `POST /workspaces/:workspaceId/runs/:runId/start`
 
 用于证明最短业务主链可运行。
 
@@ -125,8 +125,8 @@ Last Updated: 2026-05-30
 
 - `GET /workspaces/:workspaceId`
 - `GET /workspaces/:workspaceId/snapshot`
-- `GET /runs/:runId/snapshot`
-- `GET /runs/:runId/status`
+- `GET /workspaces/:workspaceId/runs/:runId/snapshot`
+- `GET /workspaces/:workspaceId/runs/:runId/status`
 - `GET /decisions`
 - `GET /approvals`
 - `GET /runtime/payloads`
@@ -211,13 +211,13 @@ Last Updated: 2026-05-30
 
 | Endpoint | 直接断言关注点 |
 | --- | --- |
-| `GET /runs/:runId/status` | `state`、`blockingTicketId`、`blockingApprovalId`、`failureReason`、`waitMatched/waitElapsedMs` |
-| `GET /runs/:runId/snapshot` | `run`、`outcome`、`taskProgress`、`results`、`artifacts` 聚合 |
-| `GET /runs/:runId/observability` | `timeline`、`evidence`、`llmUsageSummary`、`closureTraces` |
-| `GET /runs/:runId/task-progress` | `taskProgress.state`、`milestones`、`blockers`、`recovery` |
-| `GET /runs/:runId/context-bundle` | `contextBundle.sections`、`recentEvidence`、`compressedContext` |
-| `GET /runs/:runId/task-decompositions` | `taskDecompositions` 列表和节点总数/状态摘要 |
-| `GET /runs/:runId/memory-recalls` | `memoryRecallTraces` 列表和 source/stage 基本字段 |
+| `GET /workspaces/:workspaceId/runs/:runId/status` | `state`、`blockingTicketId`、`blockingApprovalId`、`failureReason`、`waitMatched/waitElapsedMs` |
+| `GET /workspaces/:workspaceId/runs/:runId/snapshot` | `run`、`outcome`、`taskProgress`、`results`、`artifacts` 聚合 |
+| `GET /workspaces/:workspaceId/runs/:runId/observability` | `timeline`、`evidence`、`llmUsageSummary`、`closureTraces` |
+| `GET /workspaces/:workspaceId/runs/:runId/task-progress` | `taskProgress.state`、`milestones`、`blockers`、`recovery` |
+| `GET /workspaces/:workspaceId/runs/:runId/context-bundle` | `contextBundle.sections`、`recentEvidence`、`compressedContext` |
+| `GET /workspaces/:workspaceId/runs/:runId/task-decompositions` | `taskDecompositions` 列表和节点总数/状态摘要 |
+| `GET /workspaces/:workspaceId/runs/:runId/memory-recalls` | `memoryRecallTraces` 列表和 source/stage 基本字段 |
 | `GET /workspaces/:workspaceId/snapshot` | `workspace`、`outcome`、`runs`、`taskProgress` 聚合 |
 | `GET /workspaces/:workspaceId/task-progress` | `taskProgress.state`、`blockers`、`recovery` |
 | `GET /workspaces/:workspaceId/context-bundle` | workspace 级 `sections` / `compressedContext` |
@@ -234,13 +234,13 @@ Last Updated: 2026-05-30
 
 | Endpoint | 当前状态 | 当前直接证据 |
 | --- | --- | --- |
-| `GET /runs/:runId/status` | direct | `http_test.go` wait/status fixture + `verify-workorch-container.sh` |
-| `GET /runs/:runId/snapshot` | direct | `http_test.go` snapshot / replay / cache fixture + `verify-workorch-container.sh` |
-| `GET /runs/:runId/observability` | direct | `http_test.go` observability / replay / inflight cache fixture |
-| `GET /runs/:runId/task-progress` | direct | `http_test.go` native-read fixture |
-| `GET /runs/:runId/context-bundle` | direct | `http_test.go` native-read fixture |
-| `GET /runs/:runId/task-decompositions` | direct | `http_test.go` native-read fixture |
-| `GET /runs/:runId/memory-recalls` | direct | `http_test.go` recall trace fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/status` | direct | `http_test.go` wait/status fixture + `verify-workorch-container.sh` |
+| `GET /workspaces/:workspaceId/runs/:runId/snapshot` | direct | `http_test.go` snapshot / replay / cache fixture + `verify-workorch-container.sh` |
+| `GET /workspaces/:workspaceId/runs/:runId/observability` | direct | `http_test.go` observability / replay / inflight cache fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/task-progress` | direct | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/context-bundle` | direct | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/task-decompositions` | direct | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/memory-recalls` | direct | `http_test.go` recall trace fixture |
 | `GET /workspaces/:workspaceId/snapshot` | direct | `http_test.go` workspace snapshot fixture |
 | `GET /workspaces/:workspaceId/task-progress` | direct | `http_test.go` native-read fixture |
 | `GET /workspaces/:workspaceId/context-bundle` | direct | `http_test.go` native-read fixture |
@@ -374,9 +374,9 @@ go test ./...
 
 当前 file backend 相关 direct fixture 已覆盖的重点包括：
 
-- `GET /runs/:runId/snapshot`
+- `GET /workspaces/:workspaceId/runs/:runId/snapshot`
   - event replay 后 snapshot 可重建
-- `GET /runs/:runId/observability`
+- `GET /workspaces/:workspaceId/runs/:runId/observability`
   - event replay 后 observability 可重建
 - `GET /runtime/payloads`
   - `ref` 能打开 raw payload，非法或缺失 ref 会失败
@@ -393,13 +393,13 @@ go test ./...
 
 | Endpoint | 直接 query 断言 | 直接 page 断言 | 当前直接证据 |
 | --- | --- | --- | --- |
-| `GET /runs/:runId/steps` | `runId=run-native-read`、`cursorAfterId=step-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=step-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/tool-calls` | `runId=run-native-read`、`cursorAfterId=tool-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=tool-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/runtime-checkpoints` | `runId=run-native-read`、`cursorAfterId=checkpoint-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=checkpoint-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/results` | `runId=run-native-read`、`cursorAfterId=result-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=result-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/patches` | `runId=run-native-read`、`cursorAfterId=patch-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=patch-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/validation-results` | `runId=run-native-read`、`cursorAfterId=validation-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=validation-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
-| `GET /runs/:runId/artifacts` | `runId=run-native-read`、`cursorAfterId=artifact-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=artifact-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/steps` | `runId=run-native-read`、`cursorAfterId=step-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=step-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/tool-calls` | `runId=run-native-read`、`cursorAfterId=tool-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=tool-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/runtime-checkpoints` | `runId=run-native-read`、`cursorAfterId=checkpoint-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=checkpoint-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/results` | `runId=run-native-read`、`cursorAfterId=result-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=result-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/patches` | `runId=run-native-read`、`cursorAfterId=patch-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=patch-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/validation-results` | `runId=run-native-read`、`cursorAfterId=validation-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=validation-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
+| `GET /workspaces/:workspaceId/runs/:runId/artifacts` | `runId=run-native-read`、`cursorAfterId=artifact-native-1`、`limit=2` | `page.limit=2`、`page.cursorAfterId=artifact-native-1`、`nextCursorAfterId` 前进 | `http_test.go` native-read fixture |
 | `GET /decisions` | `workspaceId=ws-native-read`、`runId=run-native-read`、`cursorAfterId=ticket-native-cursor`、`limit=2` | `limit=2`、`cursorAfterId=ticket-native-cursor`、`nextCursorAfterId=ticket-native-read` | `http_test.go` decision page fixture |
 | `GET /approvals` | `workspaceId=ws-native-read`、`runId=run-native-read`、`cursorAfterId=approval-native-cursor`、`limit=2` | `limit=2`、`cursorAfterId=approval-native-cursor`、`nextCursorAfterId=approval-native-read` | `http_test.go` approval page fixture |
 
@@ -428,8 +428,8 @@ go test ./...
 | 验收主题 | 首启阶段动作 | 重启后断言 | 当前直接证据 |
 | --- | --- | --- | --- |
 | workspace / goal / DoD / run replay | 创建 workspace、goal、DoD、run | `GET /events?workspaceId=...` 仍能读到 persisted workspace/goal/dod/run topics | `http_test.go` event replay fixture |
-| run event replay -> snapshot | 创建 run 后关闭服务 | `GET /runs/:runId/snapshot` 仍含 replayed `eventRecords` | `http_test.go` event replay fixture |
-| run event replay -> observability | 创建 run 后关闭服务 | `GET /runs/:runId/observability` timeline 仍包含 persisted run event | `http_test.go` event replay fixture |
+| run event replay -> snapshot | 创建 run 后关闭服务 | `GET /workspaces/:workspaceId/runs/:runId/snapshot` 仍含 replayed `eventRecords` | `http_test.go` event replay fixture |
+| run event replay -> observability | 创建 run 后关闭服务 | `GET /workspaces/:workspaceId/runs/:runId/observability` timeline 仍包含 persisted run event | `http_test.go` event replay fixture |
 | raw payload reopening | file backend 写入 raw request payload 文件 | `GET /runtime/payloads?ref=...` 重建后仍可按受控 `ref` 打开 | `http_test.go` raw payload fixture |
 | artifact reopening | file backend 写入 artifact metadata + file | `GET /artifacts/content?uri=...` 重建后仍可按受控 `uri` 打开 | `http_test.go` artifact content fixture |
 | cached artifact metadata reopening | snapshot cache 中已有 artifact metadata | `GET /artifacts/content` 可直接复用 cached metadata 打开 | `http_test.go` cached artifact fixture |

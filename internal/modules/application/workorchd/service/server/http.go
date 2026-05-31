@@ -1367,7 +1367,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runGetRequests.Add(1)
-		item, err := state.readRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		item, err := state.readRun(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1387,7 +1387,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runSnapshotRequests.Add(1)
-		item, err := state.readRunSnapshotCached(r.Context(), runID)
+		ctx := requestRunWorkspaceContext(r.Context(), r)
+		item, err := state.readRunSnapshotCached(ctx, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1408,7 +1409,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := stepQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunSteps(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunSteps(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1430,7 +1432,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := toolCallQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunToolCalls(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunToolCalls(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1452,7 +1455,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := runtimeCheckpointQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunRuntimeCheckpoints(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunRuntimeCheckpoints(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1474,7 +1478,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := resultQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunResults(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunResults(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1496,7 +1501,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := patchQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunPatches(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunPatches(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1518,7 +1524,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := validationResultQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunValidationResults(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunValidationResults(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1540,7 +1547,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := artifactQueryFromRequest(r)
 		query.RunID = runID
-		page, err := state.listRunArtifacts(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		page, err := state.listRunArtifacts(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1562,7 +1570,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		state.metrics.runStatusRequests.Add(1)
 		started := time.Now()
-		item, waitMatched, err := state.readRunStatusWithWait(r.Context(), runID, r.URL.Query())
+		item, waitMatched, err := state.readRunStatusWithWait(requestRunWorkspaceContext(r.Context(), r), runID, r.URL.Query())
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1584,7 +1592,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runObservabilityRequests.Add(1)
-		item, err := state.readRunObservabilityCached(r.Context(), runID)
+		item, err := state.readRunObservabilityCached(requestRunWorkspaceContext(r.Context(), r), runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1605,7 +1613,8 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		}
 		query := memoryRecallTraceQueryFromValues(r.URL.Query())
 		query.RunID = runID
-		items, err := state.listMemoryRecallTraces(r.Context(), state.config.Backend, state.config.DataRoot, query)
+		query.WorkspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+		items, err := state.listMemoryRecallTraces(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, query)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1644,7 +1653,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runTaskProgressRequests.Add(1)
-		item, err := state.readRunTaskProgress(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		item, err := state.readRunTaskProgress(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1664,7 +1673,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runContextBundleRequests.Add(1)
-		item, err := state.readRunContextBundle(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		item, err := state.readRunContextBundle(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -1684,7 +1693,7 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		state.metrics.runTaskDecompositionRequests.Add(1)
-		items, err := state.readRunTaskDecompositions(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		items, err := state.readRunTaskDecompositions(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2696,6 +2705,15 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			Runs:     items,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		state.handleWorkspaceScopedRunGet(w, r)
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		state.handleWorkspaceScopedRunGet(w, r)
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		state.handleWorkspaceScopedRunPost(w, r)
+	})
 	router.AddHandler("/api/v1/workorch/runs/:runId/start", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		runID, action, ok := runActionFromPath(r.URL.Path)
@@ -2711,7 +2729,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		defer release()
-		item, err := state.startRun(r.Context(), state.config.Backend, state.config.DataRoot, runID)
+		item, err := state.startRun(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -2750,7 +2768,7 @@ func registerBusinessWriteRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		defer release()
-		item, err := state.resumeRun(r.Context(), state.config.Backend, state.config.DataRoot, runID, req.ExecutionContextPatch)
+		item, err := state.resumeRun(requestRunWorkspaceContext(r.Context(), r), state.config.Backend, state.config.DataRoot, runID, req.ExecutionContextPatch)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -4359,6 +4377,218 @@ func (s *serverState) acquireRunSlot(ctx context.Context) (func(), error) {
 	return s.acquireRunSlotWithPriority(ctx, 0)
 }
 
+func (s *serverState) handleWorkspaceScopedRunGet(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(appservice.ContextWithEventHub(r.Context(), s.eventHub))
+	workspaceID, runID, action, ok := workspaceRunActionFromPath(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
+	switch action {
+	case "":
+		s.metrics.runGetRequests.Add(1)
+		item, err := s.readRun(ctx, s.config.Backend, s.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+	case "snapshot":
+		s.metrics.runSnapshotRequests.Add(1)
+		item, err := s.readRunSnapshotCached(ctx, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runSnapshotResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Snapshot: appservice.ProjectRunSnapshotDetail(item)})
+	case "steps":
+		query := stepQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunSteps(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runStepsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Steps: page.Steps, Page: page})
+	case "tool-calls":
+		query := toolCallQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunToolCalls(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runToolCallsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ToolCalls: page.ToolCalls, Page: page})
+	case "runtime-checkpoints":
+		query := runtimeCheckpointQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunRuntimeCheckpoints(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runRuntimeCheckpointsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, RuntimeCheckpoints: page.RuntimeCheckpoints, Page: page})
+	case "results":
+		query := resultQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunResults(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Results: page.Results, Page: page})
+	case "patches":
+		query := patchQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunPatches(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runPatchesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Patches: page.Patches, Page: page})
+	case "validation-results":
+		query := validationResultQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunValidationResults(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runValidationResultsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ValidationResults: page.ValidationResults, Page: page})
+	case "artifacts":
+		query := artifactQueryFromRequest(r)
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		page, err := s.listRunArtifacts(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runArtifactsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Artifacts: page.Artifacts, Page: page})
+	case "status":
+		s.metrics.runStatusRequests.Add(1)
+		started := time.Now()
+		item, waitMatched, err := s.readRunStatusWithWait(ctx, runID, r.URL.Query())
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runStatusResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Status: item, WaitMatched: waitMatched, WaitElapsedMs: int64(time.Since(started) / time.Millisecond)})
+	case "observability":
+		s.metrics.runObservabilityRequests.Add(1)
+		item, err := s.readRunObservabilityCached(ctx, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, runObservabilityResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Observability: item})
+	case "memory-recalls":
+		query := memoryRecallTraceQueryFromValues(r.URL.Query())
+		query.WorkspaceID = workspaceID
+		query.RunID = runID
+		items, err := s.listMemoryRecallTraces(ctx, s.config.Backend, s.config.DataRoot, query)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, memoryRecallTracesResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, MemoryRecallTraces: items})
+	case "task-progress":
+		s.metrics.runTaskProgressRequests.Add(1)
+		item, err := s.readRunTaskProgress(ctx, s.config.Backend, s.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskProgressResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskProgress: item})
+	case "context-bundle":
+		s.metrics.runContextBundleRequests.Add(1)
+		item, err := s.readRunContextBundle(ctx, s.config.Backend, s.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, contextBundleResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, ContextBundle: item})
+	case "task-decompositions":
+		s.metrics.runTaskDecompositionRequests.Add(1)
+		items, err := s.readRunTaskDecompositions(ctx, s.config.Backend, s.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, taskDecompositionsResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, TaskDecompositions: items})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(appservice.ContextWithEventHub(r.Context(), s.eventHub))
+	workspaceID, runID, action, ok := workspaceRunActionFromPath(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
+	switch action {
+	case "start":
+		s.metrics.runStartRequests.Add(1)
+		release, err := s.acquireRunSlotWithPriority(ctx, runPriorityFromRequest(r, 0))
+		if err != nil {
+			s.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+		item, err := s.startRun(ctx, s.config.Backend, s.config.DataRoot, runID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		s.metrics.observeRunOutcome(item)
+		if item.State == string(common.RunStateSuperseded) {
+			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
+		}
+		s.notifyRunStatusChangedForRun(item)
+		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+	case "resume":
+		var req struct {
+			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+		}
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		s.metrics.runResumeRequests.Add(1)
+		release, err := s.acquireRunSlotWithPriority(ctx, runPriorityFromRequest(r, 0))
+		if err != nil {
+			s.metrics.runCanceled.Add(1)
+			writeRunQueueError(w, err)
+			return
+		}
+		defer release()
+		item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, runID, req.ExecutionContextPatch)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		s.metrics.observeRunOutcome(item)
+		if item.State == string(common.RunStateSuperseded) {
+			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
+		}
+		s.notifyRunStatusChangedForRun(item)
+		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
 func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, values url.Values) (appservice.RunStatus, bool, error) {
 	waitState := strings.TrimSpace(values.Get("waitState"))
 	timeout := durationFromMillisQuery(values, "waitTimeoutMillis", 0, 30*time.Second)
@@ -4366,7 +4596,7 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	if interval < 10*time.Millisecond {
 		interval = 10 * time.Millisecond
 	}
-	if cached, ok := s.cachedRunSnapshot(runID); ok {
+	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		status := appservice.RunStatusFromSnapshot(cached)
 		if waitState == "" || status.State == waitState {
 			return status, waitState == "" || status.State == waitState, nil
@@ -4411,11 +4641,25 @@ func (s *serverState) readRunStatusWithWait(ctx context.Context, runID string, v
 	}
 }
 
+func requestRunWorkspaceContext(ctx context.Context, r *http.Request) context.Context {
+	if r == nil {
+		return ctx
+	}
+	workspaceID, _, _, ok := workspaceRunActionFromPath(r.URL.Path)
+	if !ok {
+		workspaceID = strings.TrimSpace(r.URL.Query().Get("workspaceId"))
+	}
+	if workspaceID == "" {
+		return ctx
+	}
+	return common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+}
+
 func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, state string) {
 	if s == nil || strings.TrimSpace(runID) == "" || !terminalRunState(state) {
 		return
 	}
-	if _, ok := s.cachedRunSnapshot(runID); ok {
+	if _, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		return
 	}
 	if ctx != nil {
@@ -4425,22 +4669,26 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 		default:
 		}
 	}
-	if _, ok := s.ensureRunSnapshotInflight(runID); ok {
+	if _, ok := s.ensureRunSnapshotInflight(ctx, runID); ok {
 		return
 	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
 	s.backgroundWG.Add(1)
 	go func() {
 		defer s.backgroundWG.Done()
-		defer s.finishRunSnapshotInflight(runID)
 		warmCtx, cancel := context.WithTimeout(s.backgroundContext(), runSnapshotCacheTTL)
 		defer cancel()
+		if workspaceID != "" {
+			warmCtx = common.ContextWithRuntimeWorkspaceID(warmCtx, workspaceID)
+		}
+		defer s.finishRunSnapshotInflight(warmCtx, runID)
 		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
-		s.completeRunSnapshotInflight(runID, item, err)
+		s.completeRunSnapshotInflight(warmCtx, runID, item, err)
 	}()
 }
 
 func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (appservice.RunSnapshot, error) {
-	if cached, ok := s.cachedRunSnapshot(runID); ok {
+	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		return cached, nil
 	}
 	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
@@ -4481,7 +4729,7 @@ func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI
 }
 
 func (s *serverState) readRunObservabilityCached(ctx context.Context, runID string) (appservice.RunObservability, error) {
-	if cached, ok := s.cachedRunSnapshot(runID); ok {
+	if cached, ok := s.cachedRunSnapshot(ctx, runID); ok {
 		return appservice.RunObservabilityFromSnapshot(cached), nil
 	}
 	if item, err, ok := s.waitRunSnapshotInflight(ctx, runID); ok {
@@ -4497,20 +4745,41 @@ func (s *serverState) readRunObservabilityCached(ctx context.Context, runID stri
 	return item, nil
 }
 
-func (s *serverState) cachedRunSnapshot(runID string) (appservice.RunSnapshot, bool) {
+func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (appservice.RunSnapshot, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return appservice.RunSnapshot{}, false
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	entry, ok := s.runSnapshotCache[runID]
+	key := runSnapshotCacheKey(ctx, runID)
+	entry, ok := s.runSnapshotCache[key]
 	if !ok || time.Since(entry.cachedAt) > runSnapshotCacheTTL {
 		if ok {
-			delete(s.runSnapshotCache, runID)
+			delete(s.runSnapshotCache, key)
 		}
-		return appservice.RunSnapshot{}, false
+		if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
+			return appservice.RunSnapshot{}, false
+		}
+		return s.cachedRunSnapshotByBareRunIDLocked(runID)
 	}
 	return entry.snapshot, true
+}
+
+func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (appservice.RunSnapshot, bool) {
+	now := time.Now()
+	var ret appservice.RunSnapshot
+	count := 0
+	for key, entry := range s.runSnapshotCache {
+		if now.Sub(entry.cachedAt) > runSnapshotCacheTTL {
+			delete(s.runSnapshotCache, key)
+			continue
+		}
+		if entry.snapshot.Run.ID == runID {
+			ret = entry.snapshot
+			count++
+		}
+	}
+	return ret, count == 1
 }
 
 func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (appservice.RunSnapshot, bool) {
@@ -4532,7 +4801,7 @@ func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (appservi
 	return appservice.RunSnapshot{}, false
 }
 
-func (s *serverState) ensureRunSnapshotInflight(runID string) (*runSnapshotInflight, bool) {
+func (s *serverState) ensureRunSnapshotInflight(ctx context.Context, runID string) (*runSnapshotInflight, bool) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return nil, true
 	}
@@ -4541,11 +4810,12 @@ func (s *serverState) ensureRunSnapshotInflight(runID string) (*runSnapshotInfli
 	if s.runSnapshotInflight == nil {
 		s.runSnapshotInflight = map[string]*runSnapshotInflight{}
 	}
-	if current, ok := s.runSnapshotInflight[runID]; ok {
+	key := runSnapshotCacheKey(ctx, runID)
+	if current, ok := s.runSnapshotInflight[key]; ok {
 		return current, true
 	}
 	current := &runSnapshotInflight{done: make(chan struct{})}
-	s.runSnapshotInflight[runID] = current
+	s.runSnapshotInflight[key] = current
 	return current, false
 }
 
@@ -4554,7 +4824,8 @@ func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string)
 		return appservice.RunSnapshot{}, nil, false
 	}
 	s.runSnapshotCacheMu.Lock()
-	current, ok := s.runSnapshotInflight[runID]
+	key := runSnapshotCacheKey(ctx, runID)
+	current, ok := s.runSnapshotInflight[key]
 	s.runSnapshotCacheMu.Unlock()
 	if !ok {
 		return appservice.RunSnapshot{}, nil, false
@@ -4567,13 +4838,14 @@ func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string)
 	}
 }
 
-func (s *serverState) completeRunSnapshotInflight(runID string, snapshot appservice.RunSnapshot, err error) {
+func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID string, snapshot appservice.RunSnapshot, err error) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	current, ok := s.runSnapshotInflight[runID]
+	key := runSnapshotCacheKey(ctx, runID)
+	current, ok := s.runSnapshotInflight[key]
 	if !ok {
 		return
 	}
@@ -4583,18 +4855,18 @@ func (s *serverState) completeRunSnapshotInflight(runID string, snapshot appserv
 		if s.runSnapshotCache == nil {
 			s.runSnapshotCache = map[string]cachedRunSnapshot{}
 		}
-		s.runSnapshotCache[snapshot.Run.ID] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+		s.runSnapshotCache[runSnapshotCacheKeyForSnapshot(snapshot)] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
 	}
 	close(current.done)
 }
 
-func (s *serverState) finishRunSnapshotInflight(runID string) {
+func (s *serverState) finishRunSnapshotInflight(ctx context.Context, runID string) {
 	if s == nil || strings.TrimSpace(runID) == "" {
 		return
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	delete(s.runSnapshotInflight, runID)
+	delete(s.runSnapshotInflight, runSnapshotCacheKey(ctx, runID))
 }
 
 func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appservice.RunSnapshot, bool) {
@@ -4627,7 +4899,22 @@ func (s *serverState) cacheRunSnapshot(snapshot appservice.RunSnapshot) {
 	if s.runSnapshotCache == nil {
 		s.runSnapshotCache = map[string]cachedRunSnapshot{}
 	}
-	s.runSnapshotCache[snapshot.Run.ID] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+	s.runSnapshotCache[runSnapshotCacheKeyForSnapshot(snapshot)] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+}
+
+func runSnapshotCacheKey(ctx context.Context, runID string) string {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" {
+		return "/" + strings.TrimSpace(runID)
+	}
+	return string(workspaceID) + "/" + strings.TrimSpace(runID)
+}
+
+func runSnapshotCacheKeyForSnapshot(snapshot appservice.RunSnapshot) string {
+	if snapshot.Run.WorkspaceID == "" {
+		return "/" + snapshot.Run.ID
+	}
+	return snapshot.Run.WorkspaceID + "/" + snapshot.Run.ID
 }
 
 func (s *serverState) clearRunSnapshotCache() {
@@ -5383,7 +5670,28 @@ func workspaceActionFromPath(path string) (workspaceID string, action string, ok
 	return "", "", false
 }
 
+func workspaceRunActionFromPath(path string) (workspaceID string, runID string, action string, ok bool) {
+	if !strings.HasPrefix(path, "/api/v1/workorch/workspaces/") {
+		return "", "", "", false
+	}
+	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/workspaces/")
+	if trimmed == "" {
+		return "", "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 3 && parts[0] != "" && parts[1] == "runs" && parts[2] != "" {
+		return parts[0], parts[2], "", true
+	}
+	if len(parts) == 4 && parts[0] != "" && parts[1] == "runs" && parts[2] != "" && parts[3] != "" {
+		return parts[0], parts[2], parts[3], true
+	}
+	return "", "", "", false
+}
+
 func runActionFromPath(path string) (runID string, action string, ok bool) {
+	if _, runID, action, ok := workspaceRunActionFromPath(path); ok {
+		return runID, action, true
+	}
 	if !strings.HasPrefix(path, "/api/v1/workorch/runs/") {
 		return "", "", false
 	}

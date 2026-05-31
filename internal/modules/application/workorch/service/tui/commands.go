@@ -50,6 +50,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		if snapshotBackend, ok := be.Workspace().(workspaceSnapshotBackend); ok {
 			snapshot, err := snapshotBackend.Snapshot(ctx, wsID)
 			if err != nil {
@@ -328,8 +329,21 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
 		}
 		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		targetRunID := common.RunID(runID)
-		if targetRunID == "" {
+		var run *backend.RunInfo
+		if targetRunID != "" {
+			fetchedRun, err := be.Run().Get(ctx, targetRunID)
+			if err != nil {
+				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+			}
+			if runBelongsToWorkspace(fetchedRun, wsID) {
+				run = fetchedRun
+			} else {
+				targetRunID = ""
+			}
+		}
+		if run == nil {
 			workspace, err := be.Workspace().Get(ctx, wsID)
 			if err != nil {
 				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
@@ -338,15 +352,18 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			if err != nil {
 				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
 			}
-			run := selectWorkspaceRun(workspace.ActiveRunID, runs)
+			run = selectWorkspaceRun(workspace.ActiveRunID, runs)
 			if run == nil {
 				return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
 			}
 			targetRunID = run.ID
-		}
-		run, err := be.Run().Get(ctx, targetRunID)
-		if err != nil {
-			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+			fetchedRun, err := be.Run().Get(ctx, targetRunID)
+			if err != nil {
+				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+			}
+			if runBelongsToWorkspace(fetchedRun, wsID) {
+				run = fetchedRun
+			}
 		}
 		if run == nil {
 			return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
@@ -364,6 +381,13 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Continuing active run"}
 		}
 	}
+}
+
+func runBelongsToWorkspace(run *backend.RunInfo, workspaceID common.WorkspaceID) bool {
+	if run == nil {
+		return false
+	}
+	return run.WorkspaceID == "" || run.WorkspaceID == workspaceID
 }
 
 func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput string) tea.Cmd {
@@ -464,7 +488,8 @@ func ResolveDecisionWithType(be backend.Backend, ticketID string, resolutionType
 			return DecisionResolvedMsg{Error: err}
 		}
 		if decision.RunID != "" {
-			_, err = be.Run().Resume(ctx, decision.RunID)
+			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, decision.WorkspaceID)
+			_, err = be.Run().Resume(resumeCtx, decision.RunID)
 		}
 		return DecisionResolvedMsg{Decision: decision, Error: err}
 	}
@@ -504,7 +529,8 @@ func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cm
 			}
 		}
 		if err == nil && !resumeHandled && approval != nil && approval.RunID != "" {
-			_, err = be.Run().Resume(ctx, approval.RunID)
+			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
+			_, err = be.Run().Resume(resumeCtx, approval.RunID)
 		}
 		return ApprovalResolvedMsg{Approval: approval, Error: err}
 	}
@@ -514,6 +540,7 @@ func resumeApprovalRun(ctx context.Context, be backend.Backend, approval *backen
 	if approval == nil || approval.RunID == "" {
 		return nil
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
 	run, err := be.Run().Get(ctx, approval.RunID)
 	if err != nil {
 		return err

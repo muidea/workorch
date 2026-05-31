@@ -387,6 +387,61 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopedRunRepositoryResolvesDuplicateRunIDByWorkspaceContext(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	rt := NewWithBackend("file", dataDir)
+	exports := rt.Exports()
+
+	runID := common.RunID("run-001")
+	for _, workspaceID := range []common.WorkspaceID{"ws-run-scope-a", "ws-run-scope-b"} {
+		if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+			ID:                   workspaceID,
+			Title:                string(workspaceID),
+			DeliverableDirectory: filepath.Join(filepath.Dir(dataDir), ".workorch-workspaces", string(workspaceID)),
+			InternalDirectory:    filepath.Join(dataDir, "internal", "workspaces", string(workspaceID)),
+			State:                common.WorkspaceStateActive,
+		}); err != nil {
+			t.Fatalf("create workspace %s: %v", workspaceID, err)
+		}
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := exports.Repositories.Runs.Create(scopedCtx, &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s/%s: %v", workspaceID, runID, err)
+		}
+		if err := exports.Repositories.Steps.Create(scopedCtx, &runmodel.Step{
+			ID:    common.StepID(string(runID) + "/step-" + string(workspaceID)),
+			RunID: runID,
+			Kind:  llmcommon.StepKindWorkspaceExecution,
+			State: common.StepStateCompleted,
+		}); err != nil {
+			t.Fatalf("create step %s/%s: %v", workspaceID, runID, err)
+		}
+	}
+
+	wsBCtx := common.ContextWithRuntimeWorkspaceID(ctx, "ws-run-scope-b")
+	run, err := exports.Repositories.Runs.Get(wsBCtx, runID)
+	if err != nil {
+		t.Fatalf("get scoped run: %v", err)
+	}
+	if run.WorkspaceID != "ws-run-scope-b" {
+		t.Fatalf("scoped run workspace = %s, want ws-run-scope-b", run.WorkspaceID)
+	}
+	steps, err := exports.Repositories.Steps.ListByRun(wsBCtx, runID)
+	if err != nil {
+		t.Fatalf("list scoped steps: %v", err)
+	}
+	if len(steps) != 1 || !strings.Contains(string(steps[0].ID), "ws-run-scope-b") {
+		t.Fatalf("scoped steps = %+v, want only ws-run-scope-b", steps)
+	}
+	if _, err := exports.Repositories.Runs.Get(ctx, runID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate run get err = %v, want conflict", err)
+	}
+}
+
 func assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t *testing.T, workspaceRoot string, workspaceID common.WorkspaceID, wantDefault common.SoulID, wantBinding common.SoulID) {
 	t.Helper()
 

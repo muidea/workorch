@@ -39,6 +39,7 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 		return Run{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 
 	if err := validateRunDefinitions(ctx, session, workspaceID, goalID, dodID); err != nil {
 		return Run{}, err
@@ -107,6 +108,11 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
+	loadedRun, err := repo.Get(ctx, id)
+	if err != nil {
+		return Run{}, err
+	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, loadedRun.WorkspaceID)
 	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
 		return Run{}, err
 	}
@@ -149,6 +155,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 	if err != nil {
 		return Run{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, loadedRun.WorkspaceID)
 	for _, item := range executionContextPatch {
 		for key, value := range item {
 			if strings.TrimSpace(key) == "" {
@@ -260,6 +267,7 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	return attachCompressedContextToLoadedRun(ctx, deps, item)
 }
 
@@ -272,6 +280,7 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	compressed, err := compressedContextForLoadedRun(ctx, deps, item)
 	if err != nil {
 		return nil, nil, err

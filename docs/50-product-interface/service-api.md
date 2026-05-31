@@ -125,23 +125,23 @@ response struct 为准，而不是单独维护 schema registry。
 ### Run And Run Detail
 
 - `GET /api/v1/workorch/runs`
-- `GET /api/v1/workorch/runs/:runId`
-- `GET /api/v1/workorch/runs/:runId/snapshot`
-- `GET /api/v1/workorch/runs/:runId/status`
-- `GET /api/v1/workorch/runs/:runId/observability`
-- `GET /api/v1/workorch/runs/:runId/task-progress`
-- `GET /api/v1/workorch/runs/:runId/context-bundle`
-- `GET /api/v1/workorch/runs/:runId/task-decompositions`
-- `GET /api/v1/workorch/runs/:runId/memory-recalls`
-- `GET /api/v1/workorch/runs/:runId/steps`
-- `GET /api/v1/workorch/runs/:runId/tool-calls`
-- `GET /api/v1/workorch/runs/:runId/runtime-checkpoints`
-- `GET /api/v1/workorch/runs/:runId/results`
-- `GET /api/v1/workorch/runs/:runId/patches`
-- `GET /api/v1/workorch/runs/:runId/validation-results`
-- `GET /api/v1/workorch/runs/:runId/artifacts`
-- `POST /api/v1/workorch/runs/:runId/start`
-- `POST /api/v1/workorch/runs/:runId/resume`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/snapshot`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/status`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/observability`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/task-progress`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/context-bundle`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/task-decompositions`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/memory-recalls`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/steps`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/tool-calls`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/runtime-checkpoints`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/results`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/patches`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/validation-results`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/artifacts`
+- `POST /api/v1/workorch/workspaces/:workspaceId/runs/:runId/start`
+- `POST /api/v1/workorch/workspaces/:workspaceId/runs/:runId/resume`
 
 ### Decision And Approval
 
@@ -1304,7 +1304,7 @@ detail / governance / event 端点当前普遍使用：
 
 ### Status Wait Parameters
 
-`GET /runs/:runId/status` 额外支持：
+`GET /workspaces/:workspaceId/runs/:runId/status` 额外支持：
 
 - `waitState`
 - `waitTimeoutMillis`
@@ -1343,13 +1343,13 @@ detail / governance / event 端点当前普遍使用：
 
 以下 detail page 端点当前统一走：
 
-- `GET /runs/:runId/steps`
-- `GET /runs/:runId/tool-calls`
-- `GET /runs/:runId/runtime-checkpoints`
-- `GET /runs/:runId/results`
-- `GET /runs/:runId/patches`
-- `GET /runs/:runId/validation-results`
-- `GET /runs/:runId/artifacts`
+- `GET /workspaces/:workspaceId/runs/:runId/steps`
+- `GET /workspaces/:workspaceId/runs/:runId/tool-calls`
+- `GET /workspaces/:workspaceId/runs/:runId/runtime-checkpoints`
+- `GET /workspaces/:workspaceId/runs/:runId/results`
+- `GET /workspaces/:workspaceId/runs/:runId/patches`
+- `GET /workspaces/:workspaceId/runs/:runId/validation-results`
+- `GET /workspaces/:workspaceId/runs/:runId/artifacts`
 - `GET /decisions`
 - `GET /approvals`
 
@@ -1376,7 +1376,7 @@ HTTP 层统一支持：
 若缺少 `workspaceId`，HTTP 层直接返回 `400`.
 
 `GET /workspaces/:workspaceId/memory-recalls` 与
-`GET /runs/:runId/memory-recalls` 当前支持：
+`GET /workspaces/:workspaceId/runs/:runId/memory-recalls` 当前支持：
 
 - `stepId`
 - `stage`
@@ -1437,10 +1437,10 @@ HTTP 层统一支持：
 | `GET /runs` | `workspaceId` |
 | `GET /decisions` / `GET /approvals` | `workspaceId`、`runId`、page params |
 | `GET /steps` / `tool-calls` / `runtime-checkpoints` / `results` / `patches` / `validation-results` / `artifacts` | `limit`、`cursorAfterId` |
-| `GET /runs/:runId/status` | `waitState`、`waitTimeoutMillis` |
+| `GET /workspaces/:workspaceId/runs/:runId/status` | `waitState`、`waitTimeoutMillis` |
 | `GET /events` | `workspaceId`、`runId`、`topic`、`subjectType`、`subjectId`、`occurredAfter`、`occurredBefore`、`limit`、`cursorAfterId` |
 | `GET /memory` | `workspaceId`、`q`、`tag`、`type`、`limit` |
-| `GET /workspaces/:workspaceId/memory-recalls` / `GET /runs/:runId/memory-recalls` | `stepId`、`stage`、`source`、`status`、`limit` |
+| `GET /workspaces/:workspaceId/memory-recalls` / `GET /workspaces/:workspaceId/runs/:runId/memory-recalls` | `stepId`、`stage`、`source`、`status`、`limit` |
 | `GET /mcp/capabilities` | `serverId`、`kind`、`category`、`stage`、`riskLevel`、`enabled`、`q` |
 | `GET /runtime/payloads` | `ref` |
 | `GET /artifacts/content` | `uri` |
@@ -1492,7 +1492,7 @@ HTTP 层统一支持：
 
 - `POST /workspaces/:workspaceId/execution-activations` 返回 `200`
   - 因为它返回 activation contract，而不是单纯资源创建确认
-- `POST /runs/:runId/start` / `POST /runs/:runId/resume` 返回 `200`
+- `POST /workspaces/:workspaceId/runs/:runId/start` / `POST /workspaces/:workspaceId/runs/:runId/resume` 返回 `200`
   - 返回最新 `run` 视图
 - `DELETE /memory/:memoryId` 返回 `200` + `{ "deleted": true }`
   - 不走 `204`

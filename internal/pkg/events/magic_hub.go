@@ -92,7 +92,7 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 		ctx,
 		cloneEnvelope(envelope),
 	)
-	ev.BindLaneKey(envelope.Topic)
+	ev.BindLaneKey(workorchEventLaneKey(envelope))
 	result := h.hub.Send(ev)
 	if result == nil {
 		return nil
@@ -130,7 +130,7 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 		ctx,
 		cloneEnvelope(envelope),
 	)
-	ev.BindLaneKey(envelope.Topic)
+	ev.BindLaneKey(workorchEventLaneKey(envelope))
 	h.hub.Post(ev)
 	return nil
 }
@@ -185,6 +185,18 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 			}
 		}
 	}
+}
+
+func workorchEventLaneKey(envelope Envelope) string {
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
+	if workspaceID != "" {
+		return "workspace/" + workspaceID
+	}
+	topic := strings.TrimSpace(envelope.Topic)
+	if topic != "" {
+		return "topic/" + topic
+	}
+	return "topic/unknown"
 }
 
 func (h *MagicHub) Published() []Envelope {

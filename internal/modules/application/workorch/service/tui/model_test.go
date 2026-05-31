@@ -316,6 +316,34 @@ func TestModelRunContinueCommandQueuesOperatorInput(t *testing.T) {
 	}
 }
 
+func TestModelRunContinueIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-2", "")
+	m.activeRunID = "run-from-ws-1"
+	m.setInput("/run continue 切换后继续当前工作区")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected continue command")
+	}
+	msg, ok := cmd().(RunControlMsg)
+	if !ok || msg.Error != nil || msg.Run == nil {
+		t.Fatalf("continue msg = %#v, want RunControlMsg with run", msg)
+	}
+	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
+		t.Fatalf("resumes = %v, want current workspace run to be resumed", be.resumes)
+	}
+	if len(be.activations) != 0 || msg.Run.WorkspaceID != "ws-2" {
+		t.Fatalf("activation/run = %d/%+v, want resumed run for ws-2", len(be.activations), msg.Run)
+	}
+
+	updated, _ := next.(*AppModel).Update(msg)
+	got := asModel(updated)
+	if got.activeRunID != "run-continue" || !got.running {
+		t.Fatalf("run state = %q/%v, want current workspace run", got.activeRunID, got.running)
+	}
+}
+
 func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateCompleted)
 	m := NewAppModel(be, "ws-1", "")
@@ -1866,6 +1894,39 @@ func TestModelWorkspaceSwitchClearsStaleViewBeforeRefresh(t *testing.T) {
 	}
 }
 
+func TestModelIgnoresRunControlForInactiveWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.progressText = "Workspace switched; refreshing state"
+
+	next, cmd := m.Update(RunControlMsg{
+		WorkspaceID: "ws-a",
+		Run:         &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Message:     "Continuing active run",
+	})
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale run control should not trigger refresh")
+	}
+	if m.activeRunID != "" || m.running || m.progressText != "Workspace switched; refreshing state" {
+		t.Fatalf("stale run control polluted state: activeRun=%q running=%v progress=%q", m.activeRunID, m.running, m.progressText)
+	}
+}
+
+func TestModelIgnoresRunStartedForInactiveWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+
+	next, cmd := m.Update(RunStartedMsg{
+		Run: &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+	})
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale run started should not fetch blockers")
+	}
+	if m.activeRunID != "" || m.running {
+		t.Fatalf("stale run started polluted state: activeRun=%q running=%v", m.activeRunID, m.running)
+	}
+}
+
 func TestModelWorkspaceContextHydratesFreshSnapshot(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-b"
@@ -3035,11 +3096,12 @@ func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, p
 
 type recordingBE struct {
 	*fakeBE
-	runState      common.RunState
-	goals         []string
-	activations   []backend.ActivateRunRequest
-	resumes       []common.RunID
-	resumePatches []map[string]any
+	runState          common.RunState
+	goals             []string
+	activations       []backend.ActivateRunRequest
+	resumes           []common.RunID
+	resumePatches     []map[string]any
+	lastListWorkspace common.WorkspaceID
 }
 
 func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
@@ -3102,12 +3164,17 @@ func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionCon
 	if len(executionContextPatch) > 0 {
 		f.parent.resumePatches = append(f.parent.resumePatches, executionContextPatch[0])
 	}
-	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+	workspaceID := f.parent.lastListWorkspace
+	if workspaceID == "" {
+		workspaceID = "ws-1"
+	}
+	return &backend.RunInfo{ID: id, WorkspaceID: workspaceID, State: common.RunStateRunning}, nil
 }
 func (f *recordingRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
 }
 func (f *recordingRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
+	f.parent.lastListWorkspace = wsID
 	return []backend.RunInfo{{ID: "run-continue", WorkspaceID: wsID, State: f.parent.runState}}, nil
 }
 func (f *recordingRun) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {

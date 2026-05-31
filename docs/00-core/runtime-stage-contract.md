@@ -1937,7 +1937,7 @@ graph-002-007-run-go-test--h-abc123
 
 ### Run ID Sequence Contract
 
-Run ID 是 runtime 执行状态的主定位符，必须优先使用可读、递增、稳定的形式。自动创建的 workspace execution run 不得再使用随机 hex/hash 字符串，应使用全局数字自增格式：
+Run ID 是 workspace 内部 runtime 执行状态的主定位符，必须优先使用可读、递增、稳定的形式。自动创建的 workspace execution run 不得再使用随机 hex/hash 字符串，应使用 workspace 内部数字自增格式：
 
 ```text
 run-001
@@ -1947,12 +1947,29 @@ run-003
 
 规则：
 
-- 自动 activation 创建 Run 时，runtime 必须扫描当前 Run 仓库中已有的 `run-<positive-int>`，取最大值后加一。该扫描必须基于持久化 Run 仓库，服务重启后继续复用已存在最大值，不得从 1 重新开始。
+- 自动 activation 创建 Run 时，runtime 必须扫描当前 workspace 的持久化 Run 仓库中已有的 `run-<positive-int>`，取当前 workspace 最大值后加一。不同 workspace 的 Run 序列彼此独立，不得因为在多个 workspace 间切换执行而交替增长。
+- 服务重启后必须继续基于当前 workspace 已存在最大值递增，不得从 1 重新开始。
 - 自动 Run ID 至少 3 位数字宽度，1 到 999 使用零填充，1000 以后自然扩展为更多位，保证常规文件名和列表按字典序排序时仍符合执行顺序。
 - 历史随机 Run ID、人工指定的非数字 Run ID、测试固定 Run ID 不参与序列计算。
-- 若并发创建发生冲突，必须重新读取现有 Run 列表并再次分配下一个数字序列，不得回退到随机 ID。
+- 若同一 workspace 内并发创建发生冲突，必须重新读取该 workspace 现有 Run 列表并再次分配下一个数字序列，不得回退到随机 ID。
 - Run ID 序列只表达执行顺序，不表达业务领域、任务类型、Goal/DoD 语义或模板语义，保持核心框架中立。
 - Step、ToolCall、Patch、Result、Artifact 等 run-scoped ID 可以继续以 Run ID 为可读前缀派生，但不得把随机 hash/base64 作为主路径。
+
+定位与交互规则：
+
+- 因为不同 workspace 可以同时存在 `run-001`，所有已知 workspace 的读取、恢复、状态轮询、snapshot、observability、run-scoped evidence 查询都必须携带 workspace scope。内部实现通过 context 传递 workspace scope，HTTP/Web 主交互必须使用 `/workspaces/{workspaceId}/runs/{runId}` 形式的 workspace-scoped route；裸 `/runs/{runId}` 只允许作为无 workspace scope 的兼容读取入口。
+- repository 在收到 workspace scope 时只能读取该 workspace 下的 run 及子资源；不得回退扫描其他 workspace。未收到 workspace scope 且发现同名 Run 跨 workspace 重复时，必须返回 conflict，禁止任意选择第一个匹配项。
+- Web/TUI 展示与操作必须使用当前 workspace 的 active/current run 作为 scope。切换 workspace 后，旧 workspace 的 active run、status message、snapshot cache、inflight snapshot 不得继续影响新 workspace。
+- run snapshot cache 与 inflight 合并键必须包含 workspace scope；只有在无重复且无 scope 的兼容读取场景中，才允许按裸 run ID 命中唯一缓存。
+
+### EventHub Lane Contract
+
+WorkOrch 事件必须使用稳定、有界的 EventHub laneKey，以同时满足顺序一致性和跨 workspace 并发：
+
+- 有 `workspaceId` 的事件必须使用 workspace 级 lane，例如 `workspace/ws-xxx`。同一 workspace 内事件保持顺序，不同 workspace 之间允许并行调度。
+- 没有 `workspaceId` 的全局事件使用 topic 级 fallback lane，例如 `topic//cli/command`。
+- laneKey 不得使用随机 ID、hash、base64 或每次请求唯一值，避免 EventHub 内部 lane 数量无界膨胀。
+- laneKey 只表达调度顺序域，不参与 observer 路由，不得编码 Goal/DoD、模板或具体业务语义。
 
 ### Raw Payload Ref
 

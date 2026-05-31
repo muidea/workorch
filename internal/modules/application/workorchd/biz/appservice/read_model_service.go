@@ -326,11 +326,14 @@ func ListRunStepsWithSession(ctx context.Context, session *RuntimeSession, query
 		return StepPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return StepPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.steps.ListByRun(ctx, runID)
 	if err != nil {
 		return StepPage{}, err
@@ -355,11 +358,14 @@ func ListRunToolCallsWithSession(ctx context.Context, session *RuntimeSession, q
 		return ToolCallPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return ToolCallPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.toolCalls.ListByRun(ctx, runID)
 	if err != nil {
 		return ToolCallPage{}, err
@@ -384,11 +390,14 @@ func ListRunRuntimeCheckpointsWithSession(ctx context.Context, session *RuntimeS
 		return RuntimeCheckpointPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return RuntimeCheckpointPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.checkpoints.ListByRun(ctx, runID)
 	if err != nil {
 		return RuntimeCheckpointPage{}, err
@@ -413,11 +422,14 @@ func ListRunResultsWithSession(ctx context.Context, session *RuntimeSession, que
 		return ResultPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return ResultPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.results.ListByRun(ctx, runID)
 	if err != nil {
 		return ResultPage{}, err
@@ -442,11 +454,14 @@ func ListRunPatchesWithSession(ctx context.Context, session *RuntimeSession, que
 		return PatchPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return PatchPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.patches.ListByRun(ctx, runID)
 	if err != nil {
 		return PatchPage{}, err
@@ -471,11 +486,14 @@ func ListRunValidationResultsWithSession(ctx context.Context, session *RuntimeSe
 		return ValidationResultPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return ValidationResultPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.validations.ListByRun(ctx, runID)
 	if err != nil {
 		return ValidationResultPage{}, err
@@ -500,11 +518,14 @@ func ListRunArtifactsWithSession(ctx context.Context, session *RuntimeSession, q
 		return ArtifactPage{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	if _, err := deps.runs.Get(ctx, runID); err != nil {
+	runItem, err := deps.runs.Get(ctx, runID)
+	if err != nil {
 		return ArtifactPage{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, runItem.WorkspaceID)
 	items, err := deps.artifacts.ListByRun(ctx, runID)
 	if err != nil {
 		return ArtifactPage{}, err
@@ -708,6 +729,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 	if err != nil {
 		return RunSnapshot{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	var workspace *workspacemodel.Workspace
 	var steps []*runmodel.Step
 	var toolCalls []*runmodel.ToolCall
@@ -865,6 +887,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 	if err != nil {
 		return RunSnapshot{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	var workspace *workspacemodel.Workspace
 	var steps []*runmodel.Step
 	var toolCalls []*runmodel.ToolCall
@@ -997,6 +1020,7 @@ func readRunStatus(ctx context.Context, deps readModelDependencies, runID common
 	if err != nil {
 		return RunStatus{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	var steps []*runmodel.Step
 	var checkpoints []*runmodel.RuntimeCheckpoint
 	var decisions []*decisionmodel.Ticket

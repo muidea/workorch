@@ -3,6 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // ListRuns returns all runs, optionally filtered by workspace.
@@ -20,7 +23,7 @@ func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error
 
 // GetRun returns a single run.
 func (c *Client) GetRun(ctx context.Context, runID string) (*Run, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/runs/%s", runID), nil)
+	resp, err := c.do(ctx, "GET", runPath(ctx, runID, ""), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +46,7 @@ func (c *Client) CreateRun(ctx context.Context, workspaceID, runID, goalID, dodI
 
 // StartRun starts a created run.
 func (c *Client) StartRun(ctx context.Context, runID string) (*Run, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/runs/%s/start", runID), nil)
+	resp, err := c.do(ctx, "POST", runPath(ctx, runID, "start"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +61,7 @@ func (c *Client) ResumeRun(ctx context.Context, runID string, executionContextPa
 			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
 		}{ExecutionContextPatch: executionContextPatch[0]}
 	}
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/runs/%s/resume", runID), body)
+	resp, err := c.do(ctx, "POST", runPath(ctx, runID, "resume"), body)
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +70,9 @@ func (c *Client) ResumeRun(ctx context.Context, runID string, executionContextPa
 
 // GetRunStatus returns the status of a run, optionally with long-poll waiting.
 func (c *Client) GetRunStatus(ctx context.Context, runID, waitState string, waitTimeoutMs int) (*RunStatus, error) {
-	path := fmt.Sprintf("/api/v1/workorch/runs/%s/status", runID)
+	path := runPath(ctx, runID, "status")
 	if waitState != "" {
-		path += fmt.Sprintf("?waitState=%s", waitState)
+		path += fmt.Sprintf("?waitState=%s", url.QueryEscape(waitState))
 		if waitTimeoutMs > 0 {
 			path += fmt.Sprintf("&waitTimeoutMillis=%d", waitTimeoutMs)
 		}
@@ -83,7 +86,7 @@ func (c *Client) GetRunStatus(ctx context.Context, runID, waitState string, wait
 
 // GetRunSnapshot returns the full run snapshot.
 func (c *Client) GetRunSnapshot(ctx context.Context, runID string) (*RunSnapshot, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/runs/%s/snapshot", runID), nil)
+	resp, err := c.do(ctx, "GET", runPath(ctx, runID, "snapshot"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +95,24 @@ func (c *Client) GetRunSnapshot(ctx context.Context, runID string) (*RunSnapshot
 
 // GetRunObservability returns the run observability with timeline.
 func (c *Client) GetRunObservability(ctx context.Context, runID string) (*RunObservability, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/runs/%s/observability", runID), nil)
+	resp, err := c.do(ctx, "GET", runPath(ctx, runID, "observability"), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[RunObservability](resp, "observability")
+}
+
+func runPath(ctx context.Context, runID string, action string) string {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	encodedRunID := url.PathEscape(runID)
+	if workspaceID == "" {
+		if action == "" {
+			return fmt.Sprintf("/api/v1/workorch/runs/%s", encodedRunID)
+		}
+		return fmt.Sprintf("/api/v1/workorch/runs/%s/%s", encodedRunID, action)
+	}
+	if action == "" {
+		return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s", url.PathEscape(string(workspaceID)), encodedRunID)
+	}
+	return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s/%s", url.PathEscape(string(workspaceID)), encodedRunID, action)
 }

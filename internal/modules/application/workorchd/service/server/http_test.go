@@ -804,6 +804,9 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
@@ -2786,7 +2789,8 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body=%s", statusRec.Code, statusRec.Body.String())
 	}
 	waitForCondition(t, time.Second, func() bool {
-		_, ok := state.cachedRunSnapshot("run-status-warm-cache")
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-status-warm-cache")
+		_, ok := state.cachedRunSnapshot(ctx, "run-status-warm-cache")
 		return ok
 	})
 
@@ -2819,7 +2823,8 @@ func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 		State:       string(common.RunStateCompleted),
 	})
 	waitForCondition(t, time.Second, func() bool {
-		_, ok := state.cachedRunSnapshot("run-notify-warm-cache")
+		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-notify-warm-cache")
+		_, ok := state.cachedRunSnapshot(ctx, "run-notify-warm-cache")
 		return ok
 	})
 

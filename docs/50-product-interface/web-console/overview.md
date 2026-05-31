@@ -68,7 +68,7 @@ Web Console 是 WorkOrch 的远程控制与观察面，主要服务：
 - `GET /api/v1/workorch/workspaces/:workspaceId/goals`
 - `GET /api/v1/workorch/workspaces/:workspaceId/dods`
 - `POST /api/v1/workorch/workspaces/:workspaceId/execution-activations`
-- `POST /api/v1/workorch/runs/:runId/resume`
+- `POST /api/v1/workorch/workspaces/:workspaceId/runs/:runId/resume`
 
 主要读模型：
 
@@ -101,19 +101,19 @@ Web Console 是 WorkOrch 的远程控制与观察面，主要服务：
 - `GET /api/v1/workorch/workspaces/:workspaceId/memory-recalls`
 - `GET /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
 - `PUT /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
-- `GET /api/v1/workorch/runs/:runId/snapshot`
-- `GET /api/v1/workorch/runs/:runId/observability`
-- `GET /api/v1/workorch/runs/:runId/context-bundle`
-- `GET /api/v1/workorch/runs/:runId/task-progress`
-- `GET /api/v1/workorch/runs/:runId/task-decompositions`
-- `GET /api/v1/workorch/runs/:runId/memory-recalls`
-- `GET /api/v1/workorch/runs/:runId/steps`
-- `GET /api/v1/workorch/runs/:runId/tool-calls`
-- `GET /api/v1/workorch/runs/:runId/runtime-checkpoints`
-- `GET /api/v1/workorch/runs/:runId/results`
-- `GET /api/v1/workorch/runs/:runId/patches`
-- `GET /api/v1/workorch/runs/:runId/validation-results`
-- `GET /api/v1/workorch/runs/:runId/artifacts`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/snapshot`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/observability`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/context-bundle`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/task-progress`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/task-decompositions`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/memory-recalls`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/steps`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/tool-calls`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/runtime-checkpoints`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/results`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/patches`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/validation-results`
+- `GET /api/v1/workorch/workspaces/:workspaceId/runs/:runId/artifacts`
 - `GET /api/v1/workorch/events`
 
 主要读模型：
