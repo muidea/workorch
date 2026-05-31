@@ -17424,6 +17424,66 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 	}
 }
 
+func TestValidateLLMFollowUpGraphAllowsConcreteFailureEvidenceAcquisitionGraph(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-evidence/follow-up",
+		RunID: "run-evidence",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:      "strict_convergence",
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds": []string{
+						"file/list",
+						"file/read",
+						"git/read",
+						"shell/command",
+						"mcp/tool_call",
+					},
+					"mustProduceConcreteFailureEvidence": true,
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+			{ID: "diff", Kind: "git/read", Input: map[string]any{"operation": "diff"}},
+			{ID: "verify", Kind: "shell/command", DependsOn: []string{"diff"}, Input: map[string]any{"command": "true"}},
+			{ID: "read", Kind: "file/read", DependsOn: []string{"verify"}, Input: map[string]any{"path": "target.txt"}},
+		}},
+	}
+	if err := validateLLMFollowUpGraphStateChangingContract(&runmodel.Run{}, step, output); err != nil {
+		t.Fatalf("validate evidence acquisition graph: %v", err)
+	}
+}
+
+func TestValidateLLMFollowUpGraphRejectsPatchDuringConcreteFailureEvidenceAcquisition(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-evidence/follow-up",
+		RunID: "run-evidence",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+			{ID: "patch", Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": "target.txt", "content": "changed"}},
+		}},
+	}
+	err := validateLLMFollowUpGraphStateChangingContract(&runmodel.Run{}, step, output)
+	if err == nil || !strings.Contains(err.Error(), "concrete failure evidence acquisition") {
+		t.Fatalf("err = %v, want evidence acquisition contract rejection", err)
+	}
+}
+
 func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrection(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

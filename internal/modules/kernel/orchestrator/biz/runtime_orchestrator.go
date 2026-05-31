@@ -4698,6 +4698,12 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) || boolValue(step.Input["providerRetryAssessmentOnly"]) {
 		return nil
 	}
+	if stepRequiresConcreteFailureEvidenceAcquisition(step) {
+		if graphIsConcreteFailureEvidenceAcquisitionGraph(step, graph) {
+			return nil
+		}
+		return fmt.Errorf("%w: concrete failure evidence acquisition must return bounded file/read, file/list, git/read, shell/command, or mcp/tool_call executionGraph without patch/apply or nested llm nodes", common.ErrInvalidArgument)
+	}
 	if graphHasStateChangingPatchNode(graph) {
 		return validateStateChangingExecutionGraph(graph)
 	}
@@ -4714,6 +4720,37 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without patch output", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func graphIsConcreteFailureEvidenceAcquisitionGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) bool {
+	if len(graph.Nodes) == 0 {
+		return false
+	}
+	accepted := mapStringSet([]string{
+		"file/list",
+		"file/read",
+		"git/read",
+		"shell/command",
+		"mcp/tool_call",
+	})
+	if step != nil && step.Input != nil {
+		required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+		if configured := mapStringSet(stringSliceFromValue(required["acceptedKinds"])); len(configured) > 0 {
+			accepted = configured
+		}
+	}
+	hasEvidenceProducer := false
+	for _, node := range graph.Nodes {
+		kind := canonicalRuntimeGraphNodeKind(node.Kind)
+		if kind == "" || kind == "patch/apply" || kind == "patch/preview" || kind == llmWorkspaceExecutionStepKind {
+			return false
+		}
+		if !accepted[kind] {
+			return false
+		}
+		hasEvidenceProducer = true
+	}
+	return hasEvidenceProducer
 }
 
 func graphHasUngatedStateChangingEvidenceNode(graph runtimemodel.BlockExecutionGraph) bool {
