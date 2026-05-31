@@ -1396,13 +1396,31 @@ func runtimeFailureTargetScope(signature string) string {
 		}
 		values[name] = value
 	}
+	if runtimeFailureSignatureIsCapabilityCall(values) {
+		if values["serverId"] != "" && values["tool"] != "" {
+			scope := "serverId=" + values["serverId"] + "|tool=" + values["tool"]
+			if values["node"] != "" {
+				scope += "|node=" + values["node"]
+			}
+			return scope
+		}
+		for _, key := range []string{"serverId", "tool", "uri"} {
+			if value := values[key]; value != "" {
+				return key + "=" + value
+			}
+		}
+	}
 	for _, key := range []string{"failureTargets", "targetRef", "conflictRef"} {
 		if value := values[key]; value != "" {
 			return key + "=" + value
 		}
 	}
 	if values["serverId"] != "" && values["tool"] != "" {
-		return "serverId=" + values["serverId"] + "|tool=" + values["tool"]
+		scope := "serverId=" + values["serverId"] + "|tool=" + values["tool"]
+		if values["node"] != "" {
+			scope += "|node=" + values["node"]
+		}
+		return scope
 	}
 	for _, key := range []string{"serverId", "tool", "uri"} {
 		if value := values[key]; value != "" {
@@ -1410,6 +1428,16 @@ func runtimeFailureTargetScope(signature string) string {
 		}
 	}
 	return ""
+}
+
+func runtimeFailureSignatureIsCapabilityCall(values map[string]string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	return values["class"] == failureClassMCPRuntime ||
+		values["class"] == failureClassMCPCapabilityDenied ||
+		values["kind"] == "mcp/tool_call" ||
+		strings.HasPrefix(values["stage"], "mcp_")
 }
 
 func normalizeRuntimeFailureTargetValue(value string) string {

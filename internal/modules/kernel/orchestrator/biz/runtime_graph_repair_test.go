@@ -37,6 +37,20 @@ func TestLatestFailedRepairableGraphStepSkipsSupersededFailure(t *testing.T) {
 	}
 }
 
+func TestMCPRuntimeFailureTargetScopePrefersCapabilityNodeOverInternalDiagnostics(t *testing.T) {
+	shellScope := runtimeFailureTargetScope("class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|node=init-sh-lsp|serverId=mcp-lsp-bridge|tool=lsp_initialize|failureTargets=client.go|error=missing shell server")
+	if shellScope != "serverId=mcp-lsp-bridge|tool=lsp_initialize|node=init-sh-lsp" {
+		t.Fatalf("shell scope = %q, want capability call node scope", shellScope)
+	}
+	tsScope := runtimeFailureTargetScope("class=mcp_runtime_failed|kind=mcp/tool_call|stage=mcp_tool_call_failed|node=init-ts-lsp|serverId=mcp-lsp-bridge|tool=lsp_initialize|failureTargets=client.go|error=missing workspace dependency")
+	if tsScope != "serverId=mcp-lsp-bridge|tool=lsp_initialize|node=init-ts-lsp" {
+		t.Fatalf("ts scope = %q, want capability call node scope", tsScope)
+	}
+	if shellScope == tsScope {
+		t.Fatalf("scopes should differ by graph node, got %q", shellScope)
+	}
+}
+
 func TestNoActionableFollowUpSkipsFailedAssessmentWithActionableGap(t *testing.T) {
 	run := &runModel.Run{DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}
 	step := &runModel.Step{

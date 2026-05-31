@@ -539,7 +539,7 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 - 完整失败签名：用于精确区分同一目标下的不同失败形态。
 - 目标级失败签名：从 `failureTargets`、`targetRef`、`conflictRef`、`serverId`、`tool`、`uri` 等中立键提取，用于识别同一失败目标在不同 step、graph node、loop、attempt 中反复出现。
 
-当失败同时包含 `serverId` 与 `tool` 时，目标级 scope 应组合为同一外部能力目标，例如 `serverId=<id>|tool=<name>`；只有缺少其中一项时才退化为单独的 `serverId` 或 `tool`。这仍然是能力目录层的中立引用，不得解释为某个具体业务服务。
+当失败同时包含 `serverId` 与 `tool` 时，目标级 scope 应组合为同一外部能力目标，例如 `serverId=<id>|tool=<name>`；若同一工具承载多个独立 graph 节点或 operation，scope 还应纳入 `node` / operation 等中立调用标识，避免不同目标的能力调用互相消耗同一 repair budget。只有缺少其中一项时才退化为单独的 `serverId` 或 `tool`。这仍然是能力目录层的中立引用，不得解释为某个具体业务服务。
 
 当失败签名包含目标级 scope 时，node 名称、step ID、loop 编号或 graph 编号变化不得重置 repair budget。若同一 failure class + target scope 已达到 repair budget，runtime 必须进入 repair exhausted / duplicate / replan 治理，而不是继续派发普通 repair。
 
@@ -548,6 +548,8 @@ Runtime repair / duplicate / replan 治理必须同时识别两类中立 scope�
 若较晚的 completed step 在同一中立 scope 内已经给出最新成功证据，较早的 failed graph step 必须视为 superseded，不得继续作为 repair target 或重复触发 ticket；runtime 应优先使用最新成功证据校正 completion/repair 视图。
 
 外部能力依赖失败是例外中的中立子类：当 `mcp/tool_call` 或等价外部 capability 对同一 `failure class + target scope` 反复返回不可用、未找到、权限拒绝、配置缺失等确定性失败时，新的 graph root 或 loop 不应把该外部依赖预算重置为 0。runtime 应收敛到 rejected result、blocked_on_decision 或 replan，而不是继续要求 LLM 生成同一能力调用。是否换用其他能力、补充配置或继续重试，必须通过 capability/profile 或治理决策表达，core 不得内置具体服务名、工具名或业务 fallback。
+
+外部 capability 调用失败的 target scope 必须优先使用 capability 调用身份，而不是 stderr / stdout 中的内部诊断路径。对 `mcp/tool_call` 或等价外部能力失败，scope 应优先来自 `serverId`、`tool`、`node` / operation；只有缺少 capability 调用身份时才回退到 `failureTargets`、`targetRef` 或诊断路径。能力实现自身日志中的文件名、行号或内部源码路径只能作为 diagnostic evidence，不能覆盖 capability target scope，也不能让不同业务无关的 capability 调用互相消耗同一 repair budget。该规则只基于 step kind、stage、server/tool/node 等中立字段，不绑定具体 MCP server、语言、工具或业务语义。
 
 当失败签名不包含目标级 scope 时，runtime 不得臆造业务目标，也不得把无目标失败合并为同一预算；此时继续按完整失败签名、root step 或显式 lineage scope 收敛。
 
