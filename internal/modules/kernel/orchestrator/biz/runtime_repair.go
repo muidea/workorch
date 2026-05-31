@@ -1161,6 +1161,9 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 	if isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
+	if runtimeRepairExhaustionHasCompletedCoverageEvidence(ticket.Context) {
+		return true
+	}
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	if targetScope == "" {
 		return false
@@ -1172,6 +1175,40 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 		}
 	}
 	return o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < o.maxRuntimeRepairAttempts()
+}
+
+func runtimeRepairExhaustionHasCompletedCoverageEvidence(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	for _, source := range []any{
+		context["coverageTargetSet"],
+		mapFromValue(context["failedStepInput"])["coverageTargetSet"],
+		mapFromValue(context["failedStepInput"])["missingDoDItems"],
+	} {
+		for _, target := range mapSliceFromValue(source) {
+			if coverageTargetHasCompletedActionEvidenceCandidate(target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageTargetHasCompletedActionEvidenceCandidate(target map[string]any) bool {
+	if len(target) == 0 {
+		return false
+	}
+	for _, candidate := range mapSliceFromValue(target["evidenceCandidates"]) {
+		if evidenceValueString(candidate["state"]) != string(common.StepStateCompleted) {
+			continue
+		}
+		switch evidenceValueString(candidate["kind"]) {
+		case "patch/apply", "shell/command", "mcp/tool_call", "git/write":
+			return true
+		}
+	}
+	return false
 }
 
 func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {

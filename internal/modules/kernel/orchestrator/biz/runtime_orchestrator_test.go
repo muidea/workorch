@@ -10105,6 +10105,105 @@ func TestRuntimeOrchestrator_BlockerAutoResumePolicyMatrix(t *testing.T) {
 			want: expected{err: common.ErrBlocked, state: common.RunStateBlockedOnDecision, blockingTicket: true},
 		},
 		{
+			name: "runtime repair exhaustion with completed coverage action evidence can resume without target scope",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-repair-exhausted-coverage-evidence")
+				runID := common.RunID("run-policy-repair-exhausted-coverage-evidence")
+				failedStepID := common.StepID(runID + "/block/assessment")
+				ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
+				signature := "class=runtime_failed|stage=completion_gate|reason=coverage_missing"
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnDecision, ticketID, "")
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    failedStepID,
+					RunID: runID,
+					Kind:  llmcommon.StepKindWorkspaceExecution,
+					State: common.StepStateFailed,
+					Output: map[string]any{
+						failureOutputKeyClass:     failureClassRuntime,
+						failureOutputKeySignature: signature,
+					},
+				}); err != nil {
+					t.Fatalf("seed failed step: %v", err)
+				}
+				if err := repos.tickets.Create(ctx, &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					StepID:      failedStepID,
+					State:       common.DecisionTicketStateOpen,
+					Context: map[string]any{
+						decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+						"failureClass":                   failureClassRuntime,
+						"failureSignature":               signature,
+						"failedStepId":                   string(failedStepID),
+						"attempts":                       defaultMaxRuntimeRepairAttempts,
+						"coverageTargetSet": []map[string]any{{
+							"targetText": "required coverage target",
+							"evidenceCandidates": []map[string]any{{
+								"kind":  shellcommon.StepKindCommand,
+								"state": common.StepStateCompleted,
+								"ref":   string(runID) + "/graph-009/verify",
+							}},
+						}},
+					},
+				}); err != nil {
+					t.Fatalf("seed repair exhaustion ticket: %v", err)
+				}
+				return runID
+			},
+			want: expected{state: common.RunStateCompleted, runtimeCalls: 1},
+		},
+		{
+			name: "runtime repair exhaustion with only read or failed coverage evidence stays blocked",
+			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
+				t.Helper()
+				workspaceID := common.WorkspaceID("ws-policy-repair-exhausted-read-evidence")
+				runID := common.RunID("run-policy-repair-exhausted-read-evidence")
+				failedStepID := common.StepID(runID + "/block/assessment")
+				ticketID := common.TicketID(string(failedStepID) + "-repair-exhausted-decision")
+				signature := "class=runtime_failed|stage=completion_gate|reason=coverage_missing"
+				seedBlockerPolicyWorkspaceAndRun(ctx, t, repos, workspaceID, runID, common.RunStateBlockedOnDecision, ticketID, "")
+				if err := repos.steps.Create(ctx, &runmodel.Step{
+					ID:    failedStepID,
+					RunID: runID,
+					Kind:  llmcommon.StepKindWorkspaceExecution,
+					State: common.StepStateFailed,
+					Output: map[string]any{
+						failureOutputKeyClass:     failureClassRuntime,
+						failureOutputKeySignature: signature,
+					},
+				}); err != nil {
+					t.Fatalf("seed failed step: %v", err)
+				}
+				if err := repos.tickets.Create(ctx, &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       runID,
+					StepID:      failedStepID,
+					State:       common.DecisionTicketStateOpen,
+					Context: map[string]any{
+						decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+						"failureClass":                   failureClassRuntime,
+						"failureSignature":               signature,
+						"failedStepId":                   string(failedStepID),
+						"attempts":                       defaultMaxRuntimeRepairAttempts,
+						"coverageTargetSet": []map[string]any{{
+							"targetText": "required coverage target",
+							"evidenceCandidates": []map[string]any{
+								{"kind": "file/read", "state": common.StepStateCompleted, "ref": string(runID) + "/graph-009/read"},
+								{"kind": shellcommon.StepKindCommand, "state": common.StepStateFailed, "ref": string(runID) + "/graph-009/verify"},
+							},
+						}},
+					},
+				}); err != nil {
+					t.Fatalf("seed repair exhaustion ticket: %v", err)
+				}
+				return runID
+			},
+			want: expected{err: common.ErrBlocked, state: common.RunStateBlockedOnDecision, blockingTicket: true},
+		},
+		{
 			name: "provider retry exhaustion stays blocked for explicit runtime provider recovery",
 			seed: func(ctx context.Context, t *testing.T, _ *RuntimeOrchestrator, repos blockerPolicyRepos) common.RunID {
 				t.Helper()
@@ -20698,6 +20797,70 @@ func TestValidateLLMExecutionOutputContractAllowsStrategySurfaceByTargetRef(t *t
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want targetRef-aligned surface accepted", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsStrategyCurrentSnapshotRepairMode(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-current-snapshot",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-current-snapshot/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "runtime contract wrapper failure",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"go.mod"},
+				"targetSnapshots": []map[string]any{{
+					"targetRef": "go.mod",
+					"content":   "module demo\n",
+				}},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-go-mod",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "go.mod",
+						"patchType":            "text_replace",
+						"oldText":              "module demo\n",
+						"newText":              "module demo\n\nrequire example.com/lib v1.0.0\n",
+						"failedSurface":        "go.mod dependency surface",
+						"rootCauseTarget":      "go.mod",
+						"repairTargetDecision": "repair the current snapshot target",
+						"repairMode":           "exact_replacement_against_current_snapshot",
+						"forbiddenRepair":      "do not edit unrelated files",
+						"verificationPlan":     "run bounded verification for targetRef=go.mod",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want current snapshot strategy repair accepted", err)
 	}
 }
 

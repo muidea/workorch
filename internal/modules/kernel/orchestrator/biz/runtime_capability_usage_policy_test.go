@@ -13,6 +13,17 @@ import (
 
 func TestValidateLLMCapabilityUsagePolicyRequiresDependentMCPFollowUpAfterPatch(t *testing.T) {
 	run := capabilityPolicyTestRun()
+	run.ExecutionContext["executionContract"] = map[string]any{
+		"capabilityUsagePolicies": []map[string]any{{
+			"id":                 "code-semantics-policy",
+			"appliesToCategory":  "code_semantics",
+			"usageMode":          "required_when_triggered",
+			"triggerStages":      []string{runtimeStageExecution, runtimeStageRepair},
+			"preferredTools":     []string{"semantic.diagnostics"},
+			"requiredAfterKinds": []string{"patch/apply"},
+			"evidenceStrength":   "auxiliary",
+		}},
+	}
 	step := capabilityPolicyTestStep()
 	output := map[string]any{
 		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
@@ -91,6 +102,28 @@ func TestValidateLLMCapabilityUsagePolicyAllowsStructuredSkipReason(t *testing.T
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want structured skip reason allowed", err)
+	}
+}
+
+func TestValidateLLMCapabilityUsagePolicyAllowsDeclaredNonBlockingFallback(t *testing.T) {
+	run := capabilityPolicyTestRun()
+	step := capabilityPolicyTestStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{
+				capabilityPolicyPatchNode(),
+				{
+					ID:        "verify",
+					Kind:      "shell/command",
+					DependsOn: []string{"patch"},
+					Input:     map[string]any{"command": "go", "args": []string{"test", "./..."}},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want non-blocking fallback policy allowed", err)
 	}
 }
 

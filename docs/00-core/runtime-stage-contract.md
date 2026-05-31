@@ -1395,6 +1395,8 @@ Graph expansion limit assessment 是 assessment-only coverage correction 的一�
 
 如果 assessment-only coverage correction 自身返回 `satisfied=false` 的 failed assessment，并列出仍缺失的 DoD / Goal / deliverable coverage，这已经不是“结构补齐”问题，而是缺少可接受验证证据或真实未满足。后续 runtime repair 必须退出 assessment-only，保留缺口清单到 `verificationEvidenceGap`，并进入 concrete validation evidence repair、rejected result 或 decision blocker；不得继续要求 LLM 只做 assessment，也不得把失败 scope 漂移回早期 planning / scan 节点。
 
+当 repair exhausted ticket 的来源是 DoD / Goal / deliverable coverage 收口，并且 ticket context 或 failed step input 中的 `coverageTargetSet` / `missingDoDItems` 已包含可追踪的 completed action evidence candidate，runtime 不得仅因缺少 file-level `failureTargetScope` 就停在人工 decision。此类 evidence candidate 只能是中立可执行或可验收动作，例如 `patch/apply`、`shell/command`、`mcp/tool_call`、`git/write` 且 `state=completed`；`file/read`、`file/list`、failed evidence、memory-only evidence 或纯摘要文本不能触发自动恢复。满足条件时，runtime 应关闭 stale repair-exhausted blocker，并进入有界 assessment / validation / replan，基于已有 coverage evidence 判断是否能收口或需要继续取证。该规则只根据 evidence kind / state / traceability 工作，不解释具体业务语义。
+
 Goal coverage 校验只应把可判定的叶子需求作为覆盖对象。Markdown 标题、分组项、以冒号结尾的父级目标项只用于组织上下文，不得作为必须单独满足的叶子需求。若 Goal 叶子需求与 DoD 项文字不完全一致，LLM 必须通过 `dodAssessment.goalCoverage` 显式建立 Goal requirement -> evidenceRefs 的映射；runtime 不应依赖领域语义硬编码进行推断。
 
 为避免格式差异造成误判，runtime 可以对 Goal / DoD 覆盖文本做中立归一化后再比较，例如去除 Markdown 装饰、标点、空白，并对长文本做保守近似匹配；但不得把完全不同的需求机械合并为同一项，也不得用这种近似匹配替代真实 evidenceRefs。DoD item coverage 可使用包含关系处理“完整原文 vs 归一化条目”的格式差异；Goal leaf coverage 不得使用包含关系接受宽泛合并条目。
@@ -1448,9 +1450,13 @@ Target admission rejection 是中立准入 wrapper failure。它只说明上一�
 
 Capability usage policy violation 是一类中立 graph contract wrapper failure。它只说明某个 state-changing trigger 之后缺少声明式 capability follow-up，例如缺少依赖的 `mcp/tool_call` 或结构化 `capabilityPolicySkips`，不说明 workspace 交付物出现了新的业务失败面。后续 repair 必须保持原始 `repairActionPackage.currentFailure`、target refs、line refs、target snapshots、coverage target 和 patch intent；同时在 `requiredOutput` 中追加 `mustRepairCapabilityPolicyFollowUp=true`，要求补足依赖 tool call 或输出结构化 skip。不得把该 wrapper 文本提升为 `currentGap`，也不得切换到 version-control snapshot、通用 deliverable 初始化或其他与原始 failure target 无关的修复目标。
 
+Capability usage policy 是否阻断必须由 policy 自身字段决定，不能由具体业务类型决定。默认规则保持严格：触发 `requiredAfterKinds` 且存在可用 capability 时，必须包含依赖 follow-up 或结构化 `capabilityPolicySkips`。若 policy 同时声明 `usageMode=prefer_when_triggered` 且 `fallbackPolicy` 明确表示 fallback / non-blocking / without-blocking，runtime 必须把该 capability 视为辅助增强，缺少 follow-up 不得硬拒绝 executionGraph，也不得消耗 repair 预算进入人工 decision；后续验证仍必须依赖直接 build/test/tool/patch 证据满足 Goal/DoD。
+
 当 repair-of-repair 的当前失败是 `llm_schema_invalid` / `llm_decision_invalid`，runtime 必须把该失败作为 LLM decision contract failure 处理，而不是 provider failure。repair input 应包含中立的 schema invalid recovery contract：只能基于 `repairActionPackage`、当前 target snapshot 和 schema 约束重建一个合法 JSON decision；禁止复用 rejected raw content / preview，禁止 markdown 包裹、注释、重复 JSON object、尾随多余括号和局部数组。该规则只治理输出形态和 lineage，不引入任何业务领域判断。
 
 当 repair-of-repair 的失败来自 runtime 输出合同或准入合同，例如 `strategyReassessment.required=true`、`executionGraph patch/apply input invalid`、`scoped state-changing runtime repair requires bounded verification` 或等价中立合同错误，failure class 必须保持 `runtime_failed` 或 `llm_decision_invalid`，不得因为错误文本中包含 `forbiddenRepair`、`API Key`、`auth` 等业务/合同词而误归类为 `auth_or_config_error`。Provider auth/config 只适用于 `llm_provider_*` 阶段或明确 provider auth/config stage；runtime 合同失败后续 repair 必须继续继承原始 failure surface、repairActionPackage、target context 和 strategy reassessment。
+
+`strategyReassessment` 的 expected surface 不能只来自最新 wrapper error。Runtime 必须同时纳入当前 `repairActionPackage.repairTargetSet` 与 `repairActionPackage.targetSnapshots[].targetRef`，使 LLM 可以围绕已确认的当前修复目标声明 `failedSurface` / `rootCauseTarget` / `repairTargetDecision`。`repairMode` 是中立策略标签，除了规范值 `continue_same_target_repair` / `shift_root_cause_target`，也可以把明确表达 current snapshot、exact replacement、minimal diff、patch current target 等含义的模式归一化为 same-target continuation；这只影响合同识别，不放宽 patch/apply 的 target relevance、granularity、bounded verification 与 coverage target 校验。
 
 Runtime contract correction failure 是一类独立的中立 repair-of-repair 信号。若失败文本命中 `strategyReassessment.required=true`、state-changing repair contract、patch/apply input contract、bounded verification contract、primary diagnostic contract 或等价输出准入合同，runtime 必须把它识别为 LLM/runtime contract loop，而不是新的业务失败面。该类失败的下一轮输入必须满足：
 

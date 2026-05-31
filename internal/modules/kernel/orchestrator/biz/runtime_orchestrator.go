@@ -2186,6 +2186,9 @@ func validateLLMCapabilityUsagePolicyContract(run *runModel.Run, step *runModel.
 		if graphHasCapabilityPolicyFollowUp(graph, policy) || outputDeclaresCapabilityPolicySkip(output, policy) {
 			continue
 		}
+		if capabilityUsagePolicyAllowsNonBlockingFallback(policy) {
+			continue
+		}
 		return fmt.Errorf(
 			"%w: executionGraph triggered capability usage policy %q after %q but returned no dependent matching mcp/tool_call or structured capabilityPolicySkips reason",
 			common.ErrInvalidArgument,
@@ -2239,6 +2242,22 @@ func capabilityUsagePolicyIdentityKey(policy map[string]any) string {
 		return ""
 	}
 	return "shape:" + category + "|" + requiredAfter + "|" + preferredTools
+}
+
+func capabilityUsagePolicyAllowsNonBlockingFallback(policy map[string]any) bool {
+	if len(policy) == 0 {
+		return false
+	}
+	mode := strings.TrimSpace(stringFromMap(policy, "usageMode"))
+	fallback := strings.ToLower(strings.TrimSpace(stringFromMap(policy, "fallbackPolicy")))
+	if mode != "prefer_when_triggered" {
+		return false
+	}
+	return strings.Contains(fallback, "fallback") &&
+		(strings.Contains(fallback, "non_blocking") ||
+			strings.Contains(fallback, "non-blocking") ||
+			strings.Contains(fallback, "without_blocking") ||
+			strings.Contains(fallback, "without-blocking"))
 }
 
 func stepInputValue(step *runModel.Step, key string) any {
@@ -3402,6 +3421,12 @@ func strategyReassessmentExpectedSurfaces(step *runModel.Step, reassessment map[
 		addCoverageTargets(step.Input["missingGoalCoverage"])
 		actionPackage := mapFromValue(step.Input["repairActionPackage"])
 		add(actionPackage["failureTargetScope"])
+		for _, target := range stringSliceFromValue(actionPackage["repairTargetSet"]) {
+			add(target)
+		}
+		for _, snapshot := range mapSliceFromValue(actionPackage["targetSnapshots"]) {
+			add(snapshot["targetRef"])
+		}
 		addCoverageTargets(actionPackage["coverageTargetSet"])
 		addCoverageTargets(actionPackage["missingDoDItems"])
 		addCoverageTargets(actionPackage["missingGoalCoverage"])
@@ -3452,9 +3477,23 @@ func strategyRepairModeFromCandidate(candidate map[string]any) string {
 	switch mode {
 	case strategyRepairModeContinueSameTarget, strategyRepairModeShiftRootCauseTarget:
 		return mode
-	default:
+	case "":
 		return ""
 	}
+	if strings.Contains(mode, "shift") || strings.Contains(mode, "root_cause") || strings.Contains(mode, "root-cause") {
+		return strategyRepairModeShiftRootCauseTarget
+	}
+	if strings.Contains(mode, "continue") ||
+		strings.Contains(mode, "same") ||
+		strings.Contains(mode, "current") ||
+		strings.Contains(mode, "snapshot") ||
+		strings.Contains(mode, "exact") ||
+		strings.Contains(mode, "minimal") ||
+		strings.Contains(mode, "replace") ||
+		strings.Contains(mode, "patch") {
+		return strategyRepairModeContinueSameTarget
+	}
+	return ""
 }
 
 func strategySameTargetContinuationAddressesCurrentFailure(step *runModel.Step, candidate map[string]any, expectedSurface string) bool {
@@ -3476,10 +3515,52 @@ func strategySameTargetContinuationAddressesCurrentFailure(step *runModel.Step, 
 	if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
 		return primaryDiagnosticPatchRequestAddressesContract(step, request, primary)
 	}
+	if strategyPatchUsesCurrentRepairTargetSnapshot(step, request) {
+		return true
+	}
 	return strings.TrimSpace(stringFromAny(candidate["addressesFailureSignals"])) != "" ||
 		len(stringSliceFromValue(candidate["addressesFailureSignals"])) > 0 ||
 		strings.TrimSpace(stringFromAny(candidate["primaryDiagnosticResolution"])) != "" ||
 		len(mapSliceFromValue(candidate["primaryDiagnosticResolutions"])) > 0
+}
+
+func strategyPatchUsesCurrentRepairTargetSnapshot(step *runModel.Step, request runtimePatchRequest) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	targetRef := normalizeRepairPatchTargetRef(request.TargetRef)
+	if targetRef == "" {
+		return false
+	}
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	targetMatched := false
+	for _, target := range stringSliceFromValue(actionPackage["repairTargetSet"]) {
+		if repairPatchTargetRefMatches(targetRef, []string{target}) {
+			targetMatched = true
+			break
+		}
+	}
+	if !targetMatched {
+		for _, snapshot := range mapSliceFromValue(actionPackage["targetSnapshots"]) {
+			if repairPatchTargetRefMatches(targetRef, []string{stringFromMap(snapshot, "targetRef")}) {
+				targetMatched = true
+				break
+			}
+		}
+	}
+	if !targetMatched {
+		return false
+	}
+	switch strings.TrimSpace(request.PatchType) {
+	case "text_replace":
+		return strings.TrimSpace(request.OldText) != "" && strings.TrimSpace(request.NewText) != ""
+	case "unified_diff":
+		return strings.TrimSpace(request.Diff) != ""
+	case "file_write":
+		return strings.TrimSpace(request.Content) != ""
+	default:
+		return false
+	}
 }
 
 func strategyCandidateAddressesGroundedRootCauseTarget(step *runModel.Step, candidate map[string]any, expectedSurface string) bool {
