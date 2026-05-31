@@ -17424,6 +17424,75 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 	}
 }
 
+func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsContractedStateChangingGraph(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	runID := common.RunID("run-graph-limit-state-change")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-graph-limit-state-change",
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+	}
+	for i := 0; i < maxGraphFollowUpExpansionAttempts; i++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{"graphFollowUp": true},
+			Output: map[string]any{
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: fmt.Sprintf("patch-%d", i), Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": fmt.Sprintf("file-%d.txt", i), "content": "ok"}},
+				}},
+			},
+		}
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed expansion step: %v", err)
+		}
+	}
+	current := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-state-change"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphFollowUp":               true,
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+				{ID: "patch", Kind: "patch/apply", Input: map[string]any{"patchType": "file_write", "targetRef": "target.txt", "content": "changed"}},
+				{ID: "verify", Kind: "shell/command", DependsOn: []string{"patch"}, Input: map[string]any{"command": "true"}},
+			}},
+		},
+	}
+	if err := stepRepo.Create(ctx, current); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+
+	handled, err := orch.validateGraphExpansionBoundary(ctx, run, current, nil, current.Output, nil)
+	if err != nil {
+		t.Fatalf("validate graph expansion boundary: %v", err)
+	}
+	if handled {
+		t.Fatalf("handled = true, want contracted state-changing graph to bypass graph expansion assessment")
+	}
+	if boolValue(current.Output["ignoredExecutionGraph"]) {
+		t.Fatalf("contracted state-changing graph was ignored: %+v", current.Output)
+	}
+}
+
 func TestValidateLLMFollowUpGraphAllowsConcreteFailureEvidenceAcquisitionGraph(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "run-evidence/follow-up",

@@ -1812,8 +1812,13 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	if !graphFollowUpExpansionStep(step) {
 		return false, nil
 	}
-	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok && graphIsConcreteValidationEvidenceGraph(graph) {
-		return false, nil
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		if graphIsConcreteValidationEvidenceGraph(graph) {
+			return false, nil
+		}
+		if inputRequiresStateChangingOutput(step.Input) && graphIsConcreteStateChangingContinuation(graph) {
+			return false, nil
+		}
 	}
 	count := o.graphFollowUpExpansionCount(ctx, run.ID)
 	if count <= maxGraphFollowUpExpansionAttempts {
