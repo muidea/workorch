@@ -22,7 +22,7 @@ func TestOutputModeSelectorKeepsSmallStateChangingRepairOnExecutionGraph(t *test
 	}
 
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
-	orch.applyLLMOutputModeSelection(context.Background(), run, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeExecutionGraph {
 		t.Fatalf("outputMode = %v, want executionGraph", input["outputMode"])
@@ -67,7 +67,7 @@ func TestOutputModeSelectorUsesIncrementalArtifactForLargeSchemaInvalidPreview(t
 		LLMOutput: LLMOutputRuntimePolicy{SchemaInvalidLargePreviewThreshold: 1024},
 	})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-large-schema"}, input, failed, 2)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-large-schema"}, input, failed, 2)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -107,7 +107,7 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequiredOutputBudgetSignal(
 		},
 	})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: "run-output-mode-required-output", WorkspaceID: "ws-output-mode-required-output"}, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-required-output", WorkspaceID: "ws-output-mode-required-output"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -156,7 +156,7 @@ func TestOutputModeSelectorRetainsIncrementalArtifactAfterContractFailure(t *tes
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-artifact-contract-retry"}, input, failed, 1)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-artifact-contract-retry"}, input, failed, 1)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -192,7 +192,7 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequestedModeWithInheritedB
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: "run-output-mode-requested", WorkspaceID: "ws-output-mode-requested"}, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-requested", WorkspaceID: "ws-output-mode-requested"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -232,7 +232,7 @@ func TestOutputModeSelectorRestoresBudgetSignalFromRunExecutionContext(t *testin
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), run, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -270,7 +270,7 @@ func TestOutputModeSelectorContinuesOpenArtifactContinuation(t *testing.T) {
 		policy:   NormalizeRuntimePolicy(RuntimePolicy{}),
 	}
 
-	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-open-continuation"}, input, nil, 0)
+	applyLLMOutputModeSelection(ctx, orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-open-continuation"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -320,7 +320,7 @@ func TestOutputModeSelectorUsesArtifactContextPhaseWhenContinuationRequestsConte
 		policy:   NormalizeRuntimePolicy(RuntimePolicy{}),
 	}
 
-	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-continuation"}, input, nil, 0)
+	applyLLMOutputModeSelection(ctx, orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-continuation"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeIncrementalArtifact {
 		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
@@ -374,7 +374,7 @@ func TestOutputModeSelectorUsesArtifactContextPhaseAfterChunkReturnedToolGraph(t
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-after-invalid-chunk"}, input, failed, 1)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: "ws-output-mode-context-after-invalid-chunk"}, input, failed, 1)
 
 	contract := mapFromValue(input["artifactOutputContract"])
 	if contract["phase"] != artifactOutputPhaseContext {
@@ -401,7 +401,7 @@ func TestOutputModeSelectorReturnsTerminalArtifactContinuationToExecutionGraph(t
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: "run-output-mode-applied", WorkspaceID: "ws-output-mode-applied"}, input, nil, 0)
+	applyLLMOutputModeSelection(ctx, orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-applied", WorkspaceID: "ws-output-mode-applied"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeExecutionGraph {
 		t.Fatalf("outputMode = %v, want executionGraph", input["outputMode"])
@@ -444,7 +444,7 @@ func TestOutputModeSelectorClearsIncrementalArtifactContractWhenReturningToExecu
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: "run-output-mode-cleanup", WorkspaceID: "ws-output-mode-cleanup"}, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-cleanup", WorkspaceID: "ws-output-mode-cleanup"}, input, nil, 0)
 
 	if outputModeFromInput(input) != outputModeExecutionGraph {
 		t.Fatalf("outputMode = %v, want executionGraph", input["outputMode"])
@@ -468,7 +468,7 @@ func TestOutputModeSelectorDoesNotInjectIncrementalArtifactWithoutStateChange(t 
 	}
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
 
-	orch.applyLLMOutputModeSelection(context.Background(), &runmodel.Run{ID: "run-output-mode-p0", WorkspaceID: "ws-output-mode-p0"}, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: "run-output-mode-p0", WorkspaceID: "ws-output-mode-p0"}, input, nil, 0)
 
 	if input["outputMode"] != nil || input["outputModeSelector"] != nil || input["artifactOutputContract"] != nil {
 		t.Fatalf("input = %+v, want no output mode injection without state-changing contract", input)

@@ -26,18 +26,12 @@ type outputModeSelection struct {
 	StateChangeNeeded bool
 }
 
-func (o *RuntimeOrchestrator) applyLLMOutputModeSelection(ctx context.Context, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) {
+func applyLLMOutputModeSelection(ctx context.Context, policy LLMOutputRuntimePolicy, continuations repository.ArtifactContinuationRepository, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) {
 	if len(input) == 0 {
 		return
 	}
 	inheritOutputModeSignalsFromRunExecutionContext(input, run)
-	policy := RuntimePolicy{}
-	continuations := repository.ArtifactContinuationRepository(nil)
-	if o != nil {
-		policy = o.policy
-		continuations = o.evidence.ArtifactContinuations
-	}
-	selection := selectOutputMode(ctx, policy.LLMOutput, continuations, run, input, failedStep, attempt)
+	selection := selectOutputMode(ctx, policy, continuations, run, input, failedStep, attempt)
 	if !selection.StateChangeNeeded {
 		clearIncrementalArtifactSelection(input)
 		return

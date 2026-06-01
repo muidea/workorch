@@ -548,9 +548,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
-	o.applyLLMOutputModeSelection(ctx, run, input, failedStep, attempt)
+	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)
-	o.applyLLMOutputModeSelection(ctx, run, input, failedStep, attempt)
+	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	return input
 }

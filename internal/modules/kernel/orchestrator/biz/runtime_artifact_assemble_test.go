@@ -924,7 +924,7 @@ func TestArtifactContinuationNextStepInputStaysChunkAfterModeSelection(t *testin
 		policy:   NormalizeRuntimePolicy(RuntimePolicy{}),
 	}
 
-	orch.applyLLMOutputModeSelection(ctx, &runmodel.Run{ID: runID, WorkspaceID: item.WorkspaceID}, input, nil, 0)
+	applyLLMOutputModeSelection(ctx, orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, &runmodel.Run{ID: runID, WorkspaceID: item.WorkspaceID}, input, nil, 0)
 
 	contract := mapFromValue(input["artifactOutputContract"])
 	if phase := stringFromMap(contract, "phase"); phase != artifactOutputPhaseChunk {

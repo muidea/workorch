@@ -2344,7 +2344,7 @@ func TestInitialStepOutputModeSelectionRestoresBudgetSignalsWithProfileStateChan
 
 	input := initialStepInput(run)
 	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
-	orch.applyLLMOutputModeSelection(context.Background(), run, input, nil, 0)
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
 
 	if intFromAny(required["estimatedPatchContentBytes"]) <= defaultMaxPatchContentBytes ||

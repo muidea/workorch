@@ -35,7 +35,7 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	if step.Input == nil {
 		step.Input = map[string]any{}
 	}
-	o.applyLLMOutputModeSelection(ctx, run, step.Input, nil, 0)
+	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, step.Input, nil, 0)
 	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
 	step.Input[stepInputKeyExecutionContextPackage] = pkg
 	if policy := llmOutputPolicyValues(o.policy); len(policy) > 0 {
