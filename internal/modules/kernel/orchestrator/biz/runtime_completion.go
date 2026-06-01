@@ -27,7 +27,7 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
 	return o.releaseWorkspaceForTerminalRun(ctx, r, common.WorkspaceStateCompleted)
@@ -49,7 +49,7 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
 	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateValidating)
@@ -71,10 +71,10 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
+	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
-	if err := o.publishWorkspaceStateChanged(ctx, workspace, run.ID); err != nil {
+	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, run.ID); err != nil {
 		return err
 	}
 
@@ -94,10 +94,10 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 	); err != nil {
 		return err
 	}
-	if err := o.publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
+	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, workspace, run.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, run.ID)
 }
 
 func (o *RuntimeOrchestrator) syncRunAndWorkspaceForValidation(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {

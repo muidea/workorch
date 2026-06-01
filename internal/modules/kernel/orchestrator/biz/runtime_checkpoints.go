@@ -7,31 +7,44 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func (o *RuntimeOrchestrator) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
-	return o.recordRunCheckpointAtStep(ctx, run, "")
+type checkpointSubsystem struct {
+	evidence RuntimeEvidenceRepositories
+	steps    repository.StepRepository
 }
 
-func (o *RuntimeOrchestrator) recordRunCheckpointAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
-	if run == nil || o.evidence.RuntimeCheckpoints == nil {
+func newCheckpointSubsystem(evidence RuntimeEvidenceRepositories, steps repository.StepRepository) *checkpointSubsystem {
+	return &checkpointSubsystem{
+		evidence: evidence,
+		steps:    steps,
+	}
+}
+
+func (c *checkpointSubsystem) recordRunCheckpoint(ctx context.Context, run *runModel.Run) error {
+	return c.recordRunCheckpointAtStep(ctx, run, "")
+}
+
+func (c *checkpointSubsystem) recordRunCheckpointAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
+	if c == nil || run == nil || c.evidence.RuntimeCheckpoints == nil {
 		return nil
 	}
 	if currentStepID == "" {
-		currentStepID = o.latestStepID(ctx, run.ID)
+		currentStepID = c.latestStepID(ctx, run.ID)
 	}
 	checkpointType := common.CheckpointTypeRunState
 	if run.BlockingTicketID != "" || run.BlockingApprovalID != "" {
 		checkpointType = common.CheckpointTypeBlocked
 	}
-	return o.createRuntimeCheckpoint(ctx, run, currentStepID, checkpointType, map[string]any{
+	return c.createRuntimeCheckpoint(ctx, run, currentStepID, checkpointType, map[string]any{
 		"event": "run_state_changed",
 		"state": string(run.State),
 	})
 }
 
-func (o *RuntimeOrchestrator) recordStepCheckpoint(ctx context.Context, run *runModel.Run, step *runModel.Step, event string) error {
-	if run == nil || step == nil || o.evidence.RuntimeCheckpoints == nil {
+func (c *checkpointSubsystem) recordStepCheckpoint(ctx context.Context, run *runModel.Run, step *runModel.Step, event string) error {
+	if c == nil || run == nil || step == nil || c.evidence.RuntimeCheckpoints == nil {
 		return nil
 	}
 	data := map[string]any{
@@ -54,16 +67,19 @@ func (o *RuntimeOrchestrator) recordStepCheckpoint(ctx context.Context, run *run
 	if completed := graphCompletedNodesFromStep(step); len(completed) > 0 {
 		data[stepInputKeyGraphCompletedNodes] = completed
 	}
-	return o.createRuntimeCheckpoint(ctx, run, step.ID, common.CheckpointTypeRunState, data)
+	return c.createRuntimeCheckpoint(ctx, run, step.ID, common.CheckpointTypeRunState, data)
 }
 
-func (o *RuntimeOrchestrator) createRuntimeCheckpoint(
+func (c *checkpointSubsystem) createRuntimeCheckpoint(
 	ctx context.Context,
 	run *runModel.Run,
 	currentStepID common.StepID,
 	checkpointType common.CheckpointType,
 	data map[string]any,
 ) error {
+	if c == nil || run == nil || c.evidence.RuntimeCheckpoints == nil {
+		return nil
+	}
 	now := runtimeEvidenceTimestamp()
 	item := &runModel.RuntimeCheckpoint{
 		ID:                 common.CheckpointID(fmt.Sprintf("%s/checkpoint/%d", run.ID, time.Now().UTC().UnixNano())),
@@ -78,20 +94,20 @@ func (o *RuntimeOrchestrator) createRuntimeCheckpoint(
 		OccurredAt:         now,
 		Data:               data,
 	}
-	if err := o.evidence.RuntimeCheckpoints.Create(ctx, item); err != nil {
+	if err := c.evidence.RuntimeCheckpoints.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		return o.evidence.RuntimeCheckpoints.Update(ctx, item)
+		return c.evidence.RuntimeCheckpoints.Update(ctx, item)
 	}
 	return nil
 }
 
-func (o *RuntimeOrchestrator) latestStepID(ctx context.Context, runID common.RunID) common.StepID {
-	if o == nil || o.steps == nil || runID == "" {
+func (c *checkpointSubsystem) latestStepID(ctx context.Context, runID common.RunID) common.StepID {
+	if c == nil || c.steps == nil || runID == "" {
 		return ""
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := c.steps.ListByRun(ctx, runID)
 	if err != nil || len(steps) == 0 {
 		return ""
 	}

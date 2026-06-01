@@ -18,15 +18,43 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (o *RuntimeOrchestrator) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
-	return o.publishRunStateChangedAtStep(ctx, run, "")
+type eventSubsystem struct {
+	hub         events.Hub
+	checkpoints *checkpointSubsystem
+	llmContext  *llmContextSubsystem
 }
 
-func (o *RuntimeOrchestrator) publishRunCreated(ctx context.Context, run *runModel.Run) error {
-	if o.eventHub == nil || run == nil {
+func newEventSubsystem(hub events.Hub, checkpoints *checkpointSubsystem, llmContext *llmContextSubsystem) *eventSubsystem {
+	return &eventSubsystem{
+		hub:         hub,
+		checkpoints: checkpoints,
+		llmContext:  llmContext,
+	}
+}
+
+func (e *eventSubsystem) checkpointManager() *checkpointSubsystem {
+	if e == nil || e.checkpoints == nil {
+		return newCheckpointSubsystem(RuntimeEvidenceRepositories{}, nil)
+	}
+	return e.checkpoints
+}
+
+func (e *eventSubsystem) llmContextManager() *llmContextSubsystem {
+	if e == nil || e.llmContext == nil {
+		return newLLMContextSubsystem()
+	}
+	return e.llmContext
+}
+
+func (e *eventSubsystem) publishRunStateChanged(ctx context.Context, run *runModel.Run) error {
+	return e.publishRunStateChangedAtStep(ctx, run, "")
+}
+
+func (e *eventSubsystem) publishRunCreated(ctx context.Context, run *runModel.Run) error {
+	if e == nil || e.hub == nil || run == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicRunCreated,
 		SourceModule: modulecommon.ModuleID,
@@ -45,14 +73,14 @@ func (o *RuntimeOrchestrator) publishRunCreated(ctx context.Context, run *runMod
 	})
 }
 
-func (o *RuntimeOrchestrator) publishRunStateChangedAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
-	if err := o.recordRunCheckpointAtStep(ctx, run, currentStepID); err != nil {
+func (e *eventSubsystem) publishRunStateChangedAtStep(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
+	if err := e.checkpointManager().recordRunCheckpointAtStep(ctx, run, currentStepID); err != nil {
 		return err
 	}
-	if o.eventHub == nil || run == nil {
+	if e == nil || e.hub == nil || run == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicRunStateChanged,
 		SourceModule: modulecommon.ModuleID,
@@ -71,8 +99,8 @@ func (o *RuntimeOrchestrator) publishRunStateChangedAtStep(ctx context.Context, 
 	})
 }
 
-func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
-	if item == nil || o.eventHub == nil {
+func (e *eventSubsystem) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
+	if e == nil || item == nil || e.hub == nil {
 		return nil
 	}
 	artifactRefs := make([]string, 0, len(item.ArtifactRefs))
@@ -81,7 +109,7 @@ func (o *RuntimeOrchestrator) publishResultAccepted(ctx context.Context, item *r
 			artifactRefs = append(artifactRefs, string(ref))
 		}
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", item.ID, resultEventStateSuffix(item.State)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        resultEventTopic(item.State),
@@ -132,11 +160,11 @@ func resultEventStateSuffix(state common.ResultState) string {
 	}
 }
 
-func (o *RuntimeOrchestrator) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
-	if item == nil || o.eventHub == nil {
+func (e *eventSubsystem) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
+	if item == nil || e.hub == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/created", item.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicArtifactCreated,
@@ -162,8 +190,8 @@ func (o *RuntimeOrchestrator) publishArtifactCreated(ctx context.Context, item *
 	})
 }
 
-func (o *RuntimeOrchestrator) publishPatchChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch, topic string, failure error) error {
-	if o.eventHub == nil || run == nil || patch == nil {
+func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, patch *runModel.Patch, topic string, failure error) error {
+	if e.hub == nil || run == nil || patch == nil {
 		return nil
 	}
 	var stepID common.StepID
@@ -190,7 +218,7 @@ func (o *RuntimeOrchestrator) publishPatchChanged(ctx context.Context, run *runM
 	if failure != nil {
 		errText = failure.Error()
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", patch.ID, patchEventName(topic)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
@@ -219,8 +247,8 @@ func (o *RuntimeOrchestrator) publishPatchChanged(ctx context.Context, run *runM
 	})
 }
 
-func (o *RuntimeOrchestrator) publishArtifactContinuationChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, item *orchestratormodel.ArtifactContinuation, topic string, failure error) error {
-	if o.eventHub == nil || run == nil || item == nil {
+func (e *eventSubsystem) publishArtifactContinuationChanged(ctx context.Context, run *runModel.Run, step *runModel.Step, item *orchestratormodel.ArtifactContinuation, topic string, failure error) error {
+	if e.hub == nil || run == nil || item == nil {
 		return nil
 	}
 	payload := map[string]any{
@@ -255,7 +283,7 @@ func (o *RuntimeOrchestrator) publishArtifactContinuationChanged(ctx context.Con
 	if step != nil {
 		stepID = step.ID
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/%s", item.ID, artifactContinuationEventName(topic)),
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
@@ -288,8 +316,8 @@ func artifactContinuationEventName(topic string) string {
 	}
 }
 
-func (o *RuntimeOrchestrator) publishPatchPreview(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, preview map[string]any) error {
-	if o.eventHub == nil || run == nil || step == nil || len(preview) == 0 {
+func (e *eventSubsystem) publishPatchPreview(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, preview map[string]any) error {
+	if e.hub == nil || run == nil || step == nil || len(preview) == 0 {
 		return nil
 	}
 	toolCallID := common.ToolCallID("")
@@ -299,7 +327,7 @@ func (o *RuntimeOrchestrator) publishPatchPreview(ctx context.Context, run *runM
 	targetRef := stringFromAny(preview["targetRef"])
 	patchType := stringFromAny(preview["patchType"])
 	subjectID := fmt.Sprintf("%s/patch-preview", step.ID)
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/patch-previewed", subjectID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicPatchPreviewed,
@@ -396,11 +424,11 @@ func intFromAny(value any) int {
 	}
 }
 
-func (o *RuntimeOrchestrator) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
-	if item == nil || o.eventHub == nil {
+func (e *eventSubsystem) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
+	if item == nil || e.hub == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -412,11 +440,11 @@ func (o *RuntimeOrchestrator) publishMemoryChanged(ctx context.Context, topic st
 	})
 }
 
-func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, workspace *workspaceModel.Workspace, runID common.RunID) error {
-	if o.eventHub == nil || workspace == nil {
+func (e *eventSubsystem) publishWorkspaceStateChanged(ctx context.Context, workspace *workspaceModel.Workspace, runID common.RunID) error {
+	if e.hub == nil || workspace == nil {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicWorkspaceStateChanged,
 		SourceModule: modulecommon.ModuleID,
@@ -428,11 +456,11 @@ func (o *RuntimeOrchestrator) publishWorkspaceStateChanged(ctx context.Context, 
 	})
 }
 
-func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runModel.Run, step *runModel.Step, topic string) error {
-	if o.eventHub == nil || run == nil || step == nil {
+func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run, step *runModel.Step, topic string) error {
+	if e.hub == nil || run == nil || step == nil {
 		return nil
 	}
-	if err := o.eventHub.Publish(ctx, events.Envelope{
+	if err := e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
 		Topic:        topic,
 		SourceModule: modulecommon.ModuleID,
@@ -441,15 +469,15 @@ func (o *RuntimeOrchestrator) publishStepState(ctx context.Context, run *runMode
 		WorkspaceID:  string(run.WorkspaceID),
 		RunID:        string(run.ID),
 		StepID:       string(step.ID),
-		Payload:      events.StepPayload(step.Kind, step.State, runtimeStepEventInput(o.llmContextManager(), run, step), runtimeStepEventOutput(o.llmContextManager(), run, step)),
+		Payload:      events.StepPayload(step.Kind, step.State, runtimeStepEventInput(e.llmContextManager(), run, step), runtimeStepEventOutput(e.llmContextManager(), run, step)),
 	}); err != nil {
 		return err
 	}
 	if topic == events.TopicStepStateChanged {
-		if err := o.publishLLMStreamProgressFromStep(ctx, run, step); err != nil {
+		if err := e.publishLLMStreamProgressFromStep(ctx, run, step); err != nil {
 			return err
 		}
-		if err := o.publishLLMUsageFromStep(ctx, run, step); err != nil {
+		if err := e.publishLLMUsageFromStep(ctx, run, step); err != nil {
 			return err
 		}
 	}
@@ -488,8 +516,8 @@ func runtimeStepEventOutput(llmContext *llmContextSubsystem, run *runModel.Run, 
 	return ret
 }
 
-func (o *RuntimeOrchestrator) publishLLMStreamProgressFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
-	if o.eventHub == nil || run == nil || step == nil || len(step.Output) == 0 {
+func (e *eventSubsystem) publishLLMStreamProgressFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if e.hub == nil || run == nil || step == nil || len(step.Output) == 0 {
 		return nil
 	}
 	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
@@ -529,7 +557,7 @@ func (o *RuntimeOrchestrator) publishLLMStreamProgressFromStep(ctx context.Conte
 	if status == "" {
 		status = "completed"
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-stream-progress", step.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicRunLLMStreamProgress,
@@ -606,8 +634,8 @@ func streamProgressSummary(output map[string]any) string {
 	}
 }
 
-func (o *RuntimeOrchestrator) publishLLMUsageFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
-	if o.eventHub == nil || run == nil || step == nil || len(step.Output) == 0 {
+func (e *eventSubsystem) publishLLMUsageFromStep(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if e.hub == nil || run == nil || step == nil || len(step.Output) == 0 {
 		return nil
 	}
 	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
@@ -633,7 +661,7 @@ func (o *RuntimeOrchestrator) publishLLMUsageFromStep(ctx context.Context, run *
 	if !ok {
 		return nil
 	}
-	return o.eventHub.Publish(ctx, events.Envelope{
+	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-usage-recorded", step.ID),
 		Version:      events.WorkorchEventVersion,
 		Topic:        events.TopicRunLLMUsageRecorded,

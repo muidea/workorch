@@ -113,7 +113,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if err := o.runs.Create(ctx, successor); err != nil {
 		return err
 	}
-	if err := o.publishRunCreated(ctx, successor); err != nil {
+	if err := o.eventPublisher().publishRunCreated(ctx, successor); err != nil {
 		return err
 	}
 	return o.StartRun(ctx, successor.ID)
@@ -294,7 +294,7 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if err := o.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
 
@@ -342,7 +342,7 @@ func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context
 	if err := o.workspaces.Update(ctx, ws); err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
 }
 
 func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, workspaceID common.WorkspaceID) error {
@@ -368,7 +368,7 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 		if err := o.workspaces.Update(ctx, ws); err != nil {
 			return err
 		}
-		return o.publishWorkspaceStateChanged(ctx, ws, "")
+		return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, "")
 	}
 	if activeRun.WorkspaceID != ws.ID || !isTerminalRunState(activeRun.State) {
 		return nil
@@ -378,7 +378,7 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 	if err := o.workspaces.Update(ctx, ws); err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, ws, activeRun.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, activeRun.ID)
 }
 
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
@@ -386,7 +386,7 @@ func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run
 	if err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
 }
 
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunWithWorkspace(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) error {
@@ -394,7 +394,7 @@ func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunWithWorkspace(ctx context
 	if err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, ws, run.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
 }
 
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunState(ctx context.Context, run *runModel.Run, state common.WorkspaceState) (*workspaceModel.Workspace, error) {

@@ -67,7 +67,7 @@ func (o *RuntimeOrchestrator) recordStepDispatchEvidence(ctx context.Context, ru
 			return err
 		},
 		func() error {
-			return o.recordStepCheckpoint(ctx, run, step, "step_dispatched")
+			return o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_dispatched")
 		},
 	)
 	if err != nil {
@@ -119,7 +119,7 @@ func (o *RuntimeOrchestrator) persistCompletedStepState(ctx context.Context, run
 			return o.steps.Update(ctx, step)
 		},
 		func() error {
-			return o.recordStepCheckpoint(ctx, run, step, "step_completed")
+			return o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_completed")
 		},
 	)
 }

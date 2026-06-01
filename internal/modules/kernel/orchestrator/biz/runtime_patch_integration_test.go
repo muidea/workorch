@@ -314,7 +314,7 @@ func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testin
 		Metadata:          map[string]any{"content": "must not be published"},
 	}
 
-	if err := orch.publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationAssembled, nil); err != nil {
+	if err := orch.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationAssembled, nil); err != nil {
 		t.Fatalf("publish artifact continuation event: %v", err)
 	}
 	published := hub.Published()

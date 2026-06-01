@@ -169,9 +169,9 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessmen
 		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
 
 func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
@@ -225,9 +225,9 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
 
 func (o *RuntimeOrchestrator) recordValidationCommandMemoriesFromValidatedDoDAssessment(
@@ -431,7 +431,7 @@ func (o *RuntimeOrchestrator) upsertRunMemoryItem(ctx context.Context, item *mem
 		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }

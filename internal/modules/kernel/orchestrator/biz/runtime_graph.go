@@ -254,9 +254,9 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	}
 	attachCoverageWorkItemFailureDiagnostics(run, step)
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
-	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.steps.Update(ctx, step)
-	_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	_ = o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged)
 	if shouldCloseCompletionGateFailureWithoutRepair(summary, step, step.Output) {
 		reason := errText
 		if reason == "" {

@@ -88,7 +88,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return common.ErrConflict
 	}
 	o.enrichLLMStepInputContext(ctx, run, step, workspace)
-	if err := o.publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
+	if err := o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
 		return err
 	}
 	toolCall, err := o.recordStepDispatchEvidence(ctx, run, step)
@@ -181,7 +181,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
-	if err := o.publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
+	if err := o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
 		return err
 	}
 

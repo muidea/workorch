@@ -112,6 +112,8 @@ type RuntimeOrchestrator struct {
 	evidence    RuntimeEvidenceRepositories
 	eventHub    events.Hub
 	policy      RuntimePolicy
+	checkpoints *checkpointSubsystem
+	eventer     *eventSubsystem
 	llmContext  *llmContextSubsystem
 	repair      *repairSubsystem
 	graph       *graphSubsystem
@@ -212,9 +214,31 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		coverage:    newCoverageSubsystem(),
 	}
 	orchestrator.graph.closures = orchestrator
-	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator)
-	orchestrator.results = newResultSubsystem(evidence, stepRepo, orchestrator)
+	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
+	orchestrator.eventer = newEventSubsystem(eventHub, orchestrator.checkpoints, orchestrator.llmContext)
+	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator.eventPublisher())
+	orchestrator.results = newResultSubsystem(evidence, stepRepo, orchestrator.eventPublisher())
 	return orchestrator
+}
+
+func (o *RuntimeOrchestrator) checkpointManager() *checkpointSubsystem {
+	if o == nil {
+		return newCheckpointSubsystem(RuntimeEvidenceRepositories{}, nil)
+	}
+	if o.checkpoints == nil {
+		o.checkpoints = newCheckpointSubsystem(o.evidence, o.steps)
+	}
+	return o.checkpoints
+}
+
+func (o *RuntimeOrchestrator) eventPublisher() *eventSubsystem {
+	if o == nil {
+		return newEventSubsystem(nil, nil, nil)
+	}
+	if o.eventer == nil {
+		o.eventer = newEventSubsystem(o.eventHub, o.checkpointManager(), o.llmContextManager())
+	}
+	return o.eventer
 }
 
 func (o *RuntimeOrchestrator) graphManager() *graphSubsystem {
@@ -263,7 +287,7 @@ func (o *RuntimeOrchestrator) patchManager() *patchSubsystem {
 		return newPatchSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
 	}
 	if o.patches == nil {
-		o.patches = newPatchSubsystem(o.evidence, o.approvals, o)
+		o.patches = newPatchSubsystem(o.evidence, o.approvals, o.eventPublisher())
 	}
 	return o.patches
 }
@@ -273,7 +297,7 @@ func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
 		return newResultSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
 	}
 	if o.results == nil {
-		o.results = newResultSubsystem(o.evidence, o.steps, o)
+		o.results = newResultSubsystem(o.evidence, o.steps, o.eventPublisher())
 	}
 	return o.results
 }

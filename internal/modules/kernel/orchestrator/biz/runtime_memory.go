@@ -74,7 +74,7 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 				}
 				topic = events.TopicMemoryUpdated
 			}
-			return o.publishMemoryChanged(ctx, topic, item)
+			return o.eventPublisher().publishMemoryChanged(ctx, topic, item)
 		})
 	}
 	if err := runParallel(tasks...); err != nil {

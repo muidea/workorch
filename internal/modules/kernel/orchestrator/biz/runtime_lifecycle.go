@@ -46,10 +46,10 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	if err := o.publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
+	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
 		return err
 	}
 	specs, err := o.nextDispatchSpecs(ctx, r)
@@ -111,10 +111,10 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
+	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
@@ -147,10 +147,10 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
+	if err := o.eventPublisher().publishRunStateChangedAtStep(ctx, r, currentStepID); err != nil {
 		return err
 	}
-	return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
@@ -275,10 +275,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if syncErr != nil {
 				return syncErr
 			}
-			if publishErr := o.publishRunStateChanged(ctx, r); publishErr != nil {
+			if publishErr := o.eventPublisher().publishRunStateChanged(ctx, r); publishErr != nil {
 				return publishErr
 			}
-			if publishErr := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
+			if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
 				return publishErr
 			}
 			if dispatchErr := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); dispatchErr != nil {
@@ -293,10 +293,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				if err != nil {
 					return err
 				}
-				if err := o.publishRunStateChanged(ctx, r); err != nil {
+				if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 					return err
 				}
-				return o.publishWorkspaceStateChanged(ctx, workspace, r.ID)
+				return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 			}
 			return nil
 		}
@@ -313,10 +313,10 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err != nil {
 		return err
 	}
-	if err := o.publishRunStateChanged(ctx, r); err != nil {
+	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	if err := o.publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
+	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
 	specs, err := o.nextDispatchSpecsAfterResolvedDecision(ctx, r, resumeAfterStepID, resumeInput)

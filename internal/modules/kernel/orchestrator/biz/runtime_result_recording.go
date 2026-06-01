@@ -184,9 +184,9 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 		if err := o.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.publishResultAccepted(ctx, existing)
+		return o.eventPublisher().publishResultAccepted(ctx, existing)
 	}
-	return o.publishResultAccepted(ctx, item)
+	return o.eventPublisher().publishResultAccepted(ctx, item)
 }
 
 func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
@@ -245,9 +245,9 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 		if err := o.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.publishResultAccepted(ctx, existing)
+		return o.eventPublisher().publishResultAccepted(ctx, existing)
 	}
-	return o.publishResultAccepted(ctx, item)
+	return o.eventPublisher().publishResultAccepted(ctx, item)
 }
 
 func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []string) (string, []string) {

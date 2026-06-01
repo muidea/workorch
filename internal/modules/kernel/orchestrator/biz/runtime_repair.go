@@ -117,12 +117,12 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		evidenceRef = string(toolCall.ID)
 	}
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
-	_ = o.recordStepCheckpoint(ctx, run, step, "step_failed")
+	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
 		_ = o.runs.Update(ctx, run)
 	}
 	_ = o.steps.Update(ctx, step)
-	_ = o.publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	_ = o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged)
 	if graphBatchStep(step) {
 		if execErr != nil {
 			return execErr
