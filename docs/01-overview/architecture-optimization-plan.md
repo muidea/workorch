@@ -328,6 +328,8 @@ type repairSubsystem struct {
 | P2.2 HTTP workspace 路由拆分 | 已完成 | `http_workspace.go` 承载 workspace CRUD、snapshot/progress/context/decomposition、memory recall、soul binding、Goal/DoD 与 quality-check routes |
 | P2.2 HTTP run 路由拆分 | 已完成 | `http_run.go` 承载 run list/read/create/start/resume、workspace-scoped run detail、status、observability、steps、tool calls、results、patches、artifacts、context bundle 与 runtime payload routes；`http_read.go`/`http_write.go` 降为领域路由聚合入口 |
 | P2.1/P2.2 行为验证 | 已完成 | `go test ./internal/modules/application/workorchd/service/server -count=1` 通过；`http_test.go` 的 native route registration 覆盖已同步 |
+| P2.4 HTTP shared helper 拆分 | 已完成 | `http.go` 只保留 config/server constructor/startup/router setup；响应/request DTO 与 function aliases 移至 `http_types.go`，默认 appservice 代理移至 `http_defaults.go`，run cache/queue/status wait 移至 `http_run_cache.go`，query helper 移至 `http_query_helpers.go`，metrics/path/decode/write helper 移至 `http_response_helpers.go` |
+| P2.4 HTTP shared helper 拆分验证 | 已完成 | `go test ./internal/modules/application/workorchd/service/server -count=1` 通过；只移动 service 层 helper 落点，不改变 route registration、handler、请求响应结构、cache key、queue 优先级或 error mapping |
 | P2.3 read model 公开入口拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_entrypoints.go` 承载 `Read*WithSession/WithBackend/FromEnv` 入口 |
 | P2.3 read model outcome 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_outcome.go` 承载 `mapRunOutcome`、`mapWorkspaceOutcome` 与 terminal result selection helpers |
 | P2.3 read model LLM usage 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_llm_usage.go` 承载 LLM context budget、usage trace、usage summary 映射 |
@@ -398,6 +400,7 @@ MCP HTTP 细分只移动 MCP route registration 和 handler 函数归属，不�
 catalog HTTP 细分只移动 souls、workspace templates、skills route registration 和 handler 函数归属，不改变 catalog CRUD、workspaceId query 过滤、响应结构或 metrics 计数。
 workspace HTTP 细分只移动 workspace/Goal/DoD route registration 和 handler 函数归属，不改变 workspace CRUD、execution activation、Goal/DoD 定义更新、quality check、snapshot/context/progress 读取或 run continuation scheduling。
 run HTTP 细分只移动 run route registration、workspace-scoped run helper 和 runtime observability handler 函数归属，不改变 run create/start/resume、status wait、snapshot cache、artifact content/runtime payload 读取、metrics 计数或 run continuation scheduling。
+HTTP shared helper 拆分只移动 DTO、operation function aliases、default appservice proxies、cache/queue、query/path、metrics/response helper 的文件归属，不改变 server state 字段、startup wiring、route 行为或 API contract。
 read model 入口拆分只移动公开入口和薄包装函数，不改变投影核心逻辑、分页策略、事件映射或 snapshot 结构。
 outcome 投影拆分只移动 outcome state/result selection 逻辑，不改变 run/workspace terminal 判断、result 选择优先级或 evidence/artifact refs 映射。
 LLM usage 投影拆分只移动 usage/context budget trace 映射与 summary 聚合逻辑，不改变事件过滤、排序、cache token 统计或 ratio 计算。
@@ -436,7 +439,7 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 | 项 | 状态 | 下一步 |
 |----|------|--------|
 | P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、repair dispatch action selection/spec/blocker/fail-run reason 与 repair 文件职责拆分已完成；`runtime_orchestrator.go` 仍约 6,353 行、`RuntimeOrchestrator` receiver 方法仍约 190 个，需继续核对 dispatch/lifecycle、workspace state sync、decision resume、validation completion 等可否通过窄接口收口 |
-| P2 application 大文件拆分后续项 | 进行中 | read model 已降至约 1,293 行；`http.go` 仍约 3,800 行，需继续核对 shared helper、route group assembly、status/cache/metrics 等是否可按现有 server 边界继续拆分 |
+| P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
 | P3 orchestrator 测试拆分 | 进行中 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 仍约 30,761 行，需继续按 dispatch、lifecycle、governance resume、validation/result、workspace sync 等集成面拆分 |
 
 ---
@@ -458,7 +461,7 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 | 指标 | 当前 | 目标 |
 |------|------|------|
 | RuntimeOrchestrator 方法数 | ~190 | ~60（核心 dispatch + lifecycle） |
-| 最大源文件行数 | ~6,353 (`runtime_orchestrator.go`)；repair 最大文件已降至 ~1,754 | <3,000 |
+| 最大源文件行数 | ~6,353 (`runtime_orchestrator.go`)；repair 最大文件已降至 ~1,754，HTTP 最大拆分文件约 2,074 | <3,000 |
 | 最大测试文件行数 | ~30,761 (`runtime_orchestrator_test.go`) | <8,000 |
 | 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |
 | 新增职责归属判断 | 已改善但未完全闭环（状态变更型协调仍集中在 `RuntimeOrchestrator`） | 明确（必须选择子系统；状态机写入保留协调层） |
