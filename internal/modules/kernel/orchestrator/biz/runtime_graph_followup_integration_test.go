@@ -2241,11 +2241,11 @@ func TestRuntimeOrchestrator_AssessmentOnlyDecisionForContinuableCandidateRoutes
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := orch.dispatchStep(ctx, run, "run-assessment-only-decision-repair/provider-retry", llmcommon.StepKindWorkspaceExecution, map[string]any{
+	if err := orch.dispatchStepWithWorkspace(ctx, run, "run-assessment-only-decision-repair/provider-retry", llmcommon.StepKindWorkspaceExecution, map[string]any{
 		stepInputKeySoulStage:         soulStageValidation,
 		"providerRetryAssessmentOnly": true,
 		"providerRetryMode":           "completion_assessment_only",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("dispatch assessment-only step: %v", err)
 	}
 
@@ -2389,11 +2389,11 @@ func TestRuntimeOrchestrator_FailedAssessmentDecisionWithActionableCoverageRoute
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := orch.dispatchStep(ctx, run, "run-failed-assessment-decision-repair/validation", llmcommon.StepKindWorkspaceExecution, map[string]any{
+	if err := orch.dispatchStepWithWorkspace(ctx, run, "run-failed-assessment-decision-repair/validation", llmcommon.StepKindWorkspaceExecution, map[string]any{
 		stepInputKeySoulStage:        soulStageValidation,
 		stepInputKeyRuntimeStage:     runtimeStageVerification,
 		stepInputKeyRuntimeStageMode: "strict_convergence",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("dispatch validation step: %v", err)
 	}
 
@@ -2499,9 +2499,9 @@ func TestRuntimeOrchestrator_ContinuableDecisionRoutesToRepair(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := orch.dispatchStep(ctx, run, "run-continuable-decision-repair/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+	if err := orch.dispatchStepWithWorkspace(ctx, run, "run-continuable-decision-repair/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
 		stepInputKeySoulStage: soulStageExecution,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("dispatch step: %v", err)
 	}
 	tickets, err := ticketRepo.ListByRunID(ctx, runID)
@@ -2614,11 +2614,11 @@ func TestRuntimeOrchestrator_KnownActionableDecisionRoutesToRepair(t *testing.T)
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := orch.dispatchStep(ctx, run, "run-known-actionable-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+	if err := orch.dispatchStepWithWorkspace(ctx, run, "run-known-actionable-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
 		stepInputKeyRuntimeStage:     runtimeStageVerification,
 		stepInputKeyRuntimeStageMode: "strict_convergence",
 		stepInputKeySoulStage:        soulStageValidation,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("dispatch step: %v", err)
 	}
 	tickets, err := ticketRepo.ListByRunID(ctx, runID)
@@ -2733,11 +2733,11 @@ func TestRuntimeOrchestrator_ReadableResourceDecisionRoutesToRepairWithHumanFiel
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := orch.dispatchStep(ctx, run, "run-readable-resource-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
+	if err := orch.dispatchStepWithWorkspace(ctx, run, "run-readable-resource-decision/step-1", llmcommon.StepKindWorkspaceExecution, map[string]any{
 		stepInputKeyRuntimeStage:     runtimeStageRepair,
 		stepInputKeyRuntimeStageMode: "strict_convergence",
 		stepInputKeySoulStage:        soulStageExecution,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("dispatch step: %v", err)
 	}
 	tickets, err := ticketRepo.ListByRunID(ctx, runID)

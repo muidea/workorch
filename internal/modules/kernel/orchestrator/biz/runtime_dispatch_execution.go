@@ -12,16 +12,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (o *RuntimeOrchestrator) dispatchStep(
-	ctx context.Context,
-	run *runModel.Run,
-	stepID common.StepID,
-	kind string,
-	input map[string]any,
-) error {
-	return o.dispatchStepWithWorkspace(ctx, run, stepID, kind, input, nil)
-}
-
 func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	ctx context.Context,
 	run *runModel.Run,

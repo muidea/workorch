@@ -387,7 +387,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		if !ok {
 			return common.ErrInvalidArgument
 		}
-		return o.dispatchStep(ctx, run, spec.ID, spec.Kind, spec.Input)
+		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
 	case runtimeRecoveryActionProviderRetryExhausted:
 		return o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepairExhausted:
@@ -404,7 +404,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		if !ok {
 			return common.ErrInvalidArgument
 		}
-		return o.dispatchStep(ctx, run, spec.ID, spec.Kind, spec.Input)
+		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
 	case runtimeRecoveryActionFailRun:
 		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, o.repairManager().failRunReasonFromFailedStep(failedStep, execErr))
 	default:
