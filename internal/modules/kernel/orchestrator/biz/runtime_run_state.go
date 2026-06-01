@@ -31,13 +31,6 @@ func (o *RuntimeOrchestrator) FailRun(ctx context.Context, runID common.RunID, r
 	return o.closeRun(ctx, runID, common.RunStateFailed, reason)
 }
 
-func (o *RuntimeOrchestrator) failLoadedRun(ctx context.Context, run *runModel.Run, reason string) error {
-	if reason == "" {
-		return common.ErrInvalidArgument
-	}
-	return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
-}
-
 func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
 	if o == nil || run == nil || run.ID == "" || o.runs == nil {
 		return common.ErrInvalidArgument

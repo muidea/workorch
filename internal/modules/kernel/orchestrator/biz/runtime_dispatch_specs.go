@@ -25,7 +25,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 			reason = "run has rejected result"
 		}
 		if !isTerminalRunState(run.State) {
-			if err := o.failLoadedRun(ctx, run, reason); err != nil {
+			if err := o.closeLoadedRun(ctx, run, common.RunStateFailed, reason); err != nil {
 				return nil, err
 			}
 		}

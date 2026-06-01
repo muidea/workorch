@@ -206,7 +206,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 			case decisioncommon.ResolutionTypeRejectCurrentPath:
 				mergeRunExecutionContextPatch(r, executionContextPatch)
-				return o.failLoadedRun(ctx, r, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
+				return o.closeLoadedRun(ctx, r, common.RunStateFailed, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
 			case decisioncommon.ResolutionTypeReplan:
 				mergeRunExecutionContextPatch(r, executionContextPatch)
 				return o.replanLoadedRun(ctx, r, ticket, resolution)
@@ -231,7 +231,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			r.BlockingApprovalID = ""
 		case common.ApprovalStateRejected:
 			mergeRunExecutionContextPatch(r, executionContextPatch)
-			return o.failLoadedRun(ctx, r, fmt.Sprintf("approval %s rejected", approval.ID))
+			return o.closeLoadedRun(ctx, r, common.RunStateFailed, fmt.Sprintf("approval %s rejected", approval.ID))
 		default:
 			return common.ErrBlocked
 		}
