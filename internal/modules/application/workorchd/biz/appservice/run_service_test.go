@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -676,6 +677,86 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 	if workspace.State != string(common.WorkspaceStateFailed) || workspace.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want failed with no terminal active run", workspace)
 	}
+}
+
+func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-dispatched", "orphan dispatched workspace", "", "workspaces/orphan-dispatched"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-orphan-dispatched", "run-orphan-dispatched", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, "run-orphan-dispatched")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    "run-orphan-dispatched/follow-up",
+		RunID: "run-orphan-dispatched",
+		Kind:  filecommon.StepKindList,
+		State: common.StepStateDispatched,
+		Input: map[string]any{"path": ".", "maxEntries": 1, "previousStepId": "run-orphan-dispatched/z-lexically-newer"},
+	}); err != nil {
+		t.Fatalf("create dispatched step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:     "run-orphan-dispatched/z-lexically-newer",
+		RunID:  "run-orphan-dispatched",
+		Kind:   filecommon.StepKindList,
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{"path": ".", "maxEntries": 1},
+		Output: map[string]any{"status": "completed"},
+	}); err != nil {
+		t.Fatalf("create previous completed step: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != "run-orphan-dispatched" || recovered[0].State != "completed" {
+		t.Fatalf("recovered = %+v, want completed run after redispatched step", recovered)
+	}
+	verifySession, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend verify: %v", err)
+	}
+	verifyExports, err := verifySession.Exports()
+	if err != nil {
+		t.Fatalf("Exports verify: %v", err)
+	}
+	step, err := verifyExports.Repositories.Steps.Get(ctx, "run-orphan-dispatched/follow-up")
+	if err != nil {
+		t.Fatalf("get redispatched step: %v", err)
+	}
+	if step.State != common.StepStateCompleted || step.Output["status"] != "completed" {
+		t.Fatalf("step = %+v, want redispatched completed step", step)
+	}
+	runAfter, err := verifyExports.Repositories.Runs.Get(ctx, "run-orphan-dispatched")
+	if err != nil {
+		t.Fatalf("get run after: %v", err)
+	}
+	if runAfter.State != common.RunStateCompleted {
+		t.Fatalf("run state = %s, want completed after redispatch", runAfter.State)
+	}
+	_ = verifySession.Close(ctx)
 }
 
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {

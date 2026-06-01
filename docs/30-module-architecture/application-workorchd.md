@@ -118,6 +118,16 @@ server 层不应复制业务逻辑；其职责应止于：
 - session 结束时只做资源释放，不做业务状态裁决
 - session 既不替代 workspace/run state，也不替代 repository 持久化 contract
 
+### Startup Recovery Boundary
+
+workorchd 启动恢复属于应用层 use-case 组合，职责是把 repository 中无法由内存 executor
+继续推进的状态重新交回 kernel runtime contract：
+
+- `running + terminal dispatched step` 表示上次进程已派发但未形成 output；启动恢复应调用 run service resume，让 orchestrator 重新派发该 step。
+- `running` 且没有 blocker、没有 continuation checkpoint、也没有可恢复 terminal dispatched/failed step 时，才能标记为 stuck failure。
+- 应用层只能识别这些通用状态形态，不得根据 workspace template、具体文件、测试框架或业务目标做分支。
+- 恢复后状态仍由 kernel run/orchestrator 决定，appservice 只返回恢复结果投影。
+
 典型入口包括：
 
 - HTTP read/write handler

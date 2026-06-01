@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	"strings"
 
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -11,6 +12,7 @@ import (
 )
 
 const stuckRunningRunFailureReason = "stuck running run recovered: no active execution, blocker, or continuation checkpoint"
+const orphanDispatchedStepRecoveryReason = "orphan dispatched step recovered after service restart"
 
 func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSession) (ret []Run, err error) {
 	exports, err := session.Exports()
@@ -19,6 +21,7 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 	}
 	defer session.CloseOnReturn(ctx, &err)
 	if exports.Repositories.Runs == nil ||
+		exports.Repositories.Steps == nil ||
 		exports.Repositories.RuntimeCheckpoints == nil ||
 		exports.Repositories.Workspaces == nil ||
 		exports.Services.RunService == nil {
@@ -33,6 +36,18 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 		return nil, err
 	}
 	for _, item := range runs {
+		if recoveredStep, changed, err := recoverOrphanDispatchedStep(ctx, exports.Services.RunService, exports.Repositories.Steps, item); err != nil {
+			return nil, err
+		} else if changed {
+			recovered, err := exports.Repositories.Runs.Get(ctx, item.ID)
+			if err != nil {
+				return nil, err
+			}
+			runView := mapRun(recovered)
+			runView.FailureReason = orphanDispatchedStepRecoveryReason + ": " + string(recoveredStep.ID)
+			ret = append(ret, runView)
+			continue
+		}
 		if !isStuckRunningRunCandidate(ctx, exports.Repositories.RuntimeCheckpoints, item) {
 			continue
 		}
@@ -49,6 +64,29 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 		ret = append(ret, mapRun(recovered))
 	}
 	return ret, nil
+}
+
+func recoverOrphanDispatchedStep(ctx context.Context, service runmodule.Service, steps stepLister, item *runmodel.Run) (*runmodel.Step, bool, error) {
+	if service == nil ||
+		steps == nil ||
+		item == nil ||
+		item.State != common.RunStateRunning ||
+		item.BlockingTicketID != "" ||
+		item.BlockingApprovalID != "" {
+		return nil, false, nil
+	}
+	runSteps, err := steps.ListByRun(ctx, item.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	terminal := terminalStepModel(runSteps)
+	if terminal == nil || terminal.State != common.StepStateDispatched {
+		return nil, false, nil
+	}
+	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: item.ID, LoadedRun: item}); err != nil {
+		return nil, false, err
+	}
+	return terminal, true, nil
 }
 
 func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces workspaceListerUpdater, runs runGetter) error {
@@ -111,6 +149,10 @@ type checkpointLister interface {
 	ListByRun(context.Context, common.RunID) ([]*runmodel.RuntimeCheckpoint, error)
 }
 
+type stepLister interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.Step, error)
+}
+
 type workspaceListerUpdater interface {
 	List(context.Context) ([]*workspacemodel.Workspace, error)
 	Update(context.Context, *workspacemodel.Workspace) error
@@ -170,6 +212,54 @@ func latestRuntimeCheckpointModel(items []*runmodel.RuntimeCheckpoint) *runmodel
 		}
 	}
 	return latest
+}
+
+func terminalStepModel(items []*runmodel.Step) *runmodel.Step {
+	if len(items) == 0 {
+		return nil
+	}
+	referenced := map[common.StepID]bool{}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if previous := previousStepModelID(item); previous != "" {
+			referenced[previous] = true
+		}
+	}
+	terminals := make([]*runmodel.Step, 0, len(items))
+	for _, item := range items {
+		if item == nil || referenced[item.ID] {
+			continue
+		}
+		terminals = append(terminals, item)
+	}
+	if len(terminals) == 0 {
+		return nil
+	}
+	if len(terminals) == 1 {
+		return terminals[0]
+	}
+	for _, item := range terminals {
+		if item.State == common.StepStateDispatched {
+			return item
+		}
+	}
+	return terminals[len(terminals)-1]
+}
+
+func previousStepModelID(item *runmodel.Step) common.StepID {
+	if item == nil || item.Input == nil {
+		return ""
+	}
+	for _, key := range []string{"previousStepId", "repairOfStepId", "failedStepId"} {
+		value, _ := item.Input[key].(string)
+		value = strings.TrimSpace(value)
+		if value != "" && common.StepID(value) != item.ID {
+			return common.StepID(value)
+		}
+	}
+	return ""
 }
 
 func nonEmptyString(value any) bool {

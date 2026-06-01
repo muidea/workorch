@@ -72,6 +72,18 @@ replan 的职责是：
 - 对 `runtime_repair_exhausted_requires_strategy` 这类结构化恢复 ticket，若 policy 允许且不存在 manual/provider/config gate，可由 auto-governance 自动选择 `replan`
 - `retry_same_step`、`replan`、`provide_information`、`terminate` 应保持为中立恢复动作，而不是某个 profile 的私有规则
 
+### 4.1 Restart Recovery For Dispatched Steps
+
+`dispatched` 表示 step 已进入当前进程内的 runtime executor。服务重启后，内存 executor
+可能已经丢失，但 repository 仍保留 `running + dispatched`。
+
+恢复规则：
+
+- 若 running run 没有 decision / approval blocker，且 terminal step 仍为 `dispatched`，startup recovery 必须重新派发该 terminal step。
+- 重新派发必须复用原 step id、kind 与 input，由 runtime adapter 重新生成 output。
+- 该场景不得伪造业务失败，也不得直接将 run 留在空转 `running`。
+- 若重新派发后 adapter 返回 provider/config/runtime failure，继续进入既有 provider retry、repair、decision 或 terminal failure 合同。
+
 #### Recovery Action Matrix
 
 当前治理恢复动作至少应按以下矩阵稳定分流：

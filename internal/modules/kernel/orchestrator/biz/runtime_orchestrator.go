@@ -540,7 +540,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if !errors.Is(err, common.ErrConflict) {
 				return err
 			}
-			specs, specErr := o.runningFailedTerminalStepRecoverySpecs(ctx, r)
+			specs, specErr := o.runningTerminalStepRecoverySpecs(ctx, r)
 			if specErr != nil {
 				return specErr
 			}
@@ -609,7 +609,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
 }
 
-func (o *RuntimeOrchestrator) runningFailedTerminalStepRecoverySpecs(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, error) {
+func (o *RuntimeOrchestrator) runningTerminalStepRecoverySpecs(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, error) {
 	if o == nil || run == nil || o.steps == nil {
 		return nil, common.ErrConflict
 	}
@@ -621,7 +621,10 @@ func (o *RuntimeOrchestrator) runningFailedTerminalStepRecoverySpecs(ctx context
 		return nil, err
 	}
 	last := terminalExecutionStep(steps)
-	if last == nil || last.State != common.StepStateFailed {
+	if last == nil {
+		return nil, nil
+	}
+	if last.State != common.StepStateFailed && last.State != common.StepStateDispatched {
 		return nil, nil
 	}
 	return o.nextDispatchSpecsFromStep(ctx, run, last)
