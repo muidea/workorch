@@ -77,11 +77,7 @@ func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.
 	if err != nil {
 		return err
 	}
-	return o.blockOnDecision(ctx, r, nil, ticketID)
-}
-
-func (o *RuntimeOrchestrator) blockOnDecision(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID) error {
-	return o.blockOnDecisionAtStep(ctx, r, workspace, ticketID, "")
+	return o.blockOnDecisionAtStep(ctx, r, nil, ticketID, "")
 }
 
 func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, ticketID common.TicketID, currentStepID common.StepID) error {
@@ -113,11 +109,7 @@ func (o *RuntimeOrchestrator) BlockOnApproval(ctx context.Context, runID common.
 	if err != nil {
 		return err
 	}
-	return o.blockOnApproval(ctx, r, nil, approvalID)
-}
-
-func (o *RuntimeOrchestrator) blockOnApproval(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID) error {
-	return o.blockOnApprovalAtStep(ctx, r, workspace, approvalID, "")
+	return o.blockOnApprovalAtStep(ctx, r, nil, approvalID, "")
 }
 
 func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runModel.Run, workspace *workspaceModel.Workspace, approvalID common.ApprovalID, currentStepID common.StepID) error {

@@ -1017,7 +1017,7 @@ func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testin
 		workspaces: workspaceRepo,
 	}
 
-	if err := orch.blockOnDecision(ctx, run, workspace, common.TicketID("ticket-state-transition-workspace-reuse")); err != nil {
+	if err := orch.blockOnDecisionAtStep(ctx, run, workspace, common.TicketID("ticket-state-transition-workspace-reuse"), ""); err != nil {
 		t.Fatalf("block on decision: %v", err)
 	}
 	if got := workspaceRepo.getCount.Load(); got != 0 {
@@ -1036,7 +1036,7 @@ func TestRuntimeOrchestrator_RunStateTransitionsReuseProvidedWorkspace(t *testin
 	if err := workspaceRepo.Update(ctx, workspace); err != nil {
 		t.Fatalf("reset workspace: %v", err)
 	}
-	if err := orch.blockOnApproval(ctx, run, workspace, common.ApprovalID("approval-state-transition-workspace-reuse")); err != nil {
+	if err := orch.blockOnApprovalAtStep(ctx, run, workspace, common.ApprovalID("approval-state-transition-workspace-reuse"), ""); err != nil {
 		t.Fatalf("block on approval: %v", err)
 	}
 	if got := workspaceRepo.getCount.Load(); got != 0 {
