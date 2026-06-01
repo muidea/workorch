@@ -406,8 +406,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["failedExecutionGraph"] = o.llmContextManager().compactExecutionGraph(graph)
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
 	}
-	if history := o.currentGovernanceHistoryForLLMInput(ctx, run); len(history) > 0 {
-		input["governanceHistory"] = history
+	governanceHistory := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
+	if current := o.currentRunGovernanceHistory(ctx, run); len(current) > 0 {
+		governanceHistory = append(current, governanceHistory...)
+	}
+	if len(governanceHistory) > 0 {
+		input["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
 	}
 	if evidence := o.graphManager().completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence

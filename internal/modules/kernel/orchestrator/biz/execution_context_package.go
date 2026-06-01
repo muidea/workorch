@@ -1296,20 +1296,6 @@ func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, r
 	return ret
 }
 
-func (o *RuntimeOrchestrator) currentGovernanceHistoryForLLMInput(ctx context.Context, run *runModel.Run) []map[string]any {
-	if run == nil {
-		return nil
-	}
-	history := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
-	if current := o.currentRunGovernanceHistory(ctx, run); len(current) > 0 {
-		history = append(current, history...)
-	}
-	if len(history) == 0 {
-		return nil
-	}
-	return compactGovernanceHistoryForRuntimeContext(history, 6)
-}
-
 func redactSensitiveMapSlice(input []map[string]any) []map[string]any {
 	if len(input) == 0 {
 		return nil
