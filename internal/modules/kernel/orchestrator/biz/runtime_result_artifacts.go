@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
@@ -54,6 +55,72 @@ func (r *resultSubsystem) publishMemoryChanged(ctx context.Context, topic string
 		return nil
 	}
 	return r.events.publishMemoryChanged(ctx, topic, item)
+}
+
+func (r *resultSubsystem) latestAcceptedResultContext(ctx context.Context, run *runModel.Run) map[string]any {
+	if r == nil || run == nil || r.evidence.Results == nil {
+		return nil
+	}
+	results, err := r.evidence.Results.ListByWorkspace(ctx, run.WorkspaceID)
+	if err != nil || len(results) == 0 {
+		return nil
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return resultSortKey(results[i]) > resultSortKey(results[j])
+	})
+	for _, item := range results {
+		if item == nil || item.State != common.ResultStateAccepted {
+			continue
+		}
+		return map[string]any{
+			"id":           string(item.ID),
+			"runId":        string(item.RunID),
+			"goalId":       string(item.GoalID),
+			"doDId":        string(item.DoDID),
+			"title":        item.Title,
+			"summary":      item.Summary,
+			"sourceType":   item.SourceType,
+			"sourceRef":    item.SourceRef,
+			"evidenceRefs": cloneStringsForExecutionContext(item.EvidenceRefs),
+			"artifactRefs": artifactIDsForExecutionContext(item.ArtifactRefs),
+		}
+	}
+	return nil
+}
+
+func (r *resultSubsystem) currentDeliverableContexts(ctx context.Context, run *runModel.Run) []map[string]any {
+	if r == nil || run == nil || r.evidence.Artifacts == nil {
+		return nil
+	}
+	items, err := r.evidence.Artifacts.ListByWorkspace(ctx, run.WorkspaceID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return artifactSortKey(items[i]) > artifactSortKey(items[j])
+	})
+	ret := make([]map[string]any, 0, min(len(items), 8))
+	for _, item := range items {
+		if item == nil || item.State != common.ArtifactStateAvailable {
+			continue
+		}
+		ret = append(ret, map[string]any{
+			"id":           string(item.ID),
+			"runId":        string(item.RunID),
+			"resultId":     string(item.ResultID),
+			"stepId":       string(item.StepID),
+			"type":         item.ArtifactType,
+			"name":         item.Name,
+			"summary":      item.Summary,
+			"uri":          item.URI,
+			"contentType":  item.ContentType,
+			"evidenceRefs": cloneStringsForExecutionContext(item.EvidenceRefs),
+		})
+		if len(ret) >= 8 {
+			break
+		}
+	}
+	return ret
 }
 
 func (r *resultSubsystem) recordResultSummaryArtifact(
