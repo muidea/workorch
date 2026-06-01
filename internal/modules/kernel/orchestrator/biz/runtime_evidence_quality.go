@@ -642,14 +642,6 @@ func lowerStringSlice(values []string) []string {
 	return ret
 }
 
-func (o *RuntimeOrchestrator) evidenceRefStepKind(ctx context.Context, ref string) (string, bool, error) {
-	step, ok, err := o.evidenceRefStep(ctx, ref)
-	if step == nil {
-		return "", ok, err
-	}
-	return strings.TrimSpace(step.Kind), ok, err
-}
-
 func (o *RuntimeOrchestrator) evidenceRefStep(ctx context.Context, ref string) (*runModel.Step, bool, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" || o == nil || o.steps == nil {

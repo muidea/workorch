@@ -779,13 +779,6 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 	return false
 }
 
-func (o *RuntimeOrchestrator) shouldBlockOnProviderRetryExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
-		return false
-	}
-	return o.providerRetryBudgetExhausted(ctx, run, failedStep)
-}
-
 func (o *RuntimeOrchestrator) providerRetryBudgetExhausted(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
 	if o == nil || run == nil || failedStep == nil {
 		return false

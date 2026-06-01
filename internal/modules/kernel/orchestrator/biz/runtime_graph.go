@@ -117,10 +117,6 @@ func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 	return ret
 }
 
-func (o *RuntimeOrchestrator) dispatchGraphStepBatch(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
-	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, nil)
-}
-
 func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
 	if len(specs) == 0 {
 		return common.ErrConflict
