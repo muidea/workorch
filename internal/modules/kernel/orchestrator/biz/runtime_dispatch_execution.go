@@ -252,7 +252,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return nil
 	}
 	if nextStepID != "" {
-		uniqueStepID, err := o.uniqueDispatchStepID(ctx, run.ID, nextStepID)
+		uniqueStepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, nextStepID)
 		if err != nil {
 			return err
 		}

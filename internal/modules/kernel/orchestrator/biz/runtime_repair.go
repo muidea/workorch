@@ -31,7 +31,6 @@ type repairRecoveryPolicy interface {
 }
 
 type repairDispatchSpecBuilder interface {
-	uniqueDispatchStepID(ctx context.Context, runID common.RunID, base common.StepID) (common.StepID, error)
 	providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any
 	runtimeRepairFollowUpStepInput(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, attempt int, execErr error) map[string]any
 }
@@ -529,7 +528,7 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 	case runtimeRecoveryActionProviderRetry:
 		rootStepID := providerRetryRootStepID(failedStep)
 		attempt := r.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-		stepID, err := builder.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+		stepID, err := uniqueDispatchStepID(ctx, r.steps, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 		if err != nil {
 			return stepDispatchSpec{}, true, err
 		}
@@ -544,7 +543,7 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 			attempts = r.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
 		}
 		attempt := attempts + 1
-		stepID, err := builder.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt))
+		stepID, err := uniqueDispatchStepID(ctx, r.steps, run.ID, runtimeRepairFollowUpStepID(run.ID, failedStep, attempt))
 		if err != nil {
 			return stepDispatchSpec{}, true, err
 		}

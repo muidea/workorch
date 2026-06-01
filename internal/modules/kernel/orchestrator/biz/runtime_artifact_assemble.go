@@ -874,7 +874,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 		return err
 	}
 	if step.Kind == artifactAssembleStepKind {
-		nextID, err := o.uniqueDispatchStepID(ctx, run.ID, artifactContinuationApplyStepID(run.ID, common.ArtifactContinuationID(strings.TrimSpace(stringFromMap(step.Input, "artifactContinuationId")))))
+		nextID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationApplyStepID(run.ID, common.ArtifactContinuationID(strings.TrimSpace(stringFromMap(step.Input, "artifactContinuationId")))))
 		if err != nil {
 			return err
 		}
@@ -912,7 +912,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 	}
 	switch item.State {
 	case common.ArtifactContinuationStatePlanning, common.ArtifactContinuationStateChunking:
-		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, artifactContinuationLLMStepID(run.ID, item))
+		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationLLMStepID(run.ID, item))
 		if err != nil {
 			return nil, true, err
 		}
@@ -924,7 +924,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 			Input: input,
 		}}, true, nil
 	case common.ArtifactContinuationStateAssembling:
-		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, artifactContinuationAssembleStepID(run.ID, item.ID))
+		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationAssembleStepID(run.ID, item.ID))
 		if err != nil {
 			return nil, true, err
 		}
@@ -934,7 +934,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 			Input: input,
 		}}, true, nil
 	case common.ArtifactContinuationStateApplying:
-		stepID, err := o.uniqueDispatchStepID(ctx, run.ID, artifactContinuationApplyStepID(run.ID, item.ID))
+		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationApplyStepID(run.ID, item.ID))
 		if err != nil {
 			return nil, true, err
 		}

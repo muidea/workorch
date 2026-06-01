@@ -9,6 +9,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func (o *RuntimeOrchestrator) nextDispatchSpecs(
@@ -219,7 +220,7 @@ func (o *RuntimeOrchestrator) runtimeRepairSpecsAfterResolvedDecision(
 		return nil, false, nil
 	}
 	attempt := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
-	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
+	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
 	if err != nil {
 		return nil, true, err
 	}
@@ -258,7 +259,7 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 	}
 	rootStepID := providerRetryRootStepID(step)
 	attempt := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 	if err != nil {
 		return nil, true, err
 	}
@@ -292,7 +293,7 @@ func (o *RuntimeOrchestrator) contextIntegritySpecsAfterResolvedDecision(
 		return nil, true, common.ErrConflict
 	}
 	baseID := common.StepID(fmt.Sprintf("%s/context-gate-retry", step.ID))
-	nextStepID, err := o.uniqueDispatchStepID(ctx, run.ID, baseID)
+	nextStepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, baseID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -475,7 +476,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	repairOf.Output["status"] = "failed"
 	repairOf.Output["error"] = "decision requested a workspace resource that is already readable"
 	attempt := o.repairManager().runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
-	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
+	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
 	if err != nil {
 		return nil, true, err
 	}
@@ -501,7 +502,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}
 		nextStepID, nextKind := nextStepSpec(last.Output)
 		if nextStepID != "" {
-			uniqueStepID, err := o.uniqueDispatchStepID(ctx, run.ID, nextStepID)
+			uniqueStepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, nextStepID)
 			if err != nil {
 				return nil, err
 			}
@@ -518,7 +519,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			} else {
 				input = o.graphManager().graphFollowUpStepInput(ctx, run, last)
 			}
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, graphFollowUpStepID(run.ID, last))
+			stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, graphFollowUpStepID(run.ID, last))
 			if err != nil {
 				return nil, err
 			}
@@ -529,7 +530,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}}, nil
 		}
 		if shouldDispatchLLMCompletionFollowUp(run, last, last.Output) {
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, llmCompletionFollowUpStepID(run.ID, last))
+			stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, llmCompletionFollowUpStepID(run.ID, last))
 			if err != nil {
 				return nil, err
 			}
@@ -540,7 +541,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}}, nil
 		}
 		if shouldDispatchNoActionableContinuationFollowUp(run, last, last.Output) {
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, noActionableContinuationFollowUpStepID(run.ID, last))
+			stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, noActionableContinuationFollowUpStepID(run.ID, last))
 			if err != nil {
 				return nil, err
 			}
@@ -594,11 +595,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 	return nil, common.ErrConflict
 }
 
-func (o *RuntimeOrchestrator) uniqueDispatchStepID(ctx context.Context, runID common.RunID, base common.StepID) (common.StepID, error) {
-	if o == nil || o.steps == nil || runID == "" || base == "" {
+func uniqueDispatchStepID(ctx context.Context, steps repository.StepRepository, runID common.RunID, base common.StepID) (common.StepID, error) {
+	if steps == nil || runID == "" || base == "" {
 		return base, nil
 	}
-	existing, err := o.steps.Get(ctx, base)
+	existing, err := steps.Get(ctx, base)
 	if errors.Is(err, common.ErrNotFound) {
 		return base, nil
 	}
@@ -610,7 +611,7 @@ func (o *RuntimeOrchestrator) uniqueDispatchStepID(ctx context.Context, runID co
 	}
 	for idx := 2; ; idx++ {
 		candidate := common.StepID(fmt.Sprintf("%s-%d", base, idx))
-		existing, err := o.steps.Get(ctx, candidate)
+		existing, err := steps.Get(ctx, candidate)
 		if errors.Is(err, common.ErrNotFound) {
 			return candidate, nil
 		}
@@ -696,7 +697,7 @@ func (o *RuntimeOrchestrator) dispatchUniqueStepWithWorkspace(
 	input map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
-	stepID, err := o.uniqueDispatchStepID(ctx, run.ID, baseStepID)
+	stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, baseStepID)
 	if err != nil {
 		return err
 	}

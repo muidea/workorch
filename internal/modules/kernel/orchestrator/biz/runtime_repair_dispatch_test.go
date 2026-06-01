@@ -13,10 +13,6 @@ import (
 
 type repairDispatchSpecBuilderStub struct{}
 
-func (repairDispatchSpecBuilderStub) uniqueDispatchStepID(_ context.Context, _ common.RunID, base common.StepID) (common.StepID, error) {
-	return base, nil
-}
-
 func (repairDispatchSpecBuilderStub) providerRetryStepInput(failedStep *runmodel.Step, attempt int, execErr error) map[string]any {
 	return providerRetryStepInput(failedStep, attempt, execErr)
 }
