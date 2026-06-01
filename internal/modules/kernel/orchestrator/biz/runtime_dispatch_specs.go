@@ -675,10 +675,6 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 	return ""
 }
 
-func (o *RuntimeOrchestrator) dispatchStepSpecs(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec) error {
-	return o.dispatchStepSpecsWithWorkspace(ctx, run, specs, nil)
-}
-
 func (o *RuntimeOrchestrator) dispatchStepSpecsWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
 	if len(specs) == 0 {
 		return common.ErrConflict

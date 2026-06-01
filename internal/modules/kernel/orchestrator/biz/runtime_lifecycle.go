@@ -66,7 +66,7 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 	if err != nil {
 		return err
 	}
-	return o.dispatchStepSpecs(ctx, r, specs)
+	return o.dispatchStepSpecsWithWorkspace(ctx, r, specs, nil)
 }
 
 func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
