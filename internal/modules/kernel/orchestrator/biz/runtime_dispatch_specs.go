@@ -11,20 +11,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (o *RuntimeOrchestrator) nextDispatchSpec(
-	ctx context.Context,
-	run *runModel.Run,
-) (common.StepID, string, map[string]any, error) {
-	specs, err := o.nextDispatchSpecs(ctx, run)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if len(specs) == 0 {
-		return "", "", nil, common.ErrConflict
-	}
-	return specs[0].ID, specs[0].Kind, specs[0].Input, nil
-}
-
 func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	ctx context.Context,
 	run *runModel.Run,
