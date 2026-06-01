@@ -2,10 +2,13 @@ import { useEffect, useRef } from 'react';
 import { createWorkorchEventStream } from '../api';
 
 export interface SSEEvent {
+  id?: string;
   topic: string;
   workspaceId?: string;
   runId?: string;
-  payload?: unknown;
+  revision?: number;
+  payload?: Record<string, unknown>;
+  stateSummary?: Record<string, unknown>;
 }
 
 export interface UseSSEOptions {
@@ -22,6 +25,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
   const debounceTimerRef = useRef<number | undefined>(undefined);
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<number | undefined>(undefined);
+  const lastEventIdRef = useRef('');
 
   useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
   useEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
@@ -34,12 +38,23 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
 
     function connect() {
       if (disposed) return;
-      stream = createWorkorchEventStream();
+      stream = createWorkorchEventStream({ lastEventId: lastEventIdRef.current });
 
       stream.addEventListener('workorch', (event: MessageEvent<string>) => {
         retryCountRef.current = 0;
         try {
           const data = JSON.parse(event.data) as SSEEvent;
+          data.id = event.lastEventId || data.id;
+          if (data.id) {
+            lastEventIdRef.current = data.id;
+          }
+          if (!data.revision && typeof data.payload?.stateSummary === 'object' && data.payload.stateSummary !== null) {
+            const summary = data.payload.stateSummary as Record<string, unknown>;
+            if (typeof summary.revision === 'number') {
+              data.revision = summary.revision;
+            }
+            data.stateSummary = summary;
+          }
           if (debounceTimerRef.current !== undefined) {
             window.clearTimeout(debounceTimerRef.current);
           }

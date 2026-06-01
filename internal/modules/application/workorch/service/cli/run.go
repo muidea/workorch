@@ -244,6 +244,8 @@ func init() {
 	runCmd.AddCommand(runResumeCmd)
 	runCmd.AddCommand(runObservabilityCmd)
 	runCmd.AddCommand(runPatchesCmd)
+	runCmd.AddCommand(runCoverageCmd)
+	runCmd.AddCommand(runTimelineCmd)
 
 	runListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 

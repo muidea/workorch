@@ -598,6 +598,7 @@ type EventRecord struct {
 	WorkspaceID    string         `json:"workspaceId,omitempty"`
 	RunID          string         `json:"runId,omitempty"`
 	StepID         string         `json:"stepId,omitempty"`
+	Revision       int64          `json:"revision,omitempty"`
 	Payload        map[string]any `json:"payload,omitempty"`
 	PayloadSummary map[string]any `json:"payloadSummary,omitempty"`
 	PayloadRef     string         `json:"payloadRef,omitempty"`

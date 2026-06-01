@@ -44,11 +44,12 @@ type MemoryHub struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[int]Handler
 	nextID      int
+	revisions   map[string]int64
 	published   []Envelope
 }
 
 func NewMemoryHub() *MemoryHub {
-	return &MemoryHub{subscribers: map[string]map[int]Handler{}}
+	return &MemoryHub{subscribers: map[string]map[int]Handler{}, revisions: map[string]int64{}}
 }
 
 func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
@@ -58,6 +59,7 @@ func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
 	}
 
 	h.mu.Lock()
+	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
 	h.published = append(h.published, envelope)
 	handlers := append([]Handler{}, h.handlersLocked(envelope.Topic)...)
 	h.mu.Unlock()
@@ -74,6 +76,17 @@ func (h *MemoryHub) Publish(ctx context.Context, envelope Envelope) error {
 		}
 	}
 	return nil
+}
+
+func (h *MemoryHub) nextWorkspaceRevisionLocked(workspaceID string) int64 {
+	if workspaceID == "" {
+		return 0
+	}
+	if h.revisions == nil {
+		h.revisions = map[string]int64{}
+	}
+	h.revisions[workspaceID]++
+	return h.revisions[workspaceID]
 }
 
 func (h *MemoryHub) PublishAsync(ctx context.Context, envelope Envelope) error {

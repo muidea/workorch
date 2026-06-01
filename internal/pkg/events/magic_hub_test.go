@@ -39,6 +39,37 @@ func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
 	}
 }
 
+func TestMagicHubAssignsWorkspaceRevision(t *testing.T) {
+	hub := NewMagicHub()
+	defer hub.Terminate(context.Background())
+
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
+		t.Fatalf("publish first workspace event: %v", err)
+	}
+	if err := hub.PublishAsync(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-a"}); err != nil {
+		t.Fatalf("publish second workspace event: %v", err)
+	}
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
+		t.Fatalf("publish other workspace event: %v", err)
+	}
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand}); err != nil {
+		t.Fatalf("publish global event: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 4 {
+		t.Fatalf("published count = %d, want 4", len(published))
+	}
+	if published[0].Revision != 1 || published[1].Revision != 2 || published[2].Revision != 1 || published[3].Revision != 0 {
+		t.Fatalf("revisions = %d/%d/%d/%d, want workspace-scoped monotonic revisions and zero global revision",
+			published[0].Revision,
+			published[1].Revision,
+			published[2].Revision,
+			published[3].Revision,
+		)
+	}
+}
+
 func TestMagicHubSupportsWildcardSubscription(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
@@ -293,6 +324,30 @@ func TestMagicHubPublishesAcrossWrappersSharingSameUnderlyingHub(t *testing.T) {
 	}
 	if received.Topic != TopicWorkspaceCreated {
 		t.Fatalf("received topic = %s, want %s", received.Topic, TopicWorkspaceCreated)
+	}
+}
+
+func TestMagicHubRevisionIsSharedAcrossWrappers(t *testing.T) {
+	rawHub := magicevent.NewHub(defaultMagicHubCapacity)
+	defer rawHub.Terminate(context.Background())
+
+	first := NewMagicHubWithHubOwner(rawHub, "test/revision-first")
+	second := NewMagicHubWithHubOwner(rawHub, "test/revision-second")
+
+	if err := first.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-shared"}); err != nil {
+		t.Fatalf("publish first wrapper event: %v", err)
+	}
+	if err := second.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-shared", RunID: "run-shared"}); err != nil {
+		t.Fatalf("publish second wrapper event: %v", err)
+	}
+
+	firstPublished := first.Published()
+	secondPublished := second.Published()
+	if len(firstPublished) != 1 || len(secondPublished) != 1 {
+		t.Fatalf("published counts = %d/%d, want 1/1", len(firstPublished), len(secondPublished))
+	}
+	if firstPublished[0].Revision != 1 || secondPublished[0].Revision != 2 {
+		t.Fatalf("shared wrapper revisions = %d/%d, want 1/2", firstPublished[0].Revision, secondPublished[0].Revision)
 	}
 }
 

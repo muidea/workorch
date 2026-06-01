@@ -285,6 +285,7 @@ type EventRecord struct {
 	WorkspaceID    string         `json:"workspaceId,omitempty"`
 	RunID          string         `json:"runId,omitempty"`
 	StepID         string         `json:"stepId,omitempty"`
+	Revision       int64          `json:"revision,omitempty"`
 	Payload        map[string]any `json:"payload,omitempty"`
 	PayloadSummary map[string]any `json:"payloadSummary,omitempty"`
 	PayloadRef     string         `json:"payloadRef,omitempty"`
@@ -530,6 +531,7 @@ type WorkspaceSnapshot struct {
 	Workspace             Workspace              `json:"workspace"`
 	Outcome               RunOutcome             `json:"outcome"`
 	TaskProgress          TaskProgress           `json:"taskProgress"`
+	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
 	DoDs                  []DoD                  `json:"dods,omitempty"`
 	Runs                  []Run                  `json:"runs,omitempty"`

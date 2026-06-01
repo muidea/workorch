@@ -4,7 +4,8 @@ import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCom
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
-import { createWorkorchEventStream, workorchApi } from '../api';
+import { workorchApi } from '../api';
+import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
 import * as helpers from '../helpers';
 
@@ -112,6 +113,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
+  const activeRunIdRef = useRef<string | undefined>(undefined);
+  const lastEventRevisionRef = useRef(0);
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
   const [soulBindingsForm] = Form.useForm();
@@ -126,7 +129,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
+    lastEventRevisionRef.current = 0;
   }, [workspaceId]);
+
+  useEffect(() => {
+    activeRunIdRef.current = workspaceProjectionRun(snapshot)?.id;
+  }, [snapshot]);
 
   useEffect(() => {
     setWorkspaceListReady(false);
@@ -159,63 +167,34 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }).finally(() => setLoading(false));
   }, [workspaceListReady, workspaceId]);
 
-  useEffect(() => {
+  useSSE((event) => {
     if (!workspaceListReady) {
-      return undefined;
+      return;
     }
-    const stream = createWorkorchEventStream();
-    const scheduleRefresh = (refreshList: boolean, targetWorkspaceId?: string) => {
-      if (workspaceEventRefreshTimerRef.current !== undefined) {
-        window.clearTimeout(workspaceEventRefreshTimerRef.current);
+    const topic = String(event.topic ?? '');
+    const selected = currentWorkspaceIdRef.current;
+    const eventWorkspaceId = event.workspaceId;
+    if (eventWorkspaceId && selected && eventWorkspaceId !== selected) {
+      if (topic === '/workspace/created' || topic === '/workspace/deleted') {
+        scheduleWorkspaceEventRefresh(true, selected);
       }
-      workspaceEventRefreshTimerRef.current = window.setTimeout(() => {
-        workspaceEventRefreshTimerRef.current = undefined;
-        const selected = currentWorkspaceIdRef.current;
-        const nextWorkspaceId = targetWorkspaceId || selected;
-        if (refreshList) {
-          void loadWorkspaceList(nextWorkspaceId).catch((error: unknown) => {
-            message.error(errorMessage(error));
-          });
-        }
-        if (nextWorkspaceId && nextWorkspaceId === selected) {
-          void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
-            if (isNotFoundError(error)) {
-              void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
-                message.error(errorMessage(refreshError));
-              });
-              return;
-            }
-            message.error(errorMessage(error));
-          });
-        }
-      }, 150);
-    };
-    const handleEvent = (event: MessageEvent<string>) => {
-      try {
-        const envelope = JSON.parse(event.data) as { topic?: string; workspaceId?: string };
-        const topic = String(envelope.topic ?? '');
-        const eventWorkspaceId = envelope.workspaceId;
-        const refreshList = topic.includes('workspace');
-        if (refreshList || !eventWorkspaceId || eventWorkspaceId === currentWorkspaceIdRef.current) {
-          scheduleRefresh(refreshList, eventWorkspaceId);
-        }
-      } catch {
-        scheduleRefresh(false, currentWorkspaceIdRef.current);
-      }
-    };
-    stream.addEventListener('workorch', handleEvent);
-    stream.onerror = () => {
-      stream.close();
-    };
-    return () => {
-      stream.removeEventListener('workorch', handleEvent);
-      stream.close();
-      if (workspaceEventRefreshTimerRef.current !== undefined) {
-        window.clearTimeout(workspaceEventRefreshTimerRef.current);
-        workspaceEventRefreshTimerRef.current = undefined;
-      }
-    };
-  }, [workspaceListReady]);
+      return;
+    }
+    const revision = event.revision ?? numericValue(event.stateSummary?.revision);
+    if (revision && lastEventRevisionRef.current && revision > lastEventRevisionRef.current + 1) {
+      lastEventRevisionRef.current = revision;
+      scheduleWorkspaceEventRefresh(true, selected);
+      return;
+    }
+    if (revision && revision > lastEventRevisionRef.current) {
+      lastEventRevisionRef.current = revision;
+    }
+    routeWorkspaceEvent(topic, eventWorkspaceId || selected, event.runId, event.stateSummary, event.payload);
+  }, {
+    enabled: workspaceListReady,
+    debounceMs: 0,
+    onReconnect: () => scheduleWorkspaceEventRefresh(true, currentWorkspaceIdRef.current)
+  });
 
   const readyDoDs = dods.filter((item) => item.state === 'ready' || item.state === 'satisfied');
   const llmProviders = configuration?.llm.providers ?? [];
@@ -511,6 +490,173 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     });
     setRunEventCursorAfterId(items.at(-1)?.id);
     setRunEventHasMore(items.length >= runtimeEventPageLimit);
+  }
+
+  function scheduleWorkspaceEventRefresh(refreshList: boolean, targetWorkspaceId?: string) {
+    if (workspaceEventRefreshTimerRef.current !== undefined) {
+      window.clearTimeout(workspaceEventRefreshTimerRef.current);
+    }
+    workspaceEventRefreshTimerRef.current = window.setTimeout(() => {
+      workspaceEventRefreshTimerRef.current = undefined;
+      const selected = currentWorkspaceIdRef.current;
+      const nextWorkspaceId = targetWorkspaceId || selected;
+      if (refreshList) {
+        void loadWorkspaceList(nextWorkspaceId).catch((error: unknown) => {
+          message.error(errorMessage(error));
+        });
+      }
+      if (nextWorkspaceId && nextWorkspaceId === selected) {
+        void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
+          if (isNotFoundError(error)) {
+            void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
+              message.error(errorMessage(refreshError));
+            });
+            return;
+          }
+          message.error(errorMessage(error));
+        });
+      }
+    }, 500);
+  }
+
+  function routeWorkspaceEvent(topic: string, targetWorkspaceId?: string, runId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
+    const selected = currentWorkspaceIdRef.current;
+    const activeRunId = activeRunIdRef.current;
+    switch (topic) {
+      case '/workspace/created':
+      case '/workspace/deleted':
+        scheduleWorkspaceEventRefresh(true, targetWorkspaceId || selected);
+        return;
+      case '/workspace/state/changed':
+        applyWorkspaceStateSummary(targetWorkspaceId || selected, summary, payload);
+        return;
+      case '/run/state/changed':
+      case '/run/created':
+        applyRunStateSummary(runId || activeRunId, summary, payload);
+        if (isTerminalState(stringValue(summary?.runState) || stringValue(payload?.state))) {
+          scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
+        }
+        return;
+      case '/step/dispatched':
+      case '/step/state/changed':
+      case '/run/llm_stream/progress':
+        if (runId && runId !== activeRunId) {
+          return;
+        }
+        return;
+      case '/run/llm_usage/recorded':
+        if (runId && runId !== activeRunId) {
+          return;
+        }
+        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
+        return;
+      case '/patch/previewed':
+      case '/patch/applied':
+      case '/patch/failed':
+      case '/patch/reverted':
+        if (runId && runId === activeRunId) {
+          void loadRunPatchPage(runId).catch((error: unknown) => message.error(errorMessage(error)));
+        }
+        return;
+      case '/result/accepted':
+      case '/result/rejected':
+      case '/result/superseded':
+      case '/goal/defined':
+      case '/dod/defined':
+      case '/ticket/created':
+      case '/approval/created':
+        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
+        return;
+      case '/memory/recall/recorded':
+        return;
+      default:
+        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
+    }
+  }
+
+  function applyWorkspaceStateSummary(targetWorkspaceId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
+    if (!targetWorkspaceId) {
+      return;
+    }
+    const workspaceState = stringValue(summary?.workspaceState) || stringValue(payload?.state);
+    const activeRunId = stringValue(summary?.activeRunId) || stringValue(payload?.activeRunId);
+    if (!workspaceState && !activeRunId) {
+      return;
+    }
+    setSnapshot((current) => {
+      if (!current || current.workspace.id !== targetWorkspaceId) {
+        return current;
+      }
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          state: workspaceState || current.workspace.state,
+          activeRunId: activeRunId || current.workspace.activeRunId
+        }
+      };
+    });
+    setWorkspaces((current) => current.map((item) => item.id === targetWorkspaceId ? {
+      ...item,
+      state: workspaceState || item.state,
+      activeRunId: activeRunId || item.activeRunId
+    } : item));
+  }
+
+  function applyRunStateSummary(runId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
+    if (!runId) {
+      return;
+    }
+    const runState = stringValue(summary?.runState) || stringValue(payload?.state);
+    const blockingTicketId = stringValue(summary?.blockingTicketId) || stringValue(payload?.blockingTicketId);
+    const blockingApprovalId = stringValue(summary?.blockingApprovalId) || stringValue(payload?.blockingApprovalId);
+    if (!runState && !blockingTicketId && !blockingApprovalId) {
+      return;
+    }
+    setSnapshot((current) => {
+      if (!current?.runs) {
+        return current;
+      }
+      return {
+        ...current,
+        runs: current.runs.map((item) => item.id === runId ? {
+          ...item,
+          state: runState || item.state,
+          blockingTicketId: blockingTicketId || item.blockingTicketId,
+          blockingApprovalId: blockingApprovalId || item.blockingApprovalId
+        } : item)
+      };
+    });
+    setRunSnapshot((current) => current?.run.id === runId ? {
+      ...current,
+      run: {
+        ...current.run,
+        state: runState || current.run.state,
+        blockingTicketId: blockingTicketId || current.run.blockingTicketId,
+        blockingApprovalId: blockingApprovalId || current.run.blockingApprovalId
+      }
+    } : current);
+    setRunObservability((current) => current?.run.id === runId ? {
+      ...current,
+      run: {
+        ...current.run,
+        state: runState || current.run.state,
+        blockingTicketId: blockingTicketId || current.run.blockingTicketId,
+        blockingApprovalId: blockingApprovalId || current.run.blockingApprovalId
+      }
+    } : current);
+  }
+
+  function stringValue(value: unknown) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function numericValue(value: unknown) {
+    return typeof value === 'number' ? value : 0;
+  }
+
+  function isTerminalState(state: string) {
+    return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'superseded' || state === 'accepted';
   }
 
   async function loadRunEventPage(runId: string, cursorAfterId?: string) {

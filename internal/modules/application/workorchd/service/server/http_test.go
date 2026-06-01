@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -65,6 +66,71 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("condition was not met within %v", timeout)
+}
+
+func readSSELines(body io.Reader) (<-chan string, <-chan error) {
+	lines := make(chan string, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		readErr <- scanner.Err()
+	}()
+	return lines, readErr
+}
+
+func waitSSEConnected(t *testing.T, lines <-chan string, readErr <-chan error) {
+	t.Helper()
+	select {
+	case line := <-lines:
+		if !strings.HasPrefix(line, ": connected") {
+			t.Fatalf("first stream line = %q, want connected comment", line)
+		}
+	case err := <-readErr:
+		t.Fatalf("stream closed before connected comment: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stream connection")
+	}
+}
+
+func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (string, events.Envelope) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	var id string
+	for {
+		select {
+		case line := <-lines:
+			switch {
+			case strings.HasPrefix(line, "id:"):
+				id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+			case strings.HasPrefix(line, "data:"):
+				var envelope events.Envelope
+				if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+					t.Fatalf("decode stream data %q: %v", line, err)
+				}
+				return id, envelope
+			}
+		case err := <-readErr:
+			t.Fatalf("stream closed before event: %v", err)
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed event")
+		}
+	}
+}
+
+func numericTestValue(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	default:
+		return 0
+	}
 }
 
 func newFileMuxWithCleanup(t *testing.T, dataRoot string) http.Handler {
@@ -986,6 +1052,109 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for streamed event")
 		}
+	}
+}
+
+func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-summary", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceStateChanged,
+		WorkspaceID: "ws-stream-summary",
+		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateRunning, "run-001"),
+	}); err != nil {
+		t.Fatalf("publish state event: %v", err)
+	}
+
+	id, envelope := readSSEEnvelope(t, lines, readErr)
+	if id == "" || envelope.ID == "" || id != envelope.ID {
+		t.Fatalf("sse id = %q envelope id = %q, want matching non-empty ids", id, envelope.ID)
+	}
+	if envelope.Revision != 1 {
+		t.Fatalf("revision = %d, want 1", envelope.Revision)
+	}
+	summary, _ := envelope.Payload["stateSummary"].(map[string]any)
+	if summary["workspaceState"] != "running" || summary["activeRunId"] != "run-001" || numericTestValue(summary["revision"]) != 1 {
+		t.Fatalf("stateSummary = %+v, want workspace state, active run and revision", summary)
+	}
+}
+
+func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicWorkspaceStateChanged,
+		WorkspaceID: "ws-stream-replay",
+		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateRunning, ""),
+	}); err != nil {
+		t.Fatalf("publish first event: %v", err)
+	}
+	firstID, first := readSSEEnvelope(t, lines, readErr)
+	if firstID == "" || first.Topic != events.TopicWorkspaceStateChanged {
+		t.Fatalf("first replay baseline = %q %+v", firstID, first)
+	}
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       events.TopicRunStateChanged,
+		WorkspaceID: "ws-stream-replay",
+		RunID:       "run-replay",
+		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
+	}); err != nil {
+		t.Fatalf("publish replay event: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	replayReq, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-stream-replay", nil)
+	if err != nil {
+		t.Fatalf("new replay request: %v", err)
+	}
+	replayReq.Header.Set("Accept", "text/event-stream")
+	replayReq.Header.Set("Last-Event-ID", firstID)
+	replayResp, err := http.DefaultClient.Do(replayReq)
+	if err != nil {
+		t.Fatalf("replay stream request: %v", err)
+	}
+	defer replayResp.Body.Close()
+	replayLines, replayErr := readSSELines(replayResp.Body)
+	waitSSEConnected(t, replayLines, replayErr)
+	_, replayed := readSSEEnvelope(t, replayLines, replayErr)
+	if replayed.Topic != events.TopicRunStateChanged || replayed.RunID != "run-replay" {
+		t.Fatalf("replayed envelope = %+v, want run state event after Last-Event-ID", replayed)
 	}
 }
 

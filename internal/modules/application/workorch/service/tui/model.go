@@ -94,6 +94,7 @@ type AppModel struct {
 	failureReason         string
 	failureHint           string
 	running               bool
+	lastRevision          int64
 
 	blockingDecision          *backend.DecisionInfo
 	blockingApproval          *backend.ApprovalInfo
@@ -1688,6 +1689,16 @@ func (m *AppModel) markApprovalResolved(id common.ApprovalID) {
 }
 
 func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
+	if evt.Revision > 0 {
+		if m.lastRevision > 0 && evt.Revision > m.lastRevision+1 && evt.WorkspaceID != "" && string(evt.WorkspaceID) == m.activeWorkspaceID {
+			m.lastRevision = evt.Revision
+			m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
+			return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		}
+		if evt.Revision > m.lastRevision {
+			m.lastRevision = evt.Revision
+		}
+	}
 	switch evt.Type {
 	case backend.EventWorkspaceListChanged:
 		return m.requestWorkspaceListRefresh()

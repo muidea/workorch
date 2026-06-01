@@ -1129,6 +1129,20 @@ export type EventRecord = {
   runId?: string;
   stepId?: string;
   payload?: Record<string, unknown>;
+  revision?: number;
+  stateSummary?: WorkorchEventStateSummary;
+};
+
+export type WorkorchEventStateSummary = {
+  workspaceState?: string;
+  activeRunId?: string;
+  runState?: string;
+  progressSummary?: string;
+  blockingTicketId?: string;
+  blockingApprovalId?: string;
+  resultState?: string;
+  outcomeSummary?: string;
+  revision?: number;
 };
 
 export type RunObservability = {
@@ -1183,6 +1197,7 @@ export type WorkspaceSnapshot = {
   workspace: Workspace;
   outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
+  coverageSummary?: Record<string, unknown>;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   goals?: Goal[];

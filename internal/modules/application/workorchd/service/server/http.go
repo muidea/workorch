@@ -602,6 +602,7 @@ type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurati
 type serverState struct {
 	config                          Config
 	eventHub                        events.Hub
+	eventReplay                     *sseReplayBuffer
 	metrics                         *serverMetrics
 	validate                        validateFunc
 	createWorkspace                 createWorkspaceFunc
@@ -1736,12 +1737,18 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		w.Header().Set("Connection", "keep-alive")
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
 		runID := strings.TrimSpace(r.URL.Query().Get("runId"))
-		eventCh := make(chan events.Envelope, 128)
-		unsubscribe := state.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+		filterEnvelope := func(envelope events.Envelope) bool {
 			if workspaceID != "" && envelope.WorkspaceID != workspaceID {
-				return nil
+				return false
 			}
 			if runID != "" && envelope.RunID != runID {
+				return false
+			}
+			return true
+		}
+		eventCh := make(chan events.Envelope, 128)
+		unsubscribe := state.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+			if !filterEnvelope(envelope) {
 				return nil
 			}
 			enqueueEventStreamEnvelope(eventCh, envelope)
@@ -1750,18 +1757,23 @@ func registerReadRoutes(router engine.RouteRegistry, state *serverState) {
 		defer unsubscribe()
 		_, _ = fmt.Fprint(w, ": connected\n\n")
 		flusher.Flush()
+		lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+		if lastEventID == "" {
+			lastEventID = strings.TrimSpace(r.URL.Query().Get("lastEventId"))
+		}
+		for _, envelope := range state.eventReplay.After(lastEventID, filterEnvelope) {
+			if !writeSSEEnvelope(w, flusher, envelope) {
+				return
+			}
+		}
 		for {
 			select {
 			case <-r.Context().Done():
 				return
 			case envelope := <-eventCh:
-				data, err := json.Marshal(envelope)
-				if err != nil {
-					continue
+				if !writeSSEEnvelope(w, flusher, envelope) {
+					return
 				}
-				_, _ = fmt.Fprintf(w, "event: workorch\n")
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-				flusher.Flush()
 			}
 		}
 	})
@@ -2963,6 +2975,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 	state := &serverState{
 		config:                          config,
 		eventHub:                        eventHub,
+		eventReplay:                     newSSEReplayBuffer(defaultSSEReplayLimit),
 		metrics:                         &serverMetrics{},
 		validate:                        defaultValidate,
 		createWorkspace:                 defaultCreateWorkspace,
@@ -3060,6 +3073,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 	}
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
+	state.registerEventReplayRecorder()
 	state.registerAutoGovernanceResumeWatcher()
 	state.registerReplanContinuationWatcher()
 	return state
@@ -3846,6 +3860,17 @@ func (s *serverState) registerReplanContinuationWatcher() {
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
 }
 
+func (s *serverState) registerEventReplayRecorder() {
+	if s == nil || s.eventHub == nil || s.eventReplay == nil {
+		return
+	}
+	unsubscribe := s.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+		s.eventReplay.Append(envelope)
+		return nil
+	})
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+}
+
 func (s *serverState) registerAutoGovernanceResumeWatcher() {
 	if s == nil || s.eventHub == nil {
 		return
@@ -3895,6 +3920,26 @@ func isEventStreamCriticalTopic(topic string) bool {
 	default:
 		return false
 	}
+}
+
+func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope events.Envelope) bool {
+	data, err := json.Marshal(enrichSSEEnvelope(envelope))
+	if err != nil {
+		return true
+	}
+	if strings.TrimSpace(envelope.ID) != "" {
+		if _, err := fmt.Fprintf(w, "id: %s\n", envelope.ID); err != nil {
+			return false
+		}
+	}
+	if _, err := fmt.Fprint(w, "event: workorch\n"); err != nil {
+		return false
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
 }
 
 func (s *serverState) withSharedSession(ctx context.Context, fn func(*appservice.RuntimeSession) error) error {

@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +27,18 @@ type MagicHub struct {
 	ownsHub       bool
 	owner         string
 	nextID        int
+	revisionState *workspaceRevisionState
 	subscriptions map[int]magicSubscription
 	observers     map[string]*magicDispatchObserver
 	published     []Envelope
 }
+
+type workspaceRevisionState struct {
+	mu        sync.Mutex
+	revisions map[string]int64
+}
+
+var sharedMagicRevisionStates sync.Map
 
 type magicSubscription struct {
 	topic   string
@@ -66,6 +75,7 @@ func newMagicHub(hub magicevent.Hub, ownsHub bool, owner string) *MagicHub {
 		hub:           hub,
 		ownsHub:       ownsHub,
 		owner:         normalizeMagicHubOwner(owner),
+		revisionState: sharedMagicRevisionState(hub),
 		subscriptions: map[int]magicSubscription{},
 		observers:     map[string]*magicDispatchObserver{},
 	}
@@ -81,6 +91,7 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	}
 
 	h.mu.Lock()
+	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
 	h.published = append(h.published, cloneEnvelope(envelope))
 	h.mu.Unlock()
 
@@ -119,6 +130,7 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 	}
 
 	h.mu.Lock()
+	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
 	h.published = append(h.published, cloneEnvelope(envelope))
 	h.mu.Unlock()
 
@@ -133,6 +145,48 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 	ev.BindLaneKey(workorchEventLaneKey(envelope))
 	h.hub.Post(ev)
 	return nil
+}
+
+func (h *MagicHub) nextWorkspaceRevisionLocked(workspaceID string) int64 {
+	if workspaceID == "" || h.revisionState == nil {
+		return 0
+	}
+	return h.revisionState.next(workspaceID)
+}
+
+func (s *workspaceRevisionState) next(workspaceID string) int64 {
+	if s == nil || workspaceID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revisions == nil {
+		s.revisions = map[string]int64{}
+	}
+	s.revisions[workspaceID]++
+	return s.revisions[workspaceID]
+}
+
+func sharedMagicRevisionState(hub magicevent.Hub) *workspaceRevisionState {
+	if key := magicHubIdentityKey(hub); key != "" {
+		if state, _ := sharedMagicRevisionStates.LoadOrStore(key, &workspaceRevisionState{revisions: map[string]int64{}}); state != nil {
+			if typed, ok := state.(*workspaceRevisionState); ok {
+				return typed
+			}
+		}
+	}
+	return &workspaceRevisionState{revisions: map[string]int64{}}
+}
+
+func magicHubIdentityKey(hub magicevent.Hub) string {
+	if hub == nil {
+		return ""
+	}
+	value := reflect.ValueOf(hub)
+	if value.Kind() != reflect.Ptr || value.IsNil() {
+		return ""
+	}
+	return fmt.Sprintf("%T/%x", hub, value.Pointer())
 }
 
 func (h *MagicHub) Subscribe(topic string, handler Handler) func() {

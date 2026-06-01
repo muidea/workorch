@@ -381,7 +381,12 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	return unsub, nil
 }
 
-func convertEnvelope(envelope events.Envelope) Event {
+func convertEnvelope(envelope events.Envelope) (ret Event) {
+	defer func() {
+		if ret.Type != "" {
+			ret.Revision = envelope.Revision
+		}
+	}()
 	switch envelope.Topic {
 	case events.TopicWorkspaceCreated:
 		return Event{Type: EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}

@@ -7,7 +7,7 @@
 
 ## 当前收口状态
 
-本轮已完成第一批无后端依赖的 Go TUI 收口：
+本轮已完成 Go TUI、后端事件、Web Console 与 CLI 的完整收口：
 
 - `applyWorkspaceContext` 不再在普通上下文刷新时调用 `resetWorkspaceView()`，改为按字段增量更新；完整空 snapshot 仍可清空已不存在的 Goal / DoD。
 - TUI event channel 容量从 64 提升到 256，并保留关键 workspace list 事件挤出策略。
@@ -15,13 +15,12 @@
 - 新增 `/status`、`/coverage`、`/steps`、`/timeline`、`/patches`、`/artifacts` inspect 命令与 slash suggestion。
 - help overlay 按 Workflow / Inspect / Governance / System 分组展示。
 - patch、artifact continuation、memory recall、LLM usage 事件改为 TUI 本地增量更新，不再触发 `FetchWorkspaceContext` 全量刷新。
+- backend `Envelope.Revision`、workspace revision counter、SSE `id:` / `Last-Event-ID` replay 已收口，并通过服务端 SSE 测试覆盖。
+- SSE `stateSummary` 在序列化阶段富化，不污染内部事件总线。
+- Web Console 改为 `useSSE` + topic router 增量消费，revision gap / reconnect 触发全量刷新兜底。
+- CLI 已新增 `run coverage <id>` / `run timeline <id>` 子命令。
 
-仍未收口的第二批内容：
-
-- backend `Envelope.Revision`、workspace revision counter、SSE `id:` / `Last-Event-ID` replay。
-- SSE `stateSummary` 富化。
-- Web Console topic router 与 revision gap 检测。
-- CLI `run coverage` / `run timeline` 子命令。
+当前无未收口项。
 
 ---
 
@@ -93,10 +92,15 @@
   id: {envelope.ID}\nevent: workorch\ndata: {json}\n\n
 ```
 
-新增 per-connection ring buffer（256 条），解析 `Last-Event-ID` header 实现短时重连回放。
+新增 serverState 级 ring buffer（256 条），通过常驻 EventHub 订阅记录事件；SSE handler 解析 `Last-Event-ID` header 或 `lastEventId` query 实现短时重连回放。
 
 **新文件：**
 - `internal/modules/application/workorchd/service/server/sse_replay.go` — ring buffer 实现
+
+**实现结果：**
+- `Envelope` 增加 lower camel JSON tag 与 `revision` 字段，SSE 输出与 Web 消费字段一致。
+- `MemoryHub` / `MagicHub` 按 workspace 分配单调递增 revision；全局事件 revision = 0。
+- `/api/v1/workorch/events/stream` 输出 `id:` 行，并在重连时按 `Last-Event-ID` / `lastEventId` 回放 ring buffer 中后续事件。
 
 #### 1.3 State Summary 事件富化
 
@@ -136,6 +140,10 @@
 - 只有 SSE 客户端承担富化开销
 - 后向兼容：`stateSummary` 是可选字段，旧客户端忽略即可
 
+**实现结果：**
+- 新增 `sse_enrichment.go`，对 workspace/run/result 关键 topic 注入 `stateSummary`。
+- `stateSummary` 放入 SSE 输出 payload，内部 EventHub envelope 保持原始事件。
+
 ---
 
 ### Phase 2: 前端增量消费
@@ -145,9 +153,6 @@
 **修改文件：**
 - `web/workorch-console/src/hooks/useSSE.ts` — 传递完整 envelope（含 revision）给回调
 - `web/workorch-console/src/pages/WorkspaceDetailPage.tsx`（line 162-218）— 替换全量刷新
-
-**新文件：**
-- `web/workorch-console/src/hooks/useWorkspaceEventRouter.ts` — topic 路由器
 
 **路由策略：**
 
@@ -166,6 +171,11 @@
 **Revision gap 检测：** 收到的 revision 与 lastRevision 差 > 1 → 触发全量刷新。
 
 **Reconnect：** `onReconnect` 回调触发全量刷新（利用 Last-Event-ID 回放减少丢失窗口）。
+
+**实现结果：**
+- `useSSE` 透传 `id`、`revision`、`stateSummary`，并用 `lastEventId` query 支持手动重连回放。
+- `WorkspaceDetailPage` 内置 topic router：workspace/run state 本地合并，patch topic 只刷新 patch 页，终态/定义/治理阻塞类事件触发必要上下文刷新，revision gap 与 reconnect 走全量刷新。
+- 未新增独立 `useWorkspaceEventRouter.ts`，原因是当前页面状态分散在多个本地 state 与分页加载函数中，内联路由可直接复用既有加载/合并函数，避免引入额外跨组件状态同步层。
 
 #### 2.2 Go TUI: 消除 resetWorkspaceView 闪烁
 
@@ -236,9 +246,15 @@ if msg.Decisions != nil {
 
 #### 2.5 Revision 追踪
 
+**状态：已收口**
+
 **修改文件：**
 - `internal/modules/application/workorch/service/tui/model.go` — `AppModel` 增加 `lastRevision int64`
 - `web/workorch-console/src/hooks/useSSE.ts` — `lastRevisionRef` 追踪
+
+**实现结果：**
+- TUI 在收到 workspace revision gap 时触发 `FetchWorkspaceContext`。
+- Web Console 在收到 revision gap 时触发 workspace list + context 全量刷新。
 
 ---
 
@@ -338,12 +354,14 @@ if msg.Decisions != nil {
 
 #### 3.4 CLI 新增子命令
 
+**状态：已收口**
+
 **新文件：**
 - `internal/modules/application/workorch/service/cli/run_inspect.go`
 
 **命令：**
 - `run coverage <id>` — 读取 workspace snapshot，展示 DoD 覆盖状态
-- `run timeline <id>` — 读取 event records，展示时间线
+- `run timeline <id>` — 读取 workspace snapshot 中的 event records，展示 run 时间线
 
 **命名对照：**
 
@@ -366,16 +384,14 @@ if msg.Decisions != nil {
 | 3 | 上下文感知输入（3.1） | 无 | 低 | 已完成 |
 | 4 | Inspect 命令 + Help 分组（3.2+3.3） | 无 | 中 | 已完成 |
 | 5 | Go TUI 减少全量刷新（2.3） | 无 | 中 | 已完成 |
-| 6 | Revision counter（1.1） | 无 | 中 | 待收口 |
-| 7 | SSE id + replay（1.2） | 6 | 中 | 待收口 |
-| 8 | State summary 富化（1.3） | 6 | 中 | 待收口 |
-| 9 | Web Console topic 路由（2.1） | 8 | 高 | 待收口 |
-| 10 | Revision 追踪（2.5） | 6 | 低 | 待收口 |
-| 11 | CLI 子命令（3.4） | 无 | 低 | 待收口 |
+| 6 | Revision counter（1.1） | 无 | 中 | 已完成 |
+| 7 | SSE id + replay（1.2） | 6 | 中 | 已完成 |
+| 8 | State summary 富化（1.3） | 6 | 中 | 已完成 |
+| 9 | Web Console topic 路由（2.1） | 8 | 高 | 已完成 |
+| 10 | Revision 追踪（2.5） | 6 | 低 | 已完成 |
+| 11 | CLI 子命令（3.4） | 无 | 低 | 已完成 |
 
-**建议分两批：**
-- **第一批（1-5）：** 无后端依赖，立即改善体验
-- **第二批（6-11）：** 后端增强 + 前端增量消费
+两批内容均已完成代码收口。
 
 ---
 
@@ -398,10 +414,11 @@ if msg.Decisions != nil {
 | Go TUI 闪烁修复 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 partial context 不清空显示、完整空 snapshot 清空定义 |
 | 上下文感知输入 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 active run plain text → operator input、idle workspace plain text → goal |
 | Inspect 命令 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 `/status`、`/coverage`、`/timeline`、`/patches`、`/artifacts` |
-| Revision counter | `make test` 验证 hub 测试通过；SSE 事件包含 revision |
-| Web Console 增量 | 开发模式 Network tab 确认非终态事件不触发全量 fetch |
-| 重连回放 | 断开 SSE 后重连，验证 Last-Event-ID 回放 |
-| 整体 | `make test-race` 通过，无 data race |
+| Revision counter | `go test ./internal/pkg/events -count=1` 覆盖 MemoryHub / MagicHub workspace revision |
+| SSE id / stateSummary / replay | `go test ./internal/modules/application/workorchd/service/server -run 'TestEventStream|TestEventRecordQuery' -count=1` |
+| Web Console 增量 | `npm --prefix web/workorch-console run build` 验证类型与打包 |
+| CLI 子命令 | `go test ./internal/modules/application/workorch/service/cli -count=1` |
+| 整体 | 本轮未执行 `make test-race`；已执行受影响包定向测试与 Web build |
 
 ---
 

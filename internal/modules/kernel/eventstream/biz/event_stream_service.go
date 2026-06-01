@@ -68,6 +68,7 @@ func eventRecordFromEnvelope(envelope events.Envelope) *eventstreammodel.EventRe
 		WorkspaceID:    common.WorkspaceID(envelope.WorkspaceID),
 		RunID:          common.RunID(envelope.RunID),
 		StepID:         common.StepID(envelope.StepID),
+		Revision:       envelope.Revision,
 		Payload:        clonePayload(envelope.Payload),
 		PayloadSummary: eventPayloadSummary(envelope.Payload),
 	}

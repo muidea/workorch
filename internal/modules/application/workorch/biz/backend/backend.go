@@ -274,6 +274,7 @@ type WorkspaceSnapshotInfo struct {
 	Workspace             WorkspaceInfo
 	Outcome               WorkspaceOutcomeInfo
 	TaskProgress          TaskProgressInfo
+	CoverageSummary       map[string]any
 	TaskDecompositions    []TaskDecompositionInfo
 	Goals                 []GoalInfo
 	DoDs                  []DoDInfo
@@ -286,8 +287,25 @@ type WorkspaceSnapshotInfo struct {
 	WebSources            []WebSourceTraceInfo
 	LLMUsageTraces        []LLMUsageTraceInfo
 	LLMUsageSummary       LLMUsageSummaryInfo
+	EventRecords          []EventRecordInfo
 	Decisions             []DecisionInfo
 	Approvals             []ApprovalInfo
+}
+
+type EventRecordInfo struct {
+	ID             common.EventRecordID
+	Version        string
+	Topic          string
+	OccurredAt     string
+	SourceModule   string
+	SubjectType    string
+	SubjectID      string
+	WorkspaceID    common.WorkspaceID
+	RunID          common.RunID
+	StepID         common.StepID
+	Payload        map[string]any
+	PayloadSummary map[string]any
+	PayloadRef     string
 }
 
 type RecoveryPlanInfo struct {
@@ -710,6 +728,7 @@ type Event struct {
 	Type        EventType
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID
+	Revision    int64
 	Payload     map[string]any
 }
 

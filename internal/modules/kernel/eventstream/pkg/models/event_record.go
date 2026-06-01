@@ -13,6 +13,7 @@ type EventRecord struct {
 	WorkspaceID    common.WorkspaceID
 	RunID          common.RunID
 	StepID         common.StepID
+	Revision       int64
 	Payload        map[string]any
 	PayloadSummary map[string]any
 	PayloadRef     string
