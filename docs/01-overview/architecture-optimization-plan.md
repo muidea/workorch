@@ -376,6 +376,8 @@ type repairSubsystem struct {
 | P1.17 repair dispatch fail-run reason 收口 | 已完成 | `repairSubsystem` 承载 fail-run reason 归一化，固定 execErr、step output error、step output reason、默认 runtime failure 的优先级；FailRun 与 rejected result recording 继续由 `RuntimeOrchestrator` 协调 |
 | P1.17 repair dispatch fail-run reason 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整失败摘要选择边界，不改变 fail-run 分支、result 记录、event payload 或状态转换 |
 | P1.18 runtime execution coordination 边界确认 | 已完成 | `dispatchStep`、blocker ticket 创建、`BlockOnDecision`、`FailRun`、rejected result recording 等状态变更型执行协调继续保留在 `RuntimeOrchestrator`；子系统只负责分类、规划、投影或通过窄接口委派，避免把核心状态机拆散 |
+| P1.19 repair 大文件职责拆分 | 已完成 | `runtime_repair.go` 按 failure dispatch、provider/budget、coverage gap、follow-up input、schema contract、action package、failure signals、policy、context material 拆分为多个 `runtime_repair_*.go` 文件；拆分后最大 repair 源文件为 `runtime_repair_context_material.go`，约 1,754 行 |
+| P1.19 repair 大文件职责拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；本轮只做函数块机械移动和 import 清理，不改变函数体、调用关系、状态转换、LLM 上下文字段或业务语义 |
 | P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
 | P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
 | P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
@@ -426,14 +428,16 @@ repair dispatch executable spec 收口只移动 provider retry/runtime repair �
 repair dispatch blocker delegation 收口只移动 blocked recovery action 到具体 blocker executor 的分发边界，实际治理 ticket、decision block 与 result 记录仍由 `RuntimeOrchestrator` 协调。
 repair dispatch fail-run reason 收口只移动失败摘要优先级归一化，实际 FailRun、rejected result recording 与事件发布仍由 `RuntimeOrchestrator` 协调。
 runtime execution coordination 边界确认明确状态变更型执行协调不继续下沉，避免子系统直接持有 run/step/ticket/result 状态机写入权。
+repair 大文件职责拆分只按现有函数职责重新落文件，未新增业务判断，未改变 runtime repair 合同、recovery action、provider retry、patch apply、coverage gap、context material 或 governance blocker 行为。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 
 ### 4.2 待继续收口
 
 | 项 | 状态 | 下一步 |
 |----|------|--------|
-| P1 orchestrator 子系统组合化后续项 | 已完成 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、repair dispatch action selection/spec/blocker/fail-run reason 已完成入口级收口；最终执行协调继续保留在 `RuntimeOrchestrator` 作为状态机写入边界 |
-| P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；完整状态流转测试继续保留在现有 orchestrator 测试中 |
+| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、repair dispatch action selection/spec/blocker/fail-run reason 与 repair 文件职责拆分已完成；`runtime_orchestrator.go` 仍约 6,353 行、`RuntimeOrchestrator` receiver 方法仍约 190 个，需继续核对 dispatch/lifecycle、workspace state sync、decision resume、validation completion 等可否通过窄接口收口 |
+| P2 application 大文件拆分后续项 | 进行中 | read model 已降至约 1,293 行；`http.go` 仍约 3,800 行，需继续核对 shared helper、route group assembly、status/cache/metrics 等是否可按现有 server 边界继续拆分 |
+| P3 orchestrator 测试拆分 | 进行中 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 仍约 30,761 行，需继续按 dispatch、lifecycle、governance resume、validation/result、workspace sync 等集成面拆分 |
 
 ---
 
@@ -441,8 +445,8 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 
 | 验证项 | 方法 |
 |--------|------|
-| 文件拆分正确性 | `make ci` 通过（fmt-check + vet + test + build） |
-| 子系统提取正确性 | `make test-race` 通过，无 data race |
+| 文件拆分正确性 | `make ci` 通过（fmt-check + vet + test + build）；阶段性拆分可先运行受影响包测试与 `git diff --check` |
+| 子系统提取正确性 | `make test-race` 通过，无 data race；阶段性收口先以受影响包 `go test -count=1` 验证行为不变 |
 | 接口不变性 | 外部调用方（application 层）无需修改 |
 | 行为不变性 | 502 个现有测试全部通过 |
 | 架构约束 | 子系统 struct 不导入 orchestrator 本体的非公开字段 |
@@ -453,8 +457,8 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 
 | 指标 | 当前 | 目标 |
 |------|------|------|
-| RuntimeOrchestrator 方法数 | 229 | ~60（核心 dispatch + lifecycle） |
-| 最大源文件行数 | 8,249 (runtime_repair.go) | <3,000 |
-| 最大测试文件行数 | 31,201 | <8,000 |
-| 子系统独立测试覆盖 | 不可能（需完整 orchestrator） | 每个子系统可独立构造和测试 |
-| 新增职责归属判断 | 模糊（任何文件都可以加方法） | 明确（必须选择子系统） |
+| RuntimeOrchestrator 方法数 | ~190 | ~60（核心 dispatch + lifecycle） |
+| 最大源文件行数 | ~6,353 (`runtime_orchestrator.go`)；repair 最大文件已降至 ~1,754 | <3,000 |
+| 最大测试文件行数 | ~30,761 (`runtime_orchestrator_test.go`) | <8,000 |
+| 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |
+| 新增职责归属判断 | 已改善但未完全闭环（状态变更型协调仍集中在 `RuntimeOrchestrator`） | 明确（必须选择子系统；状态机写入保留协调层） |

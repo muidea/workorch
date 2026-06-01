@@ -1,0 +1,1461 @@
+package orchestrator
+
+import (
+	"strings"
+
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
+	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+)
+
+func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	anchorRepairInputToPrimaryActionableFailure(input, rawFailedOutput...)
+	enrichRepairInputWithProgressFailureSignals(input)
+	refreshRepairStrategyReassessment(input)
+	priorPackage := mapFromValue(input["repairActionPackage"])
+	requiredOutput := stateChangingRepairRequiredOutput()
+	pkg := map[string]any{
+		"requiredOutput": requiredOutput,
+	}
+	mergePriorRepairActionPackageEvidence(pkg, requiredOutput, priorPackage)
+	if currentFailure := repairActionCurrentFailure(input, rawFailedOutput...); len(currentFailure) > 0 {
+		pkg["currentFailure"] = currentFailure
+	}
+	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
+		pkg["lastFailureDiagnostics"] = diagnostics
+	}
+	for _, key := range []string{
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureTargetScope",
+		"failedStepId",
+		"failedStepKind",
+		"failureReason",
+		"repairObjective",
+		"runtimeRepairAttempt",
+		"maxRuntimeRepairAttempts",
+		"targetRepairAttempts",
+		"strategyReassessment",
+	} {
+		if value, ok := input[key]; ok && value != nil {
+			pkg[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(rawFailedOutput[0])
+	} else if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
+		pkg["previousRejectedOutputSummary"] = compactStateChangingRecoveryFailureOutput(failedOutput)
+	}
+	if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 {
+		pkg["structuredFailureSignals"] = compactStructuredFailureSignalsForRepairActionPackage(signals)
+	} else if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		if signals := structuredFailureSignalsFromFailureOutput(rawFailedOutput[0], nil, "", ""); len(signals) > 0 {
+			pkg["structuredFailureSignals"] = compactStructuredFailureSignalsForRepairActionPackage(signals)
+		}
+	}
+	if primary := mapFromValue(input["primaryDiagnosticRepair"]); len(primary) > 0 {
+		pkg["primaryDiagnosticRepair"] = compactLLMContextMap(primary, 1)
+		requiredOutput["mustAddressPrimaryDiagnostics"] = true
+		requiredOutput["primaryDiagnosticMatchRule"] = "state-changing patch/apply must address line-referenced target diagnostics, or declare matching primaryDiagnosticResolution/addressesFailureSignals with relatedFailureTargets for a related target"
+	} else if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
+			pkg["primaryDiagnosticRepair"] = compactLLMContextMap(primary, 1)
+			requiredOutput["mustAddressPrimaryDiagnostics"] = true
+			requiredOutput["primaryDiagnosticMatchRule"] = "state-changing patch/apply must address line-referenced target diagnostics, or declare matching primaryDiagnosticResolution/addressesFailureSignals with relatedFailureTargets for a related target"
+		}
+	}
+	if forbidden := forbiddenRepairContentReuseFromFailure(input, rawFailedOutput...); len(forbidden) > 0 {
+		pkg["forbiddenContentReuse"] = forbidden
+		requiredOutput["mustRebuildFromCurrentEvidence"] = true
+	}
+	if targets := repairActionTargetSnapshots(input); len(targets) > 0 {
+		pkg["targetSnapshots"] = targets
+		pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(targets)
+		requiredOutput["mustTargetFailureScope"] = true
+		requiredOutput["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+		applyCurrentSnapshotDirectPatchContract(requiredOutput)
+		requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
+	}
+	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) > 0 {
+		pkg["rootCauseCandidateContext"] = compactLLMContextValue(candidates, 1)
+		requiredOutput["rootCauseCandidateRule"] = "a grounded rootCauseCandidateContext target may be patched when the patch declares relatedFailureTargets for the failed surface or the candidate is included in repairTargetSet"
+		if len(mapSliceFromValue(pkg["targetSnapshots"])) == 0 {
+			if promoted := repairActionPromotableRootCauseCandidateTargetSnapshots(candidates); len(promoted) > 0 {
+				pkg["targetSnapshots"] = promoted
+				pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(promoted)
+				pkg["rootCauseCandidateTargetsPromoted"] = true
+				requiredOutput["mustTargetFailureScope"] = true
+				requiredOutput["targetRelation"] = "grounded_root_cause_candidate_or_declared_related_failure_target"
+				applyCurrentSnapshotDirectPatchContract(requiredOutput)
+				requiredOutput["fileWriteExistingTargetRule"] = "only allowed when the target snapshot is complete/safe and patch/apply file_write includes baseHash equal to that snapshot contentHash; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, bounded unified_diff, or file/edit"
+			}
+		}
+	}
+	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
+		pkg["repairTargetSet"] = targetSet
+		requiredOutput["mustTargetRepairTargetSet"] = true
+	}
+	if coverageTargets := coverageTargetSetFromRepairInput(input); len(coverageTargets) > 0 {
+		pkg["coverageRepairRequired"] = true
+		pkg["coverageTargetSet"] = coverageTargets
+		requiredOutput["mustDeclareCoverageTargets"] = true
+		requiredOutput["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	}
+	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
+		pkg[coverageWorkItemContextKey] = context
+	}
+	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
+		pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
+	}
+	if digest := failedPatchDigestFromRepairFailure(input, rawFailedOutput...); len(digest) > 0 {
+		pkg["failedPatchDigest"] = digest
+	}
+	if satisfied := mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"]); len(satisfied) > 0 {
+		pkg["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
+		pkg["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+		requiredOutput["mustIncludeStateChangingNode"] = false
+		requiredOutput["mustProduceConcreteValidationEvidence"] = true
+		requiredOutput["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+		requiredOutput["forbiddenKinds"] = append(stringSliceFromValue(requiredOutput["forbiddenKinds"]), "repeat_same_failed_patch")
+	}
+	forbiddenActions := repairActionForbiddenActions(input, pkg)
+	if len(forbiddenActions) > 0 {
+		pkg["forbiddenActions"] = forbiddenActions
+	}
+	if mode := repairActionRequiredRepairMode(input, pkg, rawFailedOutput...); mode != "" {
+		pkg["requiredRepairMode"] = mode
+	}
+	if contract := mapFromValue(input["capabilityPolicyRepairContract"]); len(contract) > 0 {
+		pkg["capabilityPolicyRepairRequired"] = true
+		pkg["capabilityPolicyRepairContract"] = compactLLMContextMap(contract, 1)
+		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
+		requiredOutput["capabilityPolicyFollowUpRule"] = "when an execution graph includes a trigger kind from capabilityPolicyRepairContract.triggeredPolicies.requiredAfterKinds, it must include a dependent mcp/tool_call matching preferredTools or output a structured capabilityPolicySkips item with policyId/category and non-empty reason"
+		requiredOutput["capabilityPolicyRepairScopeRule"] = "capabilityPolicySkips or dependent mcp/tool_call repairs the graph contract at top level; patch/apply coverageTargets repair Goal/DoD/deliverable state change and must not be forced to use the graph-contract failure as their business failedSurface"
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
+		requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]), "assessment_only_capability_policy_repair"))
+	}
+	if budget := repairActionBudgetState(input, pkg); len(budget) > 0 {
+		pkg["repairBudget"] = budget
+	}
+	if repairActionIsSchemaInvalidRepair(input, rawFailedOutput...) {
+		pkg["schemaInvalidRecovery"] = map[string]any{
+			"required": true,
+			"reason":   "previous_llm_decision_json_invalid",
+			"requirements": []string{
+				"return exactly one valid JSON object",
+				"do not reuse rejected raw output previews",
+				"do not include markdown, comments, duplicate objects, trailing braces, or partial arrays",
+				"make every executionGraph node a complete JSON object",
+			},
+		}
+		requiredOutput["mustReturnValidJSON"] = true
+		requiredOutput["mustNotReuseRejectedJSON"] = true
+		requiredOutput["forbiddenKinds"] = append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+			"malformed_json",
+			"markdown_wrapped_json",
+			"raw_rejected_json_reuse",
+			"partial_json_array",
+		)
+	}
+	pkg["exitCriteria"] = []string{
+		"state_changing_artifact_applied_then_verify",
+		"failed_assessment_or_blocker_when_not_repairable",
+	}
+	if manifest := repairActionWorkspaceManifest(input); len(manifest) > 0 {
+		pkg["workspaceFileManifest"] = manifest
+	}
+	if diagnostics := repairActionTargetRelevanceDiagnostics(input, pkg); len(diagnostics) > 0 {
+		pkg["targetRelevanceDiagnostics"] = diagnostics
+	}
+	if int64FromValue(input["targetRepairAttempts"]) >= 2 {
+		pkg["repeatedTargetRepairMode"] = map[string]any{
+			"enabled":                           true,
+			"reason":                            "same_target_scope_repeated_failure",
+			"maxTargetScopedRepairInputBytes":   120 * 1024,
+			"mustPreferExactTargetSnapshot":     true,
+			"mustOmitRejectedRawFailureProduct": true,
+			"mustReassessRepeatedFailedSurface": true,
+		}
+		requiredOutput["mustUseCurrentTargetSnapshot"] = true
+		requiredOutput["mustRebuildFromCurrentEvidence"] = true
+		if len(mapFromValue(pkg["strategyReassessment"])) == 0 {
+			if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
+				pkg["strategyReassessment"] = reassessment
+			}
+		}
+	}
+	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
+	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
+	if len(pkg) <= 1 {
+		return nil
+	}
+	return pkg
+}
+
+func anchorRepairInputToPrimaryActionableFailure(input map[string]any, rawFailedOutput ...map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	priorPackage := mapFromValue(input["repairActionPackage"])
+	if len(priorPackage) == 0 {
+		return
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if !runtimeRepairWrapperFailureOutput(output) && !runtimeRepairWrapperFailureOutput(mapFromValue(input["failedStepOutput"])) {
+		return
+	}
+	primary := primaryActionableFailureFromRepairPackage(priorPackage)
+	if len(primary) == 0 {
+		primary = primaryActionableFailureFromRepairInputContinuations(input)
+	}
+	if len(primary) > 0 {
+		input["currentFailure"] = primary
+		for _, key := range []string{"failureClass", "failureSignature", "failedStepId", "failedStepKind", "failureTargetScope", "failureReason"} {
+			if value, ok := primary[key]; ok && strings.TrimSpace(stringFromAny(value)) != "" {
+				input[key] = value
+			}
+		}
+		if scope := strings.TrimSpace(firstNonEmptyString(stringFromMap(primary, "targetScope"), stringFromMap(input, "failureTargetScope"))); scope != "" {
+			input["failureTargetScope"] = scope
+		}
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"repairTargetSet",
+		"primaryDiagnosticRepair",
+		"rootCauseCandidateContext",
+		"strategyReassessment",
+	} {
+		if priorPackage[key] != nil {
+			input[key] = cloneStepInputValue(priorPackage[key])
+		}
+	}
+	if signals := primaryStructuredFailureSignalsFromRepairPackage(priorPackage); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+	} else if signals := structuredFailureSignalsFromPrimaryActionableFailure(primary); len(signals) > 0 {
+		input["structuredFailureSignals"] = signals
+	}
+	if diagnostics := primaryLastFailureDiagnosticsFromRepairPackage(priorPackage); len(diagnostics) > 0 {
+		input["lastFailureDiagnostics"] = diagnostics
+	}
+	if output != nil {
+		input["recentRejectedAttempt"] = compactStateChangingRecoveryFailureOutput(output)
+	}
+}
+
+func primaryActionableFailureFromRepairInputContinuations(input map[string]any) map[string]any {
+	for _, container := range []map[string]any{
+		input,
+		mapFromValue(input["executionContext"]),
+		mapFromValue(input[stepInputKeyExecutionContextPackage]),
+		mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["executionContext"]),
+	} {
+		if primary := primaryActionableFailureFromReplanContinuation(mapFromValue(container["replanContinuation"])); len(primary) > 0 {
+			return primary
+		}
+	}
+	return nil
+}
+
+func runtimeRepairWrapperFailureOutput(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	class := strings.TrimSpace(stringFromMap(output, failureOutputKeyClass))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	text := strings.ToLower(strings.Join([]string{
+		stage,
+		class,
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, failureOutputKeySignature),
+	}, "\n"))
+	return class == failureClassLLMDecisionInvalid ||
+		stage == "llm_schema_invalid" ||
+		stage == "llm_context_integrity_failed" ||
+		strings.Contains(text, "invalid llm decision json") ||
+		strings.Contains(text, "llm context gate") ||
+		strings.Contains(text, "context integrity") ||
+		strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
+		strings.Contains(text, "state-changing llm repair step returned no state-changing output") ||
+		strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply") ||
+		strings.Contains(text, "decision requests a continuable candidate choice") ||
+		strings.Contains(text, "executiongraph patch/apply input invalid") ||
+		strings.Contains(text, "runtime repair patch/apply target") ||
+		strings.Contains(text, "not related to failure target scope") ||
+		strings.Contains(text, "patch a current failure target") ||
+		strings.Contains(text, "capability usage policy") ||
+		strings.Contains(text, "dependent matching mcp/tool_call") ||
+		strings.Contains(text, "capabilitypolicyskips")
+}
+
+func primaryActionableFailureFromRepairPackage(pkg map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	for _, candidate := range []map[string]any{
+		mapFromValue(pkg["primaryActionableFailure"]),
+		mapFromValue(pkg["originalActionableFailure"]),
+		mapFromValue(pkg["currentFailure"]),
+		mapFromValue(pkg["lastFailureDiagnostics"]),
+	} {
+		if len(candidate) == 0 || runtimeRepairWrapperFailureOutput(candidate) {
+			continue
+		}
+		return compactLLMContextMap(candidate, 1)
+	}
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 {
+		ret := map[string]any{
+			"evidenceValidity": "actionable_failure",
+			"reason":           firstNonEmptyString(stringSliceFirst(stringSliceFromValue(primary["messages"])), stringFromMap(pkg, "failureReason")),
+		}
+		if refs := stringSliceFromValue(primary["targetRefs"]); len(refs) > 0 {
+			ret["targetRef"] = strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+			ret["targetScope"] = "failureTargets=" + strings.Join(limitedStrings(refs, maxLLMContextSliceItems), ",")
+		}
+		for _, key := range []string{"failureClass", "failureSignature", "failedStepId", "failedStepKind"} {
+			if value := strings.TrimSpace(firstNonEmptyString(stringFromMap(pkg, key), stringFromMap(primary, key))); value != "" {
+				ret[key] = value
+			}
+		}
+		if len(ret) > 1 {
+			return compactLLMContextMap(ret, 1)
+		}
+	}
+	return nil
+}
+
+func primaryStructuredFailureSignalsFromRepairPackage(pkg map[string]any) map[string]any {
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+		return compactLLMContextMap(primary, 1)
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+		return compactStructuredFailureSignalsForRepairActionPackage(signals)
+	}
+	return nil
+}
+
+func primaryLastFailureDiagnosticsFromRepairPackage(pkg map[string]any) map[string]any {
+	for _, candidate := range []map[string]any{
+		mapFromValue(pkg["lastFailureDiagnostics"]),
+		mapFromValue(pkg["currentFailure"]),
+	} {
+		if len(candidate) == 0 || runtimeRepairWrapperFailureOutput(candidate) {
+			continue
+		}
+		return compactFailureStepOutputForRuntimeContext(candidate)
+	}
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 {
+		return compactLLMContextMap(primary, 1)
+	}
+	return nil
+}
+
+func stringSliceFirst(values []string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput map[string]any, prior map[string]any) {
+	if len(pkg) == 0 || len(prior) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"repairTargetSet",
+		"coverageTargetSet",
+		"structuredFailureSignals",
+		"primaryDiagnosticRepair",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"currentTargetAlreadySatisfiesFailedPatch",
+		"stateChangeAlreadySatisfiedByCurrentTarget",
+	} {
+		if _, ok := pkg[key]; ok || prior[key] == nil {
+			continue
+		}
+		pkg[key] = compactLLMContextValue(prior[key], 1)
+	}
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		requiredOutput["mustTargetFailureScope"] = true
+		applyCurrentSnapshotDirectPatchContract(requiredOutput)
+	}
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		requiredOutput["mustTargetRepairTargetSet"] = true
+	}
+	if len(mapSliceFromValue(pkg["coverageTargetSet"])) > 0 {
+		requiredOutput["mustDeclareCoverageTargets"] = true
+	}
+}
+
+func stateChangingRepairRequiredOutput() map[string]any {
+	return map[string]any{
+		"mustIncludeStateChangingNode": true,
+		"acceptedKinds":                stateChangingRepairAcceptedKinds(),
+		"toolStateChangingInputContract": map[string]any{
+			"requiredWhenKind": []string{"shell/command", "mcp/tool_call"},
+			"requiredFields":   []string{"stateChanging", "targetRef", "stateChangingReason"},
+			"relationFields":   []string{"relatedFailureTargets", "targetRefs", "affectedTargets"},
+			"verificationFields": []string{
+				"verificationScope",
+				"targetRef",
+				"relatedFailureTargets",
+				"boundedReason",
+			},
+		},
+		"toolStateChangingRule": "when shell/command or mcp/tool_call is the state-changing node, declare input.stateChanging=true, input.targetRef, input.stateChangingReason, and a relation field such as relatedFailureTargets/targetRefs/affectedTargets; a dependent verification shell/tool node must declare verificationScope, targetRef, relatedFailureTargets, or boundedReason",
+		"forbiddenKinds": []string{
+			"read_only_graph",
+			"llm_gated_graph",
+			"self_inspection_graph",
+			"context_rehydration_graph",
+			"same_graph_file_read_before_patch",
+			"incomplete_patch_apply_input",
+		},
+		"patchApplyInputContract": map[string]any{
+			"text_replace": []string{"targetRef", "oldText", "newText"},
+			"file_write":   []string{"targetRef", "content"},
+			"unified_diff": []string{"targetRef", "diff"},
+		},
+	}
+}
+
+func applyCurrentSnapshotDirectPatchContract(requiredOutput map[string]any) {
+	if len(requiredOutput) == 0 {
+		return
+	}
+	requiredOutput["mustUseCurrentTargetSnapshot"] = true
+	requiredOutput["mustPatchDirectlyFromProvidedSnapshot"] = true
+	requiredOutput["forbiddenStalePatchReuse"] = true
+	requiredOutput["sameGraphReadPatchRule"] = "when current target snapshots are provided, do not put file/read before patch/apply in the same executionGraph; patch/apply must use provided current snapshot content/hash, or return a real governance blocker if the snapshot is insufficient"
+	requiredOutput["patchApplyFieldRule"] = "patch/apply input must include complete literal fields for its patchType: text_replace requires targetRef, oldText, newText; file_write requires targetRef, non-empty content; unified_diff requires targetRef and a complete diff with explicit hunk ranges"
+	requiredOutput["readBeforePatchRecoveryRule"] = "if additional current content is required, output a separate evidence acquisition step rather than mixing same-turn file/read and patch/apply"
+	requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+		"same_graph_file_read_before_patch",
+		"incomplete_patch_apply_input",
+	))
+}
+
+func stateChangingRepairAcceptedKinds() []string {
+	return []string{"patch/apply", "shell/command", "mcp/tool_call"}
+}
+
+func capabilityPolicyRepairContractFromFailure(run *runModel.Run, failedStep *runModel.Step, execErr error) map[string]any {
+	if run == nil || failedStep == nil {
+		return nil
+	}
+	failureText := strings.ToLower(strings.Join([]string{
+		errorString(execErr),
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	if !strings.Contains(failureText, "capability usage policy") {
+		return nil
+	}
+	policies := capabilityUsagePoliciesForStep(run, failedStep)
+	if len(policies) == 0 {
+		return nil
+	}
+	triggered := make([]map[string]any, 0, len(policies))
+	for _, policy := range policies {
+		policyID := strings.TrimSpace(stringFromMap(policy, "id"))
+		if policyID != "" && !strings.Contains(failureText, strings.ToLower(policyID)) {
+			continue
+		}
+		item := map[string]any{}
+		for _, key := range []string{
+			"id",
+			"appliesToCategory",
+			"usageMode",
+			"triggerStages",
+			"preferredTools",
+			"requiredAfterKinds",
+			"fallbackPolicy",
+			"evidenceStrength",
+		} {
+			if value, ok := policy[key]; ok && value != nil {
+				item[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if len(item) > 0 {
+			triggered = append(triggered, item)
+		}
+	}
+	if len(triggered) == 0 {
+		return nil
+	}
+	contract := map[string]any{
+		"triggeredPolicies": triggered,
+		"requiredOutput": map[string]any{
+			"mustReturnCorrectedExecutionGraph": true,
+			"mustUseDependentFollowUpOrSkip":    true,
+			"acceptedKinds":                     []string{"mcp/tool_call", "patch/apply", "shell/command"},
+			"skipField":                         "capabilityPolicySkips",
+		},
+		"repairRule":              "for each triggered policy, any graph containing requiredAfterKinds must include a dependent mcp/tool_call matching preferredTools, or declare capabilityPolicySkips with policyId/category and non-empty reason",
+		"scopeRule":               "top-level capabilityPolicySkips or dependent mcp/tool_call repairs this graph contract; patch/apply nodes remain bound to their own coverageTargets and state-change target",
+		"assessmentOnlyForbidden": true,
+	}
+	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
+		contract["rejectedExecutionGraph"] = rejectedGraphSummary(graph)
+	}
+	return contract
+}
+
+func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range existing {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse":
+			out[key] = value
+		}
+	}
+	out["mustIncludeStateChangingNode"] = false
+	out["mustProduceConcreteFailureEvidence"] = true
+	out["acceptedKinds"] = evidenceAcquisitionAcceptedKinds()
+	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
+		"patch/apply",
+		"llm_gated_graph",
+		"self_inspection_graph",
+		"context_rehydration_graph",
+		"run_snapshot_graph",
+		"observability_only_graph",
+	))
+	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available"
+	return out
+}
+
+func evidenceAcquisitionAcceptedKinds() []string {
+	kinds := []string{"file/list", "file/read", "shell/command", "mcp/tool_call"}
+	cfg, err := workorchconfig.Current()
+	if err != nil || workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git) {
+		kinds = append(kinds, gitcommon.StepKindRead)
+	}
+	return kinds
+}
+
+func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range existing {
+		switch key {
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "mustReferenceCoverageWorkItem":
+			out[key] = value
+		}
+	}
+	out["mustIncludeStateChangingNode"] = false
+	out["mustProduceConcreteValidationEvidence"] = true
+	out["mustPreferExecutableBehaviorValidation"] = true
+	out["staticInspectionOnlyMayNotSatisfyRuntimeBehavior"] = true
+	out["mustAttemptControlledSubstituteWhenPrerequisiteUnavailable"] = true
+	out["mustDeclareValidationEvidenceMode"] = true
+	out["mustDeclareValidationEvidenceObservation"] = true
+	out["acceptedKinds"] = []string{"shell/command", "mcp/tool_call"}
+	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
+		"patch/apply",
+		"read_only_graph",
+		"llm_gated_graph",
+		"self_inspection_graph",
+		"context_rehydration_graph",
+		"run_snapshot_graph",
+		"observability_only_graph",
+	))
+	out["validationEvidenceRule"] = "bounded validation evidence is required for unresolved Goal/DoD/deliverable coverage; patch/apply is only valid after separate concrete implementation target evidence appears"
+	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; static inspection alone does not close runtime-behavior coverage"
+	out["validationEvidenceModeRule"] = "each shell/command or mcp/tool_call node intended to close runtime-behavior coverage must declare input.validationEvidence.mode as runtime_behavior, controlled_substitute, executable_contract, or dynamic_execution; static_inspection/source_inspection metadata cannot close runtime-behavior coverage"
+	out["validationEvidenceObservationRule"] = "each concrete validation node must also declare input.validationEvidence.observationType as runtime_observation, controlled_substitute_observation, executable_contract_observation, or dynamic_execution_observation; controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute"
+	return out
+}
+
+func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[string]any, requiredOutput map[string]any) {
+	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return
+	}
+	if !boolValue(requiredOutput["mustIncludeStateChangingNode"]) {
+		return
+	}
+	if boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		requiredOutput["mustRepairCapabilityPolicyFollowUp"] = true
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
+		return
+	}
+	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageRunFromRepairInput(input), coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		requiredOutput["mustIncludePrimaryStateChangingNode"] = true
+		requiredOutput["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
+		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
+		return
+	}
+	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
+		requiredOutput["mustIncludeStateChangingNode"] = true
+		acceptedKinds := compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
+		requiredOutput["acceptedKinds"] = acceptedKinds
+		return
+	}
+	next := evidenceAcquisitionRequiredOutput(requiredOutput)
+	for key := range requiredOutput {
+		delete(requiredOutput, key)
+	}
+	for key, value := range next {
+		requiredOutput[key] = value
+	}
+	pkg["evidenceAcquisitionRequired"] = true
+	pkg["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+	pkg["exitCriteria"] = []string{
+		"concrete_failure_evidence_acquired_then_target_scoped_repair",
+		"failed_assessment_or_blocker_when_evidence_cannot_be_acquired",
+	}
+}
+
+func coverageRunFromRepairInput(input map[string]any) *runModel.Run {
+	if len(input) == 0 {
+		return nil
+	}
+	executionContract := mapFromValue(input["executionContract"])
+	if len(executionContract) == 0 {
+		executionContract = mapFromValue(mapFromValue(input[stepInputKeyExecutionContextPackage])["executionContract"])
+	}
+	if len(executionContract) == 0 {
+		return nil
+	}
+	return &runModel.Run{ExecutionContext: map[string]any{"executionContract": executionContract}}
+}
+
+func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if len(pkg) > 0 && boolValue(pkg["capabilityPolicyRepairRequired"]) {
+		return true
+	}
+	if boolValue(input["validationRepairEscalatedToImplementation"]) {
+		return true
+	}
+	return repairHasImplementationTargetEvidence(input, pkg)
+}
+
+func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {
+	if repairContextHasCapabilityInputLocatorInvalid(input, pkg) {
+		return false
+	}
+	requireCurrentSnapshot := boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
+		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"])
+	if len(input) > 0 {
+		for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
+			if repairContextHasAdmissibleTargetEvidence(input[key]) {
+				return true
+			}
+		}
+		if len(repairActionTargetSnapshots(input)) > 0 {
+			return true
+		}
+		if !requireCurrentSnapshot {
+			if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+				return true
+			}
+			if progress := mapFromValue(input["currentExecutionProgress"]); progressHasConcreteTargetEvidence(progress) {
+				return true
+			}
+		}
+	}
+	if len(pkg) > 0 {
+		if repairContextHasAdmissibleTargetEvidence(pkg["targetSnapshots"]) {
+			return true
+		}
+		if !requireCurrentSnapshot {
+			if len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(pkg["repairTargetSet"]))) > 0 {
+				return true
+			}
+			if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); len(primary) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(primary) {
+				return true
+			}
+			if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
+				return true
+			}
+			if progress := mapFromValue(pkg["currentExecutionProgress"]); progressHasConcreteTargetEvidence(progress) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func repairContextHasAdmissibleTargetEvidence(value any) bool {
+	for _, item := range mapSliceFromValue(value) {
+		if runtimeRepairTargetRefAdmissible(stringFromMap(item, "targetRef")) && !boolValue(item["isBinary"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeRepairActionPackageTargetEvidence(pkg map[string]any) {
+	if len(pkg) == 0 {
+		return
+	}
+	if targets, ok := pkg["repairTargetSet"]; ok {
+		if filtered := filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(targets)); len(filtered) > 0 {
+			pkg["repairTargetSet"] = filtered
+		} else {
+			delete(pkg, "repairTargetSet")
+		}
+	}
+	for _, key := range []string{
+		"targetSnapshots",
+		"currentTargetSnapshots",
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"rootCauseCandidateContext",
+	} {
+		items := mapSliceFromValue(pkg[key])
+		if len(items) == 0 {
+			continue
+		}
+		filtered := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if runtimeRepairTargetRefAdmissible(stringFromMap(item, "targetRef")) && !boolValue(item["isBinary"]) {
+				filtered = append(filtered, item)
+			}
+		}
+		if len(filtered) > 0 {
+			pkg[key] = filtered
+		} else {
+			delete(pkg, key)
+		}
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if compact := compactStructuredFailureSignalsForRepairActionPackage(signals); len(compact) > 0 {
+			pkg["structuredFailureSignals"] = compact
+		} else {
+			delete(pkg, "structuredFailureSignals")
+		}
+	}
+}
+
+func enrichRepairInputWithProgressFailureSignals(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	progress := mapFromValue(input["currentExecutionProgress"])
+	if len(progress) == 0 {
+		if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+			progress = mapFromValue(pkg["currentExecutionProgress"])
+		}
+	}
+	signals := structuredFailureSignalsFromProgressEvidence(progress)
+	if len(signals) == 0 {
+		return
+	}
+	input["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(input["structuredFailureSignals"]), signals)
+	if targetSet := filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(signals["targetRefs"])); len(targetSet) > 0 {
+		if existing := stringSliceFromValue(input["repairTargetSet"]); len(existing) > 0 {
+			targetSet = append(existing, targetSet...)
+		}
+		input["repairTargetSet"] = limitedStrings(compactUniqueStrings(targetSet), maxLLMContextSliceItems)
+	}
+	if strings.TrimSpace(stringFromMap(input, "failureTargetScope")) == "" {
+		if targetRefs := stringSliceFromValue(signals["targetRefs"]); len(targetRefs) > 0 {
+			input["failureTargetScope"] = "failureTargets=" + strings.Join(limitedStrings(targetRefs, maxLLMContextSliceItems), ",")
+		}
+	}
+}
+
+func progressHasConcreteTargetEvidence(progress map[string]any) bool {
+	return len(progress) > 0 && structuredFailureSignalsHaveConcreteTargetEvidence(structuredFailureSignalsFromProgressEvidence(progress))
+}
+
+func structuredFailureSignalsFromProgressEvidence(progress map[string]any) map[string]any {
+	if len(progress) == 0 {
+		return nil
+	}
+	merged := map[string]any{}
+	add := func(output map[string]any) {
+		if len(output) == 0 {
+			return
+		}
+		signals := structuredFailureSignalsFromFailureOutput(output, nil, "", "")
+		if len(signals) == 0 {
+			return
+		}
+		merged = mergeStructuredFailureSignals(merged, signals)
+	}
+	for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
+		for _, item := range mapSliceFromValue(progress[key]) {
+			output := mapFromValue(item["outputSummary"])
+			if len(output) == 0 {
+				output = mapFromValue(item["output"])
+			}
+			add(output)
+		}
+	}
+	add(map[string]any{
+		"error":                   stringFromMap(progress, "failureReason"),
+		failureOutputKeyClass:     stringFromMap(progress, "failureClass"),
+		failureOutputKeySignature: stringFromMap(progress, failureOutputKeySignature),
+	})
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func structuredFailureSignalsHaveConcreteTargetEvidence(signals map[string]any) bool {
+	if len(signals) == 0 {
+		return false
+	}
+	for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+		if structuredFailureTextTargetRefAllowed(ref) {
+			return true
+		}
+	}
+	for _, ref := range mapSliceFromValue(signals["lineRefs"]) {
+		if structuredFailureTextTargetRefAllowed(stringFromMap(ref, "targetRef")) {
+			return true
+		}
+	}
+	return false
+}
+
+func repairActionPackageRequiresEvidenceAcquisition(pkg map[string]any) bool {
+	return len(pkg) > 0 && boolValue(pkg["evidenceAcquisitionRequired"])
+}
+
+func repairActionPackageRequiresStateChangingOutput(pkg map[string]any) bool {
+	if len(pkg) == 0 {
+		return false
+	}
+	return boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"])
+}
+
+func addStrategyReassessmentRequiredOutputContract(pkg map[string]any, requiredOutput map[string]any) {
+	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return
+	}
+	if !boolValue(requiredOutput["mustIncludeStateChangingNode"]) {
+		return
+	}
+	reassessment := mapFromValue(pkg["strategyReassessment"])
+	if !boolValue(reassessment["required"]) {
+		return
+	}
+	requiredFields := stringSliceFromValue(reassessment["requiredDecisionFields"])
+	if len(requiredFields) == 0 {
+		requiredFields = []string{
+			"failedSurface",
+			"rootCauseTarget",
+			"repairTargetDecision",
+			"repairMode",
+			"forbiddenRepair",
+			"verificationPlan",
+		}
+	}
+	requiredOutput["mustDeclareStrategyReassessmentFields"] = true
+	requiredOutput["strategyReassessmentRequiredFields"] = requiredFields
+	requiredOutput["strategyReassessmentRepairModes"] = []string{"continue_same_target_repair", "shift_root_cause_target"}
+	requiredOutput["strategyReassessmentMatchRule"] = "each state-changing patch/apply node must declare these fields inside the patch/apply input object, not as top-level decision fields or node sibling fields; failedSurface must align with strategyReassessment.failedSurface, repairMode must be explicit, and rootCauseTarget must identify the resource or scope being changed"
+	if strategyReassessmentRequiresRootCauseTargetShift(reassessment) {
+		requiredOutput["mustReassessRepeatedFailedSurface"] = true
+		requiredOutput["sameTargetContinuationRule"] = "repairMode=continue_same_target_repair may patch the failed target only when it addresses current primary diagnostics with current target evidence and bounded verification"
+		requiredOutput["rootCauseTargetShiftRule"] = "repairMode=shift_root_cause_target must patch a distinct neutral grounded root-cause target or return a real governance blocker"
+	}
+}
+
+func compactStructuredFailureSignalsForRepairActionPackage(signals map[string]any) map[string]any {
+	if len(signals) == 0 {
+		return nil
+	}
+	ret := compactLLMContextMap(signals, 0)
+	targetRefs := stringSliceFromValue(ret["targetRefs"])
+	var filtered []string
+	for _, ref := range targetRefs {
+		ref = normalizeStructuredFailureTargetRef(ref)
+		if ref == "" || !structuredFailureTextTargetRefAllowed(ref) {
+			continue
+		}
+		filtered = append(filtered, ref)
+	}
+	filtered = limitedStrings(compactUniqueStrings(filtered), maxLLMContextSliceItems)
+	if len(filtered) > 0 {
+		ret["targetRefs"] = filtered
+	} else {
+		delete(ret, "targetRefs")
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if current := mapFromValue(input["currentFailure"]); len(current) > 0 &&
+		runtimeRepairWrapperFailureOutput(output) &&
+		!runtimeRepairWrapperFailureOutput(current) {
+		return compactLLMContextMap(current, 1)
+	}
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("failureClass", firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+	add("failureSignature", firstNonEmptyString(stringFromMap(input, failureOutputKeySignature), stringFromMap(output, failureOutputKeySignature)))
+	add("failedStepId", stringFromMap(input, "failedStepId"))
+	add("failedStepKind", stringFromMap(input, "failedStepKind"))
+	add("stage", stringFromMap(output, "stage"))
+	add("targetRef", firstNonEmptyString(
+		stringFromMap(output, "targetRef"),
+		stringFromMap(output, "path"),
+		repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")),
+	))
+	add("targetScope", stringFromMap(input, "failureTargetScope"))
+	add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
+	add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(input, "failureReason")))
+	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
+		add("stderrPreview", stringFromMap(diagnostics, "stderrPreview"))
+		add("stdoutPreview", stringFromMap(diagnostics, "stdoutPreview"))
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add("diagnosticKind", stringFromMap(diagnostics, "kind"))
+		add("diagnosticStage", stringFromMap(diagnostics, "stage"))
+		add("diagnosticErrorDetail", stringFromMap(diagnostics, "errorDetail"))
+		if _, ok := ret["targetRef"]; !ok {
+			add("targetRef", stringFromMap(diagnostics, "targetRef"))
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func repairActionLastFailureDiagnostics(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(input) == 0 && len(rawFailedOutput) == 0 {
+		return nil
+	}
+	if diagnostics := mapFromValue(input["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		return compactFailureStepOutputForRuntimeContext(diagnostics)
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if len(output) == 0 {
+		return nil
+	}
+	if diagnostics := mapFromValue(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		return compactFailureStepOutputForRuntimeContext(diagnostics)
+	}
+	compact := compactFailureStepOutputForRuntimeContext(output)
+	if len(compact) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"error",
+		"reason",
+		"stage",
+		"command",
+		"args",
+		"exitCode",
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"stdoutPreview",
+		"stderrPreview",
+	} {
+		if value, ok := compact[key]; ok && value != nil {
+			ret[key] = value
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func stateChangingSchemaInvalidRepair(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return repairActionIsSchemaInvalidRepair(map[string]any{
+		failureOutputKeyClass: stringFromMap(step.Output, failureOutputKeyClass),
+	}, step.Output)
+}
+
+func repairActionIsSchemaInvalidRepair(input map[string]any, rawFailedOutput ...map[string]any) bool {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, failureOutputKeyClass),
+		stringFromMap(output, failureOutputKeyClass),
+	))
+	stage := strings.TrimSpace(stringFromMap(output, "stage"))
+	if class == failureClassLLMDecisionInvalid || stage == "llm_schema_invalid" {
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(input, "failureReason"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}, "\n"))
+	return strings.Contains(text, "invalid llm decision json") ||
+		strings.Contains(text, "invalid character") && strings.Contains(text, "json")
+}
+
+func firstRawFailureOutput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(rawFailedOutput) > 0 && len(rawFailedOutput[0]) > 0 {
+		return rawFailedOutput[0]
+	}
+	if failedOutput := mapFromValue(input["failedStepOutput"]); len(failedOutput) > 0 {
+		return failedOutput
+	}
+	return nil
+}
+
+func repairActionTargetSet(input map[string]any, pkg map[string]any, rawFailedOutput ...map[string]any) []string {
+	seen := map[string]bool{}
+	var ret []string
+	manifest := repairPatchRelevantWorkspaceManifest(input)
+	add := func(value string) {
+		value = normalizeStructuredFailureTargetRef(value)
+		if value == "" {
+			return
+		}
+		if canonical, ok := canonicalRepairTargetRefFromManifest(manifest, value); ok {
+			value = canonical
+		} else if len(manifest) > 0 {
+			return
+		}
+		if seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	addStructuredFailureSignalTargetRef := func(value string) {
+		value = normalizeStructuredFailureTargetRef(value)
+		if value == "" || !structuredFailureTextTargetRefAllowed(value) {
+			return
+		}
+		add(value)
+	}
+	add(repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")))
+	if currentFailure := mapFromValue(pkg["currentFailure"]); len(currentFailure) > 0 {
+		add(stringFromMap(currentFailure, "targetRef"))
+		add(repairActionTargetRefFromScope(stringFromMap(currentFailure, "targetScope")))
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	add(stringFromMap(output, "targetRef"))
+	add(stringFromMap(output, "path"))
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add(stringFromMap(diagnostics, "targetRef"))
+		add(stringFromMap(diagnostics, "conflictRef"))
+	}
+	for _, key := range []string{"failureTargetRepairContext", "readableResourceRepairContext", "patchRepairContext", "targetSnapshots", "patchRepairSuggestions"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	for _, key := range []string{"rootCauseCandidateContext"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	for _, item := range mapSliceFromValue(pkg["targetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["currentTargetSnapshots"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	for _, item := range mapSliceFromValue(pkg["rootCauseCandidateContext"]) {
+		add(stringFromMap(item, "targetRef"))
+	}
+	if signals := mapFromValue(input["structuredFailureSignals"]); len(signals) > 0 {
+		for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+			addStructuredFailureSignalTargetRef(ref)
+		}
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+			addStructuredFailureSignalTargetRef(ref)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return limitedStrings(ret, maxLLMContextSliceItems)
+}
+
+func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ret := make([]map[string]any, 0)
+	workItemContext := coverageWorkItemContextFromInput(input)
+	add := func(kind string, item map[string]any, targetText string) {
+		targetText = strings.TrimSpace(targetText)
+		if targetText == "" {
+			return
+		}
+		token := normalizeCoverageGapRepairToken(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), targetText))
+		if token == "" || seen[kind+":"+token] {
+			return
+		}
+		seen[kind+":"+token] = true
+		next := map[string]any{
+			"kind":       kind,
+			"targetText": targetText,
+			"state":      firstNonEmptyString(stringFromMap(item, "state"), "failed"),
+		}
+		if id := strings.TrimSpace(stringFromMap(item, "goalRequirementId")); id != "" {
+			next["goalRequirementId"] = id
+			next["coverageTargetToken"] = id
+		} else {
+			next["coverageTargetToken"] = targetText
+		}
+		for _, key := range []string{"item", "raw", "requirement", "source", "sourceRequirementId", "sourceScope", "sourcePath"} {
+			if value, ok := item[key]; ok && value != nil {
+				next[key] = compactLLMContextValue(value, 1)
+			}
+		}
+		if refs := evidenceRefsFromValue(item["evidenceRefs"]); len(refs) > 0 {
+			next["evidenceRefs"] = refs
+		}
+		if candidates := runtimeRepairProgressEvidenceSummaries(mapSliceFromValue(item["evidenceCandidates"])); len(candidates) > 0 {
+			next["evidenceCandidates"] = candidates
+		}
+		ret = append(ret, next)
+	}
+	for _, item := range mapSliceFromValue(input["missingDoDItems"]) {
+		add("dod", item, stringFromMap(item, "item"))
+	}
+	for _, item := range missingGoalCoverageFromInput(input) {
+		if !missingGoalCoverageItemMatchesWorkItemContext(item, workItemContext) {
+			continue
+		}
+		add("goal", item, firstNonEmptyString(
+			stringFromMap(item, "goalRequirementId"),
+			missingGoalCoverageRequirementText(item),
+		))
+	}
+	for _, item := range mapSliceFromValue(input["missingDeliverableCoverage"]) {
+		add("deliverable", item, firstNonEmptyString(
+			stringFromMap(item, "item"),
+			stringFromMap(item, "id"),
+			stringFromMap(item, "expectationId"),
+			stringFromMap(item, "requirement"),
+		))
+	}
+	for _, item := range coverageTargetSetFromWorkItemContext(workItemContext) {
+		add(firstNonEmptyString(stringFromMap(item, "kind"), stringFromMap(item, "sourceScope"), "coverage"), item, firstNonEmptyString(
+			stringFromMap(item, "targetText"),
+			stringFromMap(item, "coverageTargetToken"),
+			stringFromMap(item, "sourceRequirementId"),
+		))
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	if len(ret) > maxLLMContextSliceItems {
+		ret = ret[:maxLLMContextSliceItems]
+	}
+	return ret
+}
+
+func missingGoalCoverageItemMatchesWorkItemContext(item map[string]any, context map[string]any) bool {
+	if len(item) == 0 || len(context) == 0 {
+		return true
+	}
+	items := coverageWorkItemCandidateItemsFromContext(context)
+	hasGoalItems := false
+	tokens := coverageTokensFromAssessmentItem(item)
+	for _, candidate := range items {
+		if strings.TrimSpace(stringFromMap(candidate, "sourceScope")) != "goal_leaf" &&
+			strings.TrimSpace(stringFromMap(candidate, "kind")) != "goal" {
+			continue
+		}
+		hasGoalItems = true
+		update := coverageWorkItemUpdate{TargetTokens: tokens}
+		if coverageWorkItemMatchesUpdate(candidate, update) {
+			return true
+		}
+	}
+	return !hasGoalItems
+}
+
+func coverageWorkItemCandidateItemsFromContext(context map[string]any) []map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	seen := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 {
+			return
+		}
+		key := firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "sourceRequirementId"),
+			stringFromMap(item, "normalizedSourceKey"),
+			stringFromMap(item, "targetText"),
+		)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		ret = append(ret, item)
+	}
+	for _, key := range []string{"currentFocus", "currentFocusItems", "unresolvedItems", "ledgerSummary"} {
+		add(mapFromValue(context[key]))
+		for _, item := range mapSliceFromValue(context[key]) {
+			add(item)
+		}
+	}
+	return ret
+}
+
+func ensureCoverageRepairTargetSet(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	targets := coverageTargetSetFromRepairInput(input)
+	if len(targets) == 0 {
+		return
+	}
+	input["coverageRepairRequired"] = true
+	input["coverageTargetSet"] = targets
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		pkg["coverageRepairRequired"] = true
+		pkg["coverageTargetSet"] = targets
+		required := mapFromValue(pkg["requiredOutput"])
+		if len(required) == 0 {
+			required = map[string]any{}
+		}
+		required["mustDeclareCoverageTargets"] = true
+		if strings.TrimSpace(stringFromMap(input, "repairObjective")) == repairObjectiveConcreteValidationEvidence ||
+			boolValue(input["boundedValidationRequired"]) ||
+			boolValue(required["mustProduceConcreteValidationEvidence"]) {
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		} else {
+			required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		}
+		pkg["requiredOutput"] = required
+		input["repairActionPackage"] = pkg
+	}
+}
+
+func repairActionTargetRefFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return ""
+	}
+	_, value, ok := strings.Cut(scope, "=")
+	if !ok {
+		return scope
+	}
+	return strings.TrimSpace(value)
+}
+
+func failedPatchDigestFromRepairFailure(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(output, failureOutputKeyClass)))
+	if class != failureClassPatchApply &&
+		!strings.Contains(text, "patch") &&
+		!strings.Contains(text, "hunk") &&
+		!strings.Contains(text, "oldtext") &&
+		!strings.Contains(text, "context mismatch") {
+		return nil
+	}
+	ret := map[string]any{}
+	add := func(key string, value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[key] = value
+		}
+	}
+	add("patchId", firstNonEmptyString(stringFromMap(output, "patchId"), stringFromMap(input, "patchId")))
+	add("targetRef", firstNonEmptyString(
+		stringFromMap(output, "targetRef"),
+		stringFromMap(input, "targetRef"),
+		repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")),
+	))
+	add("patchType", firstNonEmptyString(stringFromMap(output, "patchType"), stringFromMap(input, "patchType")))
+	add("failureReason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		add("failureDetail", firstNonEmptyString(stringFromMap(diagnostics, "errorDetail"), stringFromMap(diagnostics, "guidance")))
+		if stringFromMap(ret, "targetRef") == "" {
+			add("targetRef", stringFromMap(diagnostics, "targetRef"))
+		}
+		if stringFromMap(ret, "patchType") == "" {
+			add("patchType", stringFromMap(diagnostics, "patchType"))
+		}
+	}
+	if repairActionFailureIndicatesStalePatch(input, output) {
+		ret["stalePatchRejected"] = true
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func repairActionForbiddenActions(input map[string]any, pkg map[string]any) []string {
+	ret := []string{"read_only_graph_for_state_changing_repair"}
+	if len(stringSliceFromValue(pkg["repairTargetSet"])) > 0 {
+		ret = append(ret, "modify_target_outside_repair_target_set")
+	}
+	forbiddenReuse := stringSliceFromValue(pkg["forbiddenContentReuse"])
+	if repairActionFailureIndicatesStalePatch(input, firstRawFailureOutput(input)) ||
+		stringSliceContains(forbiddenReuse, "stale_patch_text") ||
+		stringSliceContains(forbiddenReuse, "missing_old_text") ||
+		stringSliceContains(forbiddenReuse, "malformed_diff_text") {
+		ret = append(ret, "reuse_stale_patch_hunk")
+	}
+	if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
+		ret = append(ret, "repeat_same_failed_patch")
+	}
+	return limitedStrings(compactUniqueStrings(ret), 8)
+}
+
+func repairActionRequiredRepairMode(input map[string]any, pkg map[string]any, rawFailedOutput ...map[string]any) string {
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	if !repairActionFailureIndicatesStalePatch(input, output) &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "stale_patch_text") &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "missing_old_text") &&
+		!stringSliceContains(stringSliceFromValue(pkg["forbiddenContentReuse"]), "malformed_diff_text") {
+		return ""
+	}
+	if int64FromValue(input["targetRepairAttempts"]) >= 2 {
+		return "exact_replacement_against_current_snapshot"
+	}
+	return "patch_current_snapshot_only"
+}
+
+func repairActionFailureIndicatesStalePatch(input map[string]any, output map[string]any) bool {
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	return strings.Contains(text, "context mismatch") ||
+		strings.Contains(text, "patch does not apply") ||
+		strings.Contains(text, "stale") ||
+		strings.Contains(text, "oldtext not found") ||
+		strings.Contains(text, "old text not found") ||
+		strings.Contains(text, "hunk header") ||
+		strings.Contains(text, "malformed unified") ||
+		strings.Contains(text, "invalid unified")
+}
+
+func repairActionBudgetState(input map[string]any, pkg map[string]any) map[string]any {
+	ret := map[string]any{}
+	if attempt := int64FromValue(input[stepInputKeyRuntimeRepairAttempt]); attempt > 0 {
+		ret["attempt"] = attempt
+	}
+	if maxAttempts := int64FromValue(input["maxRuntimeRepairAttempts"]); maxAttempts > 0 {
+		ret["maxAttempts"] = maxAttempts
+	}
+	if targetAttempts := int64FromValue(input["targetRepairAttempts"]); targetAttempts > 0 {
+		ret["targetRepairAttempts"] = targetAttempts
+	}
+	class := strings.TrimSpace(firstNonEmptyString(stringFromMap(input, failureOutputKeyClass), stringFromMap(pkg, failureOutputKeyClass)))
+	switch class {
+	case failureClassProviderTimeout, failureClassProviderUnavailable, failureClassContextTooLarge, failureClassRateLimited, failureClassProviderStreamIncomplete, failureClassProviderProtocolInvalid:
+		ret["budgetKind"] = "provider_retry"
+	case failureClassLLMDecisionInvalid:
+		ret["budgetKind"] = "llm_schema_repair"
+	case failureClassPatchApply:
+		ret["budgetKind"] = "patch_apply_repair"
+	case failureClassShellCommand:
+		ret["budgetKind"] = "verification_repair"
+	case failureClassRuntime:
+		ret["budgetKind"] = "state_changing_contract_repair"
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func compactStateChangingRepairInputAroundActionPackage(input map[string]any) {
+	if len(input) == 0 || len(mapFromValue(input["repairActionPackage"])) == 0 {
+		return
+	}
+	omitted := []string{}
+	omit := func(key string) {
+		if _, ok := input[key]; !ok {
+			return
+		}
+		delete(input, key)
+		omitted = append(omitted, key)
+	}
+	for _, key := range []string{
+		"failedStepInput",
+		"failedStepOutput",
+		"previousStepOutput",
+		"failedExecutionGraph",
+		stepInputKeyGraphEvidence,
+		"runEvidenceSummary",
+		stepOutputKeyExecutionGraph,
+	} {
+		omit(key)
+	}
+	if len(omitted) > 0 {
+		input["repairInputCompaction"] = map[string]any{
+			"mode":                  "repair_action_package_primary",
+			"omittedFields":         omitted,
+			"primaryField":          "repairActionPackage",
+			"reason":                "repair uses bounded current failure package instead of duplicated historical payloads",
+			"targetScopedByteLimit": 120 * 1024,
+		}
+	}
+}
+
+func repairActionTargetRelevanceDiagnostics(input map[string]any, pkg map[string]any) map[string]any {
+	if len(input) == 0 && len(pkg) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	if scope := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, "failureTargetScope"),
+		stringFromMap(pkg, "failureTargetScope"),
+	)); scope != "" {
+		ret["failureTargetScope"] = scope
+	}
+	if targets := mapSliceFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
+		ret["targetSnapshotCount"] = len(targets)
+		ret["targetRefs"] = repairActionTargetRefs(targets)
+	}
+	if manifest := mapSliceFromValue(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+		ret["workspaceManifestEntryCount"] = len(manifest)
+	}
+	if signals := mapFromValue(pkg["structuredFailureSignals"]); len(signals) > 0 {
+		if refs := stringSliceFromValue(signals["targetRefs"]); len(refs) > 0 {
+			ret["failureSignalTargetRefs"] = limitedStrings(refs, maxLLMContextSliceItems)
+		}
+		if ids := stringSliceFromValue(signals["identifiers"]); len(ids) > 0 {
+			ret["failureSignalIdentifierCount"] = len(ids)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func repairActionTargetRefs(targets []map[string]any) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if ref := stringFromMap(target, "targetRef"); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	return limitedStrings(compactUniqueStrings(refs), maxLLMContextSliceItems)
+}
