@@ -286,7 +286,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	output = normalizeCompletionGateDoDAssessmentOutput(run, step, output)
 	var evidenceNormalizeErr error
-	output, evidenceNormalizeErr = o.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	output, evidenceNormalizeErr = normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, run, output)
 	if evidenceNormalizeErr != nil {
 		return evidenceNormalizeErr
 	}

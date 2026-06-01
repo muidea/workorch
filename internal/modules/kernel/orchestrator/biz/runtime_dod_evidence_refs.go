@@ -22,19 +22,19 @@ type completionEvidenceRefCatalog struct {
 	supersededFailureStepRefs map[string]string
 }
 
-func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, run *runModel.Run, output map[string]any) (map[string]any, error) {
-	if o == nil || run == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
+func normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, output map[string]any) (map[string]any, error) {
+	if run == nil || output == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return output, nil
 	}
 	assessment := doDAssessmentFromOutput(output)
 	if assessment == nil {
 		return output, nil
 	}
-	catalog, err := completionEvidenceRefCatalogForRun(ctx, o.steps, o.evidence, run)
+	catalog, err := completionEvidenceRefCatalogForRun(ctx, steps, evidence, run)
 	if err != nil {
 		return nil, err
 	}
-	normalized, changed := normalizeDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, catalog, assessment)
+	normalized, changed := normalizeDoDAssessmentEvidenceRefs(ctx, steps, evidence, catalog, assessment)
 	if !changed {
 		return output, nil
 	}

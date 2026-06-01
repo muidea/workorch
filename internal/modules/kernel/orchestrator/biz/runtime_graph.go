@@ -197,7 +197,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		)
 	}
 	last.Output = normalizeCompletionGateDoDAssessmentOutput(currentRun, last, last.Output)
-	normalizedOutput, evidenceNormalizeErr := o.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, currentRun, last.Output)
+	normalizedOutput, evidenceNormalizeErr := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, currentRun, last.Output)
 	if evidenceNormalizeErr != nil {
 		return evidenceNormalizeErr
 	}

@@ -991,7 +991,7 @@ func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t 
 		},
 	}
 
-	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	normalized, err := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, orch.steps, orch.evidence, run, output)
 	if err != nil {
 		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
 	}
@@ -1050,7 +1050,7 @@ func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *tes
 		},
 	}
 
-	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	normalized, err := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, orch.steps, orch.evidence, run, output)
 	if err != nil {
 		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
 	}
