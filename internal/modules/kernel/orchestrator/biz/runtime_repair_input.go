@@ -419,7 +419,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			input["failureTargetRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["failureTargetRepairContext"]), snapshots)
 		}
 	}
-	if progress := o.runtimeRepairCurrentExecutionProgress(ctx, run, failedStep, input); len(progress) > 0 {
+	if progress := runtimeRepairCurrentExecutionProgress(ctx, o.steps, o.repairManager(), run, failedStep, input); len(progress) > 0 {
 		input["currentExecutionProgress"] = progress
 	}
 	patchContext := o.repairManager().runtimeRepairPatchContext(ctx, run, failedStep)

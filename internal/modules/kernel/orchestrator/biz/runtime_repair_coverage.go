@@ -718,8 +718,10 @@ func coverageTargetTokensFromStep(step *runModel.Step) []string {
 	return ret
 }
 
-func (o *RuntimeOrchestrator) runtimeRepairCurrentExecutionProgress(
+func runtimeRepairCurrentExecutionProgress(
 	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	input map[string]any,
@@ -746,10 +748,10 @@ func (o *RuntimeOrchestrator) runtimeRepairCurrentExecutionProgress(
 	if evidence := runtimeRepairProgressEvidenceSummaries(mapSliceFromValue(input[stepInputKeyGraphEvidence])); len(evidence) > 0 {
 		ret["completedGraphEvidence"] = evidence
 	}
-	if latest := runtimeRepairProgressEvidenceSummaries(latestActionEvidenceCandidates(ctx, o.steps, run, failedStep, 6)); len(latest) > 0 {
+	if latest := runtimeRepairProgressEvidenceSummaries(latestActionEvidenceCandidates(ctx, steps, run, failedStep, 6)); len(latest) > 0 {
 		ret["latestActionEvidence"] = latest
 	}
-	if attempts := runtimeRepairAttemptProgressSummaries(o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, 5)); len(attempts) > 0 {
+	if attempts := runtimeRepairAttemptProgressSummaries(repair.recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, 5)); len(attempts) > 0 {
 		ret["recentRepairAttempts"] = attempts
 	}
 	if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
