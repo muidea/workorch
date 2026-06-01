@@ -14,7 +14,7 @@ func TestMaxRuntimeRepairAttemptsUsesConfiguredPolicy(t *testing.T) {
 	orch := &RuntimeOrchestrator{
 		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
-	if got := orch.maxRuntimeRepairAttempts(); got != 10 {
+	if got := maxRuntimeRepairAttemptsForPolicy(orch.policy); got != 10 {
 		t.Fatalf("max runtime repair attempts = %d, want 10", got)
 	}
 }

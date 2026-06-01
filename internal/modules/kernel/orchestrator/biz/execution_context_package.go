@@ -37,7 +37,7 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	o.applyLLMOutputModeSelection(ctx, run, step.Input, nil, 0)
 	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
 	step.Input[stepInputKeyExecutionContextPackage] = pkg
-	if policy := o.llmOutputPolicyValues(); len(policy) > 0 {
+	if policy := llmOutputPolicyValues(o.policy); len(policy) > 0 {
 		step.Input["llmOutputPolicy"] = policy
 	}
 	if timeline := mapSliceFromValue(pkg[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
@@ -173,7 +173,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stage":       firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage)),
 		"stageMode":   stringFromMap(step.Input, stepInputKeyRuntimeStageMode),
 	}
-	if policy := o.llmOutputPolicyValues(); len(policy) > 0 {
+	if policy := llmOutputPolicyValues(o.policy); len(policy) > 0 {
 		ret["llmOutputPolicy"] = policy
 	}
 	if mode := strings.TrimSpace(stringFromMap(step.Input, "outputMode")); mode != "" {

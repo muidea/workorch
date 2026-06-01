@@ -540,13 +540,13 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < o.maxRuntimeRepairAttempts() {
+	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy) {
 		return false
 	}
-	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, o.maxRuntimeRepairAttempts()) {
+	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(o.policy)) {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && attempts < o.maxRuntimeRepairAttempts() &&
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy) &&
 		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
 		class != failureClassLLMDecisionInvalid &&
 		!runtimeFailureIsLLMContractLoop(failedStep) {

@@ -40,7 +40,7 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 }
 
 func (o *RuntimeOrchestrator) providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
-	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, o.maxProviderRetryAttempts())
+	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttemptsForPolicy(o.policy))
 }
 
 func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt int, execErr error, maxAttempts int) map[string]any {
@@ -370,7 +370,7 @@ func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx co
 		return false
 	}
 	attempts := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
-	return attempts > 0 && attempts < o.maxRuntimeRepairAttempts()
+	return attempts > 0 && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy)
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
@@ -386,7 +386,7 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") {
 		return false
 	}
-	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < o.maxRuntimeRepairAttempts() {
+	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxRuntimeRepairAttemptsForPolicy(o.policy) {
 		return false
 	}
 	failedStep, err := o.steps.Get(ctx, ticket.StepID)
@@ -409,7 +409,7 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 			return false
 		}
 	}
-	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < o.maxRuntimeRepairAttempts()
+	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttemptsForPolicy(o.policy)
 }
 
 func runtimeRepairExhaustionHasCompletedCoverageEvidence(context map[string]any) bool {

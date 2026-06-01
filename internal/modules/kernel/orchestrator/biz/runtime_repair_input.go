@@ -117,7 +117,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	setRuntimeStage(input, runtimeStageRepair)
 	input[stepInputKeyRuntimeRepairFollowUp] = true
 	input[stepInputKeyRuntimeRepairAttempt] = attempt
-	input["maxRuntimeRepairAttempts"] = o.maxRuntimeRepairAttempts()
+	input["maxRuntimeRepairAttempts"] = maxRuntimeRepairAttemptsForPolicy(o.policy)
 	if execErr != nil {
 		input["failureReason"] = execErr.Error()
 	}

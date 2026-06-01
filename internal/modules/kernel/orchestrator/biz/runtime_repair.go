@@ -694,7 +694,7 @@ func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts()
+	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(o.policy)
 }
 
 func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
@@ -707,7 +707,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := o.maxRuntimeRepairAttempts()
+	maxAttempts := maxRuntimeRepairAttemptsForPolicy(o.policy)
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
@@ -759,7 +759,7 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return false
 	}
-	if o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= o.maxRuntimeRepairAttempts() {
+	if o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(o.policy) {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
@@ -770,7 +770,7 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 		return false
 	}
 	attempts := o.repairManager().providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep))
-	if attempts >= o.maxProviderRetryAttempts() {
+	if attempts >= maxProviderRetryAttemptsForPolicy(o.policy) {
 		return false
 	}
 	if isRetryableLLMProviderRuntimeFailure(run, failedStep) {
@@ -786,7 +786,7 @@ func (o *RuntimeOrchestrator) providerRetryBudgetExhausted(ctx context.Context, 
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.repairManager().providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= o.maxProviderRetryAttempts()
+	return o.repairManager().providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttemptsForPolicy(o.policy)
 }
 
 func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
@@ -799,7 +799,7 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := o.maxProviderRetryAttempts()
+	maxAttempts := maxProviderRetryAttemptsForPolicy(o.policy)
 	rootStepID := providerRetryRootStepID(failedStep)
 	attempts := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID)
 	if attempts > maxAttempts {

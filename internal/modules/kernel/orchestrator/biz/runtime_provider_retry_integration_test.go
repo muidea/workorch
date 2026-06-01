@@ -666,7 +666,7 @@ func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
 	if got := input["maxProviderRetryAttempts"]; got != 7 {
 		t.Fatalf("maxProviderRetryAttempts = %v, want configured 7", got)
 	}
-	if got := orch.llmOutputPolicyValues()["maxPatchContentBytes"]; got != 4096 {
+	if got := llmOutputPolicyValues(orch.policy)["maxPatchContentBytes"]; got != 4096 {
 		t.Fatalf("llmOutputPolicy.maxPatchContentBytes = %v, want configured 4096", got)
 	}
 }

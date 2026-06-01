@@ -393,23 +393,20 @@ func (p LLMOutputRuntimePolicy) Values() map[string]any {
 	}
 }
 
-func (o *RuntimeOrchestrator) llmOutputPolicyValues() map[string]any {
-	if o == nil {
-		return NormalizeLLMOutputRuntimePolicy(LLMOutputRuntimePolicy{}).Values()
-	}
-	return o.policy.LLMOutput.Values()
+func llmOutputPolicyValues(policy RuntimePolicy) map[string]any {
+	return policy.LLMOutput.Values()
 }
 
-func (o *RuntimeOrchestrator) maxRuntimeRepairAttempts() int {
-	if o == nil || o.policy.MaxRuntimeRepairAttempts <= 0 {
+func maxRuntimeRepairAttemptsForPolicy(policy RuntimePolicy) int {
+	if policy.MaxRuntimeRepairAttempts <= 0 {
 		return defaultMaxRuntimeRepairAttempts
 	}
-	return o.policy.MaxRuntimeRepairAttempts
+	return policy.MaxRuntimeRepairAttempts
 }
 
-func (o *RuntimeOrchestrator) maxProviderRetryAttempts() int {
-	if o == nil || o.policy.MaxProviderRetryAttempts <= 0 {
+func maxProviderRetryAttemptsForPolicy(policy RuntimePolicy) int {
+	if policy.MaxProviderRetryAttempts <= 0 {
 		return maxProviderRetryAttempts
 	}
-	return o.policy.MaxProviderRetryAttempts
+	return policy.MaxProviderRetryAttempts
 }
