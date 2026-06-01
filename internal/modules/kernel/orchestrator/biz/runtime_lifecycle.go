@@ -42,7 +42,7 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
-	ws, err = o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, ws)
+	ws, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, ws)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (o *RuntimeOrchestrator) blockOnDecisionAtStep(ctx context.Context, r *runM
 	r.BlockingTicketID = ticketID
 	r.BlockingApprovalID = ""
 	r.FailureReason = ""
-	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateWaitingDecision, workspace)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (o *RuntimeOrchestrator) blockOnApprovalAtStep(ctx context.Context, r *runM
 	r.BlockingApprovalID = approvalID
 	r.BlockingTicketID = ""
 	r.FailureReason = ""
-	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateBlocked, workspace)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateBlocked, workspace)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			r.State = common.RunStateRunning
 			r.FailureReason = ""
 			mergeRunExecutionContextPatch(r, executionContextPatch)
-			workspace, syncErr := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+			workspace, syncErr := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
 			if syncErr != nil {
 				return syncErr
 			}
@@ -289,7 +289,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		if recoverStepID == "" {
 			if len(executionContextPatch) > 0 {
 				mergeRunExecutionContextPatch(r, executionContextPatch)
-				workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+				workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
 				if err != nil {
 					return err
 				}
@@ -309,7 +309,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
 	mergeRunExecutionContextPatch(r, executionContextPatch)
-	workspace, err := o.syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
 	if err != nil {
 		return err
 	}

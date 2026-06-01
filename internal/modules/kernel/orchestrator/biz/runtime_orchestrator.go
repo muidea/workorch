@@ -213,7 +213,7 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		graph:       newGraphSubsystem(stepRepo, nil),
 		convergence: newConvergenceSubsystem(),
 		coverage:    newCoverageSubsystem(),
-		runState:    newRunStateSubsystem(runRepo),
+		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
 	}
 	orchestrator.graph.closures = orchestrator
 	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
@@ -310,12 +310,13 @@ func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
 
 func (o *RuntimeOrchestrator) runStateManager() *runStateSubsystem {
 	if o == nil {
-		return newRunStateSubsystem(nil)
+		return newRunStateSubsystem(nil, nil)
 	}
 	if o.runState == nil {
-		o.runState = newRunStateSubsystem(o.runs)
+		o.runState = newRunStateSubsystem(o.runs, o.workspaces)
 	} else {
 		o.runState.runs = o.runs
+		o.runState.workspaces = o.workspaces
 	}
 	return o.runState
 }

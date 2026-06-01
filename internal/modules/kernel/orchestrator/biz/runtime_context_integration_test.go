@@ -1174,7 +1174,7 @@ func TestRuntimeOrchestrator_ActiveRunAndWorkspaceWritesConcurrently(t *testing.
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := orch.syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, workspace)
+		_, err := orch.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, common.WorkspaceStateRunning, workspace)
 		done <- err
 	}()
 
@@ -1357,7 +1357,7 @@ func TestRuntimeOrchestrator_BlockedRunAndWorkspaceWritesConcurrently(t *testing
 
 			done := make(chan error, 1)
 			go func() {
-				_, err := orch.syncRunAndWorkspaceForActiveState(ctx, run, tt.workspaceState, workspace)
+				_, err := orch.runStateManager().syncRunAndWorkspaceForActiveState(ctx, run, tt.workspaceState, workspace)
 				done <- err
 			}()
 

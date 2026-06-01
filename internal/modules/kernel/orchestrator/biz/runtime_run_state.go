@@ -8,7 +8,6 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -310,92 +309,14 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 }
 
 func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
-	ws, err := o.syncWorkspaceForActiveRunState(ctx, run, state)
+	if run == nil {
+		return common.ErrInvalidArgument
+	}
+	ws, err := o.runStateManager().syncWorkspaceForActiveRunState(ctx, run, state, nil)
 	if err != nil {
 		return err
 	}
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
-}
-
-func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunWithWorkspace(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) error {
-	ws, err := o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, state, workspace)
-	if err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
-}
-
-func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunState(ctx context.Context, run *runModel.Run, state common.WorkspaceState) (*workspaceModel.Workspace, error) {
-	return o.syncWorkspaceForActiveRunStateWithWorkspace(ctx, run, state, nil)
-}
-
-func (o *RuntimeOrchestrator) syncWorkspaceForActiveRunStateWithWorkspace(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
-	if run == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	ws := workspace
-	if ws == nil {
-		var err error
-		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
-		if err != nil {
-			return nil, err
-		}
-	} else if ws.ID != run.WorkspaceID {
-		return nil, common.ErrConflict
-	}
-	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
-		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return nil, err
-		}
-		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
-			return nil, common.ErrConflict
-		}
-	}
-	ws.ActiveRunID = run.ID
-	ws.State = state
-	if err := o.workspaces.Update(ctx, ws); err != nil {
-		return nil, err
-	}
-	return ws, nil
-}
-
-func (o *RuntimeOrchestrator) syncRunAndWorkspaceForActiveState(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
-	if run == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	ws := workspace
-	if ws == nil {
-		var err error
-		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
-		if err != nil {
-			return nil, err
-		}
-	} else if ws.ID != run.WorkspaceID {
-		return nil, common.ErrConflict
-	}
-	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
-		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return nil, err
-		}
-		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
-			return nil, common.ErrConflict
-		}
-	}
-	ws.ActiveRunID = run.ID
-	ws.State = state
-	if err := runParallel(
-		func() error {
-			return o.runs.Update(ctx, run)
-		},
-		func() error {
-			return o.workspaces.Update(ctx, ws)
-		},
-	); err != nil {
-		return nil, err
-	}
-	return ws, nil
 }
 
 func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
