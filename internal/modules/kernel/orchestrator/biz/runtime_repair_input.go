@@ -488,7 +488,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"If choosing a rootCauseTarget that differs from the failed surface, patch that resource directly and declare relatedFailureTargets for the failed surface being unblocked.",
 		)
 	}
-	if context := o.convertedDecisionReadableResourceContext(ctx, run, failedStep); len(context) > 0 {
+	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
 		input["readableResourceRepairContext"] = context
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"The previous decision requested information that is already available as a readable workspace resource.",

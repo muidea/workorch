@@ -463,7 +463,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	if decisionSpec.Reason == "" {
 		return nil, false, nil
 	}
-	decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
+	decisionSpec.Context = enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, nil, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 	if !knownReadableWorkspaceResourceDecisionContext(decisionSpec.Context) {
 		return nil, false, nil
 	}

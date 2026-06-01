@@ -177,7 +177,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 
 	nextStepID, nextKind := nextStepSpec(output)
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
-		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
+		decisionSpec.Context = enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 		decisionOutput := decisionOutputFromSpec(decisionSpec)
 		convergenceContract := o.convergenceManager().build(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": decisionOutput})
 		if failedAssessmentDecisionShouldRepair(step, output, decisionSpec) ||

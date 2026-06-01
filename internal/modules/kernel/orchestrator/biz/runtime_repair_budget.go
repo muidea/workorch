@@ -457,7 +457,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx cont
 	if err != nil || step == nil || step.State != common.StepStateCompleted {
 		return false
 	}
-	context := o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, nil, ticket.Context, ticket.Question, ticket.Reason)
+	context := enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, nil, ticket.Context, ticket.Question, ticket.Reason)
 	return knownReadableWorkspaceResourceDecisionContext(context)
 }
 

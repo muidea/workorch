@@ -12,6 +12,7 @@ import (
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func (r *repairSubsystem) runtimeRepairPatchContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
@@ -1259,17 +1260,17 @@ func patchRepairLooksBinary(data []byte) bool {
 	return false
 }
 
-func (o *RuntimeOrchestrator) convertedDecisionReadableResourceContext(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
-	if o == nil || o.workspaces == nil || run == nil || failedStep == nil {
+func convertedDecisionReadableResourceContext(ctx context.Context, workspaces repository.WorkspaceRepository, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if workspaces == nil || run == nil || failedStep == nil {
 		return nil
 	}
 	decision := mapFromValue(failedStep.Output["convertedDecision"])
 	context := mapFromValue(decision["context"])
-	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	workspace, err := workspaces.Get(ctx, run.WorkspaceID)
 	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
 		return nil
 	}
-	context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, context, stringFromMap(decision, "question"), stringFromMap(decision, "reason"))
+	context = enrichDecisionContextWithReadableWorkspaceResources(ctx, workspaces, run, workspace, context, stringFromMap(decision, "question"), stringFromMap(decision, "reason"))
 	if !knownReadableWorkspaceResourceDecisionContext(context) {
 		return nil
 	}
@@ -1293,19 +1294,20 @@ func (o *RuntimeOrchestrator) convertedDecisionReadableResourceContext(ctx conte
 	return ret
 }
 
-func (o *RuntimeOrchestrator) enrichDecisionContextWithReadableWorkspaceResources(
+func enrichDecisionContextWithReadableWorkspaceResources(
 	ctx context.Context,
+	workspaces repository.WorkspaceRepository,
 	run *runModel.Run,
 	workspace *workspaceModel.Workspace,
 	context map[string]any,
 	decisionQuestion string,
 	decisionReason string,
 ) map[string]any {
-	if o == nil || run == nil {
+	if run == nil {
 		return context
 	}
-	if workspace == nil && o.workspaces != nil {
-		if loaded, err := o.workspaces.Get(ctx, run.WorkspaceID); err == nil {
+	if workspace == nil && workspaces != nil {
+		if loaded, err := workspaces.Get(ctx, run.WorkspaceID); err == nil {
 			workspace = loaded
 		}
 	}
