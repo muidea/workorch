@@ -118,6 +118,26 @@ func (s *runStateSubsystem) canTerminalRunReleaseWorkspace(ctx context.Context, 
 	return isTerminalRunState(activeRun.State), nil
 }
 
+func (s *runStateSubsystem) releaseWorkspaceForTerminalRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) (*workspaceModel.Workspace, bool, error) {
+	if s == nil || s.workspaces == nil || run == nil {
+		return nil, false, common.ErrInvalidArgument
+	}
+	ws, err := s.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	canRelease, err := s.canTerminalRunReleaseWorkspace(ctx, ws, run)
+	if err != nil || !canRelease {
+		return ws, false, err
+	}
+	ws.ActiveRunID = ""
+	ws.State = state
+	if err := s.workspaces.Update(ctx, ws); err != nil {
+		return nil, false, err
+	}
+	return ws, true, nil
+}
+
 func (s *runStateSubsystem) syncWorkspaceForActiveRunState(ctx context.Context, run *runModel.Run, state common.WorkspaceState, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
 	ws, err := s.workspaceForActiveRunState(ctx, run, workspace)
 	if err != nil {
@@ -160,6 +180,39 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForValidation(ctx context.Context
 	run.FailureReason = ""
 	ws.ActiveRunID = run.ID
 	ws.State = common.WorkspaceStateValidating
+	if err := runParallel(
+		func() error {
+			return s.runs.Update(ctx, run)
+		},
+		func() error {
+			return s.workspaces.Update(ctx, ws)
+		},
+	); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
+func (s *runStateSubsystem) syncRunAndWorkspaceForCompletion(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	if s == nil || s.runs == nil || s.workspaces == nil || run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ws := workspace
+	if ws == nil {
+		var err error
+		ws, err = s.workspaces.Get(ctx, run.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+	} else if ws.ID != run.WorkspaceID {
+		return nil, common.ErrConflict
+	}
+	run.State = common.RunStateCompleted
+	run.BlockingTicketID = ""
+	run.BlockingApprovalID = ""
+	run.FailureReason = ""
+	ws.ActiveRunID = ""
+	ws.State = common.WorkspaceStateCompleted
 	if err := runParallel(
 		func() error {
 			return s.runs.Update(ctx, run)

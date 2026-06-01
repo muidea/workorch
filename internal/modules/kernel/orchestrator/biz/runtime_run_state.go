@@ -224,8 +224,11 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-
-	return o.releaseWorkspaceForTerminalRun(ctx, r, workspaceStateForTerminalRun(state))
+	workspace, changed, err := o.runStateManager().releaseWorkspaceForTerminalRun(ctx, r, workspaceStateForTerminalRun(state))
+	if err != nil || !changed {
+		return err
+	}
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func mergeRunExecutionContextPatch(run *runModel.Run, patch map[string]any) {
@@ -247,29 +250,6 @@ func mergeRunExecutionContextPatch(run *runModel.Run, patch map[string]any) {
 	if dodID, _ := patch["doDId"].(string); strings.TrimSpace(dodID) != "" {
 		run.DoDID = common.DoDID(strings.TrimSpace(dodID))
 	}
-}
-
-func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
-	if run == nil {
-		return common.ErrInvalidArgument
-	}
-	ws, err := o.workspaces.Get(ctx, run.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	canRelease, err := o.runStateManager().canTerminalRunReleaseWorkspace(ctx, ws, run)
-	if err != nil {
-		return err
-	}
-	if !canRelease {
-		return nil
-	}
-	ws.ActiveRunID = ""
-	ws.State = state
-	if err := o.workspaces.Update(ctx, ws); err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
 }
 
 func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, workspaceID common.WorkspaceID) error {
