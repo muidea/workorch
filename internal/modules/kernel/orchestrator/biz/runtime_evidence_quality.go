@@ -210,7 +210,14 @@ func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEviden
 			continue
 		}
 		refs := evidenceRefsFromValue(scoped.item["evidenceRefs"])
-		if o.hasCurrentRunUsableEvidenceRef(ctx, run.ID, refs) {
+		hasCurrentRunEvidence := false
+		for _, ref := range refs {
+			if o.currentRunEvidenceRefUsable(ctx, run.ID, ref) {
+				hasCurrentRunEvidence = true
+				break
+			}
+		}
+		if hasCurrentRunEvidence {
 			continue
 		}
 		name := evidenceKindRequirementItemName(profileEvidenceKindRequirement{Scope: scoped.scope}, scoped.item)
@@ -267,18 +274,6 @@ func runHasDefinitionChangeImpact(run *runModel.Run) bool {
 		return false
 	}
 	return boolValue(mapFromValue(run.ExecutionContext["definitionChangeImpact"])["changed"])
-}
-
-func (o *RuntimeOrchestrator) hasCurrentRunUsableEvidenceRef(ctx context.Context, runID common.RunID, refs []string) bool {
-	if runID == "" {
-		return false
-	}
-	for _, ref := range refs {
-		if o.currentRunEvidenceRefUsable(ctx, runID, ref) {
-			return true
-		}
-	}
-	return false
 }
 
 func (o *RuntimeOrchestrator) currentRunEvidenceRefUsable(ctx context.Context, runID common.RunID, ref string) bool {
