@@ -394,6 +394,8 @@ type repairSubsystem struct {
 | P3.8 repair dispatch spec 测试拆分 | 已完成 | `runtime_repair_dispatch_test.go` 承载 provider retry 与 runtime repair executable spec 的 subsystem 级测试；完整 dispatch/block/fail 状态流转测试继续保留在 `runtime_orchestrator_test.go` |
 | P3.9 repair dispatch blocker 测试拆分 | 已完成 | `runtime_repair_dispatch_test.go` 补充 blocked recovery action delegation 的 subsystem 级测试；完整 blocker ticket 持久化与 run 状态测试继续保留在现有 orchestrator 测试中 |
 | P3.10 repair dispatch fail-run reason 测试补齐 | 已完成 | `runtime_repair_dispatch_test.go` 补充 fail-run reason 优先级测试，覆盖 execErr、output.error、output.reason 与默认文案 |
+| P3.11 runtime orchestrator 集成测试拆分 | 已完成 | `runtime_orchestrator_test.go` 保留公共 stub/helper，按 mainline、patch、repair input、context、repair flow、provider retry、memory、event、decision、graph follow-up、DoD validation、execution contract、strategy contract、evidence quality、rejected result、completion gate、result completion、resume gates、lifecycle、resume contract、misc contract 拆分为多个 `runtime_*_integration_test.go` 文件 |
+| P3.11 runtime orchestrator 集成测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试函数落点，不改变测试断言、fixture、helper 或被测行为 |
 
 本轮 HTTP 拆分只移动 route registration 和静态资源处理函数，不改变 API 路径、请求/响应结构、repository 调用、事件发布或 runtime 状态流转。
 events/governance HTTP 细分只移动 route registration 和 handler 函数归属，不改变 SSE replay/filter 规则、decision/approval 查询分页、resolve/approve/reject 行为或 run resume 调度。
@@ -436,6 +438,7 @@ runtime execution coordination 边界确认明确状态变更型执行协调不�
 repair 大文件职责拆分只按现有函数职责重新落文件，未新增业务判断，未改变 runtime repair 合同、recovery action、provider retry、patch apply、coverage gap、context material 或 governance blocker 行为。
 runtime orchestrator 协调层文件拆分只移动 lifecycle/resume/completion/state sync/dispatch/contract/spec helper 的文件归属，`RuntimeOrchestrator` 仍作为状态机写入协调边界。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
+runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
 ### 4.2 待继续收口
 
@@ -443,7 +446,7 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 |----|------|--------|
 | P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、repair dispatch action selection/spec/blocker/fail-run reason、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，但 `RuntimeOrchestrator` receiver 方法仍约 190 个，需继续核对 dispatch/lifecycle、workspace state sync、decision resume、validation completion 等是否可在保持状态机写入边界的前提下通过窄接口收口 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
-| P3 orchestrator 测试拆分 | 进行中 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 仍约 30,761 行，需继续按 dispatch、lifecycle、governance resume、validation/result、workspace sync 等集成面拆分 |
+| P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 已降至约 937 行，orchestrator 测试最大文件约 2,895 行 |
 
 ---
 
@@ -465,6 +468,6 @@ LLM context 测试拆分只迁移 compact input/output、artifact chunk omission
 |------|------|------|
 | RuntimeOrchestrator 方法数 | ~190 | ~60（核心 dispatch + lifecycle） |
 | 最大源文件行数 | ~2,830 (`runtime_graph.go`)；repair 最大文件约 1,754，HTTP 最大拆分文件约 2,074 | <3,000 |
-| 最大测试文件行数 | ~30,761 (`runtime_orchestrator_test.go`) | <8,000 |
+| 最大测试文件行数 | ~2,895 (`runtime_convergence_test.go`)；`runtime_orchestrator_test.go` 已降至约 937 | <8,000 |
 | 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |
 | 新增职责归属判断 | 已改善但未完全闭环（状态变更型协调仍集中在 `RuntimeOrchestrator`） | 明确（必须选择子系统；状态机写入保留协调层） |

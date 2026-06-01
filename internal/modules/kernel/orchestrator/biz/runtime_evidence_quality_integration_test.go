@@ -1,0 +1,1176 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+)
+
+func TestRuntimeStepEvidenceQualityUsesRuntimeOutputMetadata(t *testing.T) {
+	run := &runmodel.Run{ID: "run-output-quality", WorkspaceID: "ws-output-quality"}
+	step := &runmodel.Step{ID: "run-output-quality/block/verify", RunID: run.ID, Kind: shellcommon.StepKindCommand}
+	output := map[string]any{
+		"evidenceQuality": string(common.EvidenceQualityInconclusive),
+		"evidenceReason":  "runtime adapter reported inconclusive evidence",
+		"zeroWork":        true,
+		"evidenceTags":    []any{"validation", "zero_work"},
+	}
+	quality := runtimeStepEvidenceQuality(run, step, common.ValidationResultStatePassed, output)
+	if quality.Quality != common.EvidenceQualityInconclusive || !quality.ZeroWork || !strings.Contains(strings.Join(quality.Tags, ","), "zero_work") {
+		t.Fatalf("quality = %+v, want inconclusive zero-work metadata", quality)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{ValidationResults: validationRepo}}
+	runID := common.RunID("run-dod-evidence-quality")
+	stepID := common.StepID("run-dod-evidence-quality/block/verify")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(stepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-quality",
+		RunID:           runID,
+		StepID:          stepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		Summary:         "runtime step completed",
+		EvidenceQuality: common.EvidenceQualityInconclusive,
+		EvidenceReason:  "runtime adapter reported inconclusive evidence",
+		ZeroWork:        true,
+		EvidenceTags:    []string{"validation", "zero_work"},
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{
+			{
+				"item":         "429 passthrough is covered",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(stepID)},
+			},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "inconclusive") || !strings.Contains(err.Error(), string(stepID)) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want inconclusive evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if stringFromMap(diagnostics, "kind") != "dod_evidence_quality_gap" {
+		t.Fatalf("diagnostics = %+v, want dod_evidence_quality_gap", diagnostics)
+	}
+	missing := mapSliceFromValue(diagnostics["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["source"] != "evidenceQuality" || missing[0]["state"] != "failed" {
+		t.Fatalf("missingDoDItems = %+v, want failed evidence quality gap", missing)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsReadOnlySideEffectEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind")
+	readStepID := common.StepID("run-dod-evidence-kind/block/read-usage")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    readStepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed read step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(readStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-kind",
+		RunID:           runID,
+		StepID:          readStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+								"description":       "Read-only evidence cannot prove side effects.",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "side effect recorded",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "persistence_or_side_effect") ||
+		!strings.Contains(err.Error(), "file/read") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want read-only side-effect evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	missing := mapSliceFromValue(diagnostic.RuntimeFailureDiagnostics()["missingDoDItems"])
+	if len(missing) != 1 || missing[0]["source"] != "evidenceKind" {
+		t.Fatalf("missingDoDItems = %+v, want evidenceKind diagnostic", missing)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind-valid")
+	testStepID := common.StepID("run-dod-evidence-kind-valid/block/test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    testStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed shell step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(testStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-kind-valid",
+		RunID:           runID,
+		StepID:          testStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "side effect recorded",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(testStepID)},
+		}},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(testStepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityRejectsArtifactChunkEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-artifact-chunk-evidence")
+	chunkStepID := common.StepID(runID + "/artifact-continue-001")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    chunkStepID,
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"artifactContinuationContext": map[string]any{
+				"state": string(common.ArtifactContinuationStateChunking),
+			},
+		},
+		Output: map[string]any{
+			"stage": "llm_artifact_chunk",
+		},
+	}); err != nil {
+		t.Fatalf("seed chunk step: %v", err)
+	}
+
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{{
+			"item":         "assembled artifact is delivered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(chunkStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "artifact chunk evidence") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want artifact chunk evidence rejection", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceQualityAllowsArtifactApplyEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	patchRepo := memory.NewPatchRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			Patches: patchRepo,
+		},
+	}
+	runID := common.RunID("run-dod-artifact-apply-evidence")
+	stepID := common.StepID(runID + "/artifact-apply-001")
+	patchID := common.PatchID(string(stepID) + "/patch/1")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  artifactApplyStepKind,
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"artifactContinuationApply": map[string]any{
+				"targetRef": "deliverable/target.txt",
+				"state":     string(common.ArtifactContinuationStateApplied),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed apply step: %v", err)
+	}
+	if err := patchRepo.Create(ctx, &runmodel.Patch{
+		ID:        patchID,
+		RunID:     runID,
+		StepID:    stepID,
+		PatchType: "file_write",
+		TargetRef: "deliverable/target.txt",
+		State:     common.PatchStateApplied,
+	}); err != nil {
+		t.Fatalf("seed patch: %v", err)
+	}
+
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+		"items": []map[string]any{{
+			"item":         "assembled artifact is delivered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(patchID)},
+		}},
+	}); err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAcceptsGitWriteDeliverableEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable")
+	gitStepID := common.StepID("run-dod-git-deliverable/graph-001/003-git-commit")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    gitStepID,
+		RunID: runID,
+		Kind:  gitcommon.StepKindWrite,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"operation": gitcommon.OperationCommit},
+		Output: map[string]any{
+			"operation": gitcommon.OperationCommit,
+			"commit": map[string]any{
+				"hash":    "1111111111111111111111111111111111111111",
+				"subject": "implement goal",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "version_control_snapshot",
+							"scope":                 "deliverable",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{gitcommon.StepKindWrite},
+							"rejectedStepKinds":     []string{"file/read", shellcommon.StepKindCommand},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": map[string]any{
+			"items": []map[string]any{{
+				"id":           "version_control_snapshot",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(gitStepID)},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraph(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{gitcommon.StepKindWrite},
+					"acceptedOperations":           []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "commit-snapshot",
+				"kind": gitcommon.StepKindWrite,
+				"input": map[string]any{
+					"operation": gitcommon.OperationCommit,
+					"message":   "record workspace snapshot",
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want accepted profile-required write evidence graph", err)
+	}
+}
+
+func TestStateChangingRepairContractRejectsSupplementaryWriteOnlyGraphWhenPrimaryStateChangeRequired(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-mixed", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-mixed/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":        true,
+					"mustIncludePrimaryStateChangingNode": true,
+					"acceptedKinds":                       []string{"patch/apply", gitcommon.StepKindWrite},
+					"primaryAcceptedKinds":                []string{"patch/apply", "shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "init",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationInit,
+					},
+				},
+				{
+					"id":        "add",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"init"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+			},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "without patch/apply or declared auditable state-changing operation") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want primary state-changing contract rejection", err)
+	}
+}
+
+func TestStateChangingRepairContractAcceptsSupportingWriteEvidenceGraphAfterValidationContract(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-supporting", InitialStepKind: llmWorkspaceExecutionStepKind}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageVerification,
+		"repairObjective":             repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":   true,
+		"stateChangingOutputRequired": true,
+	}
+	applied := ApplyConvergenceContract(input, ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+				"acceptedKinds":                []string{gitcommon.StepKindWrite},
+				"acceptedOperations":           []string{gitcommon.OperationCommit},
+			},
+		},
+	})
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-supporting/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: applied,
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "init",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationInit,
+					},
+				},
+				{
+					"id":        "add",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"init"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+			},
+		},
+	}
+
+	if inputRequiresConcreteValidationEvidence(step.Input) {
+		t.Fatalf("applied input still requires concrete validation evidence: %+v", step.Input)
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want supporting write graph accepted", err)
+	}
+}
+
+func TestStateChangingRepairContractOverridesStaleConcreteValidationEvidenceFlags(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-stale-validation", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-stale-validation/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired":   true,
+			"evidenceRepairRequired":      true,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":          true,
+					"mustProduceConcreteValidationEvidence": true,
+					"acceptedKinds":                         []string{gitcommon.StepKindWrite},
+					"acceptedOperations":                    []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "add",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"add"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+				{
+					"id":        "verify",
+					"kind":      shellcommon.StepKindCommand,
+					"dependsOn": []string{"commit"},
+					"input": map[string]any{
+						"command": "true",
+					},
+				},
+			},
+		},
+	}
+
+	if inputRequiresConcreteValidationEvidence(step.Input) {
+		t.Fatalf("stale validation flags still override accepted state-changing evidence contract: %+v", step.Input)
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want accepted state-changing evidence graph despite stale validation flags", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable-operation")
+	addStepID := common.StepID("run-dod-git-deliverable-operation/graph-001/002-git-add")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     addStepID,
+		RunID:  runID,
+		Kind:   gitcommon.StepKindWrite,
+		State:  common.StepStateCompleted,
+		Input:  map[string]any{"operation": gitcommon.OperationAdd},
+		Output: map[string]any{"operation": gitcommon.OperationAdd},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": []map[string]any{{
+			"id":           "version_control_snapshot",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(addStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "requires evidence operation: commit") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want commit operation requirement", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsZeroWorkAcceptedEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-git-deliverable-zero-work")
+	commitStepID := common.StepID("run-dod-git-deliverable-zero-work/graph-001/002-git-commit")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    commitStepID,
+		RunID: runID,
+		Kind:  gitcommon.StepKindWrite,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"operation": gitcommon.OperationCommit},
+		Output: map[string]any{
+			"operation": gitcommon.OperationCommit,
+			"zeroWork":  true,
+			"summary":   "git commit completed with no staged changes",
+		},
+	}); err != nil {
+		t.Fatalf("seed git step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"deliverableCoverage": []map[string]any{{
+			"id":           "version_control_snapshot",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(commitStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "non-zero-work valid evidence") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want zero-work accepted evidence rejected", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-kind-mixed")
+	readStepID := common.StepID("run-dod-evidence-kind-mixed/block/read")
+	actionStepID := common.StepID("run-dod-evidence-kind-mixed/block/action")
+	for _, step := range []*runmodel.Step{
+		{ID: readStepID, RunID: runID, Kind: "file/read", State: common.StepStateCompleted},
+		{ID: actionStepID, RunID: runID, Kind: shellcommon.StepKindCommand, State: common.StepStateCompleted},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+		if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+			ID:              common.ValidationResultID(string(step.ID) + "/validation/runtime-step"),
+			WorkspaceID:     "ws-dod-evidence-kind-mixed",
+			RunID:           runID,
+			StepID:          step.ID,
+			ValidationKind:  "runtime_step",
+			State:           common.ValidationResultStatePassed,
+			EvidenceQuality: common.EvidenceQualityValid,
+		}); err != nil {
+			t.Fatalf("seed validation result for %s: %v", step.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "persistence_or_side_effect",
+								"scope":             "acceptanceDimension",
+								"acceptedStepKinds": []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+								"rejectedStepKinds": []string{"file/read", "file/list"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "persistence_or_side_effect",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID), string(actionStepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-evidence-kind-rejected-only")
+	readStepID := common.StepID("run-dod-evidence-kind-rejected-only/block/read")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    readStepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed read step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "runtime_entrypoint",
+								"scope":             "acceptanceDimension",
+								"rejectedStepKinds": []string{"file/read"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "runtime_entrypoint",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(readStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "file/read") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want rejected-only requirement failure", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementRejectsUntraceableDirectEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-direct-evidence")
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "runtime_entrypoint",
+							"scope":                 "acceptanceDimension",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "runtime_entrypoint",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-dod-direct-evidence/graph-001/999-unknown"},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "traceable direct evidenceRef") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want untraceable direct evidence rejection", err)
+	}
+}
+
+func TestDoDAssessmentClaimEvidenceRequirementRejectsGenericValidationEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-claim-generic")
+	stepID := common.StepID("run-dod-claim-generic/graph-001/001-go-test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"command": "go", "args": []string{"test", "-race", "./..."}},
+		Output: map[string]any{
+			"stdout": "ok  \texample.com/project\t(cached)",
+		},
+	}); err != nil {
+		t.Fatalf("seed shell step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "*",
+							"scope":                 "dodItem",
+							"requireDirectEvidence": true,
+							"requireClaimEvidence":  true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand, "patch/apply"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         "streaming response emits incremental chunks",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "coverageTargets") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want claim evidence alignment rejection", err)
+	}
+}
+
+func TestDoDAssessmentClaimEvidenceRequirementAcceptsAlignedCoverageTarget(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-claim-aligned")
+	stepID := common.StepID("run-dod-claim-aligned/graph-001/001-implement-stream")
+	claim := "streaming response emits incremental chunks"
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"targetRef":       "internal/proxy/proxy.go",
+			"coverageTargets": []string{claim},
+		},
+		Output: map[string]any{"status": "applied"},
+	}); err != nil {
+		t.Fatalf("seed patch step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "*",
+							"scope":                 "dodItem",
+							"requireDirectEvidence": true,
+							"requireClaimEvidence":  true,
+							"acceptedStepKinds":     []string{shellcommon.StepKindCommand, "patch/apply"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         claim,
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
+func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-evidence-normalize")
+	validStepID := common.StepID(runID + "/graph-001/003-verify-full-regression")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    validStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{"graphNodeId": "verify_full_regression"},
+	}); err != nil {
+		t.Fatalf("seed valid step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(runID + "/follow-up-graph-planning-001-verify_full_regression"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": "coverage correction needed",
+		},
+	}); err != nil {
+		t.Fatalf("seed follow-up assessment step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(validStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-normalize",
+		RunID:           runID,
+		StepID:          validStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed valid validation: %v", err)
+	}
+	oldFailedStepID := common.StepID("run-old/graph-025/002-verify-targeted-streaming-fallback-tests")
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(oldFailedStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-evidence-normalize",
+		RunID:           "run-old",
+		StepID:          oldFailedStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStateFailed,
+		EvidenceQuality: common.EvidenceQualityInvalid,
+		EvidenceReason:  "runtime step failed",
+	}); err != nil {
+		t.Fatalf("seed failed validation: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		DoDID:           "dod-dod-evidence-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "done",
+			"items": []map[string]any{{
+				"item":         "full regression",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(runID) + "/follow-up-graph-planning-001-verify_full_regression", string(runID) + "/verify_full_regression", string(oldFailedStepID)},
+			}},
+		},
+	}
+
+	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	if err != nil {
+		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
+	}
+	assessment := doDAssessmentFromOutput(normalized)
+	items, _ := doDAssessmentItemMaps(assessment["items"])
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want one normalized item", items)
+	}
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(validStepID)}) {
+		t.Fatalf("evidenceRefs = %+v, want canonical valid step only", got)
+	}
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+		t.Fatalf("validate normalized evidence: %v", err)
+	}
+}
+
+func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-evidence-superseded")
+	oldFailedStepID := common.StepID(runID + "/graph-006/002-rerun-targeted-goal-test")
+	latestSuccessStepID := common.StepID(runID + "/graph-007/002-rerun-targeted-goal-test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     oldFailedStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateFailed,
+		Output: map[string]any{"stderr": "old failure"},
+	}); err != nil {
+		t.Fatalf("seed old failed step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     latestSuccessStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "latest targeted validation passed"},
+	}); err != nil {
+		t.Fatalf("seed latest success step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		DoDID:           "dod-dod-evidence-superseded",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "done",
+			"items": []map[string]any{{
+				"item":         "targeted goal validation",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(oldFailedStepID)},
+			}},
+		},
+	}
+
+	normalized, err := orch.normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, run, output)
+	if err != nil {
+		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
+	}
+	assessment := doDAssessmentFromOutput(normalized)
+	items, _ := doDAssessmentItemMaps(assessment["items"])
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(latestSuccessStepID)}) {
+		t.Fatalf("evidenceRefs = %+v, want latest successful evidence", got)
+	}
+}
+
+func TestDefinitionChangeAssessmentRejectsHistoricalOnlyEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-definition-change-current-evidence")
+	currentValidationRef := string(runID) + "/graph-001/001-verify-latest/validation/runtime-step"
+	currentStepID := common.StepID(runID + "/graph-001/001-verify-latest")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     currentStepID,
+		RunID:  runID,
+		Kind:   shellcommon.StepKindCommand,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stdout": "latest definition verified"},
+	}); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(currentValidationRef),
+		WorkspaceID:     "ws-definition-change-current-evidence",
+		RunID:           runID,
+		StepID:          currentStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed current validation: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-definition-change-current-evidence",
+		DoDID:           "dod-definition-change-current-evidence",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"definitionChangeImpact": map[string]any{"changed": true},
+		},
+	}
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "done",
+		"items": []map[string]any{{
+			"item":         "new DoD item",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+		}},
+		"goalCoverage": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"item":         "new Goal requirement",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+			}},
+		},
+		"acceptanceDimensions": []map[string]any{{
+			"id":           "functional_behavior",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-old/graph-001/001-verify-old"},
+		}},
+		"deliverableCoverage": map[string]any{
+			"items": []map[string]any{{
+				"item":         "validation_report",
+				"state":        "satisfied",
+				"artifactRefs": []string{"run-old/artifact/result-summary"},
+			}},
+		},
+	}
+	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "requires current run evidenceRefs") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want current-run evidence rejection", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	missing := mapSliceFromValue(diagnostic.RuntimeFailureDiagnostics()["missingDoDItems"])
+	if len(missing) == 0 || missing[0]["source"] != "definitionChangeCurrentRunEvidence" {
+		t.Fatalf("runtime diagnostics = %+v, want definition-change evidence gap", diagnostic.RuntimeFailureDiagnostics())
+	}
+
+	assessment["items"] = []map[string]any{{
+		"item":         "new DoD item",
+		"state":        "satisfied",
+		"evidenceRefs": []string{"run-old/graph-001/001-verify-old", currentValidationRef},
+	}}
+	goalCoverage := mapFromValue(assessment["goalCoverage"])
+	goalCoverage["items"] = []map[string]any{{
+		"item":         "new Goal requirement",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	assessment["goalCoverage"] = goalCoverage
+	assessment["acceptanceDimensions"] = []map[string]any{{
+		"id":           "functional_behavior",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	deliverableCoverage := mapFromValue(assessment["deliverableCoverage"])
+	deliverableCoverage["items"] = []map[string]any{{
+		"item":         "validation_report",
+		"state":        "satisfied",
+		"evidenceRefs": []string{currentValidationRef},
+	}}
+	assessment["deliverableCoverage"] = deliverableCoverage
+	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality with current evidence: %v", err)
+	}
+}
