@@ -1268,6 +1268,7 @@ func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, work
 			ret.Result = &selected
 		}
 		ret.TaskProgress = runSnapshot.TaskProgress
+		ret.CoverageSummary = coverageSummaryFromRunSnapshot(runSnapshot)
 		ret.TaskDecompositions = runSnapshot.TaskDecompositions
 		ret.ExecutionSections = runSnapshot.ExecutionSections
 		ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
@@ -1296,6 +1297,23 @@ func workspaceModelFromView(item Workspace) *workspacemodel.Workspace {
 		DefaultSoulID:        common.SoulID(item.DefaultSoulID),
 		SoulBindings:         workspaceSoulBindingsFromView(item.SoulBindings),
 	}
+}
+
+func coverageSummaryFromRunSnapshot(snapshot RunSnapshot) map[string]any {
+	ctx := snapshot.CoverageWorkItemContext
+	if len(ctx) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"summary", "currentFocus", "omittedCount", "fullLedgerRef"} {
+		if value, ok := ctx[key]; ok && value != nil {
+			ret[key] = value
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func workspaceSoulBindingsFromView(input map[string]string) map[string]common.SoulID {
@@ -5624,6 +5642,7 @@ func contextExecutionContextSection(snapshot RunSnapshot) ContextSection {
 	delete(data, "goal")
 	delete(data, "dod")
 	delete(data, "compressedContext")
+	delete(data, "coverageWorkItems")
 	return ContextSection{
 		ID:       "execution_context",
 		Kind:     "execution_context",

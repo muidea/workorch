@@ -1481,6 +1481,18 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	input map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
+	if run == nil || run.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	if !boolValue(input["allowDispatchAfterRejectedResult"]) {
+		if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+			reason := strings.TrimSpace(summary)
+			if reason == "" {
+				reason = "run has rejected result"
+			}
+			return fmt.Errorf("%w: run has rejected result: %s", common.ErrConflict, reason)
+		}
+	}
 	kind = canonicalLLMWorkspaceStepKind(kind)
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {

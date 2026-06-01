@@ -25,12 +25,27 @@ import (
 )
 
 const maxPatchRepairSnapshotBytes = 120 * 1024
+const outputKeyContractViolationType = "contractViolationType"
 
 const (
 	repairObjectiveStateChangingOutput        = "produce_state_changing_output"
 	repairObjectiveConcreteValidationEvidence = "produce_concrete_validation_evidence"
 	repairObjectiveTransientExecutionRetry    = "retry_or_adjust_transient_execution"
 	repairObjectiveAcquireFailureEvidence     = "acquire_concrete_failure_evidence"
+)
+
+const (
+	contractViolationGraphNodeReturnedGraph         = "graph_node_returned_graph"
+	contractViolationRepairReturnedGraph            = "repair_returned_graph"
+	contractViolationRepairNoStateChangingOutput    = "repair_no_state_changing_output"
+	contractViolationRepairGraphWithoutPatchApply   = "repair_graph_without_patch_apply"
+	contractViolationExecutionNoStateChangingOutput = "execution_no_state_changing_output"
+	contractViolationGraphDependsOnLLMBeforePatch   = "graph_depends_on_llm_before_patch"
+	contractViolationPatchTargetRefRequired         = "patch_target_ref_required"
+	contractViolationPatchContentRequired           = "patch_content_required"
+	contractViolationPatchUnresolvedTemplate        = "patch_unresolved_template"
+	contractViolationPatchDispatchInvalid           = "patch_dispatch_invalid"
+	contractViolationFileEditConflict               = "file_edit_conflict"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -65,6 +80,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	}
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	attachContractViolationType(step.Output, execErr)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
@@ -143,6 +159,60 @@ func attachRuntimeFailureDiagnostics(step *runModel.Step, classification runtime
 		diagnostics["runtimeDiagnostics"] = compactLLMContextMap(runtimeDiagnostics, 1)
 	}
 	step.Output["lastFailureDiagnostics"] = diagnostics
+}
+
+func attachContractViolationType(output map[string]any, execErr error) {
+	if output == nil || strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) != "" {
+		return
+	}
+	if violationType := contractViolationTypeFromFailure(output, execErr); violationType != "" {
+		output[outputKeyContractViolationType] = violationType
+	}
+}
+
+func contractViolationTypeFromFailure(output map[string]any, execErr error) string {
+	text := strings.ToLower(strings.Join([]string{
+		errorString(execErr),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+		stringFromMap(output, "stage"),
+		stringFromMap(output, "ignoredExecutionGraphReason"),
+		stringFromMap(mapFromValue(output["runtimeDiagnostics"]), "kind"),
+		stringFromMap(mapFromValue(output["runtimeDiagnostics"]), "reason"),
+	}, "\n"))
+	switch {
+	case boolValue(output["executionStageContractViolation"]) ||
+		strings.Contains(text, "execution-stage llm graph node returned executiongraph"):
+		return contractViolationGraphNodeReturnedGraph
+	case strings.Contains(text, "state-changing llm repair step returned executiongraph without patch/apply"):
+		return contractViolationRepairGraphWithoutPatchApply
+	case strings.Contains(text, "state-changing llm repair step returned executiongraph"):
+		return contractViolationRepairReturnedGraph
+	case strings.Contains(text, "state-changing llm repair step returned no state-changing output"):
+		return contractViolationRepairNoStateChangingOutput
+	case strings.Contains(text, "state-changing execution-stage llm graph node returned no state-changing output"):
+		return contractViolationExecutionNoStateChangingOutput
+	case strings.Contains(text, "executiongraph patch/apply depends on llm/workspace_execution before patch"):
+		return contractViolationGraphDependsOnLLMBeforePatch
+	case strings.Contains(text, "targetref is required") ||
+		strings.Contains(text, "targetref must be set"):
+		return contractViolationPatchTargetRefRequired
+	case strings.Contains(text, "patch content contains unresolved runtime template") ||
+		strings.Contains(text, "patch diff contains unresolved runtime template") ||
+		strings.Contains(text, "patch text_replace contains unresolved runtime template"):
+		return contractViolationPatchUnresolvedTemplate
+	case strings.Contains(text, "patch content is required") ||
+		strings.Contains(text, "patch diff is required") ||
+		strings.Contains(text, "patch oldtext is required"):
+		return contractViolationPatchContentRequired
+	case strings.Contains(text, "patch_dispatch_invalid"):
+		return contractViolationPatchDispatchInvalid
+	case strings.Contains(text, "file_edit_conflict") ||
+		strings.Contains(text, "file/edit oldtext not found"):
+		return contractViolationFileEditConflict
+	default:
+		return ""
+	}
 }
 
 func shouldCloseCompletionGateFailureWithoutRepair(summary string, step *runModel.Step, output map[string]any) bool {
@@ -6239,6 +6309,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		!runtimeRepairFailureIsReadOnlyObservation(failedStep) {
 		return true
 	}
+	if contractViolationRequiresStateChangingRepair(stringFromMap(failedStep.Output, outputKeyContractViolationType)) {
+		return true
+	}
 	text := strings.ToLower(strings.Join([]string{
 		errorString(execErr),
 		stringFromMap(failedStep.Output, "error"),
@@ -6277,6 +6350,25 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 		}
 	}
 	return false
+}
+
+func contractViolationRequiresStateChangingRepair(violationType string) bool {
+	switch strings.TrimSpace(violationType) {
+	case contractViolationGraphNodeReturnedGraph,
+		contractViolationRepairReturnedGraph,
+		contractViolationRepairNoStateChangingOutput,
+		contractViolationRepairGraphWithoutPatchApply,
+		contractViolationExecutionNoStateChangingOutput,
+		contractViolationGraphDependsOnLLMBeforePatch,
+		contractViolationPatchTargetRefRequired,
+		contractViolationPatchContentRequired,
+		contractViolationPatchUnresolvedTemplate,
+		contractViolationPatchDispatchInvalid,
+		contractViolationFileEditConflict:
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeContextIntegrityGateFailure(step *runModel.Step) bool {

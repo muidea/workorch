@@ -24825,6 +24825,57 @@ func TestRuntimeOrchestrator_RejectedResultSupersededByRecoveryProgress(t *testi
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchStepRejectsActiveRejectedResult(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-rejected-result")
+	workspaceID := common.WorkspaceID("ws-dispatch-rejected-result")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		State:                common.WorkspaceStateRunning,
+		DeliverableDirectory: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning, InitialStepKind: llmWorkspaceExecutionStepKind}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:          common.ResultID(runID + "/result/rejected"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		State:       common.ResultStateRejected,
+		Summary:     "active rejected result",
+		SourceType:  resultcommon.SourceTypeDoDAssessment,
+		SourceRef:   string(runID + "/step-1"),
+	}); err != nil {
+		t.Fatalf("seed rejected result: %v", err)
+	}
+
+	err := orch.dispatchStepWithWorkspace(ctx, run, common.StepID(runID+"/step-2"), llmWorkspaceExecutionStepKind, map[string]any{}, nil)
+	if !errors.Is(err, common.ErrConflict) || !strings.Contains(fmt.Sprint(err), "active rejected result") {
+		t.Fatalf("dispatch err = %v, want rejected result conflict", err)
+	}
+	if steps, _ := stepRepo.ListByRun(ctx, runID); len(steps) != 0 {
+		t.Fatalf("steps = %+v, want no dispatch after rejected result", steps)
+	}
+}
+
 func TestRuntimeRepairInputForSatisfiedDoDCoverageMissingIsAssessmentOnly(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dod-coverage-assessment-repair")

@@ -1991,6 +1991,44 @@ func TestRunContextBundleReusesSnapshotTaskProgress(t *testing.T) {
 	}
 }
 
+func TestRunContextBundleFiltersCoverageWorkItemsFullLedger(t *testing.T) {
+	snapshot := RunSnapshot{
+		Workspace: Workspace{ID: "ws-context-coverage", State: string(common.WorkspaceStateRunning)},
+		Run: Run{
+			ID:          "run-context-coverage",
+			WorkspaceID: "ws-context-coverage",
+			State:       string(common.RunStateRunning),
+			ExecutionContext: map[string]any{
+				"coverageWorkItems": []map[string]any{{
+					"id":      "large-ledger-item",
+					"summary": strings.Repeat("x", 128),
+				}},
+				"coverageWorkItemContext": map[string]any{
+					"summary":       "coverage summary",
+					"currentFocus":  "focus item",
+					"omittedCount":  7,
+					"fullLedgerRef": "workorch://coverage/full",
+				},
+			},
+		},
+	}
+
+	bundle := mapRunContextBundle(snapshot)
+	for _, section := range bundle.Sections {
+		if section.ID != "execution_context" {
+			continue
+		}
+		if _, ok := section.Data["coverageWorkItems"]; ok {
+			t.Fatalf("execution context section includes coverageWorkItems full ledger: %+v", section.Data)
+		}
+		if ctx := readModelMapValue(section.Data["coverageWorkItemContext"]); ctx["summary"] != "coverage summary" {
+			t.Fatalf("coverageWorkItemContext = %+v, want summary retained", section.Data["coverageWorkItemContext"])
+		}
+		return
+	}
+	t.Fatalf("sections = %+v, want execution_context section", bundle.Sections)
+}
+
 func TestRunProjectionHelpersReuseSnapshotDerivedViews(t *testing.T) {
 	snapshot := RunSnapshot{
 		Workspace: Workspace{ID: "ws-derived-view-reuse"},
@@ -3984,6 +4022,51 @@ func TestReadWorkspaceSnapshotProjectsActiveRunAndCurrentStep(t *testing.T) {
 		snapshot.TaskProgress.CurrentStepKind != "llm/workspace_execution" ||
 		snapshot.TaskProgress.CurrentStepState != string(common.StepStateDispatched) {
 		t.Fatalf("taskProgress current step = %+v, want active run current step", snapshot.TaskProgress)
+	}
+}
+
+func TestReadWorkspaceSnapshotProjectsCoverageSummaryFromActiveRun(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports := session.Bootstrap.Exports()
+
+	workspaceID := common.WorkspaceID("ws-coverage-summary")
+	runID := common.RunID("run-coverage-summary")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "coverage summary workspace",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"coverageWorkItems": []map[string]any{{"id": "full-ledger-item"}},
+			"coverageWorkItemContext": map[string]any{
+				"summary":       "2 open coverage items",
+				"currentFocus":  "focus-A",
+				"omittedCount":  3,
+				"fullLedgerRef": "workorch://coverage/ledger",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithSession(ctx, session.Borrow(), string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithSession: %v", err)
+	}
+	if snapshot.CoverageSummary["summary"] != "2 open coverage items" ||
+		snapshot.CoverageSummary["currentFocus"] != "focus-A" ||
+		snapshot.CoverageSummary["fullLedgerRef"] != "workorch://coverage/ledger" {
+		t.Fatalf("coverageSummary = %+v, want active run coverage summary", snapshot.CoverageSummary)
+	}
+	if _, ok := snapshot.CoverageSummary["coverageWorkItems"]; ok {
+		t.Fatalf("coverageSummary = %+v, must not include full ledger", snapshot.CoverageSummary)
 	}
 }
 

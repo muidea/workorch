@@ -46,6 +46,37 @@ func TestRuntimeContextIntegrityGateFailureIsNotStateChangingRepair(t *testing.T
 	}
 }
 
+func TestStateChangingRepairRequiredUsesStructuredContractViolationType(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-contract/step-1"),
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationRepairNoStateChangingOutput,
+		},
+	}
+
+	if !stateChangingRepairRequired(nil, step, nil) {
+		t.Fatalf("stateChangingRepairRequired = false, want true from structured contractViolationType")
+	}
+}
+
+func TestAttachContractViolationTypeClassifiesPatchTargetRef(t *testing.T) {
+	output := map[string]any{"stage": "patch_dispatch_invalid"}
+	attachContractViolationType(output, common.ErrInvalidArgument)
+
+	if got := output[outputKeyContractViolationType]; got != contractViolationPatchDispatchInvalid {
+		t.Fatalf("contractViolationType = %v, want %s", got, contractViolationPatchDispatchInvalid)
+	}
+
+	output = map[string]any{"error": "invalid argument: executionGraph patch/apply targetRef is required"}
+	attachContractViolationType(output, nil)
+	if got := output[outputKeyContractViolationType]; got != contractViolationPatchTargetRefRequired {
+		t.Fatalf("contractViolationType = %v, want %s", got, contractViolationPatchTargetRefRequired)
+	}
+}
+
 func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-ctx-coverage/repair-001"),

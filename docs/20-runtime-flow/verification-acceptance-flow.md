@@ -115,6 +115,7 @@ verification / acceptance 默认优先消费当前有效 run lineage 的证据�
 
 graph follow-up 收口补充要求：
 
+- graph follow-up 扩展上限为 `maxGraphFollowUpExpansionAttempts=2`。
 - 当 follow-up 达到扩展上限后，应先进入 assessment-only，而不是继续自由扩图
 - assessment-only 模式下返回的 `executionGraph` 不应被执行；它应被视为 contract violation，并进入更窄的 assessment correction 或 DoD-gap driven repair
 - `dodAssessment.satisfied=false`、failed/skipped item 和 `missingDoDItems` 应成为后续 repair/replan 的主要输入
@@ -191,6 +192,7 @@ verification / acceptance 必须执行中立 claim-to-evidence alignment。
 | --- | --- | --- |
 | 缺 `state_change` 且无 concrete target evidence | `need_evidence` | bounded read / target discovery |
 | 缺 `state_change` 且已有 target evidence | `need_state_change` | state-changing artifact 或 blocker |
+| 缺 `state_change` 但 `evidenceRole=supplemental_evidence` | `need_validation` 或 `need_evidence` | 不得启动 primary state-changing patch；先补充 evidence ledger 或等待 primary target |
 | 已有 `state_change`，缺 `validation` | `need_validation` | bounded validation evidence |
 | evidence kinds 齐备，但 assessment / alignment 不完整 | `need_assessment` | 结构化 assessment |
 | 缺用户信息、权限、审批或外部依赖 | `need_governance` | decision / approval / dependency ticket |

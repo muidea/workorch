@@ -989,6 +989,25 @@ Strict repair 的 `Current Requested Action` 不得继续使用泛化 `plan_next
 
 - `../90-archive/completed/core-runtime-closure-history.md`
 
+### Contract Violation Type
+
+Runtime 输出合同、stage contract、capability contract 或 dispatch admission 失败时，必须优先写入结构化 `contractViolationType`。该字段用于后续 repair / replan / governance 路由，避免依赖自由文本错误消息。
+
+`contractViolationType` 只表达中立合同缺口，例如：
+
+- 当前 stage 返回了被禁止的输出类型。
+- state-changing 合同缺少可执行状态变更输出。
+- state-changing capability 输入缺少目标、内容、基础版本或存在未解析模板。
+- graph 依赖顺序违反当前 dispatch admission。
+- 目标编辑发生可机械识别的冲突。
+
+恢复链必须遵守：
+
+- `stateChangingRepairRequired`、repair objective 选择、failure classification 和 budget scope 应优先读取 `contractViolationType`。
+- 自由文本 error / reason / stderr 只能作为历史持久化 step、外部 provider 原始错误或旧数据的 fallback。
+- 新增合同违规类型时，必须同步定义：枚举常量、结构化写入位置、是否需要 state-changing repair、测试覆盖和本文档说明。
+- `contractViolationType` 不得包含业务领域、语言、测试框架、MCP 服务名、文件名规则或具体实现方案。
+
 ## Repair 合同
 
 Repair 不是重新探索。Repair 必须继承来源阶段的约束，并根据失败类型收紧。
