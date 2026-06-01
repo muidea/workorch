@@ -31,7 +31,6 @@ type repairRecoveryPolicy interface {
 }
 
 type repairDispatchSpecBuilder interface {
-	providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any
 	runtimeRepairFollowUpStepInput(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, attempt int, execErr error) map[string]any
 }
 
@@ -380,7 +379,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	}
 	switch o.recoveryActionForFailedStep(ctx, run, failedStep) {
 	case runtimeRecoveryActionProviderRetry:
-		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, o, true)
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, maxProviderRetryAttemptsForPolicy(o.policy), o, true)
 		if err != nil {
 			return err
 		}
@@ -397,7 +396,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	case runtimeRecoveryActionContextIntegrityBlocked:
 		return o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepair:
-		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionRuntimeRepair, o, true)
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttemptsForPolicy(o.policy), o, true)
 		if err != nil {
 			return err
 		}
@@ -518,6 +517,7 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 	failedStep *runModel.Step,
 	execErr error,
 	action runtimeRecoveryAction,
+	maxProviderRetryAttempts int,
 	builder repairDispatchSpecBuilder,
 	useEffectiveRepairScope bool,
 ) (stepDispatchSpec, bool, error) {
@@ -535,7 +535,7 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 		return stepDispatchSpec{
 			ID:    stepID,
 			Kind:  failedStep.Kind,
-			Input: builder.providerRetryStepInput(failedStep, attempt, execErr),
+			Input: providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts),
 		}, true, nil
 	case runtimeRecoveryActionRuntimeRepair:
 		attempts := r.runtimeRepairAttemptCountForStep(ctx, run.ID, failedStep)

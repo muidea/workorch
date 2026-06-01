@@ -39,10 +39,6 @@ func providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr erro
 	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttempts)
 }
 
-func (o *RuntimeOrchestrator) providerRetryStepInput(failedStep *runModel.Step, attempt int, execErr error) map[string]any {
-	return providerRetryStepInputWithMaxAttempts(failedStep, attempt, execErr, maxProviderRetryAttemptsForPolicy(o.policy))
-}
-
 func providerRetryStepInputWithMaxAttempts(failedStep *runModel.Step, attempt int, execErr error, maxAttempts int) map[string]any {
 	if maxAttempts <= 0 {
 		maxAttempts = maxProviderRetryAttempts

@@ -263,7 +263,7 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 	if err != nil {
 		return nil, true, err
 	}
-	input := o.providerRetryStepInput(step, attempt, nil)
+	input := providerRetryStepInputWithMaxAttempts(step, attempt, nil, maxProviderRetryAttemptsForPolicy(o.policy))
 	input["decisionAuthorizedRetry"] = true
 	return []stepDispatchSpec{{
 		ID:    stepID,
@@ -563,7 +563,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		action := o.recoveryActionForFailedStep(ctx, run, last)
 		switch action {
 		case runtimeRecoveryActionProviderRetry:
-			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, o, false)
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(o.policy), o, false)
 			if err != nil {
 				return nil, err
 			}
@@ -572,7 +572,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}
 			return []stepDispatchSpec{spec}, nil
 		case runtimeRecoveryActionRuntimeRepair:
-			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, o, false)
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(o.policy), o, false)
 			if err != nil {
 				return nil, err
 			}

@@ -488,7 +488,7 @@ func TestRuntimeOrchestrator_ProviderProtocolInvalidUsesProviderRetry(t *testing
 	if action != runtimeRecoveryActionProviderRetry {
 		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionProviderRetry)
 	}
-	input := orch.providerRetryStepInput(failed, 1, errors.New("stream error: stream ID 191; INTERNAL_ERROR; received from peer"))
+	input := providerRetryStepInputWithMaxAttempts(failed, 1, errors.New("stream error: stream ID 191; INTERNAL_ERROR; received from peer"), maxProviderRetryAttemptsForPolicy(orch.policy))
 	if input[stepInputKeyProviderRetryFollowUp] != true || input[stepInputKeyProviderRetryAttempt] != 1 {
 		t.Fatalf("provider retry input = %+v, want retry attempt 1", input)
 	}
@@ -653,7 +653,7 @@ func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
 	if got := repairInput["maxRuntimeRepairAttempts"]; got != 9 {
 		t.Fatalf("maxRuntimeRepairAttempts = %v, want configured 9", got)
 	}
-	input := orch.providerRetryStepInput(&runmodel.Step{
+	input := providerRetryStepInputWithMaxAttempts(&runmodel.Step{
 		ID:    "run-policy/step-1",
 		Kind:  llmWorkspaceExecutionStepKind,
 		State: common.StepStateFailed,
@@ -662,7 +662,7 @@ func TestRuntimePolicyConfiguresProviderRetryAttempts(t *testing.T) {
 			failureOutputKeyClass:     failureClassProviderTimeout,
 			failureOutputKeySignature: "provider-timeout",
 		},
-	}, 1, errors.New("context deadline exceeded"))
+	}, 1, errors.New("context deadline exceeded"), maxProviderRetryAttemptsForPolicy(orch.policy))
 	if got := input["maxProviderRetryAttempts"]; got != 7 {
 		t.Fatalf("maxProviderRetryAttempts = %v, want configured 7", got)
 	}

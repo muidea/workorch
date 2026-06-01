@@ -13,10 +13,6 @@ import (
 
 type repairDispatchSpecBuilderStub struct{}
 
-func (repairDispatchSpecBuilderStub) providerRetryStepInput(failedStep *runmodel.Step, attempt int, execErr error) map[string]any {
-	return providerRetryStepInput(failedStep, attempt, execErr)
-}
-
 func (repairDispatchSpecBuilderStub) runtimeRepairFollowUpStepInput(_ context.Context, _ *runmodel.Run, _ *runmodel.Step, attempt int, execErr error) map[string]any {
 	return map[string]any{
 		stepInputKeyRuntimeRepairFollowUp: true,
@@ -79,7 +75,7 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansProviderRetry(t *testing.T) {
 		},
 	}
 
-	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, &runmodel.Run{ID: runID}, failedStep, errors.New("timeout"), runtimeRecoveryActionProviderRetry, repairDispatchSpecBuilderStub{}, false)
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, &runmodel.Run{ID: runID}, failedStep, errors.New("timeout"), runtimeRecoveryActionProviderRetry, maxProviderRetryAttempts, repairDispatchSpecBuilderStub{}, false)
 
 	if err != nil || !ok {
 		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want provider retry spec", ok, err)
@@ -122,7 +118,7 @@ func TestRepairSubsystemRecoveryDispatchSpecPlansRuntimeRepairWithExactScope(t *
 		t.Fatalf("seed runtime repair: %v", err)
 	}
 
-	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, &runmodel.Run{ID: runID, InitialStepKind: llmcommon.StepKindWorkspaceExecution}, failedStep, errors.New("failed"), runtimeRecoveryActionRuntimeRepair, repairDispatchSpecBuilderStub{}, false)
+	spec, ok, err := newRepairSubsystem(stepRepo, nil).recoveryDispatchSpec(ctx, &runmodel.Run{ID: runID, InitialStepKind: llmcommon.StepKindWorkspaceExecution}, failedStep, errors.New("failed"), runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttempts, repairDispatchSpecBuilderStub{}, false)
 
 	if err != nil || !ok {
 		t.Fatalf("recoveryDispatchSpec ok/err = %v/%v, want runtime repair spec", ok, err)
