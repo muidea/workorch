@@ -8,6 +8,7 @@ import (
 	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const (
@@ -30,7 +31,13 @@ func (o *RuntimeOrchestrator) applyLLMOutputModeSelection(ctx context.Context, r
 		return
 	}
 	inheritOutputModeSignalsFromRunExecutionContext(input, run)
-	selection := o.selectOutputMode(ctx, run, input, failedStep, attempt)
+	policy := RuntimePolicy{}
+	continuations := repository.ArtifactContinuationRepository(nil)
+	if o != nil {
+		policy = o.policy
+		continuations = o.evidence.ArtifactContinuations
+	}
+	selection := selectOutputMode(ctx, policy.LLMOutput, continuations, run, input, failedStep, attempt)
 	if !selection.StateChangeNeeded {
 		clearIncrementalArtifactSelection(input)
 		return
@@ -89,8 +96,8 @@ func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *
 	}
 }
 
-func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) outputModeSelection {
-	policy := NormalizeLLMOutputRuntimePolicy(o.policy.LLMOutput)
+func selectOutputMode(ctx context.Context, runtimePolicy LLMOutputRuntimePolicy, continuations repository.ArtifactContinuationRepository, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) outputModeSelection {
+	policy := NormalizeLLMOutputRuntimePolicy(runtimePolicy)
 	selection := outputModeSelection{
 		Mode:              outputModeExecutionGraph,
 		Priority:          "P6",
@@ -103,7 +110,7 @@ func (o *RuntimeOrchestrator) selectOutputMode(ctx context.Context, run *runMode
 		selection.Reason = "state_changing_output_not_allowed"
 		return selection
 	}
-	if continuation := o.openArtifactContinuationContext(ctx, run); len(continuation) > 0 {
+	if continuation := openArtifactContinuationContext(ctx, continuations, run); len(continuation) > 0 {
 		selection.Mode = outputModeIncrementalArtifact
 		selection.Priority = "P1"
 		selection.Reason = "open_artifact_continuation"
@@ -201,11 +208,11 @@ func outputModeSignalKeys() []string {
 	}
 }
 
-func (o *RuntimeOrchestrator) openArtifactContinuationContext(ctx context.Context, run *runModel.Run) map[string]any {
-	if o == nil || o.evidence.ArtifactContinuations == nil || run == nil || run.ID == "" {
+func openArtifactContinuationContext(ctx context.Context, continuations repository.ArtifactContinuationRepository, run *runModel.Run) map[string]any {
+	if continuations == nil || run == nil || run.ID == "" {
 		return nil
 	}
-	items, err := o.evidence.ArtifactContinuations.ListOpenByRun(ctx, run.ID)
+	items, err := continuations.ListOpenByRun(ctx, run.ID)
 	if err != nil || len(items) == 0 || items[0] == nil {
 		return nil
 	}
