@@ -18,19 +18,15 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type graphCompletionClosureReader interface {
-	latestCompletionClosureEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) map[string]any
-}
-
 type graphSubsystem struct {
 	steps    repository.StepRepository
-	closures graphCompletionClosureReader
+	evidence RuntimeEvidenceRepositories
 }
 
-func newGraphSubsystem(steps repository.StepRepository, closures graphCompletionClosureReader) *graphSubsystem {
+func newGraphSubsystem(steps repository.StepRepository, evidence RuntimeEvidenceRepositories) *graphSubsystem {
 	return &graphSubsystem{
 		steps:    steps,
-		closures: closures,
+		evidence: evidence,
 	}
 }
 
@@ -1070,8 +1066,8 @@ func (g *graphSubsystem) graphExpansionLimitAssessmentFollowUpStepInputFromSteps
 		previous["graphFollowUpExpansionLimitExceeded"] = true
 		input["previousStepOutput"] = previous
 	}
-	if g != nil && g.closures != nil {
-		if closure := g.closures.latestCompletionClosureEvidence(ctx, run, step); len(closure) > 0 {
+	if g != nil {
+		if closure := latestCompletionClosureEvidence(ctx, g.steps, g.evidence, run, step); len(closure) > 0 {
 			input["latestClosureEvidence"] = closure
 			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
 				input["supersededFailureEvidence"] = superseded

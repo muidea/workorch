@@ -256,7 +256,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
 			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
 		}
-		if closure := o.latestCompletionClosureEvidence(ctx, run, failedStep); len(closure) > 0 {
+		if closure := latestCompletionClosureEvidence(ctx, o.steps, o.evidence, run, failedStep); len(closure) > 0 {
 			input["latestClosureEvidence"] = closure
 			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
 				input["supersededFailureEvidence"] = superseded
@@ -277,7 +277,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		if assessmentOnlyFailedCoverageRepair {
 			input["evidenceRepairSource"] = "failed_assessment_only_coverage_gap"
 		}
-		if closure := o.latestCompletionClosureEvidence(ctx, run, failedStep); len(closure) > 0 {
+		if closure := latestCompletionClosureEvidence(ctx, o.steps, o.evidence, run, failedStep); len(closure) > 0 {
 			input["latestClosureEvidence"] = closure
 			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
 				input["supersededFailureEvidence"] = superseded

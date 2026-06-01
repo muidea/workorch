@@ -720,21 +720,21 @@ func completionEvidenceStepUsable(step *runModel.Step) bool {
 	}
 }
 
-func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) map[string]any {
-	if o == nil || run == nil || o.steps == nil {
+func latestCompletionClosureEvidence(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, failedStep *runModel.Step) map[string]any {
+	if steps == nil || run == nil {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
-	if err != nil || len(steps) == 0 {
+	runSteps, err := steps.ListByRun(ctx, run.ID)
+	if err != nil || len(runSteps) == 0 {
 		return nil
 	}
-	steps = orderedRuntimeContextSteps(steps)
+	runSteps = orderedRuntimeContextSteps(runSteps)
 	type closureItem struct {
 		order int
 		item  map[string]any
 	}
 	latestByScope := map[string]closureItem{}
-	for idx, step := range steps {
+	for idx, step := range runSteps {
 		if step == nil || step.ID == "" || step.State != common.StepStateCompleted {
 			continue
 		}
@@ -745,7 +745,7 @@ func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Contex
 		latestByScope[scope] = closureItem{order: idx, item: completionClosureStepEvidenceItem(step, idx, scope)}
 	}
 	failures := make([]map[string]any, 0)
-	for idx, step := range steps {
+	for idx, step := range runSteps {
 		if step == nil || step.ID == "" || step.State != common.StepStateFailed {
 			continue
 		}
@@ -785,8 +785,8 @@ func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Contex
 	for idx := 0; idx < latestLimit; idx++ {
 		latestItems = append(latestItems, latest[idx].item)
 	}
-	patchItems := latestCompletionPatchEvidence(ctx, o.evidence, run, failedStep)
-	validationItems := latestCompletionValidationEvidence(ctx, o.steps, o.evidence, run, failedStep)
+	patchItems := latestCompletionPatchEvidence(ctx, evidence, run, failedStep)
+	validationItems := latestCompletionValidationEvidence(ctx, steps, evidence, run, failedStep)
 	failureLimit := min(len(failures), 8)
 	ret := map[string]any{}
 	if len(latestItems) > 0 {

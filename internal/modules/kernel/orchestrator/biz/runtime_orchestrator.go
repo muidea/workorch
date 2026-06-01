@@ -211,13 +211,12 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		policy:      policy,
 		llmContext:  newLLMContextSubsystem(),
 		repair:      newRepairSubsystem(stepRepo, workspaceRepo),
-		graph:       newGraphSubsystem(stepRepo, nil),
+		graph:       newGraphSubsystem(stepRepo, evidence),
 		convergence: newConvergenceSubsystem(),
 		coverage:    newCoverageSubsystem(),
 		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
 		decision:    newDecisionResumeSubsystem(ticketRepo, resolutionRepo),
 	}
-	orchestrator.graph.closures = orchestrator
 	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
 	orchestrator.eventer = newEventSubsystem(eventHub, orchestrator.checkpoints, orchestrator.llmContext)
 	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator.eventPublisher())
@@ -247,10 +246,10 @@ func (o *RuntimeOrchestrator) eventPublisher() *eventSubsystem {
 
 func (o *RuntimeOrchestrator) graphManager() *graphSubsystem {
 	if o == nil {
-		return newGraphSubsystem(nil, nil)
+		return newGraphSubsystem(nil, RuntimeEvidenceRepositories{})
 	}
 	if o.graph == nil {
-		o.graph = newGraphSubsystem(o.steps, o)
+		o.graph = newGraphSubsystem(o.steps, o.evidence)
 	}
 	return o.graph
 }

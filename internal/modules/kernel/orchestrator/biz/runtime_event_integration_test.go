@@ -875,7 +875,7 @@ func TestRuntimeOrchestrator_GraphBatchContinuationUsesCurrentBatchRoot(t *testi
 	if !ok || len(continuedGraph.Nodes) != 3 {
 		t.Fatalf("continued graph = %+v/%v, want root execution graph", continuedGraph, ok)
 	}
-	nextSpecs := newGraphSubsystem(nil, nil).readyGraphStepSpecsFromSteps(ctx, run, last, continuedGraph, steps)
+	nextSpecs := newGraphSubsystem(nil, RuntimeEvidenceRepositories{}).readyGraphStepSpecsFromSteps(ctx, run, last, continuedGraph, steps)
 	if len(nextSpecs) != 1 || nextSpecs[0].ID != graphScopedStepID(runID, 1, 3, "verify") {
 		t.Fatalf("next specs = %+v, want dependent verify node from current graph", nextSpecs)
 	}
