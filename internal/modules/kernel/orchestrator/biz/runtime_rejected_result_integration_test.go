@@ -475,7 +475,7 @@ func TestRuntimeOrchestrator_RejectedResultSupersededByRecoveryProgress(t *testi
 		t.Fatalf("seed repair step: %v", err)
 	}
 
-	if summary, ok := orch.rejectedRunResultSummary(ctx, runID); ok {
+	if summary, ok := orch.resultManager().rejectedRunResultSummary(ctx, runID); ok {
 		t.Fatalf("rejectedRunResultSummary = %q, true; want superseded stale result", summary)
 	}
 	result, err := resultRepo.Get(ctx, resultID)

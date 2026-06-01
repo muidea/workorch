@@ -372,7 +372,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	failedStep *runModel.Step,
 	execErr error,
 ) error {
-	if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+	if summary, ok := o.resultManager().rejectedRunResultSummary(ctx, run.ID); ok {
 		reason := strings.TrimSpace(summary)
 		if reason == "" {
 			reason = "run has rejected result"

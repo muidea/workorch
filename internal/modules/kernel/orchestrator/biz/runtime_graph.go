@@ -226,7 +226,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if err := o.coverageLedger().validateReadyForAcceptance(currentRun); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
-	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
+	if err := o.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)

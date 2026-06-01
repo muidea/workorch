@@ -42,7 +42,7 @@ func TestRecordRunSummaryMemoryIncludesDoDGateVersionTag(t *testing.T) {
 		},
 	}
 
-	if err := orch.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied"); err != nil {
+	if err := orch.resultManager().recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied"); err != nil {
 		t.Fatalf("recordRunSummaryMemoryFromValidatedDoDAssessment: %v", err)
 	}
 	item, err := memoryRepo.Get(ctx, common.MemoryID("run-memory-gate-tag/memory/run-summary"))

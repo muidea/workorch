@@ -89,13 +89,13 @@ func completionRunSummaryMemoryContent(
 	return strings.Join(parts, "\n\n")
 }
 
-func (o *RuntimeOrchestrator) recordSkillFeedbackMemory(
+func (r *resultSubsystem) recordSkillFeedbackMemory(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	output map[string]any,
 ) error {
-	if run == nil || step == nil || !requiresDoDAssessmentCompletionGate(run) {
+	if r == nil || run == nil || step == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return nil
 	}
 	assessment := doDAssessmentFromOutput(output)
@@ -107,17 +107,17 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemory(
 	if summary == "" {
 		return nil
 	}
-	return o.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
+	return r.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
 }
 
-func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessment(
+func (r *resultSubsystem) recordSkillFeedbackMemoryFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
 	summary string,
 ) error {
-	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+	if r == nil || run == nil || step == nil || r.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
 	}
 	skillIDs := stringSliceFromValue(run.ExecutionContext["skillIds"])
@@ -147,11 +147,11 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessmen
 		Confidence: 50,
 		Visibility: "workspace",
 	}
-	if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+	if err := r.evidence.MemoryItems.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		existing, getErr := o.evidence.MemoryItems.Get(ctx, item.ID)
+		existing, getErr := r.evidence.MemoryItems.Get(ctx, item.ID)
 		if getErr != nil {
 			return getErr
 		}
@@ -166,22 +166,22 @@ func (o *RuntimeOrchestrator) recordSkillFeedbackMemoryFromValidatedDoDAssessmen
 		existing.Importance = item.Importance
 		existing.Confidence = item.Confidence
 		existing.Visibility = item.Visibility
-		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
+		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
 
-func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
+func (r *resultSubsystem) recordRunSummaryMemoryFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
 	summary string,
 ) error {
-	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+	if r == nil || run == nil || step == nil || r.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
 	}
 	summary = strings.TrimSpace(summary)
@@ -196,18 +196,18 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		SourceType:  memorycommon.MemorySourceRun,
 		SourceRef:   string(step.ID),
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
-		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultManager().resultPatchDetails(ctx, run.ID), o.resultManager().resultEvidenceDetails(ctx, evidenceRefs), o.resultManager().resultWebSourceDetails(ctx, run.ID)),
+		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, r.resultPatchDetails(ctx, run.ID), r.resultEvidenceDetails(ctx, evidenceRefs), r.resultWebSourceDetails(ctx, run.ID)),
 		Summary:     summary,
 		Tags:        []string{"run_summary", "dod_assessment", "runtime_result", runSummaryDoDGateVersionTag},
 		Importance:  70,
 		Confidence:  70,
 		Visibility:  "workspace",
 	}
-	if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+	if err := r.evidence.MemoryItems.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		existing, getErr := o.evidence.MemoryItems.Get(ctx, item.ID)
+		existing, getErr := r.evidence.MemoryItems.Get(ctx, item.ID)
 		if getErr != nil {
 			return getErr
 		}
@@ -222,30 +222,30 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		existing.Importance = item.Importance
 		existing.Confidence = item.Confidence
 		existing.Visibility = item.Visibility
-		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
+		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }
 
-func (o *RuntimeOrchestrator) recordValidationCommandMemoriesFromValidatedDoDAssessment(
+func (r *resultSubsystem) recordValidationCommandMemoriesFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
 ) error {
-	if run == nil || step == nil || o.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+	if r == nil || run == nil || step == nil || r.evidence.MemoryItems == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
 	}
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
-	evidenceDetails := o.resultManager().resultEvidenceDetails(ctx, evidenceRefs)
+	evidenceDetails := r.resultEvidenceDetails(ctx, evidenceRefs)
 	commands := validationCommandMemoryEntries(evidenceDetails)
 	if len(commands) == 0 {
 		return nil
 	}
-	if err := o.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
+	if err := r.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
 		ID:          common.MemoryID(fmt.Sprintf("%s/memory/validation-commands", run.ID)),
 		WorkspaceID: run.WorkspaceID,
 		RunID:       run.ID,
@@ -265,7 +265,7 @@ func (o *RuntimeOrchestrator) recordValidationCommandMemoriesFromValidatedDoDAss
 	if len(lessons) == 0 {
 		return nil
 	}
-	return o.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
+	return r.upsertRunMemoryItem(ctx, &memorymodel.MemoryItem{
 		ID:          common.MemoryID(fmt.Sprintf("%s/memory/validation-failure-lessons", run.ID)),
 		WorkspaceID: run.WorkspaceID,
 		RunID:       run.ID,
@@ -405,15 +405,15 @@ func validationFailureLessonContent(run *runModel.Run, items []validationCommand
 	return strings.TrimSpace(builder.String())
 }
 
-func (o *RuntimeOrchestrator) upsertRunMemoryItem(ctx context.Context, item *memorymodel.MemoryItem) error {
-	if o == nil || o.evidence.MemoryItems == nil || item == nil {
+func (r *resultSubsystem) upsertRunMemoryItem(ctx context.Context, item *memorymodel.MemoryItem) error {
+	if r == nil || r.evidence.MemoryItems == nil || item == nil {
 		return nil
 	}
-	if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
+	if err := r.evidence.MemoryItems.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		existing, getErr := o.evidence.MemoryItems.Get(ctx, item.ID)
+		existing, getErr := r.evidence.MemoryItems.Get(ctx, item.ID)
 		if getErr != nil {
 			return getErr
 		}
@@ -428,10 +428,10 @@ func (o *RuntimeOrchestrator) upsertRunMemoryItem(ctx context.Context, item *mem
 		existing.Importance = item.Importance
 		existing.Confidence = item.Confidence
 		existing.Visibility = item.Visibility
-		if err := o.evidence.MemoryItems.Update(ctx, existing); err != nil {
+		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
 	}
-	return o.eventPublisher().publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
 }

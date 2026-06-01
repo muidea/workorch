@@ -239,13 +239,13 @@ func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, validated, summary, nil); err != nil {
+	if err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, validated, summary, nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
-	if err := orch.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
+	if err := orch.resultManager().recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
 		t.Fatalf("record skill feedback from validated assessment: %v", err)
 	}
-	if err := orch.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
+	if err := orch.resultManager().recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, validated, summary); err != nil {
 		t.Fatalf("record run summary memory from validated assessment: %v", err)
 	}
 	results, err := orch.evidence.Results.ListByRun(ctx, runID)
@@ -316,7 +316,7 @@ func TestRuntimeOrchestrator_RecordsValidationCommandMemoriesFromDoDAssessment(t
 			MemoryItems: memoryRepo,
 		},
 	}
-	if err := orch.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment); err != nil {
+	if err := orch.resultManager().recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment); err != nil {
 		t.Fatalf("recordValidationCommandMemoriesFromValidatedDoDAssessment: %v", err)
 	}
 	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
@@ -414,7 +414,7 @@ func TestRuntimeOrchestrator_ResultSummaryIncludesRuntimeEvidenceOutput(t *testi
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "目标已完成，成功查询到服务配置信息（CPU、内存、磁盘、Docker版本）。", nil); err != nil {
+	if err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "目标已完成，成功查询到服务配置信息（CPU、内存、磁盘、Docker版本）。", nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
 	artifacts, err := orch.evidence.Artifacts.ListByRun(ctx, runID)
@@ -503,7 +503,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludePatchDiff(t *testing.T) {
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "本次仅执行 assessment-only 评估，无新增可执行操作。", nil); err != nil {
+	if err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "本次仅执行 assessment-only 评估，无新增可执行操作。", nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)
@@ -648,7 +648,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source", nil); err != nil {
+	if err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source", nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)
@@ -696,7 +696,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeWebSourceIndex(t *testing.T) 
 
 	memoryRepo := memory.NewMemoryItemRepository()
 	orch.evidence.MemoryItems = memoryRepo
-	if err := orch.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source"); err != nil {
+	if err := orch.resultManager().recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with web source"); err != nil {
 		t.Fatalf("record run summary memory: %v", err)
 	}
 	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
@@ -777,7 +777,7 @@ func TestRuntimeOrchestrator_ResultArtifactsIncludeGitOperationIndex(t *testing.
 		},
 	}
 
-	if err := orch.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with git evidence", nil); err != nil {
+	if err := orch.resultManager().recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied with git evidence", nil); err != nil {
 		t.Fatalf("record result from validated assessment: %v", err)
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)
@@ -874,7 +874,7 @@ func TestRuntimeOrchestrator_CompletionEvidenceWritesResultAndSkillFeedbackConcu
 
 	done := make(chan error, 1)
 	go func() {
-		done <- orch.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied", workspace)
+		done <- orch.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, "DoD satisfied", workspace)
 	}()
 
 	seen := map[string]bool{}
@@ -1090,7 +1090,7 @@ func TestRuntimeOrchestrator_ResultArtifactsWriteConcurrentlyBeforeAcceptedResul
 
 	done := make(chan error, 1)
 	go func() {
-		done <- orch.recordRunResultFromDoDAssessment(ctx, run, step, output, workspace)
+		done <- orch.resultManager().recordRunResultFromDoDAssessment(ctx, run, step, output, workspace)
 	}()
 
 	seen := map[string]bool{}

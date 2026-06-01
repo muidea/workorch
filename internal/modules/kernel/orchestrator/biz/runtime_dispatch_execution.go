@@ -34,7 +34,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return common.ErrInvalidArgument
 	}
 	if !boolValue(input["allowDispatchAfterRejectedResult"]) {
-		if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+		if summary, ok := o.resultManager().rejectedRunResultSummary(ctx, run.ID); ok {
 			reason := strings.TrimSpace(summary)
 			if reason == "" {
 				reason = "run has rejected result"
@@ -319,7 +319,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.coverageLedger().validateReadyForAcceptance(run); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
+	if err := o.resultManager().recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)

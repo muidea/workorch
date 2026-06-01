@@ -875,7 +875,7 @@ func TestRuntimeOrchestrator_ResultManifestReusesProvidedWorkspace(t *testing.T)
 		},
 	}
 
-	err := orch.recordRunResultFromDoDAssessment(ctx, run, step, map[string]any{
+	err := orch.resultManager().recordRunResultFromDoDAssessment(ctx, run, step, map[string]any{
 		stepOutputKeyDoDAssessment: map[string]any{
 			"satisfied": true,
 			"summary":   "accepted with reusable workspace",
@@ -937,7 +937,7 @@ func TestRuntimeOrchestrator_ResultManifestDoesNotListWorkspaceFilesWhenNoPatch(
 	}
 	orch := &RuntimeOrchestrator{}
 
-	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
+	manifest := orch.resultManager().workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted with context manifest",
 	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: workingDir}, nil)
 
@@ -982,7 +982,7 @@ func TestRuntimeOrchestrator_ResultManifestListsOnlyPatchTargets(t *testing.T) {
 	}
 	orch := &RuntimeOrchestrator{}
 
-	manifest := orch.workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
+	manifest := orch.resultManager().workspaceDeliverableManifestContent(ctx, run, step, map[string]any{
 		"summary": "accepted after patch",
 	}, []string{string(step.ID)}, &workspacemodel.Workspace{ID: workspaceID, DeliverableDirectory: workingDir}, []resultPatchDetail{
 		{TargetRef: "from-disk.md", PatchType: "file_write", Content: "fresh disk content", State: common.PatchStateApplied},

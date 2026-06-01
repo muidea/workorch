@@ -298,6 +298,10 @@ func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
 	}
 	if o.results == nil {
 		o.results = newResultSubsystem(o.evidence, o.steps, o.eventPublisher())
+	} else {
+		o.results.evidence = o.evidence
+		o.results.steps = o.steps
+		o.results.events = o.eventPublisher()
 	}
 	return o.results
 }

@@ -13,14 +13,14 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
+func (r *resultSubsystem) recordRunResultFromDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	output map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
-	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) {
+	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) {
 		return nil
 	}
 	assessment := doDAssessmentFromOutput(output)
@@ -32,10 +32,10 @@ func (o *RuntimeOrchestrator) recordRunResultFromDoDAssessment(
 	if summary == "" {
 		return nil
 	}
-	return o.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
+	return r.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
 }
 
-func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
+func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -43,7 +43,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	summary string,
 	workspace *workspaceModel.Workspace,
 ) error {
-	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
 	}
 	summary = strings.TrimSpace(summary)
@@ -52,7 +52,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	}
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
-	results := o.resultManager()
+	results := r
 	patchDetails := results.resultPatchDetails(ctx, run.ID)
 	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
 	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
@@ -61,7 +61,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails, gitOperationDetails)
 	manifestCh := make(chan string, 1)
 	go func() {
-		manifestCh <- o.workspaceDeliverableManifestContent(ctx, run, step, assessment, evidenceRefs, workspace, patchDetails)
+		manifestCh <- r.workspaceDeliverableManifestContent(ctx, run, step, assessment, evidenceRefs, workspace, patchDetails)
 	}()
 	type artifactWriteResult struct {
 		refs []common.ArtifactID
@@ -159,11 +159,11 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := o.evidence.Results.Create(ctx, item); err != nil {
+	if err := r.evidence.Results.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		existing, getErr := o.evidence.Results.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Results.Get(ctx, item.ID)
 		if getErr != nil {
 			return getErr
 		}
@@ -181,22 +181,22 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 		existing.DoDAssessment = item.DoDAssessment
 		existing.SummaryDetail = item.SummaryDetail
 		existing.UpdatedAt = now
-		if err := o.evidence.Results.Update(ctx, existing); err != nil {
+		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishResultAccepted(ctx, existing)
+		return r.publishResultAccepted(ctx, existing)
 	}
-	return o.eventPublisher().publishResultAccepted(ctx, item)
+	return r.publishResultAccepted(ctx, item)
 }
 
-func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
+func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	assessment map[string]any,
 	summary string,
 ) error {
-	if run == nil || step == nil || o.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
+	if r == nil || run == nil || step == nil || r.evidence.Results == nil || !requiresDoDAssessmentCompletionGate(run) || assessment == nil {
 		return nil
 	}
 	summary = strings.TrimSpace(summary)
@@ -225,11 +225,11 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := o.evidence.Results.Create(ctx, item); err != nil {
+	if err := r.evidence.Results.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return err
 		}
-		existing, getErr := o.evidence.Results.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Results.Get(ctx, item.ID)
 		if getErr != nil {
 			return getErr
 		}
@@ -242,12 +242,12 @@ func (o *RuntimeOrchestrator) recordRunResultFromRejectedDoDAssessment(
 		existing.DoDAssessment = item.DoDAssessment
 		existing.SummaryDetail = item.SummaryDetail
 		existing.UpdatedAt = now
-		if err := o.evidence.Results.Update(ctx, existing); err != nil {
+		if err := r.evidence.Results.Update(ctx, existing); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishResultAccepted(ctx, existing)
+		return r.publishResultAccepted(ctx, existing)
 	}
-	return o.eventPublisher().publishResultAccepted(ctx, item)
+	return r.publishResultAccepted(ctx, item)
 }
 
 func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []string) (string, []string) {
@@ -288,11 +288,11 @@ func rejectedResultSourceAndEvidenceRefs(step *runModel.Step, evidenceRefs []str
 	return sourceRef, evidenceRefs
 }
 
-func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runID common.RunID) (string, bool) {
-	if o == nil || o.evidence.Results == nil || runID == "" {
+func (r *resultSubsystem) rejectedRunResultSummary(ctx context.Context, runID common.RunID) (string, bool) {
+	if r == nil || r.evidence.Results == nil || runID == "" {
 		return "", false
 	}
-	results, err := o.evidence.Results.ListByRun(ctx, runID)
+	results, err := r.evidence.Results.ListByRun(ctx, runID)
 	if err != nil {
 		return "", false
 	}
@@ -300,8 +300,8 @@ func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runI
 		if result == nil || result.State != common.ResultStateRejected {
 			continue
 		}
-		if o.rejectedResultSupersededByRecovery(ctx, runID, result) {
-			_ = o.supersedeRejectedResult(ctx, result)
+		if r.rejectedResultSupersededByRecovery(ctx, runID, result) {
+			_ = r.supersedeRejectedResult(ctx, result)
 			continue
 		}
 		if result.State == common.ResultStateRejected {
@@ -311,15 +311,15 @@ func (o *RuntimeOrchestrator) rejectedRunResultSummary(ctx context.Context, runI
 	return "", false
 }
 
-func (o *RuntimeOrchestrator) rejectedResultSupersededByRecovery(ctx context.Context, runID common.RunID, result *resultmodel.Result) bool {
-	if o == nil || o.steps == nil || result == nil || runID == "" {
+func (r *resultSubsystem) rejectedResultSupersededByRecovery(ctx context.Context, runID common.RunID, result *resultmodel.Result) bool {
+	if r == nil || r.steps == nil || result == nil || runID == "" {
 		return false
 	}
 	sourceRef := common.StepID(strings.TrimSpace(result.SourceRef))
 	if sourceRef == "" {
 		return false
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRun(ctx, runID)
 	if err != nil {
 		return false
 	}
@@ -359,17 +359,17 @@ func recoveryStepSupersedesRejectedSource(step *runModel.Step, sourceRef common.
 	return false
 }
 
-func (o *RuntimeOrchestrator) supersedeRejectedResult(ctx context.Context, result *resultmodel.Result) error {
-	if o == nil || o.evidence.Results == nil || result == nil || result.State != common.ResultStateRejected {
+func (r *resultSubsystem) supersedeRejectedResult(ctx context.Context, result *resultmodel.Result) error {
+	if r == nil || r.evidence.Results == nil || result == nil || result.State != common.ResultStateRejected {
 		return nil
 	}
 	result.State = common.ResultStateSuperseded
 	result.Title = "Superseded Rejected Result"
 	result.UpdatedAt = runtimeEvidenceTimestamp()
-	return o.evidence.Results.Update(ctx, result)
+	return r.evidence.Results.Update(ctx, result)
 }
 
-func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment(
+func (r *resultSubsystem) recordCompletionEvidenceFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -379,16 +379,16 @@ func (o *RuntimeOrchestrator) recordCompletionEvidenceFromValidatedDoDAssessment
 ) error {
 	return runParallel(
 		func() error {
-			return o.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
+			return r.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
 		},
 		func() error {
-			return o.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
+			return r.recordSkillFeedbackMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
 		},
 		func() error {
-			return o.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
+			return r.recordRunSummaryMemoryFromValidatedDoDAssessment(ctx, run, step, assessment, summary)
 		},
 		func() error {
-			return o.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment)
+			return r.recordValidationCommandMemoriesFromValidatedDoDAssessment(ctx, run, step, assessment)
 		},
 	)
 }

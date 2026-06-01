@@ -7,6 +7,7 @@ import (
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -16,6 +17,8 @@ import (
 
 type resultEventPublisher interface {
 	publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error
+	publishResultAccepted(ctx context.Context, item *resultmodel.Result) error
+	publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error
 }
 
 type resultSubsystem struct {
@@ -37,6 +40,20 @@ func (r *resultSubsystem) publishArtifactCreated(ctx context.Context, item *resu
 		return nil
 	}
 	return r.events.publishArtifactCreated(ctx, item)
+}
+
+func (r *resultSubsystem) publishResultAccepted(ctx context.Context, item *resultmodel.Result) error {
+	if r == nil || r.events == nil {
+		return nil
+	}
+	return r.events.publishResultAccepted(ctx, item)
+}
+
+func (r *resultSubsystem) publishMemoryChanged(ctx context.Context, topic string, item *memorymodel.MemoryItem) error {
+	if r == nil || r.events == nil {
+		return nil
+	}
+	return r.events.publishMemoryChanged(ctx, topic, item)
 }
 
 func (r *resultSubsystem) recordResultSummaryArtifact(

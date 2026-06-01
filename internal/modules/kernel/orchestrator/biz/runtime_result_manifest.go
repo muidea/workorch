@@ -14,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
+func (r *resultSubsystem) workspaceDeliverableManifestContent(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -23,6 +23,9 @@ func (o *RuntimeOrchestrator) workspaceDeliverableManifestContent(
 	workspace *workspaceModel.Workspace,
 	patchDetails []resultPatchDetail,
 ) string {
+	if r == nil || run == nil || step == nil {
+		return ""
+	}
 	var builder strings.Builder
 	builder.WriteString("# Workspace Deliverable Manifest\n\n")
 	builder.WriteString(fmt.Sprintf("- Workspace: `%s`\n", run.WorkspaceID))

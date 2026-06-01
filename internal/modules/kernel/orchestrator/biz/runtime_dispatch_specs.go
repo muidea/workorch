@@ -37,7 +37,7 @@ func (o *RuntimeOrchestrator) recordRejectedCompletionDoDAssessment(ctx context.
 		assessment = rejected
 	}
 	summary, _ := assessment["summary"].(string)
-	return o.recordRunResultFromRejectedDoDAssessment(ctx, run, step, assessment, summary)
+	return o.resultManager().recordRunResultFromRejectedDoDAssessment(ctx, run, step, assessment, summary)
 }
 
 func syntheticRejectedDoDAssessment(run *runModel.Run, step *runModel.Step, output map[string]any) map[string]any {
@@ -115,7 +115,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if summary, ok := o.rejectedRunResultSummary(ctx, run.ID); ok {
+	if summary, ok := o.resultManager().rejectedRunResultSummary(ctx, run.ID); ok {
 		reason := strings.TrimSpace(summary)
 		if reason == "" {
 			reason = "run has rejected result"
