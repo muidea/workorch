@@ -11,9 +11,35 @@ import (
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
+type resultEventPublisher interface {
+	publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error
+}
+
+type resultSubsystem struct {
+	evidence RuntimeEvidenceRepositories
+	steps    repository.StepRepository
+	events   resultEventPublisher
+}
+
+func newResultSubsystem(evidence RuntimeEvidenceRepositories, steps repository.StepRepository, events resultEventPublisher) *resultSubsystem {
+	return &resultSubsystem{
+		evidence: evidence,
+		steps:    steps,
+		events:   events,
+	}
+}
+
+func (r *resultSubsystem) publishArtifactCreated(ctx context.Context, item *resultmodel.Artifact) error {
+	if r == nil || r.events == nil {
+		return nil
+	}
+	return r.events.publishArtifactCreated(ctx, item)
+}
+
+func (r *resultSubsystem) recordResultSummaryArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -23,7 +49,7 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 	artifactRefs []common.ArtifactID,
 	now string,
 ) ([]common.ArtifactID, error) {
-	if run == nil || step == nil || o.evidence.Artifacts == nil {
+	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil {
 		return nil, nil
 	}
 	item := &resultmodel.Artifact{
@@ -35,7 +61,7 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		ArtifactType: resultcommon.ArtifactTypeText,
 		Category:     resultcommon.ArtifactCategoryFinalSummary,
 		Name:         "Accepted Result Summary",
-		Summary:      resultSummaryArtifactContent(run, summary, assessment, evidenceRefs, artifactRefs, o.resultEvidenceDetails(ctx, evidenceRefs)),
+		Summary:      resultSummaryArtifactContent(run, summary, assessment, evidenceRefs, artifactRefs, r.resultEvidenceDetails(ctx, evidenceRefs)),
 		URI:          fmt.Sprintf("workorch://runs/%s/results/dod-assessment/summary", run.ID),
 		ContentType:  "text/markdown; charset=utf-8",
 		State:        common.ArtifactStateAvailable,
@@ -48,11 +74,11 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+	if err := r.evidence.Artifacts.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return nil, err
 		}
-		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Artifacts.Get(ctx, item.ID)
 		if getErr != nil {
 			return nil, getErr
 		}
@@ -70,15 +96,15 @@ func (o *RuntimeOrchestrator) recordResultSummaryArtifact(
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.Metadata = item.Metadata
 		existing.UpdatedAt = now
-		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return nil, err
 		}
-		return []common.ArtifactID{existing.ID}, o.publishArtifactCreated(ctx, existing)
+		return []common.ArtifactID{existing.ID}, r.publishArtifactCreated(ctx, existing)
 	}
-	return []common.ArtifactID{item.ID}, o.publishArtifactCreated(ctx, item)
+	return []common.ArtifactID{item.ID}, r.publishArtifactCreated(ctx, item)
 }
 
-func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
+func (r *resultSubsystem) recordWorkspaceDeliverableManifestArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -86,7 +112,7 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 	evidenceRefs []string,
 	now string,
 ) (common.ArtifactID, error) {
-	if run == nil || step == nil || o.evidence.Artifacts == nil {
+	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil {
 		return "", nil
 	}
 	item := &resultmodel.Artifact{
@@ -112,11 +138,11 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+	if err := r.evidence.Artifacts.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return "", err
 		}
-		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Artifacts.Get(ctx, item.ID)
 		if getErr != nil {
 			return "", getErr
 		}
@@ -134,22 +160,22 @@ func (o *RuntimeOrchestrator) recordWorkspaceDeliverableManifestArtifact(
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.Metadata = item.Metadata
 		existing.UpdatedAt = now
-		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, o.publishArtifactCreated(ctx, existing)
+		return existing.ID, r.publishArtifactCreated(ctx, existing)
 	}
-	return item.ID, o.publishArtifactCreated(ctx, item)
+	return item.ID, r.publishArtifactCreated(ctx, item)
 }
 
-func (o *RuntimeOrchestrator) recordPatchDiffArtifact(
+func (r *resultSubsystem) recordPatchDiffArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	patchDetails []resultPatchDetail,
 	now string,
 ) ([]common.ArtifactID, error) {
-	if run == nil || step == nil || o.evidence.Artifacts == nil || !hasPatchDeliverableContent(patchDetails) {
+	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil || !hasPatchDeliverableContent(patchDetails) {
 		return nil, nil
 	}
 	patchIDs := make([]string, 0, len(patchDetails))
@@ -190,11 +216,11 @@ func (o *RuntimeOrchestrator) recordPatchDiffArtifact(
 	if len(patchDetails) == 1 {
 		item.PatchID = patchDetails[0].ID
 	}
-	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+	if err := r.evidence.Artifacts.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return nil, err
 		}
-		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Artifacts.Get(ctx, item.ID)
 		if getErr != nil {
 			return nil, getErr
 		}
@@ -213,22 +239,22 @@ func (o *RuntimeOrchestrator) recordPatchDiffArtifact(
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.Metadata = item.Metadata
 		existing.UpdatedAt = now
-		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return nil, err
 		}
-		return []common.ArtifactID{existing.ID}, o.publishArtifactCreated(ctx, existing)
+		return []common.ArtifactID{existing.ID}, r.publishArtifactCreated(ctx, existing)
 	}
-	return []common.ArtifactID{item.ID}, o.publishArtifactCreated(ctx, item)
+	return []common.ArtifactID{item.ID}, r.publishArtifactCreated(ctx, item)
 }
 
-func (o *RuntimeOrchestrator) recordWebSourceIndexArtifact(
+func (r *resultSubsystem) recordWebSourceIndexArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	sourceDetails []resultWebSourceDetail,
 	now string,
 ) (common.ArtifactID, error) {
-	if run == nil || step == nil || o.evidence.Artifacts == nil || len(sourceDetails) == 0 {
+	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil || len(sourceDetails) == 0 {
 		return "", nil
 	}
 	evidenceRefs := resultWebSourceEvidenceRefs(sourceDetails)
@@ -255,11 +281,11 @@ func (o *RuntimeOrchestrator) recordWebSourceIndexArtifact(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+	if err := r.evidence.Artifacts.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return "", err
 		}
-		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Artifacts.Get(ctx, item.ID)
 		if getErr != nil {
 			return "", getErr
 		}
@@ -277,22 +303,22 @@ func (o *RuntimeOrchestrator) recordWebSourceIndexArtifact(
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.Metadata = item.Metadata
 		existing.UpdatedAt = now
-		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, o.publishArtifactCreated(ctx, existing)
+		return existing.ID, r.publishArtifactCreated(ctx, existing)
 	}
-	return item.ID, o.publishArtifactCreated(ctx, item)
+	return item.ID, r.publishArtifactCreated(ctx, item)
 }
 
-func (o *RuntimeOrchestrator) recordGitOperationIndexArtifact(
+func (r *resultSubsystem) recordGitOperationIndexArtifact(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
 	gitDetails []resultGitOperationDetail,
 	now string,
 ) (common.ArtifactID, error) {
-	if run == nil || step == nil || o.evidence.Artifacts == nil || len(gitDetails) == 0 {
+	if r == nil || run == nil || step == nil || r.evidence.Artifacts == nil || len(gitDetails) == 0 {
 		return "", nil
 	}
 	evidenceRefs := resultGitOperationEvidenceRefs(gitDetails)
@@ -319,11 +345,11 @@ func (o *RuntimeOrchestrator) recordGitOperationIndexArtifact(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := o.evidence.Artifacts.Create(ctx, item); err != nil {
+	if err := r.evidence.Artifacts.Create(ctx, item); err != nil {
 		if err != common.ErrConflict {
 			return "", err
 		}
-		existing, getErr := o.evidence.Artifacts.Get(ctx, item.ID)
+		existing, getErr := r.evidence.Artifacts.Get(ctx, item.ID)
 		if getErr != nil {
 			return "", getErr
 		}
@@ -341,12 +367,12 @@ func (o *RuntimeOrchestrator) recordGitOperationIndexArtifact(
 		existing.EvidenceRefs = item.EvidenceRefs
 		existing.Metadata = item.Metadata
 		existing.UpdatedAt = now
-		if err := o.evidence.Artifacts.Update(ctx, existing); err != nil {
+		if err := r.evidence.Artifacts.Update(ctx, existing); err != nil {
 			return "", err
 		}
-		return existing.ID, o.publishArtifactCreated(ctx, existing)
+		return existing.ID, r.publishArtifactCreated(ctx, existing)
 	}
-	return item.ID, o.publishArtifactCreated(ctx, item)
+	return item.ID, r.publishArtifactCreated(ctx, item)
 }
 
 func resultSummaryFromDoDAssessment(
@@ -404,11 +430,11 @@ func compactResultSummaryDiagnostics(assessment map[string]any) map[string]any {
 	return ret
 }
 
-func (o *RuntimeOrchestrator) resultPatchDetails(ctx context.Context, runID common.RunID) []resultPatchDetail {
-	if o == nil || o.evidence.Patches == nil || runID == "" {
+func (r *resultSubsystem) resultPatchDetails(ctx context.Context, runID common.RunID) []resultPatchDetail {
+	if r == nil || r.evidence.Patches == nil || runID == "" {
 		return nil
 	}
-	patches, err := o.evidence.Patches.ListByRun(ctx, runID)
+	patches, err := r.evidence.Patches.ListByRun(ctx, runID)
 	if err != nil || len(patches) == 0 {
 		return nil
 	}
@@ -430,11 +456,11 @@ func (o *RuntimeOrchestrator) resultPatchDetails(ctx context.Context, runID comm
 	return ret
 }
 
-func (o *RuntimeOrchestrator) resultWebSourceDetails(ctx context.Context, runID common.RunID) []resultWebSourceDetail {
-	if o == nil || o.steps == nil || runID == "" {
+func (r *resultSubsystem) resultWebSourceDetails(ctx context.Context, runID common.RunID) []resultWebSourceDetail {
+	if r == nil || r.steps == nil || runID == "" {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRun(ctx, runID)
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
@@ -458,11 +484,11 @@ func (o *RuntimeOrchestrator) resultWebSourceDetails(ctx context.Context, runID 
 	return ret
 }
 
-func (o *RuntimeOrchestrator) resultGitOperationDetails(ctx context.Context, runID common.RunID) []resultGitOperationDetail {
-	if o == nil || o.steps == nil || runID == "" {
+func (r *resultSubsystem) resultGitOperationDetails(ctx context.Context, runID common.RunID) []resultGitOperationDetail {
+	if r == nil || r.steps == nil || runID == "" {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRun(ctx, runID)
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
@@ -694,8 +720,8 @@ type resultGitOperationDetail struct {
 	ErrorCode        string
 }
 
-func (o *RuntimeOrchestrator) resultEvidenceDetails(ctx context.Context, evidenceRefs []string) []resultEvidenceDetail {
-	if o == nil || o.steps == nil || len(evidenceRefs) == 0 {
+func (r *resultSubsystem) resultEvidenceDetails(ctx context.Context, evidenceRefs []string) []resultEvidenceDetail {
+	if r == nil || r.steps == nil || len(evidenceRefs) == 0 {
 		return nil
 	}
 	ret := make([]resultEvidenceDetail, 0, len(evidenceRefs))
@@ -704,7 +730,7 @@ func (o *RuntimeOrchestrator) resultEvidenceDetails(ctx context.Context, evidenc
 		if ref == "" {
 			continue
 		}
-		step, err := o.steps.Get(ctx, common.StepID(ref))
+		step, err := r.steps.Get(ctx, common.StepID(ref))
 		if err != nil || step == nil || len(step.Output) == 0 {
 			continue
 		}

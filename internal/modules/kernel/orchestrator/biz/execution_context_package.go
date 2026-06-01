@@ -243,7 +243,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	go func() {
 		defer wg.Done()
 		if shouldReadProcessEvidenceTimeline(step) {
-			processTimeline, progressDigest = o.currentRunProcessEvidenceContext(ctx, run, step.ID)
+			processTimeline, progressDigest = o.graphManager().currentRunProcessEvidenceContext(ctx, run, step.ID)
 		}
 	}()
 	go func() {

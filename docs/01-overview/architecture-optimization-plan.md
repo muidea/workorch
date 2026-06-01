@@ -213,22 +213,37 @@ type repairSubsystem struct {
 
 | 新文件 | 内容 |
 |--------|------|
+| `http_system.go` | health/readiness/metrics/pprof routes |
+| `http_console.go` | console static asset + favicon routes |
+| `http_configuration.go` | configuration read/update routes |
+| `http_catalog.go` | soul, workspace template, and skill catalog routes |
+| `http_read.go` | read-only API routes |
+| `http_write.go` | write/action API routes |
+| `http_events.go` | event list + SSE stream routes |
+| `http_governance.go` | decision + approval read/write routes |
+| `http_memory.go` | memory read/write routes |
+| `http_mcp.go` | MCP server/capability/tool/resource/prompt routes |
 | `http_workspace.go` | workspace CRUD + snapshot + activation + setup draft handlers |
 | `http_run.go` | run CRUD + status + observability + detail page handlers |
-| `http_governance.go` | decision + approval handlers |
-| `http_configuration.go` | config + soul + skill + MCP + template handlers |
-| `http_events.go` | SSE stream + event list handlers |
 | `http.go` | router setup, middleware, shared helpers, service struct |
 
 #### read_model_service.go（7,131 行）→ 按投影面拆分
 
 | 新文件 | 内容 |
 |--------|------|
+| `read_model_entrypoints.go` | public read model entrypoints and session/backend/env wrappers |
 | `read_model_workspace.go` | workspace snapshot, workspace outcome, workspace task progress |
 | `read_model_run.go` | run snapshot, run observability, run context bundle |
 | `read_model_timeline.go` | 已存在（442 行），保持不变 |
+| `read_model_event.go` | event record canonicalization, payload projection, event page projection helpers |
+| `read_model_governance.go` | decision/approval pagination, ordering, governance view projection helpers |
+| `read_model_memory.go` | memory recall trace, selection score, memory hit projection helpers |
 | `read_model_coverage.go` | coverage projection, evidence mapping, ledger summary |
+| `read_model_llm_usage.go` | LLM context budget traces, usage traces, usage summary |
 | `read_model_outcome.go` | mapRunOutcome, mapWorkspaceOutcome, terminal state logic |
+| `read_model_runtime_tools.go` | tool call, web source, git operation, runtime capability projection helpers |
+| `read_model_result_artifact.go` | result summary, DoD assessment, artifact, artifact continuation, result/artifact page projection helpers |
+| `read_model_progress_context.go` | task progress, task decomposition, execution section, context bundle, compressed context, repair loop projection helpers |
 | `read_model_service.go` | 公共 helpers, 类型转换, service struct |
 
 #### 收益
@@ -295,7 +310,134 @@ type repairSubsystem struct {
 
 ---
 
-## 四、验证方式
+## 四、当前收口状态
+
+### 4.1 已完成
+
+| 项 | 状态 | 证据 |
+|----|------|------|
+| P2.1 HTTP console 路由拆分 | 已完成 | `internal/modules/application/workorchd/service/server/http_console.go` 承载 `/console/**` 与 `/favicon.ico` |
+| P2.1 HTTP system 路由拆分 | 已完成 | `internal/modules/application/workorchd/service/server/http_system.go` 承载 `/healthz`、`/readyz`、`/metrics`、`/debug/pprof/**` |
+| P2.1 HTTP configuration 路由拆分 | 已完成 | `internal/modules/application/workorchd/service/server/http_configuration.go` 承载 `/api/v1/workorch/configuration*` routes |
+| P2.2 HTTP read/write 大路由拆分 | 已完成 | `http_read.go` 承载 read-only API routes；`http_write.go` 承载 write/action API routes；`http.go` 降为 router setup/state/shared helpers |
+| P2.2 HTTP events 路由拆分 | 已完成 | `http_events.go` 承载 `/api/v1/workorch/events` 与 `/api/v1/workorch/events/stream` |
+| P2.2 HTTP governance 路由拆分 | 已完成 | `http_governance.go` 承载 decisions/approvals 的 read 与 resolve/approve/reject routes |
+| P2.2 HTTP memory 路由拆分 | 已完成 | `http_memory.go` 承载 memory list/read/update/delete 与 workspace memory create routes |
+| P2.2 HTTP MCP 路由拆分 | 已完成 | `http_mcp.go` 承载 MCP server/capability read/write 与 tools/resources/prompts list routes |
+| P2.2 HTTP catalog 路由拆分 | 已完成 | `http_catalog.go` 承载 souls、workspace templates、skills 的 read/write routes |
+| P2.2 HTTP workspace 路由拆分 | 已完成 | `http_workspace.go` 承载 workspace CRUD、snapshot/progress/context/decomposition、memory recall、soul binding、Goal/DoD 与 quality-check routes |
+| P2.2 HTTP run 路由拆分 | 已完成 | `http_run.go` 承载 run list/read/create/start/resume、workspace-scoped run detail、status、observability、steps、tool calls、results、patches、artifacts、context bundle 与 runtime payload routes；`http_read.go`/`http_write.go` 降为领域路由聚合入口 |
+| P2.1/P2.2 行为验证 | 已完成 | `go test ./internal/modules/application/workorchd/service/server -count=1` 通过；`http_test.go` 的 native route registration 覆盖已同步 |
+| P2.3 read model 公开入口拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_entrypoints.go` 承载 `Read*WithSession/WithBackend/FromEnv` 入口 |
+| P2.3 read model outcome 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_outcome.go` 承载 `mapRunOutcome`、`mapWorkspaceOutcome` 与 terminal result selection helpers |
+| P2.3 read model LLM usage 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_llm_usage.go` 承载 LLM context budget、usage trace、usage summary 映射 |
+| P2.3 read model coverage 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_coverage.go` 承载 coverage summary、DoD leaf coverage、evidence ref index 与 weak validation 判定 |
+| P2.3 read model workspace 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_workspace.go` 承载 workspace snapshot、workspace projection run selection、workspace task progress/context/decomposition 入口 |
+| P2.3 read model run 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_run.go` 承载 run snapshot、recovery snapshot、run status、run task progress 与 run step selection helpers |
+| P2.3 read model runtime tools 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_runtime_tools.go` 承载 tool call、web source、git operation、runtime capability catalog/selection/usage projection helpers |
+| P2.3 read model result/artifact 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_result_artifact.go` 承载 result summary、DoD assessment、artifact、artifact continuation、result/artifact page projection helpers |
+| P2.3 read model event 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_event.go` 承载 event record canonicalization、payload projection 与 event page projection helpers |
+| P2.3 read model governance 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_governance.go` 承载 decision/approval pagination、ordering 与 governance view projection helpers |
+| P2.3 read model memory 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_memory.go` 承载 memory recall trace、selection score、memory hit 与 memory ID projection helpers |
+| P2.3 read model progress/context 投影拆分 | 已完成 | `internal/modules/application/workorchd/biz/appservice/read_model_progress_context.go` 承载 task progress、task decomposition、execution section、context bundle、compressed context 与 repair loop projection helpers |
+| P2.3 read model 验证 | 已完成 | `go test ./internal/modules/application/workorchd/biz/appservice -count=1` 通过 |
+| P1.1 coverage subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `coverage *coverageSubsystem` 与 `coverageLedger()` 统一访问 coverage ledger；旧 free function 兼容入口已移除 |
+| P1.1 coverage subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；coverage 相关测试已改为直接验证 subsystem 方法 |
+| P1.2 patches subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `patches *patchSubsystem` 与 `patchManager()` 统一访问 patch apply/revert、patch approval gate 与 patch preview |
+| P1.2 patches subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；patch 相关测试已改为直接验证 subsystem 方法 |
+| P1.3 coverage source extraction 拆分 | 已完成 | `runtime_coverage_sources.go` 承载 Goal/DoD/profile/failed coverage source extraction、source key、markdown leaf 解析 helper |
+| P1.3 coverage source extraction 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动 source extraction helper，不改变 work item 生成、证据应用、acceptance gate 或 LLM 上下文字段 |
+| P1.4 patches request/filesystem/diff 拆分 | 已完成 | `runtime_patch_requests.go` 承载 patch request 解析与校验；`runtime_patch_filesystem.go` 承载 workspace path/hash/apply/preview；`runtime_patch_unified_diff.go` 承载 unified diff parser/apply helper |
+| P1.4 patches request/filesystem/diff 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动 patch parsing、filesystem apply、unified diff helper，不改变 approval gate、patch state、文件写入、revert 或事件 payload |
+| P1.5 patches approval risk 拆分 | 已完成 | `runtime_patch_approval_risk.go` 承载 patch/revert approval risk reasons、line stats、approval context request helper |
+| P1.5 patches approval risk 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动 risk analysis 与 approval context helper，不改变 approval gate、risk reason、审批输出或恢复行为 |
+| P1.6 coverage context/evidence 拆分 | 已完成 | `runtime_coverage_context.go` 承载 focus、ledger summary、target set、failure diagnostics 等 context projection；`runtime_coverage_evidence.go` 承载 required/missing evidence、step/assessment binding 与 work item evidence apply |
+| P1.6 coverage context/evidence 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动 context projection 与 evidence binding helper，不改变 coverage ledger、work item 状态推进、focus 排序或 LLM 上下文字段 |
+| P1.7 result subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `results *resultSubsystem` 与 `resultManager()` 统一访问 result artifact recording、runtime detail collection 与 evidence detail projection |
+| P1.7 result subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动 result artifact/detail helper 的依赖边界，不改变 result state、artifact content、evidence refs、event payload 或 memory 写入内容 |
+| P1.8 graph subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `graph *graphSubsystem` 与 `graphManager()` 统一访问 graph ready spec、follow-up input、graph evidence、run evidence summary 与 process evidence context；状态变更型 graph dispatch/repair/complete 仍保留在 orchestrator 协调层 |
+| P1.8 graph subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 graph 读取与上下文组装边界，不改变 graph node 调度顺序、follow-up 条件、evidence refs、coverage/convergence contract 或 run 状态转换 |
+| P1.9 convergence subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `convergence *convergenceSubsystem` 与 `convergenceManager()` 统一访问 convergence contract build/apply、decision ticket gate 与 compact projection；无 receiver 的纯 helper 保留 free function，避免强行引入 orchestrator 依赖 |
+| P1.9 convergence subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 RuntimeOrchestrator 内部调用入口，不改变 convergence state 判定、mechanical continuation gate、decision ticket 创建条件或 LLM 上下文字段 |
+| P1.10 repair budget subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `repair *repairSubsystem` 与 `repairManager()` 统一访问 provider retry、runtime repair attempt、failure scope 与 target scope 计数；repair dispatch、blocker、context package 构造继续保留在 orchestrator 协调层 |
+| P1.10 repair budget subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 repair budget/attempt 读取边界，不改变 retry/repair 预算上限、scope/window 匹配、blocker 判断或 run 状态转换 |
+| P1.11 repair context subsystem 入口收口 | 已完成 | `repairSubsystem` 统一访问 patch repair context/suggestions/already-satisfied signals、failure target context、resource shape alignment、root-cause candidates、recent repair attempt summaries 与 workspace file manifest；repair follow-up 主流程仍由 `RuntimeOrchestrator` 协调 |
+| P1.11 repair context subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 repair context 读取与输入素材装配边界，不改变 repair objective、blocker ticket、provider retry、patch apply、graph dispatch 或 run 状态转换 |
+| P1.12 LLM context subsystem 入口收口 | 已完成 | `RuntimeOrchestrator` 通过 `llmContext *llmContextSubsystem` 与 `llmContextManager()` 统一访问 step input/output、executionGraph 与 map compaction；已接入 step event、tool-call evidence、repair/blocker 输入投影路径 |
+| P1.12 LLM context subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 LLM context compact/projection 调用入口，不改变字段裁剪规则、section 顺序、raw payload ref、event payload 或 tool-call evidence 内容 |
+| P1.13 LLM context event/evidence 投影收口 | 已完成 | step event payload 与 runtime tool-call evidence 的 input/output summary 统一通过 `llmContextSubsystem` 生成，raw payload ref 仍由原事件/evidence helper 负责 |
+| P1.13 LLM context event/evidence 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 event/evidence summary 的压缩入口，不改变事件 topic、tool-call state、payload ref 或 evidence repository 写入 |
+| P1.14 repair dispatch action selection 收口 | 已完成 | `repairSubsystem` 承载 failure 后 `runtimeRecoveryAction` 选择入口，并通过 `repairRecoveryPolicy` 接口复用 orchestrator 现有 provider retry、context gate、duplicate failure、repair exhaustion 与 runtime repair gate 判断 |
+| P1.14 repair dispatch action selection 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 recovery action selection 的调用边界，不改变 provider retry、runtime repair、blocker、FailRun 或 dispatchStep 的实际执行分支 |
+| P1.15 repair dispatch executable spec 收口 | 已完成 | `repairSubsystem` 承载 provider retry 与 runtime repair 两类可继续执行分支的 `stepDispatchSpec` 规划；通过 `repairDispatchSpecBuilder` 回调复用 orchestrator 的 unique step ID 与 input 构造 |
+| P1.15 repair dispatch executable spec 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整可执行 repair/retry 分支 spec 生成边界，不改变 block/fail 分支、dispatchStep 调用、attempt 计数规则或 step kind/input 内容 |
+| P1.16 repair dispatch blocker delegation 收口 | 已完成 | `repairSubsystem` 承载 provider retry exhausted、runtime repair exhausted、duplicate failure、context integrity blocked 四类 blocked recovery action 的委派分支；通过 `repairBlockedRecoveryExecutor` 回调复用 orchestrator 原有 blocker ticket/run state 处理 |
+| P1.16 repair dispatch blocker delegation 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整 blocked recovery action 委派边界，不改变 ticket 创建、BlockOnDecision、rejected result recording 或错误映射 |
+| P1.17 repair dispatch fail-run reason 收口 | 已完成 | `repairSubsystem` 承载 fail-run reason 归一化，固定 execErr、step output error、step output reason、默认 runtime failure 的优先级；FailRun 与 rejected result recording 继续由 `RuntimeOrchestrator` 协调 |
+| P1.17 repair dispatch fail-run reason 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只调整失败摘要选择边界，不改变 fail-run 分支、result 记录、event payload 或状态转换 |
+| P1.18 runtime execution coordination 边界确认 | 已完成 | `dispatchStep`、blocker ticket 创建、`BlockOnDecision`、`FailRun`、rejected result recording 等状态变更型执行协调继续保留在 `RuntimeOrchestrator`；子系统只负责分类、规划、投影或通过窄接口委派，避免把核心状态机拆散 |
+| P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
+| P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
+| P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
+| P3.2 graph 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变测试断言或 runtime graph 行为 |
+| P3.3 convergence 测试落点核对 | 已完成 | convergence 合同测试已集中在 `runtime_convergence_test.go`；本轮入口收口无需迁移测试文件 |
+| P3.4 repair budget 测试拆分 | 已完成 | `runtime_repair_attempts_test.go` 承载 runtime repair attempt count 与 failure signature scope 计数测试；`runtime_orchestrator_test.go` 继续保留依赖完整 repair/blocker 状态流转的测试 |
+| P3.5 repair context 测试拆分 | 已完成 | `runtime_repair_context_test.go` 承载 repair context target snapshot 与 workspace manifest 的 subsystem 级测试；完整 repair input 组装测试继续保留在 `runtime_orchestrator_test.go` |
+| P3.6 LLM context subsystem 测试补齐 | 已完成 | `runtime_llm_context_test.go` 增加 `llmContextSubsystem` 入口测试，验证 subsystem 复用稳定 compaction 规则；既有 compact input/output、artifact chunk、lineage 与 patch redaction 测试保持不变 |
+| P3.7 LLM context event/evidence 测试适配 | 已完成 | `runtime_orchestrator_test.go` 的 raw payload ref 测试显式通过 `llmContextSubsystem` 入口生成 event/tool-call summary，断言保持原有字段不变 |
+| P3.8 repair dispatch spec 测试拆分 | 已完成 | `runtime_repair_dispatch_test.go` 承载 provider retry 与 runtime repair executable spec 的 subsystem 级测试；完整 dispatch/block/fail 状态流转测试继续保留在 `runtime_orchestrator_test.go` |
+| P3.9 repair dispatch blocker 测试拆分 | 已完成 | `runtime_repair_dispatch_test.go` 补充 blocked recovery action delegation 的 subsystem 级测试；完整 blocker ticket 持久化与 run 状态测试继续保留在现有 orchestrator 测试中 |
+| P3.10 repair dispatch fail-run reason 测试补齐 | 已完成 | `runtime_repair_dispatch_test.go` 补充 fail-run reason 优先级测试，覆盖 execErr、output.error、output.reason 与默认文案 |
+
+本轮 HTTP 拆分只移动 route registration 和静态资源处理函数，不改变 API 路径、请求/响应结构、repository 调用、事件发布或 runtime 状态流转。
+events/governance HTTP 细分只移动 route registration 和 handler 函数归属，不改变 SSE replay/filter 规则、decision/approval 查询分页、resolve/approve/reject 行为或 run resume 调度。
+memory HTTP 细分只移动 memory route registration 和 handler 函数归属，不改变 workspace memory create、memory search/read/update/delete 的请求校验、响应结构或 metrics 计数。
+MCP HTTP 细分只移动 MCP route registration 和 handler 函数归属，不改变 MCP server/capability CRUD、tool/resource/prompt listing、查询过滤或 metrics 计数。
+catalog HTTP 细分只移动 souls、workspace templates、skills route registration 和 handler 函数归属，不改变 catalog CRUD、workspaceId query 过滤、响应结构或 metrics 计数。
+workspace HTTP 细分只移动 workspace/Goal/DoD route registration 和 handler 函数归属，不改变 workspace CRUD、execution activation、Goal/DoD 定义更新、quality check、snapshot/context/progress 读取或 run continuation scheduling。
+run HTTP 细分只移动 run route registration、workspace-scoped run helper 和 runtime observability handler 函数归属，不改变 run create/start/resume、status wait、snapshot cache、artifact content/runtime payload 读取、metrics 计数或 run continuation scheduling。
+read model 入口拆分只移动公开入口和薄包装函数，不改变投影核心逻辑、分页策略、事件映射或 snapshot 结构。
+outcome 投影拆分只移动 outcome state/result selection 逻辑，不改变 run/workspace terminal 判断、result 选择优先级或 evidence/artifact refs 映射。
+LLM usage 投影拆分只移动 usage/context budget trace 映射与 summary 聚合逻辑，不改变事件过滤、排序、cache token 统计或 ratio 计算。
+coverage 投影拆分只移动 coverage summary、DoD leaf coverage 和 evidence ref 判定 helper，不改变 DoD 文本规范化、missing coverage 判定或 weak validation 规则。
+workspace 投影拆分只移动 workspace snapshot 聚合和 workspace projection run selection 逻辑，不改变 workspace state 映射、terminal result 优先级或 cached run snapshot 复用策略。
+run 投影拆分只移动 run snapshot/status 聚合、governance ticket/approval selection 和 current step selection helper，不改变 repository 查询范围、并发加载策略、snapshot 字段映射或 runtime capability 映射。
+runtime tools 投影拆分只移动 tool call、web source、git operation 和 runtime capability helper，不改变 tool 输出字段映射、capability ID 生成、catalog 查询触发条件或 evidence refs 组装。
+result/artifact 投影拆分只移动 result summary、DoD assessment、artifact、artifact continuation 和 result/artifact page helper，不改变 result/artifact 字段映射、DoD coverage 映射、artifact continuation progress/failureReason 计算或分页 cursor 规则。
+event 投影拆分只移动 event record canonicalization 和 payload projection helper，不改变 step kind canonicalization、payload key 白名单、字符串/列表裁剪上限或 event record 字段映射。
+governance 投影拆分只移动 decision/approval pagination、ordering 和 view projection helper，不改变倒序排序规则、cursor 分页规则、decision/approval 字段映射或 service 层调用方式。
+memory 投影拆分只移动 memory recall trace、selection score、memory hit 和 memory ID projection helper，不改变 recall trace 字段映射、quota/score/hit 映射或 memory ID 字符串化规则。
+progress/context 投影拆分只移动 task progress、task decomposition、execution section、context bundle、compressed context 和 repair loop helper，不改变进度状态判定、恢复建议、上下文 section 排序、压缩候选规则、repair loop 观测字段或 evidence refs 聚合规则。
+coverage subsystem 入口收口只调整 coverage ledger 的内部调用边界，不改变 work item 生成规则、证据状态转换、acceptance gate 校验或 LLM 上下文投影字段。
+patches subsystem 入口收口只调整 patch apply/revert、approval gate 与 preview event 的内部调用边界，不改变 patch request 解析、敏感路径审批规则、文件写入/revert 规则或事件 payload。
+coverage source extraction 拆分只移动 Goal/DoD/profile/failed coverage source extraction、source key 和 markdown leaf 解析 helper，不改变 coverage work item ID 生成、证据状态转换、acceptance gate 校验或 LLM 上下文投影字段。
+patches request/filesystem/diff 拆分只移动 patch request 解析校验、workspace path/hash/apply/preview、unified diff parser/apply helper，不改变 approval gate、patch state 转换、文件写入/revert 规则、preview 字段或事件 payload。
+patches approval risk 拆分只移动 patch/revert approval risk analysis、line stats 和 approval context request helper，不改变 approval gate 触发条件、risk reason 字段、审批 block 输出或后续恢复行为。
+coverage context/evidence 拆分只移动 coverage context projection、focus/ledger summary、target set、failure diagnostics、required/missing evidence 和 evidence binding helper，不改变 coverage ledger 数据结构、work item 状态推进、focus 排序、缺口计算或 LLM 上下文字段。
+result subsystem 入口收口只调整 result artifact recording、runtime detail collection 和 evidence detail projection 的内部调用边界，不改变 accepted/rejected result 状态、artifact 内容、evidence refs、event payload、memory 写入内容或 completion gate 行为。
+graph subsystem 入口收口只调整 graph ready spec、follow-up context、graph evidence 与 run process evidence 的读取/组装边界，不改变 graph dispatch、runtime repair、completion gate 或 run state transition。
+convergence subsystem 入口收口只调整 RuntimeOrchestrator 对 convergence contract 的调用入口，不改变合同状态、输出字段、mechanical repair/replan 判定或 governance gate 规则。
+repair budget subsystem 入口收口只调整 retry/repair attempt 计数的读取边界，不改变 repair action、blocker ticket、runtime failure classification 或 LLM repair input 内容。
+repair context subsystem 入口收口只调整 repair 输入素材的读取与投影边界，不改变 repair follow-up 主流程、状态转换、目标判定或具体输出合同。
+LLM context subsystem 入口收口只调整 RuntimeOrchestrator 内部对 compact/projection helper 的访问边界，不改变上下文字段裁剪、摘要上限、引用 URI、事件 payload 或 tool-call evidence 字段。
+LLM context event/evidence 投影收口只统一 event/tool-call summary 的压缩入口，不改变 raw payload 引用策略、事件发布顺序或 evidence 记录状态。
+repair dispatch action selection 收口只移动失败恢复动作选择入口，实际 dispatch、blocker ticket 创建、run fail/complete 与 step 创建仍由 `RuntimeOrchestrator` 协调。
+repair dispatch executable spec 收口只移动 provider retry/runtime repair 的 spec 规划，实际 step dispatch、blocker ticket 创建和 run 状态变更仍由 `RuntimeOrchestrator` 协调。
+repair dispatch blocker delegation 收口只移动 blocked recovery action 到具体 blocker executor 的分发边界，实际治理 ticket、decision block 与 result 记录仍由 `RuntimeOrchestrator` 协调。
+repair dispatch fail-run reason 收口只移动失败摘要优先级归一化，实际 FailRun、rejected result recording 与事件发布仍由 `RuntimeOrchestrator` 协调。
+runtime execution coordination 边界确认明确状态变更型执行协调不继续下沉，避免子系统直接持有 run/step/ticket/result 状态机写入权。
+LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
+
+### 4.2 待继续收口
+
+| 项 | 状态 | 下一步 |
+|----|------|--------|
+| P1 orchestrator 子系统组合化后续项 | 已完成 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、repair dispatch action selection/spec/blocker/fail-run reason 已完成入口级收口；最终执行协调继续保留在 `RuntimeOrchestrator` 作为状态机写入边界 |
+| P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；完整状态流转测试继续保留在现有 orchestrator 测试中 |
+
+---
+
+## 五、验证方式
 
 | 验证项 | 方法 |
 |--------|------|
@@ -307,7 +449,7 @@ type repairSubsystem struct {
 
 ---
 
-## 五、预期效果
+## 六、预期效果
 
 | 指标 | 当前 | 目标 |
 |------|------|------|

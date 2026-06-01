@@ -616,7 +616,7 @@ func (o *RuntimeOrchestrator) applyAssembledArtifactContinuation(
 		return err
 	}
 	output := artifactContinuationApplyPatchOutput(item, metadata, content)
-	if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
+	if err := o.patchManager().apply(ctx, run, step, toolCall, output, deliverableDirectory); err != nil {
 		item.State = common.ArtifactContinuationStateFailed
 		item.CurrentStepID = step.ID
 		item.OutputMode = outputModeIncrementalArtifact
@@ -862,7 +862,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	if updateRunCoverageWorkItemsFromCompletedStep(run, step) && o.runs != nil {
+	if o.coverageLedger().updateFromCompletedStep(run, step) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return err
 		}
@@ -881,7 +881,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 		return o.dispatchStepWithWorkspace(ctx, run, nextID, artifactApplyStepKind, step.Input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	return nil
 }

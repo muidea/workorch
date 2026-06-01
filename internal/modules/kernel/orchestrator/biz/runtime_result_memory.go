@@ -196,7 +196,7 @@ func (o *RuntimeOrchestrator) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		SourceType:  memorycommon.MemorySourceRun,
 		SourceRef:   string(step.ID),
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
-		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultPatchDetails(ctx, run.ID), o.resultEvidenceDetails(ctx, evidenceRefs), o.resultWebSourceDetails(ctx, run.ID)),
+		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, o.resultManager().resultPatchDetails(ctx, run.ID), o.resultManager().resultEvidenceDetails(ctx, evidenceRefs), o.resultManager().resultWebSourceDetails(ctx, run.ID)),
 		Summary:     summary,
 		Tags:        []string{"run_summary", "dod_assessment", "runtime_result", runSummaryDoDGateVersionTag},
 		Importance:  70,
@@ -240,7 +240,7 @@ func (o *RuntimeOrchestrator) recordValidationCommandMemoriesFromValidatedDoDAss
 		return nil
 	}
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
-	evidenceDetails := o.resultEvidenceDetails(ctx, evidenceRefs)
+	evidenceDetails := o.resultManager().resultEvidenceDetails(ctx, evidenceRefs)
 	commands := validationCommandMemoryEntries(evidenceDetails)
 	if len(commands) == 0 {
 		return nil

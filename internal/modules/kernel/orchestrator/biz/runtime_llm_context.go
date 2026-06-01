@@ -15,6 +15,28 @@ const (
 	maxLLMContextMapEntries        = 32
 )
 
+type llmContextSubsystem struct{}
+
+func newLLMContextSubsystem() *llmContextSubsystem {
+	return &llmContextSubsystem{}
+}
+
+func (c *llmContextSubsystem) compactStepInput(input map[string]any) map[string]any {
+	return compactStepInputForLLMContext(input)
+}
+
+func (c *llmContextSubsystem) compactStepOutput(output map[string]any) map[string]any {
+	return compactStepOutputForLLMContext(output)
+}
+
+func (c *llmContextSubsystem) compactExecutionGraph(graph runtimemodel.BlockExecutionGraph) runtimemodel.BlockExecutionGraph {
+	return compactExecutionGraphForLLMContext(graph)
+}
+
+func (c *llmContextSubsystem) compactMap(input map[string]any, depth int) map[string]any {
+	return compactLLMContextMap(input, depth)
+}
+
 func compactStepInputForLLMContext(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil

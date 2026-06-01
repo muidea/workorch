@@ -41,8 +41,8 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want true")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want true")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 5 {
@@ -92,8 +92,8 @@ func TestCoverageWorkItemsUseSameGoalLeavesAsDoDAssessmentGate(t *testing.T) {
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want table data leaves")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want table data leaves")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	required := normalizedRunGoalCoverageItems(run)
@@ -136,7 +136,7 @@ func TestBuildConvergenceContractUsesProfileStateChangingEvidenceRequirement(t *
 			},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	input := map[string]any{
 		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
 		stepInputKeyRuntimeStage:          runtimeStageRepair,
@@ -202,8 +202,8 @@ func TestCoverageWorkItemsTrackEvidenceByKind(t *testing.T) {
 		"acceptedEvidenceByKind": map[string]any{"state_change": []string{"run-001/001-change"}},
 	}}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want true because validation evidence is still missing")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want true because validation evidence is still missing")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 1 {
@@ -239,8 +239,8 @@ func TestCoverageWorkItemsKeepOldRevisionHistorical(t *testing.T) {
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want current revision rebuild")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want current revision rebuild")
 	}
 	context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	if historical := mapSliceFromValue(context["historicalItems"]); len(historical) != 1 ||
@@ -289,8 +289,8 @@ func TestCoverageWorkItemsReplanSuccessorPreservesCurrentRevisionLineage(t *test
 		},
 	}
 
-	if !prepareCoverageWorkItemsForReplanSuccessor(run) {
-		t.Fatalf("prepareCoverageWorkItemsForReplanSuccessor changed = false, want normalized successor ledger")
+	if !newCoverageSubsystem().prepareReplanSuccessor(run) {
+		t.Fatalf("coverage.prepareReplanSuccessor changed = false, want normalized successor ledger")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 1 {
@@ -346,8 +346,8 @@ func TestCoverageWorkItemsRebuildInheritsLineageByNormalizedSourceText(t *testin
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want canonical key rebuild")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want canonical key rebuild")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 1 {
@@ -389,8 +389,8 @@ func TestCoverageWorkItemsReplanSuccessorMovesStaleSourcesToHistory(t *testing.T
 		},
 	}
 
-	if !prepareCoverageWorkItemsForReplanSuccessor(run) {
-		t.Fatalf("prepareCoverageWorkItemsForReplanSuccessor changed = false, want stale source historical isolation")
+	if !newCoverageSubsystem().prepareReplanSuccessor(run) {
+		t.Fatalf("coverage.prepareReplanSuccessor changed = false, want stale source historical isolation")
 	}
 	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	if len(items) != 1 || stringFromMap(items[0], "targetText") != "current leaf" {
@@ -448,8 +448,8 @@ func TestCoverageWorkItemsHistoricalSupersededSourcesAreStable(t *testing.T) {
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want stale sources moved to history")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want stale sources moved to history")
 	}
 	historical := mapSliceFromValue(mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])["historicalItems"])
 	if len(historical) != 2 {
@@ -569,8 +569,8 @@ func TestCoverageWorkItemsRequireStateChangeForRequiredCoverageWhenRunRequiresSt
 		},
 	}
 
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want baseline")
 	}
 	var primaryOutput map[string]any
 	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
@@ -779,8 +779,8 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 			},
 		},
 	}
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want baseline")
 	}
 	changeStep := &runmodel.Step{
 		ID:    "run-cwi-advance/001-change",
@@ -791,8 +791,8 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 			"coverageTargets": []string{"stateful outcome"},
 		},
 	}
-	if !updateRunCoverageWorkItemsFromCompletedStep(run, changeStep) {
-		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed = false, want state_change evidence update")
+	if !newCoverageSubsystem().updateFromCompletedStep(run, changeStep) {
+		t.Fatalf("coverage.updateFromCompletedStep changed = false, want state_change evidence update")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "in_progress" {
@@ -819,8 +819,8 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 			}},
 		},
 	}
-	if !updateRunCoverageWorkItemsFromAssessment(run, assessmentStep, assessment) {
-		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed = false, want validation closure")
+	if !newCoverageSubsystem().updateFromAssessment(run, assessmentStep, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed = false, want validation closure")
 	}
 	item = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "satisfied" {
@@ -849,8 +849,8 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 			},
 		},
 	}
-	if !ensureRunCoverageWorkItems(run) {
-		t.Fatalf("ensureRunCoverageWorkItems changed = false, want baseline")
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want baseline")
 	}
 	step := &runmodel.Step{
 		ID:    "run-cwi-source-requirement-id/001-verify",
@@ -871,8 +871,8 @@ func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 		Output: map[string]any{"stage": "mcp_tool_call_completed"},
 	}
 
-	if !updateRunCoverageWorkItemsFromCompletedStep(run, step) {
-		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed = false, want sourceRequirementId-linked evidence")
+	if !newCoverageSubsystem().updateFromCompletedStep(run, step) {
+		t.Fatalf("coverage.updateFromCompletedStep changed = false, want sourceRequirementId-linked evidence")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "evidence_ready" {
@@ -888,7 +888,7 @@ func TestCoverageWorkItemsRejectUnclosedAssessmentEvidence(t *testing.T) {
 		ID:               "run-cwi-reject",
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	step := &runmodel.Step{ID: "run-cwi-reject/001-assess", RunID: run.ID, State: common.StepStateCompleted}
 	assessment := map[string]any{
 		"items": []map[string]any{{
@@ -899,8 +899,8 @@ func TestCoverageWorkItemsRejectUnclosedAssessmentEvidence(t *testing.T) {
 		}},
 	}
 
-	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
-		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed = false, want rejected evidence")
+	if !newCoverageSubsystem().updateFromAssessment(run, step, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed = false, want rejected evidence")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "failed" {
@@ -920,7 +920,7 @@ func TestCoverageWorkItemsRejectUnlinkedSatisfiedAssessment(t *testing.T) {
 		ID:               "run-cwi-unlinked-assessment",
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	step := &runmodel.Step{ID: "run-cwi-unlinked-assessment/001-assess", RunID: run.ID, State: common.StepStateCompleted}
 	assessment := map[string]any{
 		"items": []map[string]any{{
@@ -930,8 +930,8 @@ func TestCoverageWorkItemsRejectUnlinkedSatisfiedAssessment(t *testing.T) {
 		}},
 	}
 
-	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
-		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want rejected unlinked assessment")
+	if !newCoverageSubsystem().updateFromAssessment(run, step, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want rejected unlinked assessment")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "failed" {
@@ -960,7 +960,7 @@ func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
 			},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	step := &runmodel.Step{
 		ID:    "run-cwi-failed-step/001-change",
 		RunID: run.ID,
@@ -972,8 +972,8 @@ func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
 		},
 	}
 
-	if !updateRunCoverageWorkItemsFromFailedStep(run, step, "") {
-		t.Fatalf("updateRunCoverageWorkItemsFromFailedStep changed = false, want rejected state_change evidence")
+	if !newCoverageSubsystem().updateFromFailedStep(run, step, "") {
+		t.Fatalf("coverage.updateFromFailedStep changed = false, want rejected state_change evidence")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "failed" {
@@ -993,12 +993,12 @@ func TestCoverageWorkItemsAcceptanceGateRequiresSatisfiedItems(t *testing.T) {
 		ID:               "run-cwi-acceptance-gate",
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 
-	err := validateRunCoverageWorkItemsReadyForAcceptance(run)
+	err := newCoverageSubsystem().validateReadyForAcceptance(run)
 
 	if err == nil || !strings.Contains(err.Error(), "coverageWorkItems not ready") {
-		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance err = %v, want unresolved work item failure", err)
+		t.Fatalf("coverage.validateReadyForAcceptance err = %v, want unresolved work item failure", err)
 	}
 }
 
@@ -1007,7 +1007,7 @@ func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
 		ID:               "run-cwi-acceptance-ready",
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	step := &runmodel.Step{ID: "run-cwi-acceptance-ready/001-assess", RunID: run.ID, State: common.StepStateCompleted}
 	assessment := map[string]any{
 		"items": []map[string]any{{
@@ -1016,12 +1016,12 @@ func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
 			"evidenceRefs": []string{"run-cwi-acceptance-ready/001-assess/validation/runtime-step"},
 		}},
 	}
-	if !updateRunCoverageWorkItemsFromAssessment(run, step, assessment) {
-		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want satisfied closure")
+	if !newCoverageSubsystem().updateFromAssessment(run, step, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want satisfied closure")
 	}
 
-	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
-		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance: %v", err)
+	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
+		t.Fatalf("coverage.validateReadyForAcceptance: %v", err)
 	}
 }
 
@@ -1030,7 +1030,7 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 		ID:               "run-cwi-evidence-ready-close",
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"closure trace is exposed"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	verify := &runmodel.Step{
 		ID:    "run-cwi-evidence-ready-close/001-verify",
 		RunID: run.ID,
@@ -1040,8 +1040,8 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 			"coverageTargets": []string{"closure trace is exposed"},
 		},
 	}
-	if !updateRunCoverageWorkItemsFromCompletedStep(run, verify) {
-		t.Fatalf("updateRunCoverageWorkItemsFromCompletedStep changed=false, want evidence_ready update")
+	if !newCoverageSubsystem().updateFromCompletedStep(run, verify) {
+		t.Fatalf("coverage.updateFromCompletedStep changed=false, want evidence_ready update")
 	}
 	item := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "evidence_ready" {
@@ -1056,15 +1056,15 @@ func TestCoverageWorkItemsAssessmentClosesEvidenceReadyItemWithoutNewRefs(t *tes
 			"evidenceRefs": []string{"run-cwi-evidence-ready-close/001-verify"},
 		}},
 	}
-	if !updateRunCoverageWorkItemsFromAssessment(run, assess, assessment) {
-		t.Fatalf("updateRunCoverageWorkItemsFromAssessment changed=false, want satisfied closure")
+	if !newCoverageSubsystem().updateFromAssessment(run, assess, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want satisfied closure")
 	}
 	item = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])[0]
 	if got := stringFromMap(item, "status"); got != "satisfied" {
 		t.Fatalf("status after assessment = %q, want satisfied", got)
 	}
-	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
-		t.Fatalf("validateRunCoverageWorkItemsReadyForAcceptance: %v", err)
+	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
+		t.Fatalf("coverage.validateReadyForAcceptance: %v", err)
 	}
 }
 
@@ -1075,7 +1075,7 @@ func TestCoverageWorkItemGateFailureProjectsUnresolvedItemsIntoRepairInput(t *te
 			"dod": map[string]any{"items": []string{"acceptance gate"}},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	step := &runmodel.Step{
 		ID:    "run-cwi-gate-repair-input/001-assess",
 		RunID: run.ID,
@@ -1119,7 +1119,7 @@ func TestGraphCompletionGateFailurePersistsCoverageWorkItemDiagnostics(t *testin
 		InitialStepKind:  llmWorkspaceExecutionStepKind,
 		ExecutionContext: map[string]any{"dod": map[string]any{"items": []string{"acceptance gate"}}},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}

@@ -2185,7 +2185,7 @@ func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverage
 			},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	input := map[string]any{
 		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
 		stepInputKeyRuntimeStage:          runtimeStageVerification,
@@ -2226,7 +2226,7 @@ func TestBuildConvergenceContractDefersSupplementalDeliverableStateChangeWithout
 			},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	input := map[string]any{
 		coverageWorkItemContextKey:        run.ExecutionContext[coverageWorkItemContextKey],
 		stepInputKeyRuntimeStage:          runtimeStageVerification,

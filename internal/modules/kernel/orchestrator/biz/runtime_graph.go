@@ -15,53 +15,73 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-func (o *RuntimeOrchestrator) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {
-	return len(o.readyGraphStepSpecs(ctx, run, step)) > 0
+type graphCompletionClosureReader interface {
+	latestCompletionClosureEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) map[string]any
 }
 
-func (o *RuntimeOrchestrator) nextGraphStepSpec(
+type graphSubsystem struct {
+	steps    repository.StepRepository
+	closures graphCompletionClosureReader
+}
+
+func newGraphSubsystem(steps repository.StepRepository, closures graphCompletionClosureReader) *graphSubsystem {
+	return &graphSubsystem{
+		steps:    steps,
+		closures: closures,
+	}
+}
+
+func (g *graphSubsystem) hasGraphContinuation(ctx context.Context, run *runModel.Run, step *runModel.Step) bool {
+	return len(g.readyGraphStepSpecs(ctx, run, step)) > 0
+}
+
+func (g *graphSubsystem) nextGraphStepSpec(
 	ctx context.Context,
 	run *runModel.Run,
 	last *runModel.Step,
 ) (common.StepID, string, map[string]any, bool) {
-	specs := o.readyGraphStepSpecs(ctx, run, last)
+	specs := g.readyGraphStepSpecs(ctx, run, last)
 	if len(specs) == 0 {
 		return "", "", nil, false
 	}
 	return specs[0].ID, specs[0].Kind, specs[0].Input, true
 }
 
-func (o *RuntimeOrchestrator) readyGraphStepSpecs(
+func (g *graphSubsystem) readyGraphStepSpecs(
 	ctx context.Context,
 	run *runModel.Run,
 	last *runModel.Step,
 ) []stepDispatchSpec {
-	specs, _ := o.readyGraphStepSpecsWithSteps(ctx, run, last)
+	specs, _ := g.readyGraphStepSpecsWithSteps(ctx, run, last)
 	return specs
 }
 
-func (o *RuntimeOrchestrator) readyGraphStepSpecsWithSteps(
+func (g *graphSubsystem) readyGraphStepSpecsWithSteps(
 	ctx context.Context,
 	run *runModel.Run,
 	last *runModel.Step,
 ) ([]stepDispatchSpec, []*runModel.Step) {
-	if o == nil || run == nil || last == nil {
+	if g == nil || run == nil || last == nil {
 		return nil, nil
 	}
 	graph, ok := runtimeGraphSpecFromStep(last)
 	if !ok || len(graph.Nodes) == 0 {
 		return nil, nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	if g.steps == nil {
+		return nil, nil
+	}
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return nil, nil
 	}
-	return o.readyGraphStepSpecsFromSteps(ctx, run, last, graph, steps), steps
+	return g.readyGraphStepSpecsFromSteps(ctx, run, last, graph, steps), steps
 }
 
-func (o *RuntimeOrchestrator) readyGraphStepSpecsFromSteps(
+func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 	ctx context.Context,
 	run *runModel.Run,
 	last *runModel.Step,
@@ -158,7 +178,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return common.ErrConflict
 	}
 	if graph, ok := runtimeGraphSpecForContinuation(steps, last); ok {
-		if nextSpecs := o.readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
+		if nextSpecs := o.graphManager().readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
 			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
 		}
 	}
@@ -166,7 +186,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return err
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
 		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
@@ -198,12 +218,12 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if err := o.validateDoDAssessmentEvidenceQuality(ctx, currentRun, assessment); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
-	if updateRunCoverageWorkItemsFromAssessment(currentRun, last, assessment) && o.runs != nil {
+	if o.coverageLedger().updateFromAssessment(currentRun, last, assessment) && o.runs != nil {
 		if err := o.runs.Update(ctx, currentRun); err != nil {
 			return err
 		}
 	}
-	if err := validateRunCoverageWorkItemsReadyForAcceptance(currentRun); err != nil {
+	if err := o.coverageLedger().validateReadyForAcceptance(currentRun); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, currentRun, last, assessment, summary, workspace); err != nil {
@@ -229,7 +249,7 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
 	errText := errorString(execErr)
-	if updateRunCoverageWorkItemsFromFailedStep(run, step, errText) && o.runs != nil {
+	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
 		_ = o.runs.Update(ctx, run)
 	}
 	attachCoverageWorkItemFailureDiagnostics(run, step)
@@ -947,11 +967,11 @@ func graphFollowUpExpansionStep(step *runModel.Step) bool {
 	return ok
 }
 
-func (o *RuntimeOrchestrator) graphFollowUpExpansionCount(ctx context.Context, runID common.RunID) int {
-	if o == nil || o.steps == nil || runID == "" {
+func (g *graphSubsystem) graphFollowUpExpansionCount(ctx context.Context, runID common.RunID) int {
+	if g == nil || g.steps == nil || runID == "" {
 		return 0
 	}
-	steps, err := o.steps.ListByRun(ctx, runID)
+	steps, err := g.steps.ListByRun(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -1039,7 +1059,7 @@ func graphExpansionLimitAssessmentFollowUpStepID(runID common.RunID, step *runMo
 	return common.StepID(fmt.Sprintf("%s/follow-up-graph-limit-%s", runID, stepID))
 }
 
-func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx context.Context, run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
+func (g *graphSubsystem) graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx context.Context, run *runModel.Run, step *runModel.Step, steps []*runModel.Step, count int) map[string]any {
 	input := llmCompletionFollowUpStepInputFromSteps(run, step, steps)
 	input[stepInputKeyAssessmentOnly] = true
 	input[stepInputKeyGraphLimitFollowUp] = true
@@ -1054,10 +1074,12 @@ func (o *RuntimeOrchestrator) graphExpansionLimitAssessmentFollowUpStepInputFrom
 		previous["graphFollowUpExpansionLimitExceeded"] = true
 		input["previousStepOutput"] = previous
 	}
-	if closure := o.latestCompletionClosureEvidence(ctx, run, step); len(closure) > 0 {
-		input["latestClosureEvidence"] = closure
-		if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
-			input["supersededFailureEvidence"] = superseded
+	if g != nil && g.closures != nil {
+		if closure := g.closures.latestCompletionClosureEvidence(ctx, run, step); len(closure) > 0 {
+			input["latestClosureEvidence"] = closure
+			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+				input["supersededFailureEvidence"] = superseded
+			}
 		}
 	}
 	input["assessmentEvidenceGuidance"] = []string{
@@ -1331,12 +1353,12 @@ func noActionableContinuationFollowUpStepInputFromSteps(run *runModel.Run, step 
 	return enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
 }
 
-func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+func (g *graphSubsystem) noActionableContinuationFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
 	input := noActionableContinuationFollowUpStepInput(run, step)
-	if o == nil || o.steps == nil || run == nil {
+	if g == nil || g.steps == nil || run == nil {
 		return input
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return input
 	}
@@ -1344,12 +1366,12 @@ func (o *RuntimeOrchestrator) noActionableContinuationFollowUpStepInput(ctx cont
 	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
-func (o *RuntimeOrchestrator) llmCompletionFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+func (g *graphSubsystem) llmCompletionFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
 	input := llmCompletionFollowUpStepInput(run, step)
-	if o == nil || o.steps == nil || run == nil {
+	if g == nil || g.steps == nil || run == nil {
 		return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 	}
@@ -1368,20 +1390,20 @@ func graphFollowUpStepID(runID common.RunID, step *runModel.Step) common.StepID 
 	return common.StepID(fmt.Sprintf("%s/follow-up-graph-%s", runID, nodeID))
 }
 
-func (o *RuntimeOrchestrator) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
-	if o == nil || o.steps == nil || run == nil {
+func (g *graphSubsystem) graphFollowUpStepInput(ctx context.Context, run *runModel.Run, step *runModel.Step) map[string]any {
+	if g == nil || g.steps == nil || run == nil {
 		return restoreCoverageWorkItemContinuationConvergenceContract(run, graphFollowUpStepInput(run, step))
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return restoreCoverageWorkItemContinuationConvergenceContract(run, graphFollowUpStepInput(run, step))
 	}
-	return o.graphFollowUpStepInputFromSteps(run, step, steps)
+	return g.graphFollowUpStepInputFromSteps(run, step, steps)
 }
 
-func (o *RuntimeOrchestrator) graphFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
+func (g *graphSubsystem) graphFollowUpStepInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) map[string]any {
 	input := graphFollowUpStepInput(run, step)
-	evidence := o.completedGraphEvidenceFromSteps(run, step, steps)
+	evidence := g.completedGraphEvidenceFromSteps(run, step, steps)
 	input = enrichGraphFollowUpInputWithEvidence(input, evidence)
 	input = restoreRepairContractAfterConcreteEvidenceAcquisition(input, evidenceAcquisitionSourceStep(step, steps), evidence)
 	input = enrichRunEvidenceSummaryInput(input, runEvidenceSummaryFromRunSteps(run, steps))
@@ -1897,18 +1919,18 @@ func graphFollowUpStepInput(run *runModel.Run, step *runModel.Step) map[string]a
 	return input
 }
 
-func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *runModel.Run, anchor *runModel.Step) []map[string]any {
-	if o == nil || o.steps == nil || run == nil || anchor == nil {
+func (g *graphSubsystem) completedGraphEvidence(ctx context.Context, run *runModel.Run, anchor *runModel.Step) []map[string]any {
+	if g == nil || g.steps == nil || run == nil || anchor == nil {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return nil
 	}
-	return o.completedGraphEvidenceFromSteps(run, anchor, steps)
+	return g.completedGraphEvidenceFromSteps(run, anchor, steps)
 }
 
-func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(run *runModel.Run, anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
+func (g *graphSubsystem) completedGraphEvidenceFromSteps(run *runModel.Run, anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
 	graphSource := anchor
 	if rootStepID := graphRootStepID(anchor); rootStepID != "" && rootStepID != anchor.ID {
 		for _, step := range steps {
@@ -2013,11 +2035,11 @@ func runEvidenceSummaryFromRunSteps(run *runModel.Run, steps []*runModel.Step) [
 	return items
 }
 
-func (o *RuntimeOrchestrator) currentRunProcessEvidenceContext(ctx context.Context, run *runModel.Run, currentStepID common.StepID) ([]map[string]any, map[string]any) {
-	if o == nil || o.steps == nil || run == nil || run.ID == "" {
+func (g *graphSubsystem) currentRunProcessEvidenceContext(ctx context.Context, run *runModel.Run, currentStepID common.StepID) ([]map[string]any, map[string]any) {
+	if g == nil || g.steps == nil || run == nil || run.ID == "" {
 		return nil, nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRun(ctx, run.ID)
 	if err != nil || len(steps) == 0 {
 		return nil, nil
 	}

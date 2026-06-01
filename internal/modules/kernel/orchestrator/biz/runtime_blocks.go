@@ -560,8 +560,8 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 		return common.ErrInvalidArgument
 	}
 	output := decisionOutputFromSpec(spec)
-	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": output})
-	if !ShouldCreateDecisionTicket(step.Input, output, contract) {
+	contract := o.convergenceManager().build(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": output})
+	if !o.convergenceManager().shouldCreateDecisionTicket(step.Input, output, contract) {
 		return common.ErrInvalidArgument
 	}
 

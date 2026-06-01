@@ -21,7 +21,7 @@ func (o *RuntimeOrchestrator) recordToolCallStarted(ctx context.Context, run *ru
 		RunID:       run.ID,
 		StepID:      step.ID,
 		ToolName:    step.Kind,
-		Arguments:   runtimeToolCallArguments(run, step),
+		Arguments:   runtimeToolCallArguments(o.llmContextManager(), run, step),
 		State:       common.ToolCallStateRunning,
 		StartedAt:   now,
 	}
@@ -86,7 +86,7 @@ func (o *RuntimeOrchestrator) recordToolCallCompleted(ctx context.Context, toolC
 	toolCall.State = common.ToolCallStateCompleted
 	toolCall.EndedAt = runtimeEvidenceTimestamp()
 	toolCall.ExitSummary = localizedStepCompletionSummary(dialogLanguage)
-	toolCall.Output = runtimeToolCallOutput(toolCall, output)
+	toolCall.Output = runtimeToolCallOutput(o.llmContextManager(), toolCall, output)
 	toolCall.Error = ""
 	if err := o.evidence.ToolCalls.Update(ctx, toolCall); err != nil {
 		if err == common.ErrNotFound {
@@ -131,7 +131,7 @@ func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall
 	toolCall.State = common.ToolCallStateFailed
 	toolCall.EndedAt = runtimeEvidenceTimestamp()
 	toolCall.ExitSummary = "runtime step failed"
-	toolCall.Output = runtimeToolCallOutput(toolCall, output)
+	toolCall.Output = runtimeToolCallOutput(o.llmContextManager(), toolCall, output)
 	if execErr != nil {
 		toolCall.Error = execErr.Error()
 	}
@@ -144,9 +144,12 @@ func (o *RuntimeOrchestrator) recordToolCallFailed(ctx context.Context, toolCall
 	return nil
 }
 
-func runtimeToolCallArguments(run *runModel.Run, step *runModel.Step) map[string]any {
+func runtimeToolCallArguments(llmContext *llmContextSubsystem, run *runModel.Run, step *runModel.Step) map[string]any {
 	if run == nil || step == nil {
 		return nil
+	}
+	if llmContext == nil {
+		llmContext = newLLMContextSubsystem()
 	}
 	ret := map[string]any{
 		"workspaceId": string(run.WorkspaceID),
@@ -155,15 +158,18 @@ func runtimeToolCallArguments(run *runModel.Run, step *runModel.Step) map[string
 		"stepKind":    step.Kind,
 		"inputRef":    runtimeRawPayloadRef(run.WorkspaceID, run.ID, "steps", string(step.ID), "input.json"),
 	}
-	if summary := compactStepInputForLLMContext(step.Input); len(summary) > 0 {
+	if summary := llmContext.compactStepInput(step.Input); len(summary) > 0 {
 		ret["inputSummary"] = summary
 	}
 	return ret
 }
 
-func runtimeToolCallOutput(toolCall *runModel.ToolCall, output map[string]any) map[string]any {
+func runtimeToolCallOutput(llmContext *llmContextSubsystem, toolCall *runModel.ToolCall, output map[string]any) map[string]any {
+	if llmContext == nil {
+		llmContext = newLLMContextSubsystem()
+	}
 	if toolCall == nil {
-		return compactStepOutputForLLMContext(output)
+		return llmContext.compactStepOutput(output)
 	}
 	ret := map[string]any{
 		"workspaceId": string(toolCall.WorkspaceID),
@@ -172,7 +178,7 @@ func runtimeToolCallOutput(toolCall *runModel.ToolCall, output map[string]any) m
 		"toolCallId":  string(toolCall.ID),
 		"outputRef":   runtimeRawPayloadRef(toolCall.WorkspaceID, toolCall.RunID, "steps", string(toolCall.StepID), "output.json"),
 	}
-	if summary := compactStepOutputForLLMContext(output); len(summary) > 0 {
+	if summary := llmContext.compactStepOutput(output); len(summary) > 0 {
 		for key, value := range summary {
 			ret[key] = value
 		}

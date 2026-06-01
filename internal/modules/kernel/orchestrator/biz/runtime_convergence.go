@@ -29,6 +29,34 @@ type ConvergenceContract struct {
 	HistoricalSignals               map[string]any
 }
 
+type convergenceSubsystem struct{}
+
+func newConvergenceSubsystem() *convergenceSubsystem {
+	return &convergenceSubsystem{}
+}
+
+func (c *convergenceSubsystem) build(
+	run *runModel.Run,
+	currentStep *runModel.Step,
+	failedStep *runModel.Step,
+	lineage map[string]any,
+	evidence map[string]any,
+) ConvergenceContract {
+	return BuildConvergenceContract(run, currentStep, failedStep, lineage, evidence)
+}
+
+func (c *convergenceSubsystem) apply(input map[string]any, contract ConvergenceContract) map[string]any {
+	return ApplyConvergenceContract(input, contract)
+}
+
+func (c *convergenceSubsystem) shouldCreateDecisionTicket(input map[string]any, llmOutput map[string]any, contract ConvergenceContract) bool {
+	return ShouldCreateDecisionTicket(input, llmOutput, contract)
+}
+
+func (c *convergenceSubsystem) compact(contract ConvergenceContract) map[string]any {
+	return compactConvergenceContract(contract)
+}
+
 func BuildConvergenceContract(
 	run *runModel.Run,
 	currentStep *runModel.Step,

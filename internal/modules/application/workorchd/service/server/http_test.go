@@ -810,6 +810,7 @@ func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	registerSystemRoutes(router, state)
+	registerConfigurationRoutes(router, state)
 	registerReadRoutes(router, state)
 	registerBusinessWriteRoutes(router, state)
 	registerConsoleRoutes(router)

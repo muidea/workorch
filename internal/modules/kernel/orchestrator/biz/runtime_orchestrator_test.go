@@ -2176,7 +2176,7 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 	step := &runmodel.Step{ID: "run-patch-preview-event/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-preview-event/step-1/tool-call"}
 
-	err := orch.publishPatchPreviewFromOutput(ctx, run, step, toolCall, map[string]any{
+	err := orch.patchManager().publishPreviewFromOutput(ctx, run, step, toolCall, map[string]any{
 		"patchPreview": map[string]any{
 			"patchType":   "file_write",
 			"targetRef":   "preview.txt",
@@ -2217,7 +2217,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	step := &runmodel.Step{ID: "run-patch-event/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-event/step-1/tool-call"}
 
-	if err := orch.applyRuntimePatches(ctx, run, step, toolCall, map[string]any{
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType": "file_write",
 			"targetRef": "applied.txt",
@@ -2232,7 +2232,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	}
 
 	failedStep := &runmodel.Step{ID: "run-patch-event/step-2", RunID: run.ID}
-	err := orch.applyRuntimePatches(ctx, run, failedStep, toolCall, map[string]any{
+	err := orch.patchManager().apply(ctx, run, failedStep, toolCall, map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType": "unified_diff",
 			"targetRef": "main.go",
@@ -2305,7 +2305,7 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	run := &runmodel.Run{ID: "run-patch-revert", WorkspaceID: "ws-patch-revert"}
 	step := &runmodel.Step{ID: "run-patch-revert/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert/step-1/tool-call"}
-	if err := orch.applyRuntimePatches(ctx, run, step, toolCall, map[string]any{
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType": "file_write",
 			"targetRef": "main.go",
@@ -2325,7 +2325,7 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	}
 	revertStep := &runmodel.Step{ID: "run-patch-revert/step-2", RunID: run.ID}
 	output := map[string]any{"patchRevert": map[string]any{"patchId": string(patchID)}}
-	if err := orch.applyRuntimePatchRevert(ctx, run, revertStep, toolCall, output, deliverableDirectory); err != nil {
+	if err := orch.patchManager().revert(ctx, run, revertStep, toolCall, output, deliverableDirectory); err != nil {
 		t.Fatalf("revert patch: %v", err)
 	}
 	content, err := os.ReadFile(filepath.Join(deliverableDirectory, "main.go"))
@@ -2368,7 +2368,7 @@ func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 	run := &runmodel.Run{ID: "run-patch-revert-conflict", WorkspaceID: "ws-patch-revert-conflict"}
 	step := &runmodel.Step{ID: "run-patch-revert-conflict/step-1", RunID: run.ID}
 	toolCall := &runmodel.ToolCall{ID: "run-patch-revert-conflict/step-1/tool-call"}
-	if err := orch.applyRuntimePatches(ctx, run, step, toolCall, map[string]any{
+	if err := orch.patchManager().apply(ctx, run, step, toolCall, map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType": "file_write",
 			"targetRef": "main.go",
@@ -2382,7 +2382,7 @@ func TestRuntimeOrchestratorRevertRejectsHashDrift(t *testing.T) {
 		t.Fatalf("drift file: %v", err)
 	}
 	patchID := common.PatchID("run-patch-revert-conflict/step-1/patch/1")
-	err := orch.applyRuntimePatchRevert(ctx, run, &runmodel.Step{ID: "run-patch-revert-conflict/step-2", RunID: run.ID}, toolCall, map[string]any{
+	err := orch.patchManager().revert(ctx, run, &runmodel.Step{ID: "run-patch-revert-conflict/step-2", RunID: run.ID}, toolCall, map[string]any{
 		"patchRevert": map[string]any{"patchId": string(patchID)},
 	}, deliverableDirectory)
 	if !errors.Is(err, common.ErrConflict) {
@@ -2490,7 +2490,7 @@ func TestRuntimeOrchestratorAllowsSensitivePatchWithApprovedApprovalID(t *testin
 		events.NewMemoryHub(),
 	)
 
-	spec, err := orch.patchApprovalBlockSpec(ctx, runID, "", map[string]any{
+	spec, err := orch.patchManager().approvalBlockSpec(ctx, runID, "", map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType":  "file_write",
 			"targetRef":  ".env",
@@ -5753,225 +5753,6 @@ func TestValidateRepairPatchTargetRelevanceAllowsDeclaredRelatedCanonicalTarget(
 	}
 }
 
-func TestCompactLLMContextDropsHeavyTransportFields(t *testing.T) {
-	largeRepairContent := "package main\n" + strings.Repeat("func currentShape() {}\n", 300)
-	input := compactStepInputForLLMContext(map[string]any{
-		"executionContext":                  map[string]any{"skills": []any{map[string]any{"instruction": strings.Repeat("s", 256)}}},
-		stepInputKeyExecutionContextPackage: map[string]any{"workspaceFileManifest": []map[string]any{{"path": ".git/object"}}},
-		stepInputKeyWorkspaceFileManifest:   []map[string]any{{"path": ".git/object"}},
-		"failedStepInput": map[string]any{
-			"executionContext": map[string]any{"memories": []any{map[string]any{"content": strings.Repeat("m", 256)}}},
-		},
-		"failedStepOutput": map[string]any{"stderr": strings.Repeat("e", 256)},
-		"previousStepOutput": map[string]any{
-			stepOutputKeyExecutionGraph: map[string]any{"nodes": []any{map[string]any{"id": "inspect", "kind": "file/list"}}},
-		},
-		"repairActionPackage": map[string]any{
-			"requiredOutput": map[string]any{"mustIncludeStateChangingNode": true, "acceptedKinds": []string{"patch/apply"}},
-			"targetSnapshots": []map[string]any{{
-				"targetRef":        "main.go",
-				"contentHash":      "hash-main",
-				"contentComplete":  true,
-				"safeForFileWrite": true,
-				"redacted":         false,
-				"truncated":        false,
-				"content":          largeRepairContent,
-			}},
-		},
-		"failedStepId":  "run-1/block/test",
-		"failureReason": strings.Repeat("x", maxLLMContextStringBytes+16),
-	})
-	if _, ok := input["executionContext"]; ok {
-		t.Fatalf("executionContext should be dropped from compact input")
-	}
-	if _, ok := input[stepInputKeyExecutionContextPackage]; ok {
-		t.Fatalf("executionContextPackage should be dropped from compact input")
-	}
-	if _, ok := input[stepInputKeyWorkspaceFileManifest]; ok {
-		t.Fatalf("workspaceFileManifest should be dropped from compact input")
-	}
-	for _, key := range []string{"failedStepInput", "failedStepOutput", "previousStepOutput"} {
-		if _, ok := input[key]; ok {
-			t.Fatalf("%s should be dropped from compact input", key)
-		}
-	}
-	if got := fmt.Sprint(input["failureReason"]); len(got) > maxLLMContextStringBytes+3 {
-		t.Fatalf("failureReason length = %d, want truncated", len(got))
-	}
-	actionPackage := mapFromValue(input["repairActionPackage"])
-	if len(actionPackage) == 0 {
-		t.Fatalf("repairActionPackage = %#v, want retained actionable package", input["repairActionPackage"])
-	}
-	if targets := mapSliceFromValue(actionPackage["targetSnapshots"]); len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
-		t.Fatalf("repairActionPackage.targetSnapshots = %#v, want compact target snapshot", actionPackage["targetSnapshots"])
-	} else if got, want := stringFromMap(targets[0], "content"), strings.TrimSpace(largeRepairContent); got != want {
-		t.Fatalf("repairActionPackage.targetSnapshots[0].content length = %d, want untruncated safe target length %d", len(got), len(want))
-	}
-
-	output := compactStepOutputForLLMContext(map[string]any{
-		"stderr":       strings.Repeat("e", maxLLMContextStringBytes+10),
-		"failureClass": failureClassShellCommand,
-		"provider":     map[string]any{"id": "old-provider", "baseUrl": "http://127.0.0.1:8090/v1"},
-		"contextBudget": map[string]any{
-			"actualBytes": 1200,
-			"providerId":  "old-provider",
-			"model":       "old-model",
-			"profile":     map[string]any{"maxInputTokens": 1},
-		},
-		"llmUsage": map[string]any{
-			"inputTokens": 10,
-			"providerId":  "old-provider",
-			"provider":    "compatible",
-			"model":       "old-model",
-		},
-		"nested": map[string]any{
-			"executionContext":                  map[string]any{"large": "value"},
-			stepInputKeyExecutionContextPackage: map[string]any{"large": "value"},
-			"failedStepInput":                   map[string]any{"large": "value"},
-		},
-	})
-	if output["failureClass"] != failureClassShellCommand {
-		t.Fatalf("failureClass = %v, want preserved", output["failureClass"])
-	}
-	if output["provider"] != nil || output["providerId"] != nil {
-		t.Fatalf("output = %+v, want provider binding stripped", output)
-	}
-	if budget := mapFromValue(output["contextBudget"]); budget["providerId"] != nil || budget["model"] != nil || budget["profile"] != nil {
-		t.Fatalf("contextBudget = %+v, want provider binding stripped", budget)
-	}
-	if usage := mapFromValue(output["llmUsage"]); usage["providerId"] != nil || usage["provider"] != nil || usage["model"] != nil {
-		t.Fatalf("llmUsage = %+v, want provider binding stripped", usage)
-	}
-	stderr := mapFromValue(output["stderr"])
-	if len(stderr) == 0 ||
-		stderr["truncated"] != true ||
-		int64FromValue(stderr["bytes"]) <= maxLLMContextEvidenceTextBytes ||
-		!strings.HasSuffix(fmt.Sprint(stderr["textPreview"]), "...") {
-		t.Fatalf("stderr = %#v, want compact evidence text summary", output["stderr"])
-	}
-	nested := mapFromValue(output["nested"])
-	if _, ok := nested[stepInputKeyExecutionContextPackage]; ok {
-		t.Fatalf("nested executionContextPackage should be dropped")
-	}
-	if _, ok := nested["executionContext"]; ok {
-		t.Fatalf("nested executionContext should be dropped")
-	}
-	if _, ok := nested["failedStepInput"]; ok {
-		t.Fatalf("nested failedStepInput should be dropped")
-	}
-}
-
-func TestCompactLLMContextOmitsArtifactChunkContent(t *testing.T) {
-	chunkContent := "line 1\nline 2\nline 3\n"
-	input := compactStepInputForLLMContext(map[string]any{
-		"outputMode": outputModeIncrementalArtifact,
-		"artifactContinuationContext": map[string]any{
-			"id":                  "continuation-001",
-			"runId":               "run-001",
-			"artifactId":          "artifact-001",
-			"targetRef":           "deliverable.txt",
-			"operation":           "replace",
-			"expectedSequence":    2,
-			"previousChunkTail":   "line 1\n",
-			"receivedSequences":   []int{1},
-			"receivedChunkHashes": map[int]string{1: "sha256:previous"},
-			"coverageTargets":     []string{"cwi-001"},
-			"content":             chunkContent,
-			"body":                chunkContent,
-		},
-	})
-	continuation := mapFromValue(input["artifactContinuationContext"])
-	if continuation["artifactId"] != "artifact-001" || continuation["expectedSequence"] != 2 {
-		t.Fatalf("artifactContinuationContext = %+v, want compact current cursor", continuation)
-	}
-	if continuation["content"] != nil || continuation["body"] != nil || continuation["previousChunkTail"] != nil {
-		t.Fatalf("artifactContinuationContext = %+v, want no raw body", continuation)
-	}
-
-	output := compactStepOutputForLLMContext(map[string]any{
-		"artifactChunk": map[string]any{
-			"artifactId": "artifact-001",
-			"targetRef":  "deliverable.txt",
-			"sequence":   2,
-			"content":    chunkContent,
-			"isFinal":    false,
-			"chunkHash":  "sha256:chunk",
-			"endsWith":   "line 3",
-		},
-		stepOutputKeyLLMDecision: map[string]any{
-			"artifactChunk": map[string]any{
-				"artifactId": "artifact-001",
-				"targetRef":  "deliverable.txt",
-				"sequence":   2,
-				"content":    chunkContent,
-				"isFinal":    false,
-				"chunkHash":  "sha256:chunk",
-			},
-		},
-	})
-	encoded, err := json.Marshal(output)
-	if err != nil {
-		t.Fatalf("marshal compact artifact output: %v", err)
-	}
-	if strings.Contains(string(encoded), chunkContent) || strings.Contains(string(encoded), `"content":"`) {
-		t.Fatalf("compact artifact output retained chunk content: %s", encoded)
-	}
-	chunk := mapFromValue(output["artifactChunk"])
-	if chunk["contentOmitted"] != true || chunk["contentBytes"] != len([]byte(strings.TrimSpace(chunkContent))) {
-		t.Fatalf("artifactChunk = %+v, want omitted content metadata", chunk)
-	}
-	decisionChunk := mapFromValue(mapFromValue(output[stepOutputKeyLLMDecision])["artifactChunk"])
-	if decisionChunk["contentOmitted"] != true {
-		t.Fatalf("llmDecision.artifactChunk = %+v, want omitted content metadata", decisionChunk)
-	}
-}
-
-func TestRuntimeContextLineageCompactionDropsRawFailureArtifacts(t *testing.T) {
-	rawContent := "package main\nconst apiKey = \"[REDACTED]\"\n"
-	continuation := compactReplanContinuationForRuntimeContext(map[string]any{
-		"predecessorRunId": "run-before",
-		"reason":           "decision_replan",
-		"ticketContext": map[string]any{
-			"failureClass":     failureClassRuntime,
-			"failureSignature": "class=runtime_failed|kind=llm/workspace_execution|failureTargets=main.go",
-			"failedStepInput": map[string]any{
-				"executionContext": map[string]any{"large": strings.Repeat("x", 4096)},
-			},
-			"failureTargetRepairContext": []map[string]any{{
-				"targetRef":        "main.go",
-				"contentHash":      "hash-main",
-				"contentComplete":  true,
-				"safeForFileWrite": true,
-				"content":          rawContent,
-			}},
-			"failedStepOutput": map[string]any{
-				"stage":             "llm_schema_invalid",
-				"rawContentPreview": `{"diff":"[REDACTED]"}`,
-				"streamEvents": []map[string]any{{
-					"delta": `{"content":"[REDACTED]"}`,
-				}},
-			},
-		},
-	})
-	encoded, err := json.Marshal(continuation)
-	if err != nil {
-		t.Fatalf("marshal compact continuation: %v", err)
-	}
-	text := string(encoded)
-	if strings.Contains(text, rawContent) || strings.Contains(text, "failedStepInput") || strings.Contains(text, "[REDACTED]") {
-		t.Fatalf("compact continuation retained raw failure artifacts: %s", text)
-	}
-	ticketContext := mapFromValue(continuation["ticketContext"])
-	targets := mapSliceFromValue(ticketContext["targetSnapshots"])
-	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["content"] != nil {
-		t.Fatalf("targetSnapshots = %#v, want metadata-only lineage target", ticketContext["targetSnapshots"])
-	}
-	failedOutput := mapFromValue(ticketContext["failedStepOutput"])
-	if failedOutput["rawContentPreviewOmitted"] != true || failedOutput["streamEventsOmitted"] != true {
-		t.Fatalf("failedStepOutput = %#v, want invalid LLM raw content omitted", failedOutput)
-	}
-}
-
 func TestRuntimeEvidenceAndStepEventsUseRawRefsInsteadOfDuplicatingFullPayloads(t *testing.T) {
 	run := &runmodel.Run{ID: "run-ref-evidence", WorkspaceID: "ws-ref-evidence"}
 	step := &runmodel.Step{
@@ -5994,9 +5775,10 @@ func TestRuntimeEvidenceAndStepEventsUseRawRefsInsteadOfDuplicatingFullPayloads(
 		},
 	}
 
-	args := runtimeToolCallArguments(run, step)
-	eventInput := runtimeStepEventInput(run, step)
-	eventOutput := runtimeStepEventOutput(run, step)
+	llmContext := newLLMContextSubsystem()
+	args := runtimeToolCallArguments(llmContext, run, step)
+	eventInput := runtimeStepEventInput(llmContext, run, step)
+	eventOutput := runtimeStepEventOutput(llmContext, run, step)
 
 	encoded, err := json.Marshal(map[string]any{
 		"args":        args,
@@ -6012,51 +5794,6 @@ func TestRuntimeEvidenceAndStepEventsUseRawRefsInsteadOfDuplicatingFullPayloads(
 	}
 	if args["inputRef"] == "" || eventInput["inputRef"] == "" || eventOutput["outputRef"] == "" {
 		t.Fatalf("refs missing: args=%+v eventInput=%+v eventOutput=%+v", args, eventInput, eventOutput)
-	}
-}
-
-func TestCompactStepOutputForLLMContextOmitsRedactedRejectedPatchFragments(t *testing.T) {
-	output := compactStepOutputForLLMContext(map[string]any{
-		"status":            "failed",
-		"error":             "invalid argument: patch diff contains redacted runtime markers",
-		"rawContentPreview": `{"patches":[{"targetRef":"main.go","diff":"@@ -1 +1 @@\n+token [REDACTED]"}]}`,
-		"patchRequests": []map[string]any{{
-			"targetRef": "main.go",
-			"patchType": "file_write",
-			"content":   "package main\nconst token = \"[REDACTED]\"\n",
-		}},
-		"llmDecision": map[string]any{
-			stepOutputKeyExecutionGraph: map[string]any{
-				"nodes": []map[string]any{{
-					"id":   "patch",
-					"kind": "patch/apply",
-					"input": map[string]any{
-						"targetRef": "main.go",
-						"patchType": "unified_diff",
-						"diff":      "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n+token [REDACTED]\n",
-					},
-				}},
-			},
-		},
-	})
-
-	encoded, err := json.Marshal(output)
-	if err != nil {
-		t.Fatalf("marshal compact output: %v", err)
-	}
-	if strings.Contains(string(encoded), "[REDACTED]") {
-		t.Fatalf("compact output still exposes redacted marker: %s", encoded)
-	}
-	if omitted := mapFromValue(output["rawContentPreview"]); omitted["omitted"] != true || omitted["containedRuntimeRedactionMarker"] != true {
-		t.Fatalf("rawContentPreview = %#v, want omitted redacted content summary", output["rawContentPreview"])
-	}
-	requests, _ := output["patchRequests"].([]any)
-	if len(requests) != 1 {
-		t.Fatalf("patchRequests = %#v, want one compact request", output["patchRequests"])
-	}
-	request := mapFromValue(requests[0])
-	if request["targetRef"] != "main.go" || mapFromValue(request["content"])["omitted"] != true {
-		t.Fatalf("patchRequests[0] = %#v, want target preserved and content omitted", request)
 	}
 }
 
@@ -9052,114 +8789,6 @@ func TestRuntimeOrchestrator_BlocksOnDecisionAfterProviderTimeoutRetriesExhauste
 	}
 }
 
-func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIncludesDispatchedProviderInfrastructureFailures(t *testing.T) {
-	ctx := context.Background()
-	runID := common.RunID("run-runtime-repair-budget-provider-failures")
-	stepRepo := memory.NewStepRepository()
-	orch := &RuntimeOrchestrator{steps: stepRepo}
-
-	seedSteps := []*runmodel.Step{
-		{
-			ID:    common.StepID(runID + "/provider-misrouted-repair"),
-			RunID: runID,
-			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
-			Input: map[string]any{
-				stepInputKeyRuntimeRepairFollowUp: true,
-				failureOutputKeyClass:             failureClassProviderTimeout,
-			},
-			Output: map[string]any{"status": "completed"},
-		},
-		{
-			ID:    common.StepID(runID + "/repair-provider-timeout"),
-			RunID: runID,
-			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateFailed,
-			Input: map[string]any{
-				stepInputKeyRuntimeRepairFollowUp: true,
-				failureOutputKeyClass:             failureClassRuntime,
-			},
-			Output: map[string]any{
-				"stage":               "llm_provider_timeout",
-				failureOutputKeyClass: failureClassProviderTimeout,
-			},
-		},
-		{
-			ID:    common.StepID(runID + "/real-runtime-repair"),
-			RunID: runID,
-			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
-			Input: map[string]any{
-				stepInputKeyRuntimeRepairFollowUp: true,
-				failureOutputKeyClass:             failureClassRuntime,
-			},
-			Output: map[string]any{
-				"stage":               "llm_execution_graph_plan",
-				failureOutputKeyClass: failureClassRuntime,
-			},
-		},
-	}
-	for _, step := range seedSteps {
-		if err := stepRepo.Create(ctx, step); err != nil {
-			t.Fatalf("seed step %s: %v", step.ID, err)
-		}
-	}
-
-	if got := orch.runtimeRepairAttemptCount(ctx, runID); got != len(seedSteps) {
-		t.Fatalf("runtimeRepairAttemptCount = %d, want every dispatched runtime repair attempt counted", got)
-	}
-}
-
-func TestRuntimeOrchestrator_RuntimeRepairAttemptCountIsScopedByFailureSignature(t *testing.T) {
-	ctx := context.Background()
-	runID := common.RunID("run-runtime-repair-budget-scoped-signature")
-	stepRepo := memory.NewStepRepository()
-	orch := &RuntimeOrchestrator{steps: stepRepo}
-	for attempt := 1; attempt <= defaultMaxRuntimeRepairAttempts; attempt++ {
-		if err := stepRepo.Create(ctx, &runmodel.Step{
-			ID:    common.StepID(fmt.Sprintf("%s/repair-a-%d", runID, attempt)),
-			RunID: runID,
-			Kind:  llmcommon.StepKindWorkspaceExecution,
-			State: common.StepStateCompleted,
-			Input: map[string]any{
-				stepInputKeyRuntimeRepairFollowUp: true,
-				stepInputKeyRuntimeRepairAttempt:  attempt,
-				stepInputKeyRepairOfFailureClass:  failureClassRuntime,
-				stepInputKeyRepairOfFailureSig:    "class=runtime|target=a",
-			},
-			Output: map[string]any{"status": "completed"},
-		}); err != nil {
-			t.Fatalf("seed scoped repair %d: %v", attempt, err)
-		}
-	}
-
-	failedA := &runmodel.Step{
-		ID:    common.StepID(runID + "/block/a"),
-		RunID: runID,
-		State: common.StepStateFailed,
-		Output: map[string]any{
-			failureOutputKeyClass:     failureClassRuntime,
-			failureOutputKeySignature: "class=runtime|target=a",
-		},
-	}
-	failedB := &runmodel.Step{
-		ID:    common.StepID(runID + "/block/b"),
-		RunID: runID,
-		State: common.StepStateFailed,
-		Output: map[string]any{
-			failureOutputKeyClass:     failureClassRuntime,
-			failureOutputKeySignature: "class=runtime|target=b",
-		},
-	}
-
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedA); got != defaultMaxRuntimeRepairAttempts {
-		t.Fatalf("attempt count for A = %d, want exhausted scope", got)
-	}
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedB); got != 0 {
-		t.Fatalf("attempt count for B = %d, want independent scope", got)
-	}
-}
-
 func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInheritedLineage(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-runtime-repair-budget-current-signature")
@@ -9197,10 +8826,10 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureBeforeInherited
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("attempt count = %d, want current output failure signature to ignore inherited lineage attempts", got)
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("effective attempt count = %d, want current output failure target to ignore inherited lineage attempts", got)
 	}
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{ID: runID, WorkspaceID: common.WorkspaceID("ws-current-signature")}, failedStep, 1, nil)
@@ -9265,7 +8894,7 @@ func TestRuntimeOrchestrator_RuntimeRepairScopeUsesCurrentFailureWithoutTargetSc
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("attempt count = %d, want current output failure signature to ignore inherited repair signature", got)
 	}
 	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
@@ -9339,10 +8968,10 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsRepairWrapperRootC
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("exact attempt count = %d, want signature-specific count to stay independent", got)
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want root/class wrapper attempts counted", got)
 	}
 	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-wrapper-root-class")}, failedStep) {
@@ -9436,10 +9065,10 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run-stream-test|failureTargets=stream_e2e_test.go|exitCode=1",
 		},
 	}
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("exact attempt count = %d, want node-specific signature to remain independent", got)
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want target scope exhausted", got)
 	}
 	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-scope")}, failedStep) {
@@ -9456,7 +9085,7 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=run-other-test|failureTargets=other_target_test.go|exitCode=1",
 		},
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, otherTarget); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, otherTarget); got != 0 {
 		t.Fatalf("other target effective attempt count = %d, want independent target scope", got)
 	}
 }
@@ -9504,7 +9133,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("effective attempt count = %d, want old graph-root attempts excluded", got)
 	}
 	if orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-window")}, failedStep) {
@@ -9527,7 +9156,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 	}); err != nil {
 		t.Fatalf("seed current target repair: %v", err)
 	}
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 1 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 1 {
 		t.Fatalf("effective attempt count = %d, want current graph-root target attempt counted", got)
 	}
 }
@@ -9575,7 +9204,7 @@ func TestRuntimeOrchestrator_PatchApplyTargetBudgetCrossesGraphWindows(t *testin
 		},
 	}
 
-	if got := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want patch target attempts counted across graph roots", got)
 	}
 	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-patch-target-budget")}, failedStep) {
@@ -9850,7 +9479,7 @@ func TestRuntimeRepairMCPFailureTargetUsesCompositeRunBudget(t *testing.T) {
 		},
 	}
 
-	if attempts := orch.runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); attempts != 2 {
+	if attempts := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); attempts != 2 {
 		t.Fatalf("effective attempts = %d, want same external capability target counted across graph roots", attempts)
 	}
 	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedStep) {
@@ -10886,7 +10515,7 @@ func TestRuntimeOrchestrator_ProviderRetryAttemptCountIgnoresSuccessfulProviderR
 		t.Fatalf("seed failed retry: %v", err)
 	}
 
-	if got := orch.providerRetryAttemptCount(ctx, runID, rootStepID); got != 1 {
+	if got := orch.repairManager().providerRetryAttemptCount(ctx, runID, rootStepID); got != 1 {
 		t.Fatalf("providerRetryAttemptCount = %d, want only failed provider retry attempts", got)
 	}
 }
@@ -11266,7 +10895,7 @@ func TestRuntimeOrchestrator_RuntimeRepairBudgetCountsProviderTimeoutRepairDispa
 			failureOutputKeySignature: signature,
 		},
 	}
-	if got := orch.runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 1 {
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 1 {
 		t.Fatalf("runtimeRepairAttemptCountForStep = %d, want provider-timeout repair dispatch counted", got)
 	}
 }
@@ -11336,7 +10965,7 @@ func TestRuntimeOrchestrator_ProviderRetryKeepsRootAcrossRetryFailure(t *testing
 	if got := providerRetryRootStepID(failedRetry); got != rootStepID {
 		t.Fatalf("providerRetryRootStepID = %q, want root %q", got, rootStepID)
 	}
-	if got := orch.providerRetryAttemptCount(ctx, runID, providerRetryRootStepID(failedRetry)); got != 1 {
+	if got := orch.repairManager().providerRetryAttemptCount(ctx, runID, providerRetryRootStepID(failedRetry)); got != 1 {
 		t.Fatalf("providerRetryAttemptCount = %d, want prior retry counted for same root", got)
 	}
 	nextID := providerRetryStepID(runID, providerRetryRootStepID(failedRetry), 2)
@@ -14021,7 +13650,7 @@ func TestRuntimeOrchestrator_GraphBatchContinuationUsesCurrentBatchRoot(t *testi
 	if !ok || len(continuedGraph.Nodes) != 3 {
 		t.Fatalf("continued graph = %+v/%v, want root execution graph", continuedGraph, ok)
 	}
-	nextSpecs := (&RuntimeOrchestrator{}).readyGraphStepSpecsFromSteps(ctx, run, last, continuedGraph, steps)
+	nextSpecs := newGraphSubsystem(nil, nil).readyGraphStepSpecsFromSteps(ctx, run, last, continuedGraph, steps)
 	if len(nextSpecs) != 1 || nextSpecs[0].ID != graphScopedStepID(runID, 1, 3, "verify") {
 		t.Fatalf("next specs = %+v, want dependent verify node from current graph", nextSpecs)
 	}
@@ -16362,11 +15991,11 @@ func TestRuntimeOrchestrator_GraphFollowUpReusesLoadedStepsForEvidence(t *testin
 		}
 	}
 
-	specs, steps := orch.readyGraphStepSpecsWithSteps(ctx, run, anchor)
+	specs, steps := orch.graphManager().readyGraphStepSpecsWithSteps(ctx, run, anchor)
 	if len(specs) != 0 {
 		t.Fatalf("ready specs = %+v, want no remaining graph node", specs)
 	}
-	input := orch.graphFollowUpStepInputFromSteps(run, anchor, steps)
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, anchor, steps)
 
 	if got := stepRepo.listCount.Load(); got != 1 {
 		t.Fatalf("step ListByRun count = %d, want 1 reused read", got)
@@ -16444,7 +16073,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractAfterConcreteEvi
 		},
 	}
 
-	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor, readStep})
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor, readStep})
 
 	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
 		input[stepInputKeyRuntimeStageMode] != "strict_convergence" ||
@@ -16529,7 +16158,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterLis
 		},
 	}
 
-	input := orch.graphFollowUpStepInputFromSteps(run, shellStep, []*runmodel.Step{root, listStep, shellStep})
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, shellStep, []*runmodel.Step{root, listStep, shellStep})
 
 	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
 		input[stepInputKeyRuntimeStageMode] != "strict_convergence" ||
@@ -16687,7 +16316,7 @@ func TestRuntimeOrchestrator_GraphFollowUpDoesNotRestoreRepairContractWithoutCon
 		Output: map[string]any{"stdout": "probe completed without target reference"},
 	}
 
-	input := orch.graphFollowUpStepInputFromSteps(run, probeStep, []*runmodel.Step{root, probeStep})
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, probeStep, []*runmodel.Step{root, probeStep})
 
 	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
 		input["repairObjective"] == repairObjectiveStateChangingOutput ||
@@ -16727,7 +16356,7 @@ func TestRuntimeOrchestrator_GraphFollowUpRunEvidenceIncludesPriorCompletedSteps
 		Output: map[string]any{"stdout": "current graph validation passed"},
 	}
 
-	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{priorStep, anchor, graphStep})
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{priorStep, anchor, graphStep})
 
 	graphEvidence := mapSliceFromValue(input[stepInputKeyGraphEvidence])
 	if len(graphEvidence) != 1 || graphEvidence[0]["nodeId"] != "verify" {
@@ -16812,7 +16441,7 @@ func TestGraphExpansionLimitAssessmentInputIncludesLatestClosureEvidence(t *test
 		t.Fatalf("list steps: %v", err)
 	}
 
-	input := orch.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
+	input := orch.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
 
 	if input[stepInputKeyAssessmentOnly] != true || input[stepInputKeyGraphLimitFollowUp] != true {
 		t.Fatalf("input = %+v, want graph limit assessment-only markers", input)
@@ -16926,7 +16555,7 @@ func TestGraphExpansionLimitFollowUpRestoresCoverageValidationConvergenceContrac
 	}
 	orch := &RuntimeOrchestrator{steps: stepRepo}
 
-	input := orch.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
+	input := orch.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, anchor, steps, maxGraphFollowUpExpansionAttempts+1)
 
 	if input[stepInputKeyAssessmentOnly] == true {
 		t.Fatalf("input = %+v, want coverage convergence contract to clear graph-limit assessment-only", input)
@@ -16975,7 +16604,7 @@ func TestGraphFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T
 	}
 	orch := &RuntimeOrchestrator{}
 
-	input := orch.graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor})
+	input := orch.graphManager().graphFollowUpStepInputFromSteps(run, anchor, []*runmodel.Step{anchor})
 
 	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
 		input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
@@ -16995,76 +16624,6 @@ func TestGraphFollowUpRestoresCoverageValidationConvergenceContract(t *testing.T
 	targets := mapSliceFromValue(input["coverageTargetSet"])
 	if len(targets) != 1 || targets[0]["sourceRequirementId"] != "dod-graph-validation-dod-item-001" {
 		t.Fatalf("coverageTargetSet = %+v, want focused coverage work item target", input["coverageTargetSet"])
-	}
-}
-
-func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
-	runID := common.RunID("run-evidence-priority")
-	steps := make([]*runmodel.Step, 0, maxLLMContextSliceItems+3)
-	for idx := 0; idx < maxLLMContextSliceItems+2; idx++ {
-		steps = append(steps, &runmodel.Step{
-			ID:     common.StepID(fmt.Sprintf("%s/llm-%03d", runID, idx)),
-			RunID:  runID,
-			Kind:   llmWorkspaceExecutionStepKind,
-			State:  common.StepStateCompleted,
-			Output: map[string]any{"status": "completed"},
-		})
-	}
-	critical := &runmodel.Step{
-		ID:     common.StepID(runID + "/graph-001/002-verify"),
-		RunID:  runID,
-		Kind:   shellcommon.StepKindCommand,
-		State:  common.StepStateCompleted,
-		Output: map[string]any{"stdout": "critical validation passed"},
-	}
-	steps = append([]*runmodel.Step{critical}, steps...)
-
-	evidence := runEvidenceSummaryFromSteps(steps)
-
-	if len(evidence) != maxLLMContextSliceItems {
-		t.Fatalf("runEvidenceSummary length = %d, want %d", len(evidence), maxLLMContextSliceItems)
-	}
-	foundCritical := false
-	for _, item := range evidence {
-		if item["stepId"] == string(critical.ID) {
-			foundCritical = true
-			break
-		}
-	}
-	if !foundCritical {
-		t.Fatalf("runEvidenceSummary = %+v, want critical shell evidence retained", evidence)
-	}
-}
-
-func TestRunEvidenceSummaryIncludesOutputRefAndTargetedLargeTextExcerpt(t *testing.T) {
-	run := &runmodel.Run{
-		ID:          "run-evidence-ref",
-		WorkspaceID: "ws-evidence-ref",
-	}
-	step := &runmodel.Step{
-		ID:    "run-evidence-ref/graph-001/001-verify",
-		RunID: run.ID,
-		Kind:  shellcommon.StepKindCommand,
-		State: common.StepStateFailed,
-		Output: map[string]any{
-			"stderr": strings.Repeat("head-line\n", 200) + "final actionable failure",
-		},
-	}
-
-	evidence := runEvidenceSummaryFromRunSteps(run, []*runmodel.Step{step})
-
-	if len(evidence) != 1 {
-		t.Fatalf("runEvidenceSummary length = %d, want 1", len(evidence))
-	}
-	if evidence[0]["outputRef"] != "workorch://workspaces/ws-evidence-ref/runs/run-evidence-ref/steps/run-evidence-ref/graph-001/001-verify/output.json" {
-		t.Fatalf("outputRef = %#v", evidence[0]["outputRef"])
-	}
-	output := mapFromValue(evidence[0]["output"])
-	stderr := mapFromValue(output["stderr"])
-	if stderr["truncated"] != true ||
-		!strings.Contains(fmt.Sprint(stderr["headPreview"]), "head-line") ||
-		!strings.Contains(fmt.Sprint(stderr["tailPreview"]), "final actionable failure") {
-		t.Fatalf("stderr = %+v, want targeted head/tail excerpt", stderr)
 	}
 }
 
@@ -17089,56 +16648,6 @@ func TestMergeRunExecutionContextPatchRefreshesEffectiveDefinitionIDs(t *testing
 	}
 	if run.ExecutionContext["existing"] != "kept" || run.ExecutionContext["goalId"] != "goal-new" || run.ExecutionContext["doDId"] != "dod-new" {
 		t.Fatalf("executionContext = %+v, want merged definition patch", run.ExecutionContext)
-	}
-}
-
-func TestRuntimeOrchestrator_ReadyGraphStepSpecsReusesLoadedStepsForStepID(t *testing.T) {
-	ctx := context.Background()
-	stepRepo := newCountingStepRepository()
-	orch := &RuntimeOrchestrator{steps: stepRepo}
-	runID := common.RunID("run-graph-step-id-efficiency")
-	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-graph-step-id-efficiency"}
-	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
-		{ID: "verify-file", Kind: "graph/mock"},
-	}}
-	root := &runmodel.Step{
-		ID:     common.StepID(string(runID) + "/zz-llm-after-graph-root"),
-		RunID:  runID,
-		Kind:   llmcommon.StepKindWorkspaceExecution,
-		State:  common.StepStateCompleted,
-		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
-	}
-	conflictingBaseStep := &runmodel.Step{
-		ID:     common.StepID(string(runID) + "/block/verify-file"),
-		RunID:  runID,
-		Kind:   "graph/mock",
-		State:  common.StepStateCompleted,
-		Input:  map[string]any{stepInputKeyGraphNodeID: "verify-file", stepInputKeyGraphRootStepID: string(runID) + "/previous-root"},
-		Output: map[string]any{"stdout": "previous graph scope"},
-	}
-	for _, step := range []*runmodel.Step{root, conflictingBaseStep} {
-		if err := stepRepo.Create(ctx, step); err != nil {
-			t.Fatalf("seed step %s: %v", step.ID, err)
-		}
-	}
-
-	specs, _ := orch.readyGraphStepSpecsWithSteps(ctx, run, root)
-
-	if got := stepRepo.listCount.Load(); got != 1 {
-		t.Fatalf("step ListByRun count = %d, want one graph step scan", got)
-	}
-	if got := stepRepo.getCount.Load(); got != 0 {
-		t.Fatalf("step Get count = %d, want step ID resolution to reuse loaded steps", got)
-	}
-	if len(specs) != 1 {
-		t.Fatalf("ready specs = %+v, want one graph node spec", specs)
-	}
-	wantID := graphScopedStepID(runID, 2, 1, "verify-file")
-	if specs[0].ID != wantID {
-		t.Fatalf("spec ID = %s, want scoped ID %s", specs[0].ID, wantID)
-	}
-	if strings.Contains(string(specs[0].ID), "zz-llm-after-graph") {
-		t.Fatalf("spec ID = %s, want readable scoped ID without embedded root lineage", specs[0].ID)
 	}
 }
 

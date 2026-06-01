@@ -576,7 +576,7 @@ func TestHandleArtifactOutputContinuationApplyUpdatesCoverageWorkItems(t *testin
 			},
 		},
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	item := newArtifactContinuationForAssembleTest()
 	item.ID = "artifact-continuation-coverage-update"
 	item.WorkspaceID = run.WorkspaceID

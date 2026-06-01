@@ -52,11 +52,12 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	}
 	now := runtimeEvidenceTimestamp()
 	evidenceRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
-	patchDetails := o.resultPatchDetails(ctx, run.ID)
+	results := o.resultManager()
+	patchDetails := results.resultPatchDetails(ctx, run.ID)
 	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
 	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
-	webSourceDetails := o.resultWebSourceDetails(ctx, run.ID)
-	gitOperationDetails := o.resultGitOperationDetails(ctx, run.ID)
+	webSourceDetails := results.resultWebSourceDetails(ctx, run.ID)
+	gitOperationDetails := results.resultGitOperationDetails(ctx, run.ID)
 	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails, gitOperationDetails)
 	manifestCh := make(chan string, 1)
 	go func() {
@@ -68,13 +69,13 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	}
 	summaryArtifactCh := make(chan artifactWriteResult, 1)
 	go func() {
-		refs, err := o.recordResultSummaryArtifact(ctx, run, step, summary, assessment, evidenceRefs, expectedArtifactRefs, now)
+		refs, err := results.recordResultSummaryArtifact(ctx, run, step, summary, assessment, evidenceRefs, expectedArtifactRefs, now)
 		summaryArtifactCh <- artifactWriteResult{refs: refs, err: err}
 	}()
 	manifest := <-manifestCh
 	manifestArtifactCh := make(chan artifactWriteResult, 1)
 	go func() {
-		ref, err := o.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, manifest, evidenceRefs, now)
+		ref, err := results.recordWorkspaceDeliverableManifestArtifact(ctx, run, step, manifest, evidenceRefs, now)
 		var refs []common.ArtifactID
 		if ref != "" {
 			refs = []common.ArtifactID{ref}
@@ -83,12 +84,12 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	}()
 	patchArtifactCh := make(chan artifactWriteResult, 1)
 	go func() {
-		refs, err := o.recordPatchDiffArtifact(ctx, run, step, patchDetails, now)
+		refs, err := results.recordPatchDiffArtifact(ctx, run, step, patchDetails, now)
 		patchArtifactCh <- artifactWriteResult{refs: refs, err: err}
 	}()
 	webSourceArtifactCh := make(chan artifactWriteResult, 1)
 	go func() {
-		ref, err := o.recordWebSourceIndexArtifact(ctx, run, step, webSourceDetails, now)
+		ref, err := results.recordWebSourceIndexArtifact(ctx, run, step, webSourceDetails, now)
 		var refs []common.ArtifactID
 		if ref != "" {
 			refs = []common.ArtifactID{ref}
@@ -97,7 +98,7 @@ func (o *RuntimeOrchestrator) recordRunResultFromValidatedDoDAssessment(
 	}()
 	gitOperationArtifactCh := make(chan artifactWriteResult, 1)
 	go func() {
-		ref, err := o.recordGitOperationIndexArtifact(ctx, run, step, gitOperationDetails, now)
+		ref, err := results.recordGitOperationIndexArtifact(ctx, run, step, gitOperationDetails, now)
 		var refs []common.ArtifactID
 		if ref != "" {
 			refs = []common.ArtifactID{ref}

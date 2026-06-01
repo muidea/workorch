@@ -24,7 +24,7 @@ func initialStepKind(run *runModel.Run) string {
 }
 
 func initialStepInput(run *runModel.Run) map[string]any {
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	input := nextStepInput(run, "")
 	if input == nil {
 		return nil
@@ -607,7 +607,7 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if run == nil {
 		return nil
 	}
-	ensureRunCoverageWorkItems(run)
+	newCoverageSubsystem().ensure(run)
 	input := map[string]any{
 		"workspaceId":    string(run.WorkspaceID),
 		"previousStepId": string(previousStepID),

@@ -123,6 +123,13 @@ type RuntimeOrchestrator struct {
 	evidence    RuntimeEvidenceRepositories
 	eventHub    events.Hub
 	policy      RuntimePolicy
+	llmContext  *llmContextSubsystem
+	repair      *repairSubsystem
+	graph       *graphSubsystem
+	convergence *convergenceSubsystem
+	coverage    *coverageSubsystem
+	patches     *patchSubsystem
+	results     *resultSubsystem
 }
 
 type RuntimeEvidenceRepositories struct {
@@ -198,7 +205,7 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 	if len(policies) > 0 {
 		policy = NormalizeRuntimePolicy(policies[0])
 	}
-	return &RuntimeOrchestrator{
+	orchestrator := &RuntimeOrchestrator{
 		runtime:     runtime,
 		runs:        runRepo,
 		steps:       stepRepo,
@@ -209,7 +216,77 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		evidence:    evidence,
 		eventHub:    eventHub,
 		policy:      policy,
+		llmContext:  newLLMContextSubsystem(),
+		repair:      newRepairSubsystem(stepRepo, workspaceRepo),
+		graph:       newGraphSubsystem(stepRepo, nil),
+		convergence: newConvergenceSubsystem(),
+		coverage:    newCoverageSubsystem(),
 	}
+	orchestrator.graph.closures = orchestrator
+	orchestrator.patches = newPatchSubsystem(evidence, approvalRepo, orchestrator)
+	orchestrator.results = newResultSubsystem(evidence, stepRepo, orchestrator)
+	return orchestrator
+}
+
+func (o *RuntimeOrchestrator) graphManager() *graphSubsystem {
+	if o == nil {
+		return newGraphSubsystem(nil, nil)
+	}
+	if o.graph == nil {
+		o.graph = newGraphSubsystem(o.steps, o)
+	}
+	return o.graph
+}
+
+func (o *RuntimeOrchestrator) llmContextManager() *llmContextSubsystem {
+	if o == nil || o.llmContext == nil {
+		return newLLMContextSubsystem()
+	}
+	return o.llmContext
+}
+
+func (o *RuntimeOrchestrator) repairManager() *repairSubsystem {
+	if o == nil {
+		return newRepairSubsystem(nil, nil)
+	}
+	if o.repair == nil {
+		o.repair = newRepairSubsystem(o.steps, o.workspaces)
+	}
+	return o.repair
+}
+
+func (o *RuntimeOrchestrator) convergenceManager() *convergenceSubsystem {
+	if o == nil || o.convergence == nil {
+		return newConvergenceSubsystem()
+	}
+	return o.convergence
+}
+
+func (o *RuntimeOrchestrator) coverageLedger() *coverageSubsystem {
+	if o == nil || o.coverage == nil {
+		return newCoverageSubsystem()
+	}
+	return o.coverage
+}
+
+func (o *RuntimeOrchestrator) patchManager() *patchSubsystem {
+	if o == nil {
+		return newPatchSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
+	}
+	if o.patches == nil {
+		o.patches = newPatchSubsystem(o.evidence, o.approvals, o)
+	}
+	return o.patches
+}
+
+func (o *RuntimeOrchestrator) resultManager() *resultSubsystem {
+	if o == nil {
+		return newResultSubsystem(RuntimeEvidenceRepositories{}, nil, nil)
+	}
+	if o.results == nil {
+		o.results = newResultSubsystem(o.evidence, o.steps, o)
+	}
+	return o.results
 }
 
 func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
@@ -961,7 +1038,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		"predecessorRunId": string(run.ID),
 		"reason":           "decision_replan",
 	}
-	if timeline, digest := o.currentRunProcessEvidenceContext(ctx, run, ""); len(timeline) > 0 {
+	if timeline, digest := o.graphManager().currentRunProcessEvidenceContext(ctx, run, ""); len(timeline) > 0 {
 		replanContext[stepInputKeyProcessEvidenceTimeline] = timeline
 		if len(digest) > 0 {
 			replanContext[stepInputKeyCurrentProgressDigest] = digest
@@ -997,9 +1074,9 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if successor.InitialStepKind == "" {
 		successor.InitialStepKind = initialStepKind(run)
 	}
-	prepareCoverageWorkItemsForReplanSuccessor(successor)
-	if contract := BuildConvergenceContract(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); contract.State != "" {
-		successor.ExecutionContext["convergenceContract"] = compactConvergenceContract(contract)
+	o.coverageLedger().prepareReplanSuccessor(successor)
+	if contract := o.convergenceManager().build(successor, nil, nil, map[string]any{"input": successor.ExecutionContext}, nil); contract.State != "" {
+		successor.ExecutionContext["convergenceContract"] = o.convergenceManager().compact(contract)
 	}
 	successor.ExecutionContext["compressedContext"] = compressedContextForCreatedRuntimeRun(successor)
 	if err := o.closeLoadedRun(ctx, run, common.RunStateSuperseded, ""); err != nil {
@@ -1588,26 +1665,27 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if handled, err := o.handleArtifactOutputContinuation(ctx, run, step, toolCall, output, workspace); handled || err != nil {
 		return err
 	}
-	if err := o.publishPatchPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
+	patches := o.patchManager()
+	if err := patches.publishPreviewFromOutput(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
 	language := runDialogLanguage(run)
-	patchApproval, err := o.patchApprovalBlockSpec(ctx, run.ID, language, output)
+	patchApproval, err := patches.approvalBlockSpec(ctx, run.ID, language, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch approval gate failed", err)
 	}
 	if patchApproval.Reason != "" {
 		applyPatchApprovalBlockOutput(output, patchApproval)
-	} else if err := o.applyRuntimePatches(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
+	} else if err := patches.apply(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch application failed", err)
 	}
-	patchRevertApproval, err := o.patchRevertApprovalBlockSpec(ctx, run.ID, language, output)
+	patchRevertApproval, err := patches.revertApprovalBlockSpec(ctx, run.ID, language, output)
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert approval gate failed", err)
 	}
 	if patchRevertApproval.Reason != "" {
 		applyPatchRevertApprovalBlockOutput(output, patchRevertApproval)
-	} else if err := o.applyRuntimePatchRevert(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
+	} else if err := patches.revert(ctx, run, step, toolCall, output, workspace.DeliverableDirectory); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch revert failed", err)
 	}
 	memoryRefs, err := o.recordMemoryWrites(ctx, run, step, output)
@@ -1623,7 +1701,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.recordCompletedRuntimeStepEvidence(ctx, run, step, toolCall, output); err != nil {
 		return err
 	}
-	if updateRunCoverageWorkItemsFromCompletedStep(run, step) && o.runs != nil {
+	if o.coverageLedger().updateFromCompletedStep(run, step) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return err
 		}
@@ -1639,11 +1717,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if decisionSpec := decisionBlockSpec(output); decisionSpec.Reason != "" {
 		decisionSpec.Context = o.enrichDecisionContextWithReadableWorkspaceResources(ctx, run, workspace, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 		decisionOutput := decisionOutputFromSpec(decisionSpec)
-		convergenceContract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": decisionOutput})
+		convergenceContract := o.convergenceManager().build(run, step, step, map[string]any{"input": step.Input}, map[string]any{"llmOutput": decisionOutput})
 		if failedAssessmentDecisionShouldRepair(step, output, decisionSpec) ||
 			assessmentOnlyDecisionShouldRepair(step, decisionSpec) ||
 			continuableDecisionShouldRepair(step, decisionSpec) ||
-			!ShouldCreateDecisionTicket(step.Input, decisionOutput, convergenceContract) {
+			!o.convergenceManager().shouldCreateDecisionTicket(step.Input, decisionOutput, convergenceContract) {
 			if assessmentOnlyDecisionShouldRepair(step, decisionSpec) {
 				output["assessmentOnlyDecisionConvertedToRepair"] = true
 			} else if failedAssessmentDecisionShouldRepair(step, output, decisionSpec) {
@@ -1652,7 +1730,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 				output["continuableDecisionConvertedToRepair"] = true
 			}
 			output["convertedDecisionGate"] = "convergence_contract"
-			output["convergenceContract"] = compactConvergenceContract(convergenceContract)
+			output["convergenceContract"] = o.convergenceManager().compact(convergenceContract)
 			output["convertedDecision"] = convertedDecisionPayload(decisionSpec)
 			output[stepOutputKeyDoDAssessment] = assessmentOnlyDecisionRepairAssessment(run, step, decisionSpec)
 			delete(output, stepOutputKeyBlockDecisionReason)
@@ -1670,7 +1748,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 				fmt.Errorf("%w: decision requests a continuable candidate choice", common.ErrInvalidArgument),
 			)
 		}
-		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
+		if nextStepID == "" && !o.graphManager().hasGraphContinuation(ctx, run, step) {
 			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
 		}
 		ticketID := decisionSpec.TicketID
@@ -1687,7 +1765,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.blockOnDecisionAtStep(ctx, run, workspace, ticketID, step.ID)
 	}
 	if approvalSpec := approvalBlockSpec(output); approvalSpec.Reason != "" {
-		if nextStepID == "" && !o.hasGraphContinuation(ctx, run, step) {
+		if nextStepID == "" && !o.graphManager().hasGraphContinuation(ctx, run, step) {
 			return o.FailRun(ctx, run.ID, fmt.Sprintf("runtime step %s blocked without next step", step.ID))
 		}
 		if approvalSpec.ApprovalID == "" {
@@ -1711,7 +1789,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if handled, err := o.validateGraphExpansionBoundary(ctx, run, step, toolCall, output, workspace); handled || err != nil {
 		return err
 	}
-	graphSpecs, graphSteps := o.readyGraphStepSpecsWithSteps(ctx, run, step)
+	graphSpecs, graphSteps := o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
 	if len(graphSpecs) > 0 {
 		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
 	}
@@ -1721,17 +1799,17 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if shouldDispatchGraphFollowUp(run, step, output) {
 		var input map[string]any
 		if len(graphSteps) > 0 {
-			input = o.graphFollowUpStepInputFromSteps(run, step, graphSteps)
+			input = o.graphManager().graphFollowUpStepInputFromSteps(run, step, graphSteps)
 		} else {
-			input = o.graphFollowUpStepInput(ctx, run, step)
+			input = o.graphManager().graphFollowUpStepInput(ctx, run, step)
 		}
 		return o.dispatchUniqueStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
+		return o.dispatchUniqueStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(output); completionStateRequiresActionableContinuation(output, completionState) {
 		return o.handleRuntimeStepFailure(
@@ -1761,12 +1839,12 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if updateRunCoverageWorkItemsFromAssessment(run, step, assessment) && o.runs != nil {
+	if o.coverageLedger().updateFromAssessment(run, step, assessment) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return err
 		}
 	}
-	if err := validateRunCoverageWorkItemsReadyForAcceptance(run); err != nil {
+	if err := o.coverageLedger().validateReadyForAcceptance(run); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if err := o.recordCompletionEvidenceFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace); err != nil {
@@ -1835,7 +1913,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 			return false, nil
 		}
 	}
-	count := o.graphFollowUpExpansionCount(ctx, run.ID)
+	count := o.graphManager().graphFollowUpExpansionCount(ctx, run.ID)
 	if count <= maxGraphFollowUpExpansionAttempts {
 		return false, nil
 	}
@@ -1849,7 +1927,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 	if err != nil {
 		return true, err
 	}
-	input := o.graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
+	input := o.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
 	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 }
 
@@ -5549,7 +5627,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}
 		return nil, common.ErrConflict
 	}
-	if ensureRunCoverageWorkItems(run) && o.runs != nil {
+	if o.coverageLedger().ensure(run) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return nil, err
 		}
@@ -5588,11 +5666,11 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 	pkg := mapFromValue(input["repairActionPackage"])
 	targetRefs := initialRepairTargetRefs(input, pkg)
 	if len(targetRefs) == 0 {
-		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
 	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
 	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
-		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
 	var snapshots []map[string]any
 	for _, targetRef := range targetRefs {
@@ -5606,7 +5684,7 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 		snapshots = append(snapshots, item)
 	}
 	if len(snapshots) == 0 {
-		return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
 	input["patchRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["patchRepairContext"]), snapshots)
 	pkg = repairActionPackageForEvidenceAcquisitionFollowUp(input, pkg, snapshots)
@@ -5618,7 +5696,7 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 		"Runtime loaded current target snapshots from repairTargetSet before this replan repair. Use patchRepairContext and repairActionPackage.targetSnapshots as the current patch baseline.",
 		"Do not generate stale hunks from historical summaries when current target snapshots are available.",
 	)
-	return ApplyConvergenceContract(input, BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil))
+	return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
 }
 
 func initialRepairTargetRefs(input map[string]any, pkg map[string]any) []string {
@@ -5676,7 +5754,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if ensureRunCoverageWorkItems(run) && o.runs != nil {
+	if o.coverageLedger().ensure(run) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return nil, err
 		}
@@ -5737,7 +5815,7 @@ func (o *RuntimeOrchestrator) runtimeRepairSpecsAfterResolvedDecision(
 	if step == nil || step.State != common.StepStateFailed {
 		return nil, false, nil
 	}
-	attempt := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
+	attempt := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
 	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
 	if err != nil {
 		return nil, true, err
@@ -5776,7 +5854,7 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 		return nil, false, nil
 	}
 	rootStepID := providerRetryRootStepID(step)
-	attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
+	attempt := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
 	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 	if err != nil {
 		return nil, true, err
@@ -5993,7 +6071,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	repairOf.Output["continuableDecisionConvertedToRepair"] = true
 	repairOf.Output["status"] = "failed"
 	repairOf.Output["error"] = "decision requested a workspace resource that is already readable"
-	attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
+	attempt := o.repairManager().runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
 	stepID, err = o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
 	if err != nil {
 		return nil, true, err
@@ -6014,7 +6092,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		return nil, common.ErrInvalidArgument
 	}
 	if last.State == common.StepStateCompleted {
-		specs, steps := o.readyGraphStepSpecsWithSteps(ctx, run, last)
+		specs, steps := o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, last)
 		if len(specs) > 0 {
 			return specs, nil
 		}
@@ -6033,9 +6111,9 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		if shouldDispatchGraphFollowUp(run, last, last.Output) {
 			var input map[string]any
 			if len(steps) > 0 {
-				input = o.graphFollowUpStepInputFromSteps(run, last, steps)
+				input = o.graphManager().graphFollowUpStepInputFromSteps(run, last, steps)
 			} else {
-				input = o.graphFollowUpStepInput(ctx, run, last)
+				input = o.graphManager().graphFollowUpStepInput(ctx, run, last)
 			}
 			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, graphFollowUpStepID(run.ID, last))
 			if err != nil {
@@ -6055,7 +6133,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			return []stepDispatchSpec{{
 				ID:    stepID,
 				Kind:  initialStepKind(run),
-				Input: o.llmCompletionFollowUpStepInput(ctx, run, last),
+				Input: o.graphManager().llmCompletionFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 		if shouldDispatchNoActionableContinuationFollowUp(run, last, last.Output) {
@@ -6066,7 +6144,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			return []stepDispatchSpec{{
 				ID:    stepID,
 				Kind:  initialStepKind(run),
-				Input: o.noActionableContinuationFollowUpStepInput(ctx, run, last),
+				Input: o.graphManager().noActionableContinuationFollowUpStepInput(ctx, run, last),
 			}}, nil
 		}
 	}
@@ -6081,28 +6159,23 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		action := o.recoveryActionForFailedStep(ctx, run, last)
 		switch action {
 		case runtimeRecoveryActionProviderRetry:
-			rootStepID := providerRetryRootStepID(last)
-			attempt := o.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, o, false)
 			if err != nil {
 				return nil, err
 			}
-			return []stepDispatchSpec{{
-				ID:    stepID,
-				Kind:  last.Kind,
-				Input: o.providerRetryStepInput(last, attempt, nil),
-			}}, nil
+			if !ok {
+				return nil, common.ErrConflict
+			}
+			return []stepDispatchSpec{spec}, nil
 		case runtimeRecoveryActionRuntimeRepair:
-			attempt := o.runtimeRepairAttemptCountForStep(ctx, run.ID, last) + 1
-			stepID, err := o.uniqueDispatchStepID(ctx, run.ID, runtimeRepairFollowUpStepID(run.ID, last, attempt))
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, o, false)
 			if err != nil {
 				return nil, err
 			}
-			return []stepDispatchSpec{{
-				ID:    stepID,
-				Kind:  initialStepKind(run),
-				Input: o.runtimeRepairFollowUpStepInput(ctx, run, last, attempt, nil),
-			}}, nil
+			if !ok {
+				return nil, common.ErrConflict
+			}
+			return []stepDispatchSpec{spec}, nil
 		case runtimeRecoveryActionProviderRetryExhausted,
 			runtimeRecoveryActionRuntimeRepairExhausted,
 			runtimeRecoveryActionDuplicateFailure,

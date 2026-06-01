@@ -536,7 +536,7 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
 	targetScope := runtimeFailureTargetScope(signature)
-	attempts := o.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
+	attempts := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
@@ -711,8 +711,8 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 			"failureTargetScope":             runtimeFailureTargetScope(signature),
 			"failedStepId":                   string(failedStep.ID),
 			"failedStepKind":                 failedStep.Kind,
-			"failedStepInput":                compactStepInputForLLMContext(failedStep.Input),
-			"failedStepOutput":               compactStepOutputForLLMContext(failedStep.Output),
+			"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
+			"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
 		},
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {

@@ -171,7 +171,7 @@ func TestRuntimeOrchestrator_PatchApprovalUsesDialogLanguage(t *testing.T) {
 		events.NewMemoryHub(),
 	)
 
-	spec, err := orch.patchApprovalBlockSpec(ctx, "run-patch-localized", "zh-CN", map[string]any{
+	spec, err := orch.patchManager().approvalBlockSpec(ctx, "run-patch-localized", "zh-CN", map[string]any{
 		stepOutputKeyPatches: []map[string]any{{
 			"patchType": "file_write",
 			"targetRef": ".env",
