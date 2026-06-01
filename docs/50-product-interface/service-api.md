@@ -111,6 +111,11 @@ response struct 为准，而不是单独维护 schema registry。
 - `POST /api/v1/workorch/workspaces/:workspaceId/execution-activations`
 - `POST /api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check`
 
+Workspace scoped read endpoints must resolve active/projection run IDs inside
+the requested workspace. If another workspace has the same run ID, the endpoint
+must still return the current workspace projection instead of surfacing a
+repository-level `409 Conflict`.
+
 ### Goal And DoD
 
 - `GET /api/v1/workorch/workspaces/:workspaceId/goals`
@@ -1229,6 +1234,8 @@ workorch://workspaces/<workspace-id>/artifacts/<run-id>/<relative-path>
 
 - 错误正文当前统一通过 `errorResponse{error}` 返回
 - `409` 在本服务中很关键，常表示业务状态冲突，而不仅是 HTTP 级资源冲突
+- workspace scoped `snapshot` / `context-bundle` 不应因为其他 workspace 存在同名
+  run id 返回 `409`；这类端点必须先绑定 workspace scope 再解析 active/projection run
 - `408` 目前主要与 `run status` 的 wait 模式相关
 
 ## Pagination And Detail Direction

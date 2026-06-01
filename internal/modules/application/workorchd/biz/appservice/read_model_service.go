@@ -1101,6 +1101,7 @@ func runReadModelTasks(tasks ...func() error) error {
 }
 
 func readWorkspaceSnapshot(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID, cachedRunSnapshot *RunSnapshot) (WorkspaceSnapshot, error) {
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	var item *workspacemodel.Workspace
 	if cachedRunSnapshot != nil && cachedRunSnapshot.Workspace.ID == string(workspaceID) {
 		item = workspaceModelFromView(cachedRunSnapshot.Workspace)
@@ -1336,6 +1337,7 @@ func readRunTaskProgress(ctx context.Context, deps readModelDependencies, runID 
 }
 
 func readWorkspaceContextBundle(ctx context.Context, deps readModelDependencies, workspaceID common.WorkspaceID) (ContextBundle, error) {
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	snapshot, err := readWorkspaceSnapshot(ctx, deps, workspaceID, nil)
 	if err != nil {
 		return ContextBundle{}, err

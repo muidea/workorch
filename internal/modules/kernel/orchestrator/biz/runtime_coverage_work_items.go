@@ -634,7 +634,10 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 }
 
 func coverageSourceCanCarryStateChange(source coverageWorkItemSource) bool {
-	return normalizeEvidenceKindRequirementScope(source.SourceScope) == "deliverable"
+	if normalizeEvidenceKindRequirementScope(source.SourceScope) != "deliverable" {
+		return false
+	}
+	return normalizedCoverageEvidenceRole(source.EvidenceRole) == "primary_state_change"
 }
 
 func normalizedCoverageEvidenceRole(role string) string {

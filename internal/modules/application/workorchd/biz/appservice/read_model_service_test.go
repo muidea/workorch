@@ -4195,6 +4195,48 @@ func TestReadWorkspaceSnapshotReadsWorkspaceAndWorkspaceScopedItemsConcurrently(
 	}
 }
 
+func TestReadWorkspaceSnapshotBindsWorkspaceScopeForWorkspaceScopedRunIDs(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+
+	firstWorkspaceID := common.WorkspaceID("ws-snapshot-run-scope-a")
+	secondWorkspaceID := common.WorkspaceID("ws-snapshot-run-scope-b")
+	runID := common.RunID("run-002")
+	for _, workspaceID := range []common.WorkspaceID{firstWorkspaceID, secondWorkspaceID} {
+		if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+			ID:          workspaceID,
+			Title:       string(workspaceID),
+			State:       common.WorkspaceStateRunning,
+			ActiveRunID: runID,
+		}); err != nil {
+			t.Fatalf("create workspace %s: %v", workspaceID, err)
+		}
+		if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s/%s: %v", workspaceID, runID, err)
+		}
+	}
+
+	snapshot, err := ReadWorkspaceSnapshotWithSession(ctx, session.Borrow(), string(secondWorkspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithSession: %v", err)
+	}
+	if snapshot.Workspace.ID != string(secondWorkspaceID) || snapshot.Run == nil || snapshot.Run.WorkspaceID != string(secondWorkspaceID) || snapshot.Run.ID != string(runID) {
+		t.Fatalf("snapshot workspace/run = %+v/%+v, want scoped %s/%s", snapshot.Workspace, snapshot.Run, secondWorkspaceID, runID)
+	}
+	bundle, err := ReadWorkspaceContextBundleWithSession(ctx, session.Borrow(), string(secondWorkspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceContextBundleWithSession: %v", err)
+	}
+	if bundle.RunID != string(runID) || bundle.WorkspaceID != string(secondWorkspaceID) {
+		t.Fatalf("context bundle = %+v, want scoped run %s/%s", bundle, secondWorkspaceID, runID)
+	}
+}
+
 func TestReadWorkspaceSnapshotProjectsAcceptedResultOverStaleTerminalActiveRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)

@@ -2214,7 +2214,6 @@ func TestBuildConvergenceContractDefersSupplementalDeliverableStateChangeWithout
 	run := &runmodel.Run{
 		ID: "run-supplemental-deliverable-cwi",
 		ExecutionContext: map[string]any{
-			"goal": map[string]any{"id": "goal-supplemental-deliverable-cwi", "text": "deliver observable behavior"},
 			"executionContract": map[string]any{
 				"stateChangePolicy": "must_produce_state_change",
 				"profileContracts": map[string]any{

@@ -560,8 +560,8 @@ func TestCoverageWorkItemsRequireStateChangeForRequiredCoverageWhenRunRequiresSt
 				"profileContracts": map[string]any{
 					"neutral": map[string]any{
 						"deliverableExpectations": []map[string]any{
-							{"id": "primary-output", "required": true},
-							{"id": "supporting-evidence", "required": true},
+							{"id": "primary-output", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "supporting-evidence", "required": true, "evidenceRole": "supplemental_evidence"},
 						},
 					},
 				},
@@ -591,6 +591,17 @@ func TestCoverageWorkItemsRequireStateChangeForRequiredCoverageWhenRunRequiresSt
 	if stringFromMap(focus, "sourceRequirementId") != "primary-output" {
 		t.Fatalf("currentFocus = %+v, want primary-output before validation-only items", focus)
 	}
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringFromMap(item, "sourceRequirementId") != "supporting-evidence" {
+			continue
+		}
+		missing := stringSet(coverageMissingEvidenceKinds(item))
+		if missing["state_change"] || !missing["validation"] {
+			t.Fatalf("supporting-evidence missingEvidenceKinds = %+v, want validation only", coverageMissingEvidenceKinds(item))
+		}
+		return
+	}
+	t.Fatalf("coverageWorkItems = %+v, want supporting-evidence item", run.ExecutionContext[coverageWorkItemsKey])
 }
 
 func TestCoverageWorkItemContextPrioritizesFailedItemsOverEvidenceReadyTopK(t *testing.T) {

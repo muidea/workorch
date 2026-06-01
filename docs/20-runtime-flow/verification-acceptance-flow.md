@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-01
 
 ## Purpose
 
@@ -194,6 +194,28 @@ verification / acceptance 必须执行中立 claim-to-evidence alignment。
 | 已有 `state_change`，缺 `validation` | `need_validation` | bounded validation evidence |
 | evidence kinds 齐备，但 assessment / alignment 不完整 | `need_assessment` | 结构化 assessment |
 | 缺用户信息、权限、审批或外部依赖 | `need_governance` | decision / approval / dependency ticket |
+
+### Evidence Role And State Change
+
+`stateChangePolicy=must_produce_state_change` 是 profile / execution contract 的全局收敛策略，
+但不能无条件投射到所有 deliverable coverage item。
+
+稳定规则：
+
+- 只有 `evidenceRole=primary_state_change` 的 deliverable work item，才会因为全局
+  `stateChangePolicy` 自动要求 `state_change` evidence。
+- `evidenceRole=supplemental_evidence` 的 deliverable，例如验证报告、coverage map、
+  usage ledger、摘要或其他补充证据，默认只要求 validation / artifact / assessment
+  这类与自身角色匹配的证据。
+- 若某个 supplemental deliverable 确实需要状态变更证据，必须通过 profile 的
+  `evidenceRequirements` 显式声明 accepted step kind / operation；core 只执行结构化规则，
+  不按 deliverable 名称或业务语义猜测。
+- `version_control_snapshot` 这类 supplemental deliverable 可以通过 profile requirement
+  要求 `git/write` + `commit`，但不能让其他 supplemental deliverable 被隐式要求手工
+  patch 或写入无关文件。
+
+该规则用于避免 runtime 把“缺少补充证据”误导为“必须制造状态变更”，从而导致
+LLM 反复 patch 验证产物或报告文件，而不是围绕当前 Goal / DoD 缺口收敛。
 
 ### Stage Update Rules
 

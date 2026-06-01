@@ -2958,6 +2958,9 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	if evidence := o.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
+		if snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence); len(snapshots) > 0 {
+			input["failureTargetRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["failureTargetRepairContext"]), snapshots)
+		}
 	}
 	if progress := o.runtimeRepairCurrentExecutionProgress(ctx, run, failedStep, input); len(progress) > 0 {
 		input["currentExecutionProgress"] = progress

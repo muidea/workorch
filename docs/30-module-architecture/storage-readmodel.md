@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-29
+Last Updated: 2026-06-01
 
 ## Purpose
 
@@ -149,6 +149,26 @@ Coverage / ledger 相关的读模型也必须分层：
 - projection 只表达当前视图，不反向覆盖 run-scoped ledger
 - run-scoped ledger 不得写回 formal Goal / DoD
 - full ledger 默认通过 raw/payload ref 或 detail 打开，而不是强塞进 summary
+
+### Workspace-Scoped Run Identity In Read Models
+
+Run ID 是 workspace 内部运行序号，不再要求全局唯一。file backend、read model、
+API handler 和 UI 读取聚合视图时必须显式携带 workspace scope。
+
+稳定规则：
+
+- workspace snapshot、workspace context-bundle、workspace task-progress 等 workspace
+  级投影在内部读取 active/projection run 前，必须把 `workspaceId` 绑定到 runtime context。
+- run snapshot、run observability、run detail page 等 run 级投影应优先使用
+  `/workspaces/:workspaceId/runs/:runId/...` 形态，并在 repository 查询前绑定 workspace scope。
+- 当多个 workspace 中存在相同 run id（例如多个 `run-002`）时，workspace-scoped
+  projection 必须解析到当前 workspace 下的 run，不得返回 `409 Conflict`。
+- 未带 workspace scope 的全局 run 查询只能用于明确要求全局唯一或列表型入口；
+  若存在多个同名 run，返回 conflict 是合理的 repository 保护，不应泄漏到 workspace
+  scoped API。
+
+该规则保证 workspace 内自增 run id、Web/TUI 状态投影和 context-bundle 读取保持一致，
+避免由于 run id 重名导致前端 snapshot/context-bundle 无法读取。
 
 ### Run-Scoped Coverage Ledger Persistence
 

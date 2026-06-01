@@ -16553,6 +16553,105 @@ func TestRuntimeOrchestrator_GraphFollowUpRestoresRepairContractFromRootAfterLis
 	}
 }
 
+func TestRuntimeRepairFollowUpInheritsGraphSiblingEvidenceFromRoot(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-repair-inherits-sibling-evidence")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:      stepRepo,
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-repair-inherits-sibling-evidence",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "read-target", Kind: "file/read"},
+		{ID: "check-target", Kind: "shell/command", DependsOn: []string{"read-target"}},
+	}}
+	root := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+			},
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+	readStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-read-target"),
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "read-target",
+			stepInputKeyGraphRootStepID: string(root.ID),
+		},
+		Output: map[string]any{
+			"status":           "completed",
+			"stage":            "file_read",
+			"path":             "main.go",
+			"exists":           true,
+			"content":          "package main\n\nfunc main() {}\n",
+			"contentHash":      "hash-main",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+			"isBinary":         false,
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/002-check-target"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:     "check-target",
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepInputKeyRuntimeStage:    runtimeStageExecution,
+		},
+		Output: map[string]any{
+			"status":                  "failed",
+			"stdout":                  "MISSING_REQUIRED_SYMBOL:Handle\n",
+			"error":                   "exit status 1",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=check-target|exitCode=1",
+		},
+	}
+	for _, step := range []*runmodel.Step{root, readStep, failedStep} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, errors.New("exit status 1"))
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] != nil {
+		t.Fatalf("repair input = %+v, want graph sibling evidence to restore state-changing repair contract", input)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	snapshots := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(snapshots) != 1 || snapshots[0]["targetRef"] != "main.go" || snapshots[0]["contentHash"] != "hash-main" {
+		t.Fatalf("targetSnapshots = %+v, want target snapshot from sibling file/read evidence", snapshots)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+}
+
 func TestRuntimeOrchestrator_GraphFollowUpDoesNotRestoreRepairContractWithoutConcreteEvidence(t *testing.T) {
 	runID := common.RunID("run-evidence-acquisition-no-target")
 	orch := &RuntimeOrchestrator{}

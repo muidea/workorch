@@ -1909,13 +1909,29 @@ func (o *RuntimeOrchestrator) completedGraphEvidence(ctx context.Context, run *r
 }
 
 func (o *RuntimeOrchestrator) completedGraphEvidenceFromSteps(run *runModel.Run, anchor *runModel.Step, steps []*runModel.Step) []map[string]any {
-	graph, ok := runtimeGraphSpecFromStep(anchor)
+	graphSource := anchor
+	if rootStepID := graphRootStepID(anchor); rootStepID != "" && rootStepID != anchor.ID {
+		for _, step := range steps {
+			if step != nil && step.ID == rootStepID {
+				graphSource = step
+				break
+			}
+		}
+	}
+	graph, ok := runtimeGraphSpecFromStep(graphSource)
 	if !ok || len(graph.Nodes) == 0 {
 		return nil
+	}
+	graphRootID := graphRootStepID(graphSource)
+	if graphRootID == "" {
+		graphRootID = graphSource.ID
 	}
 	completedByNode := map[string]*runModel.Step{}
 	for _, step := range steps {
 		if step == nil || step.State != common.StepStateCompleted {
+			continue
+		}
+		if graphNodeID(step) != "" && graphRootStepID(step) != graphRootID {
 			continue
 		}
 		nodeID := graphNodeID(step)
