@@ -151,6 +151,28 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForActiveState(ctx context.Contex
 	return ws, nil
 }
 
+func (s *runStateSubsystem) syncRunAndWorkspaceForValidation(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
+	ws, err := s.workspaceForActiveRunState(ctx, run, workspace)
+	if err != nil {
+		return nil, err
+	}
+	run.State = common.RunStateValidating
+	run.FailureReason = ""
+	ws.ActiveRunID = run.ID
+	ws.State = common.WorkspaceStateValidating
+	if err := runParallel(
+		func() error {
+			return s.runs.Update(ctx, run)
+		},
+		func() error {
+			return s.workspaces.Update(ctx, ws)
+		},
+	); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
 func (s *runStateSubsystem) workspaceForActiveRunState(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
 	if s == nil || s.runs == nil || s.workspaces == nil || run == nil {
 		return nil, common.ErrInvalidArgument

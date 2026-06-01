@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -67,7 +66,7 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 		return common.ErrConflict
 	}
 	var err error
-	workspace, err = o.syncRunAndWorkspaceForValidation(ctx, run, workspace)
+	workspace, err = o.runStateManager().syncRunAndWorkspaceForValidation(ctx, run, workspace)
 	if err != nil {
 		return err
 	}
@@ -98,44 +97,4 @@ func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Co
 		return err
 	}
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, run.ID)
-}
-
-func (o *RuntimeOrchestrator) syncRunAndWorkspaceForValidation(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
-	if run == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	ws := workspace
-	if ws == nil {
-		var err error
-		ws, err = o.workspaces.Get(ctx, run.WorkspaceID)
-		if err != nil {
-			return nil, err
-		}
-	} else if ws.ID != run.WorkspaceID {
-		return nil, common.ErrConflict
-	}
-	if ws.ActiveRunID != "" && ws.ActiveRunID != run.ID {
-		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return nil, err
-		}
-		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
-			return nil, common.ErrConflict
-		}
-	}
-	run.State = common.RunStateValidating
-	run.FailureReason = ""
-	ws.ActiveRunID = run.ID
-	ws.State = common.WorkspaceStateValidating
-	if err := runParallel(
-		func() error {
-			return o.runs.Update(ctx, run)
-		},
-		func() error {
-			return o.workspaces.Update(ctx, ws)
-		},
-	); err != nil {
-		return nil, err
-	}
-	return ws, nil
 }

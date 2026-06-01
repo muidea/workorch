@@ -1112,7 +1112,7 @@ func TestRuntimeOrchestrator_ValidationRunAndWorkspaceWritesConcurrently(t *test
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := orch.syncRunAndWorkspaceForValidation(ctx, run, workspace)
+		_, err := orch.runStateManager().syncRunAndWorkspaceForValidation(ctx, run, workspace)
 		done <- err
 	}()
 

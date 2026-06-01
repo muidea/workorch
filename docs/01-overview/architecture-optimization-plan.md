@@ -390,6 +390,8 @@ type repairSubsystem struct {
 | P1.23 run state read helper subsystem 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只移动读取/计算 helper 的接收者，不改变 run ID 格式、replan context 字段、workspace release 条件、run/workspace 状态转换或 event payload |
 | P1.24 run/workspace active state sync 收口 | 已完成 | `runStateSubsystem` 承载 active run/workspace 冲突判定、workspace active run 绑定、run/workspace 并行持久化同步；`RuntimeOrchestrator` 仍负责 lifecycle/resume/block/validate 的流程分支、事件发布与后续 dispatch |
 | P1.24 run/workspace active state sync 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=120s` 通过；只移动中立状态同步边界，不改变 active run 冲突规则、workspace state 映射、run state 写入内容、事件发布顺序或 dispatch 行为 |
+| P1.25 validation run/workspace sync 收口 | 已完成 | `runStateSubsystem` 承载 validation 阶段 run/workspace 并行持久化同步，复用 active run 冲突判定；`RuntimeOrchestrator` 仍负责 validation completion 两阶段事件发布与最终 completed 状态收口 |
+| P1.25 validation run/workspace sync 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=120s` 通过；只移动 validation 同步边界，不改变 validating/completed 状态写入、workspace state、active run 绑定、事件发布顺序或 completion gate 行为 |
 | P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
 | P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
 | P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
@@ -449,6 +451,7 @@ event/checkpoint subsystem 收口只移动事件发布和 checkpoint 记录的�
 result recording subsystem 收口只移动 result、completion evidence、memory 与 deliverable manifest 记录职责，completion gate、run/workspace 状态写入和 dispatch 协调仍由 `RuntimeOrchestrator` 负责。
 run state read helper subsystem 收口只移动 run 状态相关读取/计算 helper，run close、workspace sync、replan successor 创建与事件发布继续由 `RuntimeOrchestrator` 协调。
 run/workspace active state sync 收口只移动 active run 绑定和 run/workspace 持久化同步边界，lifecycle/resume/block/validate 的流程判断、事件发布与 dispatch 继续由 `RuntimeOrchestrator` 协调。
+validation run/workspace sync 收口只移动 validation 阶段的 run/workspace 持久化同步，completion gate、validating/completed 两阶段事件发布与最终完成流程继续由 `RuntimeOrchestrator` 协调。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
@@ -456,7 +459,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 项 | 状态 | 下一步 |
 |----|------|--------|
-| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 154 个，需继续核对 dispatch/lifecycle、decision resume 与 validation completion 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
+| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 153 个，需继续核对 dispatch/lifecycle、decision resume 与 validation completion 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
 | P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 已降至约 937 行，orchestrator 测试最大文件约 2,895 行 |
 
@@ -478,7 +481,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 指标 | 当前 | 目标 |
 |------|------|------|
-| RuntimeOrchestrator 方法数 | ~154 | ~60（核心 dispatch + lifecycle） |
+| RuntimeOrchestrator 方法数 | ~153 | ~60（核心 dispatch + lifecycle） |
 | 最大源文件行数 | ~2,830 (`runtime_graph.go`)；repair 最大文件约 1,754，HTTP 最大拆分文件约 2,074 | <3,000 |
 | 最大测试文件行数 | ~2,895 (`runtime_convergence_test.go`)；`runtime_orchestrator_test.go` 已降至约 937 | <8,000 |
 | 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |
