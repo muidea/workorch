@@ -122,6 +122,7 @@ type RuntimeOrchestrator struct {
 	patches     *patchSubsystem
 	results     *resultSubsystem
 	runState    *runStateSubsystem
+	decision    *decisionResumeSubsystem
 }
 
 type RuntimeEvidenceRepositories struct {
@@ -214,6 +215,7 @@ func NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		convergence: newConvergenceSubsystem(),
 		coverage:    newCoverageSubsystem(),
 		runState:    newRunStateSubsystem(runRepo, workspaceRepo),
+		decision:    newDecisionResumeSubsystem(ticketRepo, resolutionRepo),
 	}
 	orchestrator.graph.closures = orchestrator
 	orchestrator.checkpoints = newCheckpointSubsystem(evidence, stepRepo)
@@ -319,6 +321,19 @@ func (o *RuntimeOrchestrator) runStateManager() *runStateSubsystem {
 		o.runState.workspaces = o.workspaces
 	}
 	return o.runState
+}
+
+func (o *RuntimeOrchestrator) decisionResumeManager() *decisionResumeSubsystem {
+	if o == nil {
+		return newDecisionResumeSubsystem(nil, nil)
+	}
+	if o.decision == nil {
+		o.decision = newDecisionResumeSubsystem(o.tickets, o.resolutions)
+	} else {
+		o.decision.tickets = o.tickets
+		o.decision.resolutions = o.resolutions
+	}
+	return o.decision
 }
 
 func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
