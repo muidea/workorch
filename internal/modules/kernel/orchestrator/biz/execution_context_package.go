@@ -15,6 +15,7 @@ import (
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const (
@@ -237,7 +238,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	go func() {
 		defer wg.Done()
 		if shouldReadRecentFailureHistory(step) {
-			failures = o.recentFailureContexts(ctx, run, step.ID, 6)
+			failures = recentFailureContexts(ctx, o.steps, run, step.ID, 6)
 		}
 	}()
 	go func() {
@@ -1412,20 +1413,20 @@ func shouldIncludeWorkspaceManifestInExecutionContextPackage(run *runModel.Run, 
 	}
 }
 
-func (o *RuntimeOrchestrator) recentFailureContexts(ctx context.Context, run *runModel.Run, currentStepID common.StepID, limit int) []map[string]any {
-	if o == nil || run == nil || o.steps == nil || limit <= 0 {
+func recentFailureContexts(ctx context.Context, steps repository.StepRepository, run *runModel.Run, currentStepID common.StepID, limit int) []map[string]any {
+	if steps == nil || run == nil || limit <= 0 {
 		return nil
 	}
 	if currentStepID == initialStepID(run.ID) {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
-	if err != nil || len(steps) == 0 {
+	items, err := steps.ListByRun(ctx, run.ID)
+	if err != nil || len(items) == 0 {
 		return nil
 	}
-	ret := make([]map[string]any, 0, min(len(steps), limit))
-	for idx := len(steps) - 1; idx >= 0; idx-- {
-		step := steps[idx]
+	ret := make([]map[string]any, 0, min(len(items), limit))
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		step := items[idx]
 		if step == nil || step.ID == currentStepID || step.State != common.StepStateFailed {
 			continue
 		}
