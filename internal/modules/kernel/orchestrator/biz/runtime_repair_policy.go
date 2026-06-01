@@ -217,20 +217,21 @@ func coverageValidationEvidenceRepairEligible(failedStep *runModel.Step) bool {
 		strings.Contains(text, "coverage")
 }
 
-func (o *RuntimeOrchestrator) coverageValidationRepairShouldEscalateToStateChanging(
+func coverageValidationRepairShouldEscalateToStateChanging(
 	ctx context.Context,
+	repair *repairSubsystem,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	input map[string]any,
 ) bool {
-	if o == nil || run == nil || failedStep == nil {
+	if run == nil || failedStep == nil {
 		return false
 	}
 	if !coverageValidationEvidenceRepairEligible(failedStep) ||
 		!coverageVerificationGapPresent(input, failedStep) {
 		return false
 	}
-	if o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) == 0 {
+	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) == 0 {
 		return false
 	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||

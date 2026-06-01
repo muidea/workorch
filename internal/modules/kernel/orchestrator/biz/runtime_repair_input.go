@@ -201,7 +201,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	coverageValidationEvidenceRepair := coverageGapEligibleForValidationRepair && !coverageValidationHasTargetEvidence
 	validationRepairEscalatesToStateChanging := coverageGapEligibleForValidationRepair &&
 		coverageValidationHasTargetEvidence &&
-		o.coverageValidationRepairShouldEscalateToStateChanging(ctx, run, failedStep, input)
+		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input)
 	if validationRepairEscalatesToStateChanging {
 		input["validationRepairEscalatedToImplementation"] = true
 		input["repairObjective"] = repairObjectiveStateChangingOutput
