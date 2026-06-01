@@ -748,7 +748,7 @@ func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Contex
 		return nil, nil
 	}
 	items, err := o.evidence.MemoryItems.ListByWorkspaceID(ctx, run.WorkspaceID)
-	runStates := o.stepInputMemoryRunStates(ctx, run.WorkspaceID)
+	runStates := stepInputMemoryRunStates(ctx, o.runs, run.WorkspaceID)
 	refreshSource := stepInputMemoryRefreshSource(step)
 	if err != nil {
 		return nil, map[string]any{
@@ -789,16 +789,16 @@ func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Contex
 	}
 }
 
-func (o *RuntimeOrchestrator) stepInputMemoryRunStates(ctx context.Context, workspaceID common.WorkspaceID) map[common.RunID]common.RunState {
-	if o == nil || o.runs == nil || workspaceID == "" {
+func stepInputMemoryRunStates(ctx context.Context, runs repository.RunRepository, workspaceID common.WorkspaceID) map[common.RunID]common.RunState {
+	if runs == nil || workspaceID == "" {
 		return nil
 	}
-	runs, err := o.runs.ListByWorkspaceID(ctx, workspaceID)
-	if err != nil || len(runs) == 0 {
+	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil || len(items) == 0 {
 		return nil
 	}
-	ret := make(map[common.RunID]common.RunState, len(runs))
-	for _, run := range runs {
+	ret := make(map[common.RunID]common.RunState, len(items))
+	for _, run := range items {
 		if run == nil || run.ID == "" {
 			continue
 		}
