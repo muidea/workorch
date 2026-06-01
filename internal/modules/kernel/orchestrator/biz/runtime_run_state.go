@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -49,7 +48,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 	if o == nil || run == nil || run.ID == "" || o.runs == nil {
 		return common.ErrInvalidArgument
 	}
-	successorID, err := o.nextReplanRunID(ctx, run.ID)
+	successorID, err := o.runStateManager().nextReplanRunID(ctx, run.ID)
 	if err != nil {
 		return err
 	}
@@ -87,7 +86,7 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		replanContext["resolutionType"] = resolution.Type
 		replanContext["resolutionPayload"] = compactDecisionPayloadForRuntimeContext(resolution.Payload)
 	}
-	o.hydrateReplanContextWithInheritedPrimaryFailure(ctx, run, replanContext)
+	o.runStateManager().hydrateReplanContextWithInheritedPrimaryFailure(ctx, run, replanContext)
 	successorContext["replanContinuation"] = compactReplanContinuationForRuntimeContext(replanContext)
 	successor := &runModel.Run{
 		ID:               successorID,
@@ -117,58 +116,6 @@ func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel
 		return err
 	}
 	return o.StartRun(ctx, successor.ID)
-}
-
-func (o *RuntimeOrchestrator) hydrateReplanContextWithInheritedPrimaryFailure(ctx context.Context, run *runModel.Run, replanContext map[string]any) {
-	if o == nil || run == nil || len(replanContext) == 0 {
-		return
-	}
-	if primary := primaryActionableFailureFromReplanContinuation(replanContext); len(primary) > 0 {
-		return
-	}
-	inherited := o.findInheritedActionableReplanContinuation(ctx, run, map[common.RunID]bool{})
-	if len(inherited) == 0 {
-		return
-	}
-	if timeline := mapSliceFromValue(inherited[stepInputKeyProcessEvidenceTimeline]); len(timeline) > 0 {
-		replanContext[stepInputKeyProcessEvidenceTimeline] = timeline
-	}
-	if primary := primaryActionableFailureFromReplanContinuation(inherited); len(primary) > 0 {
-		if digest := currentProgressDigestFromPrimaryActionableFailure(primary); len(digest) > 0 {
-			replanContext[stepInputKeyCurrentProgressDigest] = digest
-		}
-	} else if digest := mapFromValue(inherited[stepInputKeyCurrentProgressDigest]); len(digest) > 0 {
-		replanContext[stepInputKeyCurrentProgressDigest] = digest
-	}
-	if pkg := mapFromValue(inherited["repairActionPackage"]); len(pkg) > 0 && len(mapFromValue(replanContext["repairActionPackage"])) == 0 {
-		replanContext["repairActionPackage"] = pkg
-	}
-}
-
-func (o *RuntimeOrchestrator) findInheritedActionableReplanContinuation(ctx context.Context, run *runModel.Run, visited map[common.RunID]bool) map[string]any {
-	if o == nil || run == nil || run.ID == "" {
-		return nil
-	}
-	if visited == nil {
-		visited = map[common.RunID]bool{}
-	}
-	if visited[run.ID] {
-		return nil
-	}
-	visited[run.ID] = true
-	replan := mapFromValue(run.ExecutionContext["replanContinuation"])
-	if primary := primaryActionableFailureFromReplanContinuation(replan); len(primary) > 0 {
-		return replan
-	}
-	predecessorID := common.RunID(strings.TrimSpace(stringFromMap(replan, "predecessorRunId")))
-	if predecessorID == "" || o.runs == nil || visited[predecessorID] {
-		return nil
-	}
-	predecessor, err := o.runs.Get(ctx, predecessorID)
-	if err != nil {
-		return nil
-	}
-	return o.findInheritedActionableReplanContinuation(ctx, predecessor, visited)
 }
 
 func compressedContextForCreatedRuntimeRun(run *runModel.Run) map[string]any {
@@ -253,25 +200,6 @@ func localizedRuntimeRetentionPolicy(language string) string {
 	return "Retain recovery checkpoints, blockers, milestones, latest evidence summary, and Result/Artifact refs; reload full evidence by source refs when needed."
 }
 
-func (o *RuntimeOrchestrator) nextReplanRunID(ctx context.Context, predecessor common.RunID) (common.RunID, error) {
-	if o == nil || o.runs == nil || predecessor == "" {
-		return "", common.ErrInvalidArgument
-	}
-	base := runtimeReadableIDPart(string(predecessor))
-	if base == "" {
-		base = "run"
-	}
-	for seq := 1; seq <= 100; seq++ {
-		candidate := common.RunID(fmt.Sprintf("%s-replan-%03d", base, seq))
-		if _, err := o.runs.Get(ctx, candidate); errors.Is(err, common.ErrNotFound) {
-			return candidate, nil
-		} else if err != nil {
-			return "", err
-		}
-	}
-	return "", common.ErrConflict
-}
-
 func (o *RuntimeOrchestrator) closeRun(ctx context.Context, runID common.RunID, state common.RunState, reason string) error {
 	r, err := o.runs.Get(ctx, runID)
 	if err != nil {
@@ -330,7 +258,7 @@ func (o *RuntimeOrchestrator) releaseWorkspaceForTerminalRun(ctx context.Context
 	if err != nil {
 		return err
 	}
-	canRelease, err := o.canTerminalRunReleaseWorkspace(ctx, ws, run)
+	canRelease, err := o.runStateManager().canTerminalRunReleaseWorkspace(ctx, ws, run)
 	if err != nil {
 		return err
 	}
@@ -468,26 +396,6 @@ func (o *RuntimeOrchestrator) syncRunAndWorkspaceForActiveState(ctx context.Cont
 		return nil, err
 	}
 	return ws, nil
-}
-
-func (o *RuntimeOrchestrator) canTerminalRunReleaseWorkspace(ctx context.Context, workspace *workspaceModel.Workspace, run *runModel.Run) (bool, error) {
-	if workspace == nil || run == nil || workspace.ID != run.WorkspaceID {
-		return false, nil
-	}
-	if workspace.ActiveRunID == "" || workspace.ActiveRunID == run.ID {
-		return true, nil
-	}
-	activeRun, err := o.runs.Get(ctx, workspace.ActiveRunID)
-	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
-			return true, nil
-		}
-		return false, err
-	}
-	if activeRun.WorkspaceID != workspace.ID {
-		return true, nil
-	}
-	return isTerminalRunState(activeRun.State), nil
 }
 
 func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
