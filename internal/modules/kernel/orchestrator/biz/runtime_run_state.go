@@ -288,17 +288,6 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, activeRun.ID)
 }
 
-func (o *RuntimeOrchestrator) syncWorkspaceForActiveRun(ctx context.Context, run *runModel.Run, state common.WorkspaceState) error {
-	if run == nil {
-		return common.ErrInvalidArgument
-	}
-	ws, err := o.runStateManager().syncWorkspaceForActiveRunState(ctx, run, state, nil)
-	if err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, run.ID)
-}
-
 func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
 	switch state {
 	case common.RunStateCompleted:

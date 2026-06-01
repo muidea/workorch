@@ -47,15 +47,14 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	if r.State != common.RunStateRunning {
 		return common.ErrConflict
 	}
-	r.State = common.RunStateValidating
-	r.FailureReason = ""
-	if err := o.runs.Update(ctx, r); err != nil {
+	workspace, err := o.runStateManager().syncRunAndWorkspaceForValidation(ctx, r, nil)
+	if err != nil {
 		return err
 	}
 	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
 		return err
 	}
-	return o.syncWorkspaceForActiveRun(ctx, r, common.WorkspaceStateValidating)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
 func (o *RuntimeOrchestrator) validateAndCompleteRun(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
