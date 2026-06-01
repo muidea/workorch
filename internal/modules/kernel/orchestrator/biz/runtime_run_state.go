@@ -38,10 +38,6 @@ func (o *RuntimeOrchestrator) failLoadedRun(ctx context.Context, run *runModel.R
 	return o.closeLoadedRun(ctx, run, common.RunStateFailed, reason)
 }
 
-func (o *RuntimeOrchestrator) supersedeLoadedRun(ctx context.Context, run *runModel.Run) error {
-	return o.closeLoadedRun(ctx, run, common.RunStateSuperseded, "")
-}
-
 func (o *RuntimeOrchestrator) replanLoadedRun(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) error {
 	if o == nil || run == nil || run.ID == "" || o.runs == nil {
 		return common.ErrInvalidArgument

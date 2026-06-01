@@ -57,10 +57,6 @@ func (o *RuntimeOrchestrator) ValidateRun(ctx context.Context, runID common.RunI
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
 }
 
-func (o *RuntimeOrchestrator) validateAndCompleteRun(ctx context.Context, run *runModel.Run, currentStepID common.StepID) error {
-	return o.validateAndCompleteRunWithWorkspace(ctx, run, currentStepID, nil)
-}
-
 func (o *RuntimeOrchestrator) validateAndCompleteRunWithWorkspace(ctx context.Context, run *runModel.Run, currentStepID common.StepID, workspace *workspaceModel.Workspace) error {
 	if run == nil || run.ID == "" {
 		return common.ErrInvalidArgument
