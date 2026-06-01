@@ -147,7 +147,7 @@ func TestModelHandlesArtifactContinuationEvent(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-001"
-	next, cmd := m.Update(BackendEventMsg{Event: backend.Event{
+	cmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventArtifactContinuationChanged,
 		WorkspaceID: "ws-1",
 		RunID:       "run-001",
@@ -158,13 +158,48 @@ func TestModelHandlesArtifactContinuationEvent(t *testing.T) {
 			"receivedSequences": []any{1, 2, 3},
 			"bytesWritten":      512,
 		},
-	}})
-	got := asModel(next)
-	if !strings.Contains(got.progressText, "Artifact chunking deliverable.txt seq 3/4 512B") {
-		t.Fatalf("progressText = %q, want artifact continuation progress", got.progressText)
+	})
+	if !strings.Contains(m.progressText, "Artifact chunking deliverable.txt seq 3/4 512B") {
+		t.Fatalf("progressText = %q, want artifact continuation progress", m.progressText)
 	}
-	if cmd == nil {
-		t.Fatalf("expected workspace context refresh command")
+	if cmd != nil {
+		t.Fatalf("artifact continuation event should update incrementally without workspace refresh")
+	}
+	if len(m.artifactContinuations) != 1 || m.artifactContinuations[0].TargetRef != "deliverable.txt" {
+		t.Fatalf("artifactContinuations = %+v, want incrementally updated item", m.artifactContinuations)
+	}
+}
+
+func TestModelWorkspaceContextPartialUpdateDoesNotClearExistingDisplay(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.currentTask = "existing goal"
+	m.transcript = []transcriptItem{{Kind: "Goal", Text: "existing goal"}}
+	m.dodItems = []string{"existing dod"}
+	m.runtimeEvents = []string{"existing runtime event"}
+	m.patches = []backend.PatchInfo{{ID: "patch-1", TargetRef: "old.txt", State: common.PatchStateApplied}}
+	m.llmUsage = backend.LLMUsageSummaryInfo{EntryTotal: 2, TotalTokens: 100}
+	m.activeRunID = "run-1"
+
+	m.applyWorkspaceContext(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-1", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"},
+		ActiveRun: &backend.RunInfo{
+			ID:          "run-1",
+			WorkspaceID: "ws-1",
+			State:       common.RunStateRunning,
+		},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-1",
+			WorkspaceID: "ws-1",
+			State:       common.RunStateRunning,
+		},
+		WorkspaceHasLive: true,
+	})
+
+	if m.currentTask != "existing goal" || len(m.dodItems) != 1 || m.dodItems[0] != "existing dod" {
+		t.Fatalf("definitions were cleared: task=%q dod=%v", m.currentTask, m.dodItems)
+	}
+	if len(m.runtimeEvents) != 1 || len(m.patches) != 1 || m.llmUsage.EntryTotal != 2 {
+		t.Fatalf("display state was cleared: events=%v patches=%v llm=%+v", m.runtimeEvents, m.patches, m.llmUsage)
 	}
 }
 
@@ -247,7 +282,7 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputWithoutBlockerRequiresSlashCommand(t *testing.T) {
+func TestModelPlainInputWithActiveRunQueuesOperatorInput(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
@@ -256,17 +291,43 @@ func TestModelPlainInputWithoutBlockerRequiresSlashCommand(t *testing.T) {
 	next, cmd := m.submitInput()
 	m = asModel(next)
 
-	if cmd != nil {
-		t.Fatal("plain input without blocker should not return command")
+	if cmd == nil {
+		t.Fatal("plain input with active run should continue run")
 	}
+	msg := cmd()
+	_, _ = m.Update(msg)
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if len(be.resumes) != 0 {
-		t.Fatalf("resumes = %v, want no resume for plain input", be.resumes)
+	if len(be.resumePatches) != 1 {
+		t.Fatalf("resumePatches = %v, want one operator input patch", be.resumePatches)
 	}
-	if m.lastError == nil || !strings.Contains(m.lastError.Error(), "slash command") {
-		t.Fatalf("lastError = %v, want slash command guidance", m.lastError)
+	queue, ok := be.resumePatches[0]["operatorInputQueue"].([]map[string]any)
+	if !ok || len(queue) != 1 || queue[0]["content"] != "继续处理" {
+		t.Fatalf("operatorInputQueue = %#v, want plain input queued", be.resumePatches[0]["operatorInputQueue"])
+	}
+}
+
+func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeRunID = ""
+	m.running = false
+	m.setInput("补充新的目标")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("plain input in idle workspace should submit goal")
+	}
+	msg := cmd()
+	_, _ = m.Update(msg)
+
+	if len(be.goals) != 1 || be.goals[0] != "补充新的目标" {
+		t.Fatalf("goals = %v, want plain input as goal", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for idle goal input", be.resumes)
 	}
 }
 
@@ -564,6 +625,102 @@ func TestModelStepProgressAppendsRuntimeEvents(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Runtime Events") || !strings.Contains(view, "Working: mcp/tool_call mcp-lsp-bridge:textDocument/references") {
 		t.Fatalf("view missing runtime event log:\n%s", view)
+	}
+}
+
+func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+
+	if cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventPatchApplied,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"patchId":      "patch-1",
+			"state":        string(common.PatchStateApplied),
+			"targetRef":    "main.go",
+			"summary":      "updated target",
+			"addedLines":   3,
+			"deletedLines": 1,
+		},
+	}); cmd != nil {
+		t.Fatal("patch event should not fetch full workspace context")
+	}
+	if len(m.patches) != 1 || m.patches[0].ID != "patch-1" || m.patches[0].AddedLines != 3 {
+		t.Fatalf("patches = %+v, want incremental patch", m.patches)
+	}
+
+	if cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventMemoryRecallRecorded,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"traceId":            "trace-1",
+			"status":             "selected",
+			"source":             "recall",
+			"stage":              "planning",
+			"retrievedMemoryIds": []any{"mem-1", "mem-2"},
+		},
+	}); cmd != nil {
+		t.Fatal("memory recall event should not fetch full workspace context")
+	}
+	if len(m.memoryRecalls) != 1 || len(m.memoryRecalls[0].RetrievedMemoryIDs) != 2 {
+		t.Fatalf("memoryRecalls = %+v, want incremental recall", m.memoryRecalls)
+	}
+
+	if cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventLLMUsageRecorded,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"providerId":   "provider-a",
+			"model":        "model-a",
+			"inputTokens":  10,
+			"outputTokens": 5,
+			"totalTokens":  15,
+			"contextBudget": map[string]any{
+				"maxTokens": 2048,
+			},
+		},
+	}); cmd != nil {
+		t.Fatal("llm usage event should not fetch full workspace context")
+	}
+	if m.llmUsage.EntryTotal != 1 || m.llmUsage.TotalTokens != 15 || m.llmContext["maxTokens"] != 2048 {
+		t.Fatalf("llm usage/context = %+v/%+v, want incremental usage", m.llmUsage, m.llmContext)
+	}
+}
+
+func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.currentTask = "finish task"
+	m.dodItems = []string{"dod one"}
+	m.runtimeEvents = []string{"Working: shell/command go test ./..."}
+	m.patches = []backend.PatchInfo{{ID: "patch-1", TargetRef: "main.go", State: common.PatchStateApplied}}
+	m.artifacts = []string{"result.md"}
+
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{"/status", "finish task"},
+		{"/coverage", "dod one"},
+		{"/timeline", "go test ./..."},
+		{"/patches", "main.go"},
+		{"/artifacts", "result.md"},
+	} {
+		m.setInput(tc.input)
+		next, cmd := m.submitInput()
+		m = asModel(next)
+		if cmd != nil {
+			t.Fatalf("%s returned command, want local render", tc.input)
+		}
+		if !strings.Contains(m.result, tc.want) {
+			t.Fatalf("%s result = %q, want %q", tc.input, m.result, tc.want)
+		}
 	}
 }
 
@@ -994,7 +1151,7 @@ func TestModelSlashCompletionHelpAndClearCommands(t *testing.T) {
 	}
 	m.width = 80
 	m.height = 20
-	if view := stripANSI(m.View()); !strings.Contains(view, "WorkOrch Help") || !strings.Contains(view, "Ctrl+P / Ctrl+N") {
+	if view := stripANSI(m.View()); !strings.Contains(view, "WorkOrch Help") || !strings.Contains(view, "/status") || !strings.Contains(view, "/coverage") {
 		t.Fatalf("help overlay missing content:\n%s", view)
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})

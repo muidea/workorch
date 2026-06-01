@@ -121,7 +121,7 @@ func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal stri
 }
 
 func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initialGoal string, options Options) AppModel {
-	eventCh := make(chan backend.Event, 64)
+	eventCh := make(chan backend.Event, 256)
 	unsubscribe := func() {}
 	if be != nil {
 		if unsub, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
@@ -580,8 +580,18 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("no active workspace")
 		return m, nil
 	}
-	m.lastError = fmt.Errorf("plain input requires a slash command: use /goal, /run continue, /run restart, /decision, or /approval")
-	return m, nil
+	m.clearInput()
+	m.lastError = nil
+	if m.activeRunID != "" || m.running {
+		m.cancelWorkspaceSelection()
+		m.clearRunDisplayState()
+		m.appendTranscript("Input", text)
+		m.progress = progressSubmitting
+		m.progressText = "Continuing active run"
+		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, text)
+	}
+	m.cancelWorkspaceSelection()
+	return m.submitGoalText(text)
 }
 
 func (m *AppModel) submitGoalText(text string) (tea.Model, tea.Cmd) {
@@ -814,6 +824,54 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.result = renderMemoryRecallSummary(m.memoryRecalls)
 		m.resetMainViewport()
 		m.progressText = "Showing memory recall summary"
+		return m, nil, true
+	case "status":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = m.renderInspectStatus()
+		m.resetMainViewport()
+		m.progressText = "Showing workspace status"
+		m.lastError = nil
+		return m, nil, true
+	case "coverage":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = m.renderInspectCoverage()
+		m.resetMainViewport()
+		m.progressText = "Showing coverage progress"
+		m.lastError = nil
+		return m, nil, true
+	case "steps":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = m.renderInspectSteps()
+		m.resetMainViewport()
+		m.progressText = "Showing recent steps"
+		m.lastError = nil
+		return m, nil, true
+	case "timeline":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = renderInspectTimeline(m.runtimeEvents)
+		m.resetMainViewport()
+		m.progressText = "Showing runtime timeline"
+		m.lastError = nil
+		return m, nil, true
+	case "patches":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = renderInspectPatches(m.patches)
+		m.resetMainViewport()
+		m.progressText = "Showing patches"
+		m.lastError = nil
+		return m, nil, true
+	case "artifacts":
+		m.addInputHistory(text)
+		m.clearInput()
+		m.result = m.renderInspectArtifacts()
+		m.resetMainViewport()
+		m.progressText = "Showing artifacts"
+		m.lastError = nil
 		return m, nil, true
 	case "dod":
 		m.addInputHistory(text)
@@ -1106,6 +1164,210 @@ func memoryRecallHitSummary(items []backend.MemoryRecallHitInfo, memoryID common
 		}
 	}
 	return ""
+}
+
+func patchInfoFromEvent(evt backend.Event) backend.PatchInfo {
+	return backend.PatchInfo{
+		ID:           common.PatchID(firstPayloadString(evt.Payload, "patchId", "ID", "id", events.PayloadKeyPatchID)),
+		WorkspaceID:  evt.WorkspaceID,
+		RunID:        evt.RunID,
+		StepID:       common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", events.PayloadKeyStepID)),
+		ToolCallID:   common.ToolCallID(firstPayloadString(evt.Payload, "toolCallId", "ToolCallID", events.PayloadKeyToolCallID)),
+		ApprovalID:   common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ApprovalID", events.PayloadKeyApprovalID)),
+		PatchType:    firstPayloadString(evt.Payload, "patchType", "PatchType", events.PayloadKeyPatchType),
+		TargetRef:    firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef),
+		Summary:      firstPayloadString(evt.Payload, "summary", "Summary", events.PayloadKeySummary),
+		State:        common.PatchState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)),
+		AddedLines:   payloadIntValue(evt.Payload, "addedLines", "AddedLines", events.PayloadKeyAddedLines),
+		DeletedLines: payloadIntValue(evt.Payload, "deletedLines", "DeletedLines", events.PayloadKeyDeletedLines),
+	}
+}
+
+func (m *AppModel) upsertPatch(next backend.PatchInfo) {
+	if next.ID == "" && next.TargetRef == "" && next.State == "" {
+		return
+	}
+	for idx := range m.patches {
+		if next.ID != "" && m.patches[idx].ID == next.ID {
+			m.patches[idx] = mergePatchInfo(m.patches[idx], next)
+			return
+		}
+	}
+	m.patches = append(m.patches, next)
+}
+
+func mergePatchInfo(existing backend.PatchInfo, next backend.PatchInfo) backend.PatchInfo {
+	if next.WorkspaceID != "" {
+		existing.WorkspaceID = next.WorkspaceID
+	}
+	if next.RunID != "" {
+		existing.RunID = next.RunID
+	}
+	if next.StepID != "" {
+		existing.StepID = next.StepID
+	}
+	if next.ToolCallID != "" {
+		existing.ToolCallID = next.ToolCallID
+	}
+	if next.ApprovalID != "" {
+		existing.ApprovalID = next.ApprovalID
+	}
+	if next.PatchType != "" {
+		existing.PatchType = next.PatchType
+	}
+	if next.TargetRef != "" {
+		existing.TargetRef = next.TargetRef
+	}
+	if next.Summary != "" {
+		existing.Summary = next.Summary
+	}
+	if next.State != "" {
+		existing.State = next.State
+	}
+	if next.AddedLines != 0 {
+		existing.AddedLines = next.AddedLines
+	}
+	if next.DeletedLines != 0 {
+		existing.DeletedLines = next.DeletedLines
+	}
+	return existing
+}
+
+func artifactContinuationInfoFromEvent(evt backend.Event) backend.ArtifactContinuationInfo {
+	return backend.ArtifactContinuationInfo{
+		ID:                common.ArtifactContinuationID(firstPayloadString(evt.Payload, "artifactContinuationId", "ID", "id")),
+		WorkspaceID:       evt.WorkspaceID,
+		RunID:             evt.RunID,
+		RootStepID:        common.StepID(firstPayloadString(evt.Payload, "rootStepId", "RootStepID")),
+		ArtifactID:        firstPayloadString(evt.Payload, "artifactId", "ArtifactID"),
+		TargetRef:         firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef),
+		Operation:         firstPayloadString(evt.Payload, "operation", "Operation", events.PayloadKeyOperation),
+		State:             common.ArtifactContinuationState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)),
+		ExpectedSequence:  payloadIntValue(evt.Payload, "expectedSequence", "ExpectedSequence"),
+		ReceivedSequences: payloadIntSliceValue(evt.Payload, "receivedSequences", "ReceivedSequences"),
+		FinalReceived:     payloadBoolValue(evt.Payload, "finalReceived", "FinalReceived"),
+		BytesWritten:      int64(payloadIntValue(evt.Payload, "bytesWritten", "BytesWritten", events.PayloadKeyReceivedBytes)),
+		FailureReason:     firstPayloadString(evt.Payload, "failureReason", "FailureReason", "error", "Error", events.PayloadKeyError),
+		Progress:          payloadMapValue(evt.Payload, "progress", "Progress"),
+	}
+}
+
+func (m *AppModel) upsertArtifactContinuation(next backend.ArtifactContinuationInfo) {
+	if next.ID == "" && next.TargetRef == "" && next.State == "" {
+		return
+	}
+	for idx := range m.artifactContinuations {
+		if next.ID != "" && m.artifactContinuations[idx].ID == next.ID {
+			m.artifactContinuations[idx] = mergeArtifactContinuationInfo(m.artifactContinuations[idx], next)
+			return
+		}
+	}
+	m.artifactContinuations = append(m.artifactContinuations, next)
+}
+
+func mergeArtifactContinuationInfo(existing backend.ArtifactContinuationInfo, next backend.ArtifactContinuationInfo) backend.ArtifactContinuationInfo {
+	if next.WorkspaceID != "" {
+		existing.WorkspaceID = next.WorkspaceID
+	}
+	if next.RunID != "" {
+		existing.RunID = next.RunID
+	}
+	if next.RootStepID != "" {
+		existing.RootStepID = next.RootStepID
+	}
+	if next.ArtifactID != "" {
+		existing.ArtifactID = next.ArtifactID
+	}
+	if next.TargetRef != "" {
+		existing.TargetRef = next.TargetRef
+	}
+	if next.Operation != "" {
+		existing.Operation = next.Operation
+	}
+	if next.State != "" {
+		existing.State = next.State
+	}
+	if next.ExpectedSequence != 0 {
+		existing.ExpectedSequence = next.ExpectedSequence
+	}
+	if len(next.ReceivedSequences) > 0 {
+		existing.ReceivedSequences = append([]int(nil), next.ReceivedSequences...)
+	}
+	if next.FinalReceived {
+		existing.FinalReceived = true
+	}
+	if next.BytesWritten != 0 {
+		existing.BytesWritten = next.BytesWritten
+	}
+	if next.FailureReason != "" {
+		existing.FailureReason = next.FailureReason
+	}
+	if next.Progress != nil {
+		existing.Progress = clonePayloadMap(next.Progress)
+	}
+	return existing
+}
+
+func memoryRecallInfoFromEvent(evt backend.Event) backend.MemoryRecallTraceInfo {
+	return backend.MemoryRecallTraceInfo{
+		ID:                 common.MemoryRecallTraceID(firstPayloadString(evt.Payload, "traceId", "ID", "id", events.PayloadKeyTraceID)),
+		WorkspaceID:        evt.WorkspaceID,
+		RunID:              evt.RunID,
+		StepID:             common.StepID(firstPayloadString(evt.Payload, "stepId", "StepID", events.PayloadKeyStepID)),
+		Stage:              firstPayloadString(evt.Payload, "stage", "Stage", events.PayloadKeyStage),
+		Source:             firstPayloadString(evt.Payload, "source", "Source", "sourceType", "SourceType", events.PayloadKeySourceType),
+		Policy:             firstPayloadString(evt.Payload, "policy", "Policy", events.PayloadKeyPolicy),
+		Status:             firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus),
+		ProviderID:         firstPayloadString(evt.Payload, "providerId", "ProviderID", events.PayloadKeyProviderID),
+		Operation:          firstPayloadString(evt.Payload, "operation", "Operation", events.PayloadKeyOperation),
+		RetrievedMemoryIDs: memoryIDsFromStrings(payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", events.PayloadKeyRetrievedMemoryIDs)),
+		Reason:             firstPayloadString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+	}
+}
+
+func memoryIDsFromStrings(items []string) []common.MemoryID {
+	ret := make([]common.MemoryID, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item) != "" {
+			ret = append(ret, common.MemoryID(strings.TrimSpace(item)))
+		}
+	}
+	return ret
+}
+
+func (m *AppModel) upsertMemoryRecall(next backend.MemoryRecallTraceInfo) {
+	if next.ID == "" && next.Status == "" && len(next.RetrievedMemoryIDs) == 0 {
+		return
+	}
+	for idx := range m.memoryRecalls {
+		if next.ID != "" && m.memoryRecalls[idx].ID == next.ID {
+			m.memoryRecalls[idx] = next
+			return
+		}
+	}
+	m.memoryRecalls = append(m.memoryRecalls, next)
+}
+
+func (m *AppModel) applyLLMUsageEvent(payload map[string]any) {
+	m.llmUsage.EntryTotal++
+	inputTokens := payloadIntValue(payload, events.PayloadKeyInputTokens, "inputTokens", "InputTokens")
+	outputTokens := payloadIntValue(payload, events.PayloadKeyOutputTokens, "outputTokens", "OutputTokens")
+	totalTokens := payloadIntValue(payload, events.PayloadKeyTotalTokens, "totalTokens", "TotalTokens")
+	if totalTokens == 0 {
+		totalTokens = inputTokens + outputTokens
+	}
+	m.llmUsage.InputTokens += inputTokens
+	m.llmUsage.OutputTokens += outputTokens
+	m.llmUsage.TotalTokens += totalTokens
+	if payloadBoolValue(payload, events.PayloadKeyEstimated, "estimated", "Estimated") {
+		m.llmUsage.EstimatedEntries++
+	} else {
+		m.llmUsage.ProviderNativeEntries++
+	}
+	if strings.TrimSpace(firstPayloadString(payload, events.PayloadKeyFailureClass, "failureClass", "FailureClass")) != "" ||
+		strings.EqualFold(firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status"), "failed") {
+		m.llmUsage.FailedEntries++
+	}
 }
 
 func renderDoDItems(items []string, width int, limit int) string {
@@ -1561,6 +1823,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.followMainViewportTail()
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
+		m.upsertPatch(patchInfoFromEvent(evt))
 		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
 		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
 		if targetRef != "" || state != "" {
@@ -1570,13 +1833,15 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return nil
 	case backend.EventArtifactContinuationChanged:
+		m.upsertArtifactContinuation(artifactContinuationInfoFromEvent(evt))
 		m.progressText = artifactContinuationProgressText(evt.Payload)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return nil
 	case backend.EventMemoryRecallRecorded:
+		m.upsertMemoryRecall(memoryRecallInfoFromEvent(evt))
 		status := firstPayloadString(evt.Payload, "status", "Status", events.PayloadKeyStatus)
 		ids := payloadStringSliceValue(evt.Payload, "retrievedMemoryIds", "RetrievedMemoryIDs", events.PayloadKeyRetrievedMemoryIDs)
 		if status == "degraded" {
@@ -1586,13 +1851,14 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return nil
 	case backend.EventLLMUsageRecorded:
+		m.applyLLMUsageEvent(evt.Payload)
 		m.progressText = llmUsageProgressText(evt.Payload)
 		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return nil
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -1694,7 +1960,7 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 	default:
 		if m.progress == progressIdle || m.progress == progressSubmitting {
 			m.progress = progressRunning
-			if strings.TrimSpace(m.progressText) == "" {
+			if strings.TrimSpace(m.progressText) == "" || strings.HasPrefix(m.progressText, "Continuing active run") {
 				m.progressText = "Run started; waiting for progress or final result"
 			}
 		}
@@ -1704,6 +1970,7 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 func (m *AppModel) clearRunDisplayState() {
 	m.clearResultDisplayState()
 	m.patches = nil
+	m.artifactContinuations = nil
 	m.taskDecomp = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
@@ -1936,6 +2203,43 @@ func payloadIntValue(payload map[string]any, keys ...string) int {
 		}
 	}
 	return 0
+}
+
+func payloadIntSliceValue(payload map[string]any, keys ...string) []int {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case []int:
+			return append([]int(nil), typed...)
+		case []int64:
+			ret := make([]int, 0, len(typed))
+			for _, item := range typed {
+				ret = append(ret, int(item))
+			}
+			return ret
+		case []any:
+			ret := make([]int, 0, len(typed))
+			for _, item := range typed {
+				switch v := item.(type) {
+				case int:
+					ret = append(ret, v)
+				case int64:
+					ret = append(ret, int(v))
+				case float64:
+					ret = append(ret, int(v))
+				case float32:
+					ret = append(ret, int(v))
+				}
+			}
+			if len(ret) > 0 {
+				return ret
+			}
+		}
+	}
+	return nil
 }
 
 func payloadBoolValue(payload map[string]any, keys ...string) bool {

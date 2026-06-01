@@ -213,9 +213,12 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	previousTranscript := append([]transcriptItem(nil), m.transcript...)
 	previousDoDItems := append([]string(nil), m.dodItems...)
 	m.upsertWorkspace(*msg.Workspace)
-	m.resetWorkspaceView()
-	m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
-	m.approvals = append([]backend.ApprovalInfo(nil), msg.Approvals...)
+	if msg.Decisions != nil {
+		m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
+	}
+	if msg.Approvals != nil {
+		m.approvals = append([]backend.ApprovalInfo(nil), msg.Approvals...)
+	}
 
 	workspaceHasLive := msg.WorkspaceHasLive || msg.Workspace.ActiveRunID != ""
 	activeRun := msg.ActiveRun
@@ -227,13 +230,19 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if run == nil {
 		m.activeRunID = ""
 		m.running = false
+		m.clearRunProjectionState()
 		if msg.Goal != nil && strings.TrimSpace(msg.Goal.Text) != "" {
 			goalText := strings.TrimSpace(msg.Goal.Text)
 			m.currentTask = goalText
 			m.transcript = initialTranscript(goalText)
+		} else if msg.Snapshot != nil {
+			m.currentTask = ""
+			m.transcript = nil
 		}
 		if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 			m.dodItems = append([]string(nil), msg.DoD.Items...)
+		} else if msg.Snapshot != nil {
+			m.dodItems = nil
 		}
 		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 		m.applyWorkspaceProgress(msg.Workspace.State)
@@ -253,11 +262,16 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if goalText != "" {
 		m.currentTask = goalText
 		m.transcript = effectiveGoalTranscript(run, goalText)
+	} else if msg.Snapshot != nil {
+		m.currentTask = ""
+		m.transcript = nil
 	}
 	if items := effectiveDoDItems(run); len(items) > 0 {
 		m.dodItems = items
 	} else if msg.DoD != nil && len(msg.DoD.Items) > 0 {
 		m.dodItems = append([]string(nil), msg.DoD.Items...)
+	} else if msg.Snapshot != nil {
+		m.dodItems = nil
 	}
 	m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 	if msg.Snapshot != nil {
@@ -308,6 +322,23 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if strings.TrimSpace(m.result) != "" {
 		m.followMainViewportTail()
 	}
+}
+
+func (m *AppModel) clearRunProjectionState() {
+	m.result = ""
+	m.artifacts = nil
+	m.sources = nil
+	m.patches = nil
+	m.artifactContinuations = nil
+	m.taskDecomp = nil
+	m.memoryRecalls = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
+	m.repairLoop = ""
+	m.failureReason = ""
+	m.failureHint = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
 }
 
 func (m *AppModel) restoreDefinitionsWhenPartialContext(msg WorkspaceContextMsg, previousTask string, previousTranscript []transcriptItem, previousDoDItems []string) {

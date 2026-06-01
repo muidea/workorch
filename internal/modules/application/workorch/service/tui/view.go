@@ -702,9 +702,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit command | /goal | /run continue | /run restart | /dod | /memory | /config | /exit"
+	help := "enter: submit | /goal | /run continue | /dod | /status | /coverage | /timeline | /memory | /config | /exit"
 	if width < 120 {
-		help = "enter | /goal | /run continue | /dod | /memory | /config | /exit"
+		help = "enter | /goal | /dod | /run continue | /status | /coverage | /memory | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -716,7 +716,37 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 	lines := []string{
 		"WorkOrch Help",
 		"",
-		"Enter: submit slash command; decision/approval prompts also accept plain answers",
+		"Workflow:",
+		"  /goal <text>         submit a new goal",
+		"  /run continue [text] continue the active run",
+		"  /run restart [text]  restart workspace execution",
+		"  /dod <items>         set acceptance criteria",
+		"",
+		"Inspect:",
+		"  /status              workspace and run status",
+		"  /coverage            DoD coverage progress",
+		"  /steps               recent step summary",
+		"  /timeline            runtime event timeline",
+		"  /patches             patch evidence",
+		"  /artifacts           artifacts and continuations",
+		"  /memory              memory recall",
+		"",
+		"Governance:",
+		"  /decision answer     answer current decision",
+		"  /decision replan     request replan",
+		"  /approval approve    approve request",
+		"  /approval reject     reject request",
+		"",
+		"System:",
+		"  /workspace           select workspace",
+		"  /workspace create    create workspace",
+		"  /config              system configuration",
+		"  /clear               clear display",
+		"  /help                show this help",
+		"  /exit                quit",
+		"",
+		"Enter: submit command; decision/approval prompts accept plain answers",
+		"Plain text continues an active run, or creates a new goal when idle",
 		"Alt+Enter: insert newline",
 		"Ctrl+P / Ctrl+N: input history",
 		"Tab: slash command completion",
@@ -725,9 +755,8 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"Ctrl+C: interrupt active run; use /exit to quit",
 		"PgUp / PgDn: scroll result",
 		"Esc: clear input or close help",
-		"/help /clear /config /workspace /workspace create /goal /dod /memory /result /run continue /run restart /exit",
 	}
-	panelWidth := min(width-4, 72)
+	panelWidth := min(width-4, 78)
 	if panelWidth < 30 {
 		panelWidth = max(20, width-2)
 	}
