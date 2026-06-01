@@ -221,7 +221,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if err := o.createDecisionTicket(ctx, run, step, decisionSpec); err != nil {
 			return err
 		}
-		if err := o.recordRejectedResultForDecisionBlock(ctx, run, step, output, decisionSpec); err != nil {
+		if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, step, output, decisionSpec); err != nil {
 			return err
 		}
 		return o.blockOnDecisionAtStep(ctx, run, workspace, ticketID, step.ID)

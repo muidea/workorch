@@ -58,7 +58,7 @@ func decisionBlockRequiresRejectedResult(spec runtimeDecisionBlockSpec) bool {
 	return strings.TrimSpace(stringFromMap(spec.Context, decisionContextKeyRecoveryPolicy)) == decisionContextRecoveryPolicyRepairPlan
 }
 
-func (o *RuntimeOrchestrator) recordRejectedResultForDecisionBlock(
+func (r *resultSubsystem) recordRejectedResultForDecisionBlock(
 	ctx context.Context,
 	run *runModel.Run,
 	step *runModel.Step,
@@ -68,7 +68,7 @@ func (o *RuntimeOrchestrator) recordRejectedResultForDecisionBlock(
 	if !decisionBlockRequiresRejectedResult(spec) {
 		return nil
 	}
-	return o.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, output)
+	return r.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 }
 
 func decisionBlockSpec(output map[string]any) runtimeDecisionBlockSpec {

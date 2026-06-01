@@ -737,7 +737,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 			},
 		},
 	}
-	if err := o.recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
+	if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
