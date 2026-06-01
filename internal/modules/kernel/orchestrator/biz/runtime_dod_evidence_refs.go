@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type completionEvidenceRefCatalog struct {
@@ -29,7 +30,7 @@ func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(c
 	if assessment == nil {
 		return output, nil
 	}
-	catalog, err := o.completionEvidenceRefCatalog(ctx, run)
+	catalog, err := completionEvidenceRefCatalogForRun(ctx, o.steps, o.evidence, run)
 	if err != nil {
 		return nil, err
 	}
@@ -51,9 +52,13 @@ func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(c
 	return ret, nil
 }
 
-func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, run *runModel.Run) (completionEvidenceRefCatalog, error) {
+func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run) (completionEvidenceRefCatalog, error) {
+	runID := common.RunID("")
+	if run != nil {
+		runID = run.ID
+	}
 	catalog := completionEvidenceRefCatalog{
-		runID:                     run.ID,
+		runID:                     runID,
 		aliases:                   map[string]string{},
 		steps:                     map[string]*runModel.Step{},
 		patches:                   map[string]bool{},
@@ -63,15 +68,15 @@ func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, 
 		latestUsableOrderByScope:  map[string]int{},
 		supersededFailureStepRefs: map[string]string{},
 	}
-	if o == nil || o.steps == nil || run == nil || run.ID == "" {
+	if steps == nil || run == nil || run.ID == "" {
 		return catalog, nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	runSteps, err := steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return catalog, err
 	}
-	steps = orderedRuntimeContextSteps(steps)
-	for idx, step := range steps {
+	runSteps = orderedRuntimeContextSteps(runSteps)
+	for idx, step := range runSteps {
 		if step == nil || step.ID == "" {
 			continue
 		}
@@ -91,7 +96,7 @@ func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, 
 			catalog.addAlias(rawAlias, canonical)
 		}
 	}
-	for _, step := range steps {
+	for _, step := range runSteps {
 		if step == nil || step.ID == "" || step.State != common.StepStateFailed {
 			continue
 		}
@@ -108,17 +113,17 @@ func (o *RuntimeOrchestrator) completionEvidenceRefCatalog(ctx context.Context, 
 			catalog.supersededFailureStepRefs[canonical] = latest
 		}
 	}
-	for _, step := range steps {
+	for _, step := range runSteps {
 		if step == nil || step.ID == "" {
 			continue
 		}
 		canonical := string(step.ID)
-		for _, rawAlias := range completionEvidenceFollowUpNodeAliases(run.ID, step, steps) {
+		for _, rawAlias := range completionEvidenceFollowUpNodeAliases(run.ID, step, runSteps) {
 			catalog.addAlias(rawAlias, canonical)
 		}
 	}
-	if o.evidence.Patches != nil {
-		patches, err := o.evidence.Patches.ListByRun(ctx, run.ID)
+	if evidence.Patches != nil {
+		patches, err := evidence.Patches.ListByRun(ctx, run.ID)
 		if err != nil {
 			return catalog, err
 		}
