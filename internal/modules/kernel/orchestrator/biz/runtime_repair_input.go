@@ -173,11 +173,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
 	if assessmentOnlyCoverageRepair {
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
-			input["missingGoalCoverage"] = o.missingGoalCoverageWithEvidenceCandidates(ctx, run, failedStep, missingGoalCoverage)
+			input["missingGoalCoverage"] = missingGoalCoverageWithEvidenceCandidates(ctx, o.steps, run, failedStep, missingGoalCoverage)
 		}
 	}
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
-		input["missingDoDItems"] = o.missingDoDItemsWithEvidenceCandidates(ctx, run, failedStep, missingDoD)
+		input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, o.steps, run, failedStep, missingDoD)
 	}
 	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
 		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {

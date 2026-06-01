@@ -10,6 +10,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func terminalAssessmentOnlyDecisionContractFailure(step *runModel.Step) bool {
@@ -385,8 +386,9 @@ func missingGoalCoverageMatchKeys(item map[string]any) []string {
 	return ret
 }
 
-func (o *RuntimeOrchestrator) missingGoalCoverageWithEvidenceCandidates(
+func missingGoalCoverageWithEvidenceCandidates(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	missing []map[string]any,
@@ -403,20 +405,21 @@ func (o *RuntimeOrchestrator) missingGoalCoverageWithEvidenceCandidates(
 			next["goalRequirementId"] = goalCoverageRequirementID(idx+1, normalized)
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			if candidates := o.goalCoverageEvidenceCandidatesForRequirement(ctx, run, failedStep, requirement); len(candidates) > 0 {
+			if candidates := goalCoverageEvidenceCandidatesForRequirement(ctx, steps, run, failedStep, requirement); len(candidates) > 0 {
 				next["evidenceCandidates"] = candidates
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = o.latestCoverageBoundActionEvidenceCandidates(ctx, run, failedStep, requirement, 5)
+			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidates(ctx, steps, run, failedStep, requirement, 5)
 		}
 		ret = append(ret, next)
 	}
 	return ret
 }
 
-func (o *RuntimeOrchestrator) missingDoDItemsWithEvidenceCandidates(
+func missingDoDItemsWithEvidenceCandidates(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	missing []map[string]any,
@@ -429,12 +432,12 @@ func (o *RuntimeOrchestrator) missingDoDItemsWithEvidenceCandidates(
 		next := cloneStepPayload(item)
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
 			requirement := strings.TrimSpace(stringFromMap(next, "item"))
-			if candidates := o.goalCoverageEvidenceCandidatesForRequirement(ctx, run, failedStep, requirement); len(candidates) > 0 {
+			if candidates := goalCoverageEvidenceCandidatesForRequirement(ctx, steps, run, failedStep, requirement); len(candidates) > 0 {
 				next["evidenceCandidates"] = candidates
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = o.latestCoverageBoundActionEvidenceCandidates(ctx, run, failedStep, strings.TrimSpace(stringFromMap(next, "item")), 5)
+			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidates(ctx, steps, run, failedStep, strings.TrimSpace(stringFromMap(next, "item")), 5)
 		}
 		ret = append(ret, next)
 	}
@@ -451,20 +454,21 @@ func missingGoalCoverageRequirementText(item map[string]any) string {
 	))
 }
 
-func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
+func goalCoverageEvidenceCandidatesForRequirement(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	requirement string,
 ) []map[string]any {
-	if o == nil || o.steps == nil || run == nil {
+	if steps == nil || run == nil {
 		return nil
 	}
 	terms := coverageRequirementTerms(requirement)
 	if len(terms) == 0 {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	runSteps, err := steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return nil
 	}
@@ -473,7 +477,7 @@ func (o *RuntimeOrchestrator) goalCoverageEvidenceCandidatesForRequirement(
 		item  map[string]any
 	}
 	candidates := make([]candidate, 0)
-	for _, step := range steps {
+	for _, step := range runSteps {
 		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
 			continue
 		}
@@ -548,23 +552,24 @@ func coverageEvidenceQualityCandidateAllowed(value string) bool {
 	}
 }
 
-func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
+func latestActionEvidenceCandidates(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	limit int,
 ) []map[string]any {
-	if o == nil || o.steps == nil || run == nil || limit <= 0 {
+	if steps == nil || run == nil || limit <= 0 {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
-	if err != nil || len(steps) == 0 {
+	runSteps, err := steps.ListByRun(ctx, run.ID)
+	if err != nil || len(runSteps) == 0 {
 		return nil
 	}
-	steps = orderedRuntimeContextSteps(steps)
+	runSteps = orderedRuntimeContextSteps(runSteps)
 	ret := make([]map[string]any, 0, limit)
-	for idx := len(steps) - 1; idx >= 0 && len(ret) < limit; idx-- {
-		step := steps[idx]
+	for idx := len(runSteps) - 1; idx >= 0 && len(ret) < limit; idx-- {
+		step := runSteps[idx]
 		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
 			continue
 		}
@@ -592,28 +597,29 @@ func (o *RuntimeOrchestrator) latestActionEvidenceCandidates(
 	return ret
 }
 
-func (o *RuntimeOrchestrator) latestCoverageBoundActionEvidenceCandidates(
+func latestCoverageBoundActionEvidenceCandidates(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	failedStep *runModel.Step,
 	coverageTarget string,
 	limit int,
 ) []map[string]any {
-	if o == nil || o.steps == nil || run == nil || limit <= 0 {
+	if steps == nil || run == nil || limit <= 0 {
 		return nil
 	}
 	coverageTarget = normalizeCoverageGapRepairToken(coverageTarget)
 	if coverageTarget == "" {
 		return nil
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
-	if err != nil || len(steps) == 0 {
+	runSteps, err := steps.ListByRun(ctx, run.ID)
+	if err != nil || len(runSteps) == 0 {
 		return nil
 	}
-	steps = orderedRuntimeContextSteps(steps)
+	runSteps = orderedRuntimeContextSteps(runSteps)
 	ret := make([]map[string]any, 0, limit)
-	for idx := len(steps) - 1; idx >= 0 && len(ret) < limit; idx-- {
-		step := steps[idx]
+	for idx := len(runSteps) - 1; idx >= 0 && len(ret) < limit; idx-- {
+		step := runSteps[idx]
 		if step == nil || (failedStep != nil && step.ID == failedStep.ID) {
 			continue
 		}
@@ -740,7 +746,7 @@ func (o *RuntimeOrchestrator) runtimeRepairCurrentExecutionProgress(
 	if evidence := runtimeRepairProgressEvidenceSummaries(mapSliceFromValue(input[stepInputKeyGraphEvidence])); len(evidence) > 0 {
 		ret["completedGraphEvidence"] = evidence
 	}
-	if latest := runtimeRepairProgressEvidenceSummaries(o.latestActionEvidenceCandidates(ctx, run, failedStep, 6)); len(latest) > 0 {
+	if latest := runtimeRepairProgressEvidenceSummaries(latestActionEvidenceCandidates(ctx, o.steps, run, failedStep, 6)); len(latest) > 0 {
 		ret["latestActionEvidence"] = latest
 	}
 	if attempts := runtimeRepairAttemptProgressSummaries(o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, 5)); len(attempts) > 0 {

@@ -1407,7 +1407,7 @@ func TestRuntimeRepairLatestActionEvidenceUsesExplicitSequenceOrder(t *testing.T
 		}
 	}
 	orch := &RuntimeOrchestrator{steps: steps}
-	evidence := orch.latestActionEvidenceCandidates(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-context-order"}, nil, 2)
+	evidence := latestActionEvidenceCandidates(ctx, orch.steps, &runmodel.Run{ID: runID, WorkspaceID: "ws-context-order"}, nil, 2)
 	if len(evidence) != 2 {
 		t.Fatalf("latestActionEvidenceCandidates = %+v, want two items", evidence)
 	}

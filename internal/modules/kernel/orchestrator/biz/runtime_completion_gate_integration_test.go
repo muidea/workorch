@@ -523,7 +523,7 @@ func TestRuntimeRepairEvidenceCandidatesRequireCoverageBoundAction(t *testing.T)
 		steps:      stepRepo,
 		workspaces: memory.NewWorkspaceRepository(),
 	}
-	missing := orch.missingDoDItemsWithEvidenceCandidates(ctx, run, nil, []map[string]any{{
+	missing := missingDoDItemsWithEvidenceCandidates(ctx, orch.steps, run, nil, []map[string]any{{
 		"item":  "target alpha requirement",
 		"state": "failed",
 	}})
@@ -547,7 +547,7 @@ func TestRuntimeRepairEvidenceCandidatesRequireCoverageBoundAction(t *testing.T)
 	}); err != nil {
 		t.Fatalf("seed bound step: %v", err)
 	}
-	missing = orch.missingDoDItemsWithEvidenceCandidates(ctx, run, nil, []map[string]any{{
+	missing = missingDoDItemsWithEvidenceCandidates(ctx, orch.steps, run, nil, []map[string]any{{
 		"item":  "target alpha requirement",
 		"state": "failed",
 	}})
