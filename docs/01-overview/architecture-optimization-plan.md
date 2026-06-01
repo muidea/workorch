@@ -448,6 +448,8 @@ type repairSubsystem struct {
 | P1.52 decision readable resource context helper 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'Test.*Decision\|Test.*RepairInput\|Test.*Dispatch\|Test.*KnownReadable' -count=1 -timeout=120s` 通过；`RuntimeOrchestrator` receiver 方法数降至约 106 个 |
 | P1.53 completion closure evidence helper 收口 | 已完成 | latest completion closure evidence 从 `RuntimeOrchestrator` receiver 改为显式 `StepRepository`/`RuntimeEvidenceRepositories` helper，graph subsystem 直接持有 evidence 依赖；不改变 latest/superseded/patch/validation evidence 投影或 graph expansion limit follow-up 输入 |
 | P1.53 completion closure evidence helper 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'Test.*Graph\|Test.*CompletionGate\|Test.*RepairInput\|Test.*Event' -count=1 -timeout=120s` 通过；`RuntimeOrchestrator` receiver 方法数降至约 105 个 |
+| P1.54 DoD evidence quality sub-check helper 收口 | 已完成 | artifact continuation evidence ref、definition change current-run evidence、profile evidence kind requirement 与 evidence ref step kind 子校验从 `RuntimeOrchestrator` receiver 改为显式 repository helper；保留 `validateDoDAssessmentEvidenceQuality` 作为 orchestrator 入口 |
+| P1.54 DoD evidence quality sub-check helper 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'Test.*EvidenceQuality\|Test.*DoDAssessment\|Test.*ArtifactContinuation\|Test.*DefinitionChange' -count=1 -timeout=120s` 通过；`RuntimeOrchestrator` receiver 方法数降至约 101 个 |
 | P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
 | P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
 | P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
@@ -536,6 +538,7 @@ output mode selector helper 收口只将输出模式优先级计算与 open arti
 repair coverage evidence candidate helper 收口只将 coverage candidate 读取改为显式 step repository helper，实际候选排序、coverage target 匹配、fallback 数量和 repair input 字段不变。
 decision readable resource context helper 收口只将 readable workspace resource context 的 workspace 读取依赖显式化，实际 manifest 扫描、readableResources 字段和自动 repair 判定不变。
 completion closure evidence helper 收口只将 completion closure evidence 投影依赖显式化，实际 latest/superseded/patch/validation evidence 字段和 graph follow-up 输入不变。
+DoD evidence quality sub-check helper 收口只将 evidence quality 子校验依赖显式化，实际 artifact continuation evidence、definition change current-run evidence、profile evidence kind 与 claim alignment 规则不变。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
@@ -543,7 +546,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 项 | 状态 | 下一步 |
 |----|------|--------|
-| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、workspace active run reconcile、rejected DoD result recording、unused dispatch single-spec helper 清理、dispatch step ID helper、lifecycle block wrapper 清理、unused lifecycle/completion wrapper 清理、unused private receiver helper 清理、unused dispatch specs wrapper 清理、runtime policy accessor 收口、unused dispatch step wrapper 清理、provider retry input builder 收口、decision block rejected result recording 收口、current-run evidence ref wrapper 清理、failed loaded run wrapper 清理、governance history LLM input wrapper 清理、result context projection 收口、recent failure context helper 收口、step input memory run state helper 收口、completion evidence ref catalog helper 收口、evidence ref repository helper 收口、output mode selector helper 收口、repair coverage evidence candidate helper 收口、decision readable resource context helper 收口、completion closure evidence helper 收口、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 105 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
+| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、workspace active run reconcile、rejected DoD result recording、unused dispatch single-spec helper 清理、dispatch step ID helper、lifecycle block wrapper 清理、unused lifecycle/completion wrapper 清理、unused private receiver helper 清理、unused dispatch specs wrapper 清理、runtime policy accessor 收口、unused dispatch step wrapper 清理、provider retry input builder 收口、decision block rejected result recording 收口、current-run evidence ref wrapper 清理、failed loaded run wrapper 清理、governance history LLM input wrapper 清理、result context projection 收口、recent failure context helper 收口、step input memory run state helper 收口、completion evidence ref catalog helper 收口、evidence ref repository helper 收口、output mode selector helper 收口、repair coverage evidence candidate helper 收口、decision readable resource context helper 收口、completion closure evidence helper 收口、DoD evidence quality sub-check helper 收口、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 101 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
 | P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 已降至约 937 行，orchestrator 测试最大文件约 2,895 行 |
 
@@ -565,7 +568,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 指标 | 当前 | 目标 |
 |------|------|------|
-| RuntimeOrchestrator 方法数 | ~105 | ~60（核心 dispatch + lifecycle） |
+| RuntimeOrchestrator 方法数 | ~101 | ~60（核心 dispatch + lifecycle） |
 | 最大源文件行数 | ~2,830 (`runtime_graph.go`)；repair 最大文件约 1,754，HTTP 最大拆分文件约 2,074 | <3,000 |
 | 最大测试文件行数 | ~2,895 (`runtime_convergence_test.go`)；`runtime_orchestrator_test.go` 已降至约 937 | <8,000 |
 | 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |

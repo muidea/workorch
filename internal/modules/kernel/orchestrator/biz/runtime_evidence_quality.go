@@ -99,10 +99,10 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 	if o == nil || run == nil || assessment == nil {
 		return nil
 	}
-	if err := o.validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, run, assessment); err != nil {
+	if err := validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, o.steps, o.evidence, run, assessment); err != nil {
 		return err
 	}
-	if err := o.validateArtifactContinuationAssessmentEvidenceRefs(ctx, assessment); err != nil {
+	if err := validateArtifactContinuationAssessmentEvidenceRefs(ctx, o.steps, o.evidence.ValidationResults, assessment); err != nil {
 		return err
 	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
@@ -141,14 +141,14 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 			}
 		}
 	}
-	if err := o.validateDoDAssessmentEvidenceKindRequirements(ctx, run, assessment); err != nil {
+	if err := validateDoDAssessmentEvidenceKindRequirements(ctx, o.steps, o.evidence.ValidationResults, run, assessment); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (o *RuntimeOrchestrator) validateArtifactContinuationAssessmentEvidenceRefs(ctx context.Context, assessment map[string]any) error {
-	if o == nil || assessment == nil || o.steps == nil {
+func validateArtifactContinuationAssessmentEvidenceRefs(ctx context.Context, steps repository.StepRepository, validationResults repository.ValidationResultRepository, assessment map[string]any) error {
+	if assessment == nil || steps == nil {
 		return nil
 	}
 	for _, scoped := range definitionChangeAssessmentCoverageItems(assessment) {
@@ -156,7 +156,7 @@ func (o *RuntimeOrchestrator) validateArtifactContinuationAssessmentEvidenceRefs
 			continue
 		}
 		for _, ref := range evidenceRefsFromValue(scoped.item["evidenceRefs"]) {
-			step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
+			step, ok, err := evidenceRefStep(ctx, steps, validationResults, ref)
 			if err != nil {
 				return err
 			}
@@ -202,7 +202,7 @@ func artifactContinuationChunkEvidenceStep(step *runModel.Step) bool {
 	return stage == "llm_artifact_chunk" || stage == artifactOutputPhaseChunk
 }
 
-func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEvidence(ctx context.Context, run *runModel.Run, assessment map[string]any) error {
+func validateDefinitionChangeAssessmentCurrentRunEvidence(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, assessment map[string]any) error {
 	if run == nil || assessment == nil || !runHasDefinitionChangeImpact(run) {
 		return nil
 	}
@@ -213,7 +213,7 @@ func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEviden
 		refs := evidenceRefsFromValue(scoped.item["evidenceRefs"])
 		hasCurrentRunEvidence := false
 		for _, ref := range refs {
-			if currentRunEvidenceRefUsable(ctx, o.steps, o.evidence, run.ID, ref) {
+			if currentRunEvidenceRefUsable(ctx, steps, evidence, run.ID, ref) {
 				hasCurrentRunEvidence = true
 				break
 			}
@@ -300,9 +300,9 @@ func currentRunEvidenceRefUsable(ctx context.Context, steps repository.StepRepos
 	return false
 }
 
-func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceKindRequirements(ctx context.Context, run *runModel.Run, assessment map[string]any) error {
+func validateDoDAssessmentEvidenceKindRequirements(ctx context.Context, steps repository.StepRepository, validationResults repository.ValidationResultRepository, run *runModel.Run, assessment map[string]any) error {
 	requirements := profileEvidenceKindRequirements(run)
-	if len(requirements) == 0 || o == nil || o.steps == nil {
+	if len(requirements) == 0 || steps == nil {
 		return nil
 	}
 	for _, requirement := range requirements {
@@ -317,7 +317,7 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceKindRequirements(ctx 
 			if !evidenceKindRequirementMatchesItem(requirement, item) {
 				continue
 			}
-			if err := o.validateEvidenceRefsStepKinds(ctx, requirement, item); err != nil {
+			if err := validateEvidenceRefsStepKinds(ctx, steps, validationResults, requirement, item); err != nil {
 				return err
 			}
 		}
@@ -521,7 +521,7 @@ func knownEvidenceKindRequirementScope(scope string) bool {
 	}
 }
 
-func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context, requirement profileEvidenceKindRequirement, item map[string]any) error {
+func validateEvidenceRefsStepKinds(ctx context.Context, steps repository.StepRepository, validationResults repository.ValidationResultRepository, requirement profileEvidenceKindRequirement, item map[string]any) error {
 	refs := evidenceRefsFromValue(item["evidenceRefs"])
 	if len(refs) == 0 {
 		if requirement.RequireDirect {
@@ -543,7 +543,7 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 	acceptedSteps := make([]*runModel.Step, 0)
 	itemName := evidenceKindRequirementItemName(requirement, item)
 	for _, ref := range refs {
-		step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
+		step, ok, err := evidenceRefStep(ctx, steps, validationResults, ref)
 		if err != nil {
 			return err
 		}
@@ -596,19 +596,19 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		}
 	}
 	if requirement.RequireClaimEvidence && claimEvidenceRequiresAlignment(itemName) {
-		steps := acceptedSteps
+		claimSteps := acceptedSteps
 		if !hasAcceptedRequirement {
 			for _, ref := range refs {
-				step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
+				step, ok, err := evidenceRefStep(ctx, steps, validationResults, ref)
 				if err != nil {
 					return err
 				}
 				if ok {
-					steps = append(steps, step)
+					claimSteps = append(claimSteps, step)
 				}
 			}
 		}
-		if !stepsContainClaimAlignedEvidence(itemName, steps) {
+		if !stepsContainClaimAlignedEvidence(itemName, claimSteps) {
 			return evidenceKindRequirementError(requirement, itemName, strings.Join(refs, ", "), "", "requires evidence text or coverageTargets aligned with the satisfied claim")
 		}
 	}
