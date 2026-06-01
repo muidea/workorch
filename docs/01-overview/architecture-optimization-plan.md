@@ -402,6 +402,8 @@ type repairSubsystem struct {
 | P1.29 StartRun active workspace guard 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=120s` 通过；只移动启动前 guard 的读取边界，不改变 created-only 启动条件、stale activeRunID conflict 语义、active run 冲突规则或 dispatch 行为 |
 | P1.30 workspace active run reconcile 收口 | 已完成 | `runStateSubsystem.reconcileWorkspaceActiveRun` 承载 workspace activeRun 读取、missing active run 清理、terminal active run 释放与 workspace 状态写入；`RuntimeOrchestrator` 仍负责 reconcile 调用点和 workspace state event 发布 |
 | P1.30 workspace active run reconcile 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRunStateSubsystemReconcileWorkspaceActiveRunClearsMissingActiveRun|TestRuntimeOrchestrator_ReconcileWorkspaceActiveRun|TestRuntimeOrchestrator_StartRun|TestRuntimeOrchestrator_Resume' -count=1 -timeout=120s` 通过；只移动 activeRun reconcile 持久化边界，不改变 missing activeRunID、terminal active run、non-terminal active run 或 event payload 语义 |
+| P1.31 rejected DoD result recording 收口 | 已完成 | `resultSubsystem.recordRejectedCompletionDoDAssessment` 承载 rejected completion DoD assessment 的合成、降级、runtime diagnostics 保留与 rejected result 写入；`RuntimeOrchestrator` 只在 repair/block gate 中调用 result manager |
+| P1.31 rejected DoD result recording 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRuntimeOrchestrator_RecordsRejected|TestRuntimeOrchestrator_Rejected|TestRuntimeOrchestrator_.*Rejected' -count=1 -timeout=120s` 通过；只移动 rejected result 录制边界，不改变 completion gate、recovery 分支、result state、DoD assessment 字段或 event payload |
 | P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
 | P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
 | P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
@@ -467,6 +469,7 @@ decision resume selection 收口只移动 resolved ticket/resolution 读取与�
 ValidateRun validation sync 收口只统一手动 validation 与自动 validation completion 的 run/workspace 持久化路径，入口校验和事件发布继续由 `RuntimeOrchestrator` 协调。
 StartRun active workspace guard 收口只移动启动前 workspace/active run 冲突读取逻辑，run state 写入、workspace active 绑定、事件发布与 dispatch 继续由 `RuntimeOrchestrator` 协调。
 workspace active run reconcile 收口只移动 workspace activeRun 读取与修正写入逻辑，reconcile 调用时机和事件发布继续由 `RuntimeOrchestrator` 协调。
+rejected DoD result recording 收口只移动 rejected result 的 assessment 合成与记录逻辑，触发时机、repair/block 分支和状态机流程继续由 `RuntimeOrchestrator` 协调。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
@@ -474,7 +477,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 项 | 状态 | 下一步 |
 |----|------|--------|
-| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、workspace active run reconcile、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法维持约 150 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
+| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、workspace active run reconcile、rejected DoD result recording、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 149 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
 | P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 已降至约 937 行，orchestrator 测试最大文件约 2,895 行 |
 
@@ -496,7 +499,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 指标 | 当前 | 目标 |
 |------|------|------|
-| RuntimeOrchestrator 方法数 | ~150 | ~60（核心 dispatch + lifecycle） |
+| RuntimeOrchestrator 方法数 | ~149 | ~60（核心 dispatch + lifecycle） |
 | 最大源文件行数 | ~2,830 (`runtime_graph.go`)；repair 最大文件约 1,754，HTTP 最大拆分文件约 2,074 | <3,000 |
 | 最大测试文件行数 | ~2,895 (`runtime_convergence_test.go`)；`runtime_orchestrator_test.go` 已降至约 937 | <8,000 |
 | 子系统独立测试覆盖 | 部分完成（coverage/patches/result/graph/convergence/repair/LLM context 已有局部入口或独立测试） | 每个子系统可独立构造和测试 |

@@ -663,7 +663,7 @@ func (o *RuntimeOrchestrator) failRunWithRejectedCompletionResult(ctx context.Co
 		reason = "runtime step failed"
 	}
 	if requiresDoDAssessmentCompletionGate(run) && step != nil {
-		_ = o.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
+		_ = o.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output)
 		reason = rejectedCompletionFailureReason(step, reason)
 	}
 	return o.FailRun(ctx, run.ID, reason)

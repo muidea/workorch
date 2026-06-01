@@ -32,7 +32,7 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForUnsatisfiedDoDAssessment(t 
 	}
 	step := &runmodel.Step{ID: common.StepID(string(runID) + "/step-1"), RunID: runID}
 
-	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
 		stepOutputKeyDoDAssessment: map[string]any{
 			"satisfied": false,
 			"summary":   "DoD not satisfied; missing effective tests.",
@@ -133,7 +133,7 @@ func TestRuntimeOrchestrator_RecordsRejectedResultForWeakSatisfiedDoDAssessment(
 	}
 	step := &runmodel.Step{ID: common.StepID(string(runID) + "/step-1"), RunID: runID}
 
-	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
 		stepOutputKeyDoDAssessment: map[string]any{
 			"satisfied":           true,
 			"summary":             "validation completed with inconclusive evidence",
@@ -183,7 +183,7 @@ func TestRuntimeOrchestrator_RejectedResultPublishesRejectedEventID(t *testing.T
 	}
 	step := &runmodel.Step{ID: common.StepID(string(runID) + "/assessment"), RunID: runID}
 
-	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
 		stepOutputKeyDoDAssessment: map[string]any{
 			"satisfied": false,
 			"summary":   "not satisfied",
@@ -222,7 +222,7 @@ func TestRuntimeOrchestrator_RecordsSyntheticRejectedResultWithoutDoDAssessment(
 	}
 	step := &runmodel.Step{ID: common.StepID(string(runID) + "/block/implement"), RunID: runID}
 
-	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, map[string]any{
 		"error": "state-changing execution-stage llm graph node returned no state-changing output",
 	}); err != nil {
 		t.Fatalf("record synthetic rejected result: %v", err)
@@ -333,7 +333,7 @@ func TestRuntimeOrchestrator_RejectedResultAttributesProviderRetryToTerminalStep
 		},
 	}
 
-	if err := orch.recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output); err != nil {
+	if err := orch.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, step.Output); err != nil {
 		t.Fatalf("record rejected result: %v", err)
 	}
 

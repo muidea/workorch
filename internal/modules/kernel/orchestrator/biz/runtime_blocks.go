@@ -68,7 +68,7 @@ func (o *RuntimeOrchestrator) recordRejectedResultForDecisionBlock(
 	if !decisionBlockRequiresRejectedResult(spec) {
 		return nil
 	}
-	return o.recordRejectedCompletionDoDAssessment(ctx, run, step, output)
+	return o.resultManager().recordRejectedCompletionDoDAssessment(ctx, run, step, output)
 }
 
 func decisionBlockSpec(output map[string]any) runtimeDecisionBlockSpec {

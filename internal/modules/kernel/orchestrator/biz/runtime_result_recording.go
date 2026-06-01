@@ -35,6 +35,89 @@ func (r *resultSubsystem) recordRunResultFromDoDAssessment(
 	return r.recordRunResultFromValidatedDoDAssessment(ctx, run, step, assessment, summary, workspace)
 }
 
+func (r *resultSubsystem) recordRejectedCompletionDoDAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	assessment := doDAssessmentFromOutput(output)
+	if assessment == nil {
+		assessment = syntheticRejectedDoDAssessment(run, step, output)
+	}
+	if satisfied, _ := assessment["satisfied"].(bool); satisfied {
+		rejected := cloneStepPayload(assessment)
+		rejected["satisfied"] = false
+		if summary := strings.TrimSpace(stringFromMap(rejected, "summary")); summary != "" {
+			rejected["sourceSummary"] = summary
+		}
+		if reason := strings.TrimSpace(syntheticRejectedDoDReason(step, output)); reason != "" {
+			rejected["rejectionReason"] = reason
+			rejected["gateFailureReason"] = reason
+			if goalOutcome := strings.TrimSpace(stringFromMap(rejected, "goalOutcome")); goalOutcome != "" {
+				rejected["sourceGoalOutcome"] = goalOutcome
+			}
+			rejected["goalOutcome"] = reason
+		}
+		if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			rejected["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
+		}
+		rejected["summary"] = "DoD assessment rejected by runtime completion gate."
+		assessment = rejected
+	}
+	summary, _ := assessment["summary"].(string)
+	return r.recordRunResultFromRejectedDoDAssessment(ctx, run, step, assessment, summary)
+}
+
+func syntheticRejectedDoDAssessment(run *runModel.Run, step *runModel.Step, output map[string]any) map[string]any {
+	reason := syntheticRejectedDoDReason(step, output)
+	stepRef := ""
+	if step != nil {
+		stepRef = string(step.ID)
+	}
+	item := map[string]any{
+		"item":          "runtime execution contract",
+		"state":         "failed",
+		"evidenceRefs":  []string{stepRef},
+		"reason":        reason,
+		"failureReason": reason,
+	}
+	assessment := map[string]any{
+		"satisfied":   false,
+		"summary":     reason,
+		"goalOutcome": reason,
+		"items":       []map[string]any{item},
+		"goalCoverage": map[string]any{
+			"satisfied": false,
+			"items": []map[string]any{{
+				"goal":         "current Goal requirements",
+				"state":        "failed",
+				"evidenceRefs": []string{stepRef},
+				"reason":       reason,
+			}},
+		},
+	}
+	if run != nil && strings.TrimSpace(string(run.GoalID)) != "" {
+		assessment["goalId"] = string(run.GoalID)
+	}
+	return assessment
+}
+
+func syntheticRejectedDoDReason(step *runModel.Step, output map[string]any) string {
+	for _, key := range []string{"error", "reason", "summary"} {
+		if reason := strings.TrimSpace(stringFromMap(output, key)); reason != "" {
+			return reason
+		}
+	}
+	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		if reason := strings.TrimSpace(stringFromMap(diagnostics, "reason")); reason != "" {
+			return reason
+		}
+		if kind := strings.TrimSpace(stringFromMap(diagnostics, "kind")); kind != "" {
+			return "runtime failure: " + kind
+		}
+	}
+	if step != nil && step.ID != "" {
+		return fmt.Sprintf("runtime step %s failed before producing an acceptable DoD assessment", step.ID)
+	}
+	return "runtime failed before producing an acceptable DoD assessment"
+}
+
 func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,
