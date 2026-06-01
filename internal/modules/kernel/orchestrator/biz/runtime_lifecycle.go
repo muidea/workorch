@@ -23,21 +23,9 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if r.State != common.RunStateCreated {
 		return common.ErrConflict
 	}
-	ws, err := o.workspaces.Get(ctx, r.WorkspaceID)
+	ws, err := o.runStateManager().workspaceForCreatedRunStart(ctx, r)
 	if err != nil {
 		return err
-	}
-	if ws.ActiveRunID != "" && ws.ActiveRunID != runID {
-		activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
-		if errors.Is(err, common.ErrNotFound) {
-			return common.ErrConflict
-		}
-		if err != nil {
-			return err
-		}
-		if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
-			return common.ErrConflict
-		}
 	}
 
 	r.State = common.RunStateRunning

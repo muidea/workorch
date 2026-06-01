@@ -226,6 +226,30 @@ func (s *runStateSubsystem) syncRunAndWorkspaceForCompletion(ctx context.Context
 	return ws, nil
 }
 
+func (s *runStateSubsystem) workspaceForCreatedRunStart(ctx context.Context, run *runModel.Run) (*workspaceModel.Workspace, error) {
+	if s == nil || s.runs == nil || s.workspaces == nil || run == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	ws, err := s.workspaces.Get(ctx, run.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ws.ActiveRunID == "" || ws.ActiveRunID == run.ID {
+		return ws, nil
+	}
+	activeRun, err := s.runs.Get(ctx, ws.ActiveRunID)
+	if errors.Is(err, common.ErrNotFound) {
+		return nil, common.ErrConflict
+	}
+	if err != nil {
+		return nil, err
+	}
+	if activeRun != nil && activeRun.WorkspaceID == ws.ID && !isTerminalRunState(activeRun.State) {
+		return nil, common.ErrConflict
+	}
+	return ws, nil
+}
+
 func (s *runStateSubsystem) workspaceForActiveRunState(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
 	if s == nil || s.runs == nil || s.workspaces == nil || run == nil {
 		return nil, common.ErrInvalidArgument
