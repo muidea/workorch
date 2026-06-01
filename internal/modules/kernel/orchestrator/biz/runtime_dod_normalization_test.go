@@ -435,7 +435,7 @@ func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcr
 		},
 	}
 
-	normalized, changed := (&RuntimeOrchestrator{}).normalizeDoDAssessmentEvidenceRefs(context.Background(), catalog, assessment)
+	normalized, changed := normalizeDoDAssessmentEvidenceRefs(context.Background(), nil, RuntimeEvidenceRepositories{}, catalog, assessment)
 	if !changed {
 		t.Fatalf("normalizeDoDAssessmentEvidenceRefs changed=false, want fallback evidence normalization")
 	}

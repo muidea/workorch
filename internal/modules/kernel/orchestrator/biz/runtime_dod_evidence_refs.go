@@ -34,7 +34,7 @@ func (o *RuntimeOrchestrator) normalizeCompletionGateDoDAssessmentEvidenceRefs(c
 	if err != nil {
 		return nil, err
 	}
-	normalized, changed := o.normalizeDoDAssessmentEvidenceRefs(ctx, catalog, assessment)
+	normalized, changed := normalizeDoDAssessmentEvidenceRefs(ctx, o.steps, o.evidence, catalog, assessment)
 	if !changed {
 		return output, nil
 	}
@@ -372,24 +372,24 @@ func (c completionEvidenceRefCatalog) addAlias(alias string, canonical string) {
 	c.aliases[alias] = canonical
 }
 
-func (o *RuntimeOrchestrator) normalizeDoDAssessmentEvidenceRefs(ctx context.Context, catalog completionEvidenceRefCatalog, assessment map[string]any) (map[string]any, bool) {
+func normalizeDoDAssessmentEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, assessment map[string]any) (map[string]any, bool) {
 	if assessment == nil {
 		return assessment, false
 	}
 	ret := cloneStepPayload(assessment)
 	changed := false
 	fallbackRefs := completionEvidenceFallbackRefs(catalog)
-	if refs, ok := normalizeEvidenceRefList(ctx, o, catalog, ret["evidenceRefs"]); ok {
+	if refs, ok := normalizeEvidenceRefList(ctx, steps, evidence, catalog, ret["evidenceRefs"]); ok {
 		ret["evidenceRefs"] = refs
 		changed = true
 	}
-	if items, ok := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, ret["items"], fallbackRefs, false); ok {
+	if items, ok := normalizeAssessmentItemsEvidenceRefs(ctx, steps, evidence, catalog, ret["items"], fallbackRefs, false); ok {
 		ret["items"] = items
 		changed = true
 	}
 	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "deliverableCoverage", "deliverables", "producedArtifacts"} {
 		value := ret[key]
-		normalized, ok := normalizeCoverageEvidenceRefs(ctx, o, catalog, value, fallbackRefs)
+		normalized, ok := normalizeCoverageEvidenceRefs(ctx, steps, evidence, catalog, value, fallbackRefs)
 		if !ok {
 			continue
 		}
@@ -402,9 +402,9 @@ func (o *RuntimeOrchestrator) normalizeDoDAssessmentEvidenceRefs(ctx context.Con
 	return ret, true
 }
 
-func normalizeCoverageEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string) (any, bool) {
+func normalizeCoverageEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string) (any, bool) {
 	if mapped := mapFromValue(value); len(mapped) > 0 {
-		items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, mapped["items"], fallbackRefs, boolValue(mapped["satisfied"]))
+		items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, steps, evidence, catalog, mapped["items"], fallbackRefs, boolValue(mapped["satisfied"]))
 		if !changed {
 			return value, false
 		}
@@ -412,14 +412,14 @@ func normalizeCoverageEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, 
 		ret["items"] = items
 		return ret, true
 	}
-	items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, o, catalog, value, fallbackRefs, false)
+	items, changed := normalizeAssessmentItemsEvidenceRefs(ctx, steps, evidence, catalog, value, fallbackRefs, false)
 	if !changed {
 		return value, false
 	}
 	return items, true
 }
 
-func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string, inferSatisfiedFromParent bool) ([]map[string]any, bool) {
+func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, value any, fallbackRefs []string, inferSatisfiedFromParent bool) ([]map[string]any, bool) {
 	items, ok := doDAssessmentItemMaps(value)
 	if !ok || len(items) == 0 {
 		return nil, false
@@ -428,13 +428,13 @@ func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, o *RuntimeOrchest
 	changed := false
 	for _, item := range items {
 		normalized := cloneStepPayload(item)
-		if refs, ok := normalizeEvidenceRefList(ctx, o, catalog, normalized["evidenceRefs"]); ok {
+		if refs, ok := normalizeEvidenceRefList(ctx, steps, evidence, catalog, normalized["evidenceRefs"]); ok {
 			normalized["evidenceRefs"] = refs
 			changed = true
 		}
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(normalized, "state")))
 		itemFallbackRefs := fallbackRefs
-		if refs := completionEvidenceCandidateRefs(ctx, o, catalog, normalized); len(refs) > 0 {
+		if refs := completionEvidenceCandidateRefs(ctx, steps, evidence, catalog, normalized); len(refs) > 0 {
 			itemFallbackRefs = refs
 		}
 		if state == "" && inferSatisfiedFromParent && len(itemFallbackRefs) > 0 {
@@ -466,8 +466,8 @@ func completionAssessmentStateAllowsEvidenceFallback(state string) bool {
 	}
 }
 
-func completionEvidenceCandidateRefs(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, item map[string]any) []string {
-	if o == nil {
+func completionEvidenceCandidateRefs(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, item map[string]any) []string {
+	if steps == nil {
 		return nil
 	}
 	candidates := mapSliceFromValue(item["evidenceCandidates"])
@@ -486,7 +486,7 @@ func completionEvidenceCandidateRefs(ctx context.Context, o *RuntimeOrchestrator
 		if ref == "" {
 			continue
 		}
-		canonical, ok := o.canonicalCompletionEvidenceRef(ctx, catalog, ref)
+		canonical, ok := canonicalCompletionEvidenceRef(ctx, steps, evidence, catalog, ref)
 		if !ok {
 			continue
 		}
@@ -590,7 +590,7 @@ func dedupeEvidenceRefs(refs []string) []string {
 	return ret
 }
 
-func normalizeEvidenceRefList(ctx context.Context, o *RuntimeOrchestrator, catalog completionEvidenceRefCatalog, value any) ([]string, bool) {
+func normalizeEvidenceRefList(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, value any) ([]string, bool) {
 	refs := evidenceRefsFromValue(value)
 	if len(refs) == 0 {
 		return nil, false
@@ -604,7 +604,7 @@ func normalizeEvidenceRefList(ctx context.Context, o *RuntimeOrchestrator, catal
 			changed = true
 			continue
 		}
-		canonical, ok := o.canonicalCompletionEvidenceRef(ctx, catalog, ref)
+		canonical, ok := canonicalCompletionEvidenceRef(ctx, steps, evidence, catalog, ref)
 		if !ok {
 			changed = true
 			continue
@@ -625,7 +625,7 @@ func normalizeEvidenceRefList(ctx context.Context, o *RuntimeOrchestrator, catal
 	return ret, true
 }
 
-func (o *RuntimeOrchestrator) canonicalCompletionEvidenceRef(ctx context.Context, catalog completionEvidenceRefCatalog, ref string) (string, bool) {
+func canonicalCompletionEvidenceRef(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, catalog completionEvidenceRefCatalog, ref string) (string, bool) {
 	ref = strings.Trim(strings.TrimSpace(ref), "/")
 	if ref == "" || !traceableEvidenceRef(ref) {
 		return "", false
@@ -642,13 +642,13 @@ func (o *RuntimeOrchestrator) canonicalCompletionEvidenceRef(ctx context.Context
 		}
 		return canonical, false
 	}
-	if verdict, ok, err := o.evidenceRefQualityVerdict(ctx, ref); err == nil && ok {
+	if verdict, ok, err := evidenceRefQualityVerdictFromRepository(ctx, evidence.ValidationResults, ref); err == nil && ok {
 		return ref, validationEvidenceCanSatisfyDoD(verdict)
 	}
-	if ok, err := o.patchEvidenceRefUsable(ctx, ref); err == nil && ok {
+	if ok, err := patchEvidenceRefUsable(ctx, evidence.Patches, ref); err == nil && ok {
 		return ref, true
 	}
-	if step, ok, err := o.stepByEvidenceRef(ctx, ref); err == nil && ok {
+	if step, ok, err := stepByEvidenceRef(ctx, steps, ref); err == nil && ok {
 		canonical := string(step.ID)
 		if completionEvidenceStepUsable(step) {
 			return canonical, true
@@ -669,11 +669,11 @@ func (o *RuntimeOrchestrator) canonicalCompletionEvidenceRef(ctx context.Context
 	return "", false
 }
 
-func (o *RuntimeOrchestrator) patchEvidenceRefUsable(ctx context.Context, ref string) (bool, error) {
-	if o == nil || o.evidence.Patches == nil {
+func patchEvidenceRefUsable(ctx context.Context, patches repository.PatchRepository, ref string) (bool, error) {
+	if patches == nil {
 		return false, nil
 	}
-	patch, err := o.evidence.Patches.Get(ctx, common.PatchID(ref))
+	patch, err := patches.Get(ctx, common.PatchID(ref))
 	if err == nil {
 		return patch != nil && patch.State == common.PatchStateApplied, nil
 	}
@@ -683,11 +683,11 @@ func (o *RuntimeOrchestrator) patchEvidenceRefUsable(ctx context.Context, ref st
 	return false, err
 }
 
-func (o *RuntimeOrchestrator) stepByEvidenceRef(ctx context.Context, ref string) (*runModel.Step, bool, error) {
-	if o == nil || o.steps == nil {
+func stepByEvidenceRef(ctx context.Context, steps repository.StepRepository, ref string) (*runModel.Step, bool, error) {
+	if steps == nil {
 		return nil, false, nil
 	}
-	step, err := o.steps.Get(ctx, common.StepID(ref))
+	step, err := steps.Get(ctx, common.StepID(ref))
 	if err == nil {
 		return step, true, nil
 	}
@@ -696,7 +696,7 @@ func (o *RuntimeOrchestrator) stepByEvidenceRef(ctx context.Context, ref string)
 	}
 	for _, marker := range []string{"/validation/", "/tool-call/"} {
 		if idx := strings.Index(ref, marker); idx > 0 {
-			step, err := o.steps.Get(ctx, common.StepID(ref[:idx]))
+			step, err := steps.Get(ctx, common.StepID(ref[:idx]))
 			if err == nil {
 				return step, true, nil
 			}
@@ -785,8 +785,8 @@ func (o *RuntimeOrchestrator) latestCompletionClosureEvidence(ctx context.Contex
 	for idx := 0; idx < latestLimit; idx++ {
 		latestItems = append(latestItems, latest[idx].item)
 	}
-	patchItems := o.latestCompletionPatchEvidence(ctx, run, failedStep)
-	validationItems := o.latestCompletionValidationEvidence(ctx, run, failedStep)
+	patchItems := latestCompletionPatchEvidence(ctx, o.evidence, run, failedStep)
+	validationItems := latestCompletionValidationEvidence(ctx, o.steps, o.evidence, run, failedStep)
 	failureLimit := min(len(failures), 8)
 	ret := map[string]any{}
 	if len(latestItems) > 0 {
@@ -831,11 +831,11 @@ func completionClosureStepEvidenceItem(step *runModel.Step, order int, scope str
 	return item
 }
 
-func (o *RuntimeOrchestrator) latestCompletionPatchEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
-	if o == nil || run == nil || o.evidence.Patches == nil {
+func latestCompletionPatchEvidence(ctx context.Context, evidence RuntimeEvidenceRepositories, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if run == nil || evidence.Patches == nil {
 		return nil
 	}
-	patches, err := o.evidence.Patches.ListByRun(ctx, run.ID)
+	patches, err := evidence.Patches.ListByRun(ctx, run.ID)
 	if err != nil || len(patches) == 0 {
 		return nil
 	}
@@ -872,11 +872,11 @@ func (o *RuntimeOrchestrator) latestCompletionPatchEvidence(ctx context.Context,
 	return ret
 }
 
-func (o *RuntimeOrchestrator) latestCompletionValidationEvidence(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
-	if o == nil || run == nil || o.evidence.ValidationResults == nil {
+func latestCompletionValidationEvidence(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, run *runModel.Run, failedStep *runModel.Step) []map[string]any {
+	if run == nil || evidence.ValidationResults == nil {
 		return nil
 	}
-	items, err := o.evidence.ValidationResults.ListByRun(ctx, run.ID)
+	items, err := evidence.ValidationResults.ListByRun(ctx, run.ID)
 	if err != nil || len(items) == 0 {
 		return nil
 	}
@@ -896,7 +896,7 @@ func (o *RuntimeOrchestrator) latestCompletionValidationEvidence(ctx context.Con
 		if target := strings.TrimSpace(result.TargetRef); target != "" {
 			scope = "targetRef=" + normalizeRuntimeFailureTargetValue(target)
 		} else if result.StepID != "" {
-			if step, ok, err := o.stepByEvidenceRef(ctx, string(result.StepID)); err == nil && ok {
+			if step, ok, err := stepByEvidenceRef(ctx, steps, string(result.StepID)); err == nil && ok {
 				scope = completionEvidenceStepScope(step)
 			}
 		}

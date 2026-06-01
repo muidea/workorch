@@ -9,6 +9,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 type runtimeEvidenceQuality struct {
@@ -111,7 +112,7 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 				continue
 			}
 			for _, ref := range evidenceRefsFromValue(item["evidenceRefs"]) {
-				verdict, ok, err := o.evidenceRefQualityVerdict(ctx, ref)
+				verdict, ok, err := evidenceRefQualityVerdictFromRepository(ctx, o.evidence.ValidationResults, ref)
 				if err != nil {
 					return err
 				}
@@ -155,7 +156,7 @@ func (o *RuntimeOrchestrator) validateArtifactContinuationAssessmentEvidenceRefs
 			continue
 		}
 		for _, ref := range evidenceRefsFromValue(scoped.item["evidenceRefs"]) {
-			step, ok, err := o.evidenceRefStep(ctx, ref)
+			step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
 			if err != nil {
 				return err
 			}
@@ -212,7 +213,7 @@ func (o *RuntimeOrchestrator) validateDefinitionChangeAssessmentCurrentRunEviden
 		refs := evidenceRefsFromValue(scoped.item["evidenceRefs"])
 		hasCurrentRunEvidence := false
 		for _, ref := range refs {
-			if o.currentRunEvidenceRefUsable(ctx, run.ID, ref) {
+			if currentRunEvidenceRefUsable(ctx, o.steps, o.evidence, run.ID, ref) {
 				hasCurrentRunEvidence = true
 				break
 			}
@@ -276,7 +277,7 @@ func runHasDefinitionChangeImpact(run *runModel.Run) bool {
 	return boolValue(mapFromValue(run.ExecutionContext["definitionChangeImpact"])["changed"])
 }
 
-func (o *RuntimeOrchestrator) currentRunEvidenceRefUsable(ctx context.Context, runID common.RunID, ref string) bool {
+func currentRunEvidenceRefUsable(ctx context.Context, steps repository.StepRepository, evidence RuntimeEvidenceRepositories, runID common.RunID, ref string) bool {
 	ref = strings.Trim(strings.TrimSpace(ref), "/")
 	if ref == "" || runID == "" {
 		return false
@@ -285,18 +286,16 @@ func (o *RuntimeOrchestrator) currentRunEvidenceRefUsable(ctx context.Context, r
 	if ref != string(runID) && !strings.HasPrefix(ref, prefix) {
 		return false
 	}
-	if o != nil {
-		if o.evidence.ValidationResults != nil {
-			if item, err := o.evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil && item != nil {
-				return item.RunID == runID && validationEvidenceCanSatisfyDoD(qualityFromValidationResult(item))
-			}
+	if evidence.ValidationResults != nil {
+		if item, err := evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil && item != nil {
+			return item.RunID == runID && validationEvidenceCanSatisfyDoD(qualityFromValidationResult(item))
 		}
-		if ok, err := o.patchEvidenceRefUsable(ctx, ref); err == nil && ok {
-			return true
-		}
-		if step, ok, err := o.stepByEvidenceRef(ctx, ref); err == nil && ok {
-			return step.RunID == runID && completionEvidenceStepFallbackUsable(step)
-		}
+	}
+	if ok, err := patchEvidenceRefUsable(ctx, evidence.Patches, ref); err == nil && ok {
+		return true
+	}
+	if step, ok, err := stepByEvidenceRef(ctx, steps, ref); err == nil && ok {
+		return step.RunID == runID && completionEvidenceStepFallbackUsable(step)
 	}
 	return false
 }
@@ -544,7 +543,7 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 	acceptedSteps := make([]*runModel.Step, 0)
 	itemName := evidenceKindRequirementItemName(requirement, item)
 	for _, ref := range refs {
-		step, ok, err := o.evidenceRefStep(ctx, ref)
+		step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
 		if err != nil {
 			return err
 		}
@@ -600,7 +599,7 @@ func (o *RuntimeOrchestrator) validateEvidenceRefsStepKinds(ctx context.Context,
 		steps := acceptedSteps
 		if !hasAcceptedRequirement {
 			for _, ref := range refs {
-				step, ok, err := o.evidenceRefStep(ctx, ref)
+				step, ok, err := evidenceRefStep(ctx, o.steps, o.evidence.ValidationResults, ref)
 				if err != nil {
 					return err
 				}
@@ -637,17 +636,17 @@ func lowerStringSlice(values []string) []string {
 	return ret
 }
 
-func (o *RuntimeOrchestrator) evidenceRefStep(ctx context.Context, ref string) (*runModel.Step, bool, error) {
+func evidenceRefStep(ctx context.Context, steps repository.StepRepository, validationResults repository.ValidationResultRepository, ref string) (*runModel.Step, bool, error) {
 	ref = strings.TrimSpace(ref)
-	if ref == "" || o == nil || o.steps == nil {
+	if ref == "" || steps == nil {
 		return nil, false, nil
 	}
-	if step, ok, err := o.stepKindByRef(ctx, ref); err != nil || ok {
+	if step, ok, err := stepKindByRef(ctx, steps, ref); err != nil || ok {
 		return step, ok, err
 	}
-	if o.evidence.ValidationResults != nil {
-		if item, err := o.evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil {
-			if step, ok, err := o.stepKindByRef(ctx, string(item.StepID)); err != nil || ok {
+	if validationResults != nil {
+		if item, err := validationResults.Get(ctx, common.ValidationResultID(ref)); err == nil {
+			if step, ok, err := stepKindByRef(ctx, steps, string(item.StepID)); err != nil || ok {
 				return step, ok, err
 			}
 		} else if err != common.ErrNotFound {
@@ -656,7 +655,7 @@ func (o *RuntimeOrchestrator) evidenceRefStep(ctx context.Context, ref string) (
 	}
 	for _, marker := range []string{"/validation/", "/tool-call/"} {
 		if idx := strings.Index(ref, marker); idx > 0 {
-			if step, ok, err := o.stepKindByRef(ctx, ref[:idx]); err != nil || ok {
+			if step, ok, err := stepKindByRef(ctx, steps, ref[:idx]); err != nil || ok {
 				return step, ok, err
 			}
 		}
@@ -664,8 +663,11 @@ func (o *RuntimeOrchestrator) evidenceRefStep(ctx context.Context, ref string) (
 	return nil, false, nil
 }
 
-func (o *RuntimeOrchestrator) stepKindByRef(ctx context.Context, ref string) (*runModel.Step, bool, error) {
-	step, err := o.steps.Get(ctx, common.StepID(ref))
+func stepKindByRef(ctx context.Context, steps repository.StepRepository, ref string) (*runModel.Step, bool, error) {
+	if steps == nil {
+		return nil, false, nil
+	}
+	step, err := steps.Get(ctx, common.StepID(ref))
 	if err == nil {
 		return step, true, nil
 	}
@@ -925,17 +927,17 @@ func containsNonASCII(text string) bool {
 	return false
 }
 
-func (o *RuntimeOrchestrator) evidenceRefQualityVerdict(ctx context.Context, ref string) (runtimeEvidenceQuality, bool, error) {
+func evidenceRefQualityVerdictFromRepository(ctx context.Context, validationResults repository.ValidationResultRepository, ref string) (runtimeEvidenceQuality, bool, error) {
 	ref = strings.TrimSpace(ref)
-	if ref == "" || o == nil || o.evidence.ValidationResults == nil {
+	if ref == "" || validationResults == nil {
 		return runtimeEvidenceQuality{}, false, nil
 	}
-	if item, err := o.evidence.ValidationResults.Get(ctx, common.ValidationResultID(ref)); err == nil {
+	if item, err := validationResults.Get(ctx, common.ValidationResultID(ref)); err == nil {
 		return qualityFromValidationResult(item), true, nil
 	} else if err != common.ErrNotFound {
 		return runtimeEvidenceQuality{}, false, err
 	}
-	items, err := o.evidence.ValidationResults.ListByStep(ctx, common.StepID(ref))
+	items, err := validationResults.ListByStep(ctx, common.StepID(ref))
 	if err != nil {
 		return runtimeEvidenceQuality{}, false, err
 	}
