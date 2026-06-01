@@ -250,6 +250,46 @@ func (s *runStateSubsystem) workspaceForCreatedRunStart(ctx context.Context, run
 	return ws, nil
 }
 
+func (s *runStateSubsystem) reconcileWorkspaceActiveRun(
+	ctx context.Context,
+	workspaceID common.WorkspaceID,
+) (*workspaceModel.Workspace, common.RunID, bool, error) {
+	if s == nil || s.runs == nil || s.workspaces == nil || workspaceID == "" {
+		return nil, "", false, common.ErrInvalidArgument
+	}
+	ws, err := s.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if ws.ActiveRunID == "" {
+		return ws, "", false, nil
+	}
+	activeRunID := ws.ActiveRunID
+	activeRun, err := s.runs.Get(ctx, activeRunID)
+	if err != nil {
+		if !errors.Is(err, common.ErrNotFound) {
+			return nil, "", false, err
+		}
+		ws.ActiveRunID = ""
+		if isActiveWorkspaceState(ws.State) {
+			ws.State = common.WorkspaceStateActive
+		}
+		if err := s.workspaces.Update(ctx, ws); err != nil {
+			return nil, "", false, err
+		}
+		return ws, "", true, nil
+	}
+	if activeRun.WorkspaceID != ws.ID || !isTerminalRunState(activeRun.State) {
+		return ws, activeRunID, false, nil
+	}
+	ws.ActiveRunID = ""
+	ws.State = workspaceStateForTerminalRun(activeRun.State)
+	if err := s.workspaces.Update(ctx, ws); err != nil {
+		return nil, "", false, err
+	}
+	return ws, activeRun.ID, true, nil
+}
+
 func (s *runStateSubsystem) workspaceForActiveRunState(ctx context.Context, run *runModel.Run, workspace *workspaceModel.Workspace) (*workspaceModel.Workspace, error) {
 	if s == nil || s.runs == nil || s.workspaces == nil || run == nil {
 		return nil, common.ErrInvalidArgument

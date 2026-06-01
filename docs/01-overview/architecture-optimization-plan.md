@@ -400,6 +400,8 @@ type repairSubsystem struct {
 | P1.28 ValidateRun validation sync 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=120s` 通过；只统一 validation 状态同步路径，不改变 run validating 条件、workspace state、activeRun 绑定或 event payload |
 | P1.29 StartRun active workspace guard 收口 | 已完成 | `runStateSubsystem.workspaceForCreatedRunStart` 承载 created run 启动前的 workspace activeRun 冲突读取与 stale activeRunID 判定；`RuntimeOrchestrator` 仍负责 StartRun 状态转换、事件发布、next dispatch 与失败后 reconcile |
 | P1.29 StartRun active workspace guard 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1 -timeout=120s` 通过；只移动启动前 guard 的读取边界，不改变 created-only 启动条件、stale activeRunID conflict 语义、active run 冲突规则或 dispatch 行为 |
+| P1.30 workspace active run reconcile 收口 | 已完成 | `runStateSubsystem.reconcileWorkspaceActiveRun` 承载 workspace activeRun 读取、missing active run 清理、terminal active run 释放与 workspace 状态写入；`RuntimeOrchestrator` 仍负责 reconcile 调用点和 workspace state event 发布 |
+| P1.30 workspace active run reconcile 验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -run 'TestRunStateSubsystemReconcileWorkspaceActiveRunClearsMissingActiveRun|TestRuntimeOrchestrator_ReconcileWorkspaceActiveRun|TestRuntimeOrchestrator_StartRun|TestRuntimeOrchestrator_Resume' -count=1 -timeout=120s` 通过；只移动 activeRun reconcile 持久化边界，不改变 missing activeRunID、terminal active run、non-terminal active run 或 event payload 语义 |
 | P3.1 LLM context 测试拆分 | 已完成 | `runtime_llm_context_test.go` 承载 LLM context compaction、artifact chunk omission、lineage compaction 与 redacted patch fragment omission 测试；`runtime_orchestrator_test.go` 不再承载这组纯 context helper 测试 |
 | P3.1 LLM context 测试拆分验证 | 已完成 | `go test ./internal/modules/kernel/orchestrator/biz -count=1` 通过；只迁移测试落点，不改变被测行为 |
 | P3.2 graph 测试拆分 | 已完成 | `runtime_graph_test.go` 承载 run evidence summary 与 ready graph spec 复用已加载 steps 的测试；`runtime_orchestrator_test.go` 继续保留依赖完整状态流转的 graph e2e/dispatch 测试 |
@@ -464,6 +466,7 @@ terminal workspace release/completion sync 收口只移动终态 workspace 释�
 decision resume selection 收口只移动 resolved ticket/resolution 读取与选择逻辑，实际 resume/replan/fail 状态机分支继续由 `RuntimeOrchestrator` 协调。
 ValidateRun validation sync 收口只统一手动 validation 与自动 validation completion 的 run/workspace 持久化路径，入口校验和事件发布继续由 `RuntimeOrchestrator` 协调。
 StartRun active workspace guard 收口只移动启动前 workspace/active run 冲突读取逻辑，run state 写入、workspace active 绑定、事件发布与 dispatch 继续由 `RuntimeOrchestrator` 协调。
+workspace active run reconcile 收口只移动 workspace activeRun 读取与修正写入逻辑，reconcile 调用时机和事件发布继续由 `RuntimeOrchestrator` 协调。
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
@@ -471,7 +474,7 @@ runtime orchestrator 集成测试拆分只移动测试函数文件归属，公�
 
 | 项 | 状态 | 下一步 |
 |----|------|--------|
-| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法已降至约 150 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
+| P1 orchestrator 子系统组合化后续项 | 进行中 | coverage、patches、result、graph、convergence、repair budget/context、LLM context、event/checkpoint、repair dispatch action selection/spec/blocker/fail-run reason、result recording、run state read helper、run/workspace active state sync、validation run/workspace sync、terminal workspace release/completion sync、decision resume selection、ValidateRun validation sync、StartRun active workspace guard、workspace active run reconcile、repair 文件职责拆分与 runtime orchestrator 协调层文件拆分已完成；orchestrator 源码最大文件已低于 3,000 行，`RuntimeOrchestrator` receiver 方法维持约 150 个，需继续核对 dispatch/lifecycle 是否还可在保持状态机流程协调边界的前提下通过窄接口收口 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
 | P3 orchestrator 测试拆分 | 已完成 | LLM context、graph 局部、repair budget/context、repair dispatch spec/blocker/fail-run reason 测试已迁移或补齐，convergence 测试已独立；`runtime_orchestrator_test.go` 已降至约 937 行，orchestrator 测试最大文件约 2,895 行 |
 

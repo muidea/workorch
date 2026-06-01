@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 
@@ -256,36 +255,11 @@ func (o *RuntimeOrchestrator) reconcileWorkspaceActiveRun(ctx context.Context, w
 	if o == nil || workspaceID == "" {
 		return nil
 	}
-	ws, err := o.workspaces.Get(ctx, workspaceID)
-	if err != nil {
+	ws, activeRunID, changed, err := o.runStateManager().reconcileWorkspaceActiveRun(ctx, workspaceID)
+	if err != nil || !changed {
 		return err
 	}
-	if ws.ActiveRunID == "" {
-		return nil
-	}
-	activeRun, err := o.runs.Get(ctx, ws.ActiveRunID)
-	if err != nil {
-		if !errors.Is(err, common.ErrNotFound) {
-			return err
-		}
-		ws.ActiveRunID = ""
-		if isActiveWorkspaceState(ws.State) {
-			ws.State = common.WorkspaceStateActive
-		}
-		if err := o.workspaces.Update(ctx, ws); err != nil {
-			return err
-		}
-		return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, "")
-	}
-	if activeRun.WorkspaceID != ws.ID || !isTerminalRunState(activeRun.State) {
-		return nil
-	}
-	ws.ActiveRunID = ""
-	ws.State = workspaceStateForTerminalRun(activeRun.State)
-	if err := o.workspaces.Update(ctx, ws); err != nil {
-		return err
-	}
-	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, activeRun.ID)
+	return o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, activeRunID)
 }
 
 func workspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
