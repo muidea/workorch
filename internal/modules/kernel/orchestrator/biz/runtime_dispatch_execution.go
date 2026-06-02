@@ -265,13 +265,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		} else {
 			input = o.graphManager().graphFollowUpStepInput(ctx, run, step)
 		}
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, noActionableContinuationFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().noActionableContinuationFollowUpStepInput(ctx, run, step), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(output); completionStateRequiresActionableContinuation(output, completionState) {
 		return o.handleRuntimeStepFailure(
@@ -359,7 +359,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 				step.Output = output
 				_ = o.steps.Update(ctx, step)
 				input := assessmentOnlyContractCorrectionStepInput(step, output, err)
-				return true, o.dispatchUniqueStepWithWorkspace(ctx, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspace)
+				return true, dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, assessmentOnlyContractCorrectionStepID(run.ID, step), initialStepKind(run), input, workspace)
 			}
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 		}
@@ -390,5 +390,5 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 		return true, err
 	}
 	input := o.graphManager().graphExpansionLimitAssessmentFollowUpStepInputFromSteps(ctx, run, step, steps, count)
-	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
+	return true, dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, graphExpansionLimitAssessmentFollowUpStepID(run.ID, step), initialStepKind(run), input, workspace)
 }

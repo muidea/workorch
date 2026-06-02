@@ -178,13 +178,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return err
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(currentRun, last, last.Output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionStateRequiresActionableContinuation(last.Output, completionState) {
 		return o.handleGraphBatchCompletionGateFailure(

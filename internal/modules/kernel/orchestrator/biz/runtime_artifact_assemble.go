@@ -100,7 +100,7 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 	if len(createdItems) == 0 {
 		return nil
 	}
-	return o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationLLMStepID(run.ID, createdItems[0]), initialStepKind(run), artifactContinuationNextStepInput(step, createdItems[0]), workspace)
+	return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, createdItems[0]), initialStepKind(run), artifactContinuationNextStepInput(step, createdItems[0]), workspace)
 }
 
 func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any, workspace *workspaceModel.Workspace) error {
@@ -180,9 +180,9 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 		return err
 	}
 	if !item.FinalReceived {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), artifactContinuationNextStepInput(step, item), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), artifactContinuationNextStepInput(step, item), workspace)
 	}
-	return o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationAssembleStepID(run.ID, item.ID), artifactAssembleStepKind, artifactContinuationInternalStepInput(item), workspace)
+	return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationAssembleStepID(run.ID, item.ID), artifactAssembleStepKind, artifactContinuationInternalStepInput(item), workspace)
 }
 
 func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
@@ -305,7 +305,7 @@ func (o *RuntimeOrchestrator) resumeArtifactContinuationAfterContextGraph(ctx co
 	}
 	nextInput := artifactContinuationNextStepInput(contextStep, item)
 	nextInput["artifactContextEvidence"] = compactStepOutputForLLMContext(output)
-	return true, o.dispatchUniqueStepWithWorkspace(ctx, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), nextInput, workspace)
+	return true, dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), nextInput, workspace)
 }
 
 func (o *RuntimeOrchestrator) completeArtifactContinuationLLMStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
@@ -881,7 +881,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 		return o.dispatchStepWithWorkspace(ctx, run, nextID, artifactApplyStepKind, step.Input, workspace)
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return o.dispatchUniqueStepWithWorkspace(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
 	}
 	return nil
 }

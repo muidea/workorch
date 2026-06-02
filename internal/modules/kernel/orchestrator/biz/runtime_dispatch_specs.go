@@ -697,19 +697,26 @@ func (o *RuntimeOrchestrator) dispatchStepSpecsWithWorkspace(ctx context.Context
 	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, workspace)
 }
 
-func (o *RuntimeOrchestrator) dispatchUniqueStepWithWorkspace(
+type dispatchStepWithWorkspaceFunc func(context.Context, *runModel.Run, common.StepID, string, map[string]any, *workspaceModel.Workspace) error
+
+func dispatchUniqueStepWithWorkspace(
 	ctx context.Context,
+	steps repository.StepRepository,
+	dispatch dispatchStepWithWorkspaceFunc,
 	run *runModel.Run,
 	baseStepID common.StepID,
 	kind string,
 	input map[string]any,
 	workspace *workspaceModel.Workspace,
 ) error {
-	stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, baseStepID)
+	if run == nil || steps == nil || dispatch == nil {
+		return common.ErrInvalidArgument
+	}
+	stepID, err := uniqueDispatchStepID(ctx, steps, run.ID, baseStepID)
 	if err != nil {
 		return err
 	}
-	return o.dispatchStepWithWorkspace(ctx, run, stepID, kind, input, workspace)
+	return dispatch(ctx, run, stepID, kind, input, workspace)
 }
 
 func mergeResumeInput(specs []stepDispatchSpec, resumeInput map[string]any) {
