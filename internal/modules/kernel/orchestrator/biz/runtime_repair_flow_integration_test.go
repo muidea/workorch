@@ -1578,7 +1578,7 @@ func TestRuntimeRepairMCPFailureTargetUsesCompositeRunBudget(t *testing.T) {
 	if attempts := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); attempts != 2 {
 		t.Fatalf("effective attempts = %d, want same external capability target counted across graph roots", attempts)
 	}
-	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedStep) {
+	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, &runmodel.Run{ID: runID, DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, failedStep) {
 		t.Fatalf("duplicate external capability target should block before repeating the same call again")
 	}
 }

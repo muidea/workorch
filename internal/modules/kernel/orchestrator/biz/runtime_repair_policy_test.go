@@ -10,6 +10,10 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+func shouldBlockOnDuplicateRuntimeFailureForTest(ctx context.Context, orch *RuntimeOrchestrator, run *runmodel.Run, failedStep *runmodel.Step) bool {
+	return shouldBlockOnDuplicateRuntimeFailure(ctx, orch.steps, orch.repairManager(), orch.policy, orch.tickets != nil, run, failedStep)
+}
+
 func TestMaxRuntimeRepairAttemptsUsesConfiguredPolicy(t *testing.T) {
 	orch := &RuntimeOrchestrator{
 		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
@@ -78,7 +82,7 @@ func TestShouldNotBlockOnDuplicateRuntimeFailureBeforeScopedBudget(t *testing.T)
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
-	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
 		t.Fatalf("expected duplicate shell-command failure to stay repairable before scoped budget")
 	}
 }
@@ -137,7 +141,7 @@ func TestShouldBlockOnDuplicateRuntimeFailureForRepeatedLLMDecisionInvalid(t *te
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
-	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
 		t.Fatalf("expected repeated llm decision invalid failure to continue schema recovery before repair budget is exhausted")
 	}
 }
@@ -272,7 +276,7 @@ func TestShouldBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWitho
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
-	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
+	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
 		t.Fatalf("expected repeated runtime contract loop to be blocked when no new evidence exists")
 	}
 }
@@ -344,7 +348,7 @@ func TestShouldNotBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWi
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
-	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, currentFailed) {
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
 		t.Fatalf("expected duplicate runtime contract loop to continue when new action evidence exists")
 	}
 }

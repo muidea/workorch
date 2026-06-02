@@ -21,10 +21,6 @@ type repairSubsystem struct {
 	workspaces repository.WorkspaceRepository
 }
 
-type repairRecoveryPolicy interface {
-	shouldBlockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
-}
-
 type repairDispatchSpecBuilder interface {
 	runtimeRepairFollowUpStepInput(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, attempt int, execErr error) map[string]any
 }
@@ -418,8 +414,8 @@ const (
 	runtimeRecoveryActionFailRun                 runtimeRecoveryAction = "fail_run"
 )
 
-func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, policy repairRecoveryPolicy, runtimePolicy RuntimePolicy, runtimeAvailable bool, canCreateDecisionTicket bool) runtimeRecoveryAction {
-	if policy == nil || run == nil || failedStep == nil {
+func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, runtimePolicy RuntimePolicy, runtimeAvailable bool, canCreateDecisionTicket bool) runtimeRecoveryAction {
+	if run == nil || failedStep == nil {
 		return runtimeRecoveryActionFailRun
 	}
 	if shouldBlockOnProviderConfigFailure(canCreateDecisionTicket, run, failedStep) {
@@ -440,7 +436,7 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	if shouldEscalateRuntimeRepairExhaustion(ctx, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
 		return runtimeRecoveryActionRuntimeRepairExhausted
 	}
-	if policy.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
+	if shouldBlockOnDuplicateRuntimeFailure(ctx, r.steps, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
 		return runtimeRecoveryActionDuplicateFailure
 	}
 	if shouldAttemptRuntimeRepair(ctx, r, runtimePolicy, runtimeAvailable, run, failedStep) {
@@ -453,7 +449,7 @@ func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, r
 	if o == nil {
 		return runtimeRecoveryActionFailRun
 	}
-	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o, o.policy, o.runtime != nil, o.tickets != nil)
+	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o.policy, o.runtime != nil, o.tickets != nil)
 }
 
 func (r *repairSubsystem) blockRecoveryActionFromFailedStep(

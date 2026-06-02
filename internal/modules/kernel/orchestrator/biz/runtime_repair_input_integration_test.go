@@ -488,7 +488,7 @@ func TestRuntimeOrchestrator_PatchApplyDuplicateFailureContinuesMechanicalRepair
 		},
 	}
 
-	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, run, current) {
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, current) {
 		t.Fatalf("shouldBlockOnDuplicateRuntimeFailure = true, want false for budgeted patch/apply target repair")
 	}
 }

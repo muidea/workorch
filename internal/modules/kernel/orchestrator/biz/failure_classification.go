@@ -10,6 +10,7 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const (
@@ -529,35 +530,43 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil || o.steps == nil || o.tickets == nil {
+func shouldBlockOnDuplicateRuntimeFailure(
+	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
+	policy RuntimePolicy,
+	canCreateDecisionTicket bool,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+) bool {
+	if steps == nil || repair == nil || run == nil || failedStep == nil || !canCreateDecisionTicket {
 		return false
 	}
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
 	targetScope := runtimeFailureTargetScope(signature)
-	attempts := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
+	attempts := repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy) {
+	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) {
 		return false
 	}
-	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(o.policy)) {
+	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy)) {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy) &&
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) &&
 		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
 		class != failureClassLLMDecisionInvalid &&
 		!runtimeFailureIsLLMContractLoop(failedStep) {
 		return false
 	}
-	steps, err := o.steps.ListByRun(ctx, run.ID)
+	stepsForRun, err := steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return false
 	}
 	duplicateFound := false
-	for _, step := range steps {
+	for _, step := range stepsForRun {
 		if step == nil || step.ID == failedStep.ID || step.State != common.StepStateFailed {
 			continue
 		}
@@ -576,7 +585,7 @@ func (o *RuntimeOrchestrator) shouldBlockOnDuplicateRuntimeFailure(ctx context.C
 		return false
 	}
 	if runtimeFailureNeedsNoNewEvidenceCheck(class, failedStep) &&
-		runtimeFailureRunHasCompletedActionEvidence(steps, failedStep.ID) {
+		runtimeFailureRunHasCompletedActionEvidence(stepsForRun, failedStep.ID) {
 		return false
 	}
 	return true

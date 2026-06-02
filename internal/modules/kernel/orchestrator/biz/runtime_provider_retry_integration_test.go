@@ -1821,7 +1821,7 @@ func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesTargetScopeAcrossGraphNo
 		},
 	}
 
-	if !orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-duplicate")}, currentFailed) {
+	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-duplicate")}, currentFailed) {
 		t.Fatalf("duplicate failure should block after target-scoped budget is exhausted")
 	}
 }

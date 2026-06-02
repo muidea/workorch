@@ -853,7 +853,7 @@ func TestAssessmentSchemaInvalidBeforeBudgetDoesNotEscalateDuplicateDecision(t *
 		tickets: memory.NewDecisionTicketRepository(),
 	}
 
-	if orch.shouldBlockOnDuplicateRuntimeFailure(ctx, &runmodel.Run{ID: runID, WorkspaceID: "ws-assessment-schema-invalid-duplicate", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, current) {
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, &runmodel.Run{ID: runID, WorkspaceID: "ws-assessment-schema-invalid-duplicate", DoDID: "dod", InitialStepKind: llmWorkspaceExecutionStepKind}, current) {
 		t.Fatalf("assessment schema invalid should continue schema recovery before duplicate decision escalation")
 	}
 }
