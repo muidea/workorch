@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
@@ -8,6 +8,10 @@ BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.
 MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18185}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_MCP_STDIO_VERIFY_SUFFIX:-$$}"
+CURL_CONNECT_TIMEOUT="${WORKORCH_MCP_STDIO_VERIFY_CURL_CONNECT_TIMEOUT:-2}"
+CURL_MAX_TIME="${WORKORCH_MCP_STDIO_VERIFY_CURL_MAX_TIME:-300}"
+CURL_READY_MAX_TIME="${WORKORCH_MCP_STDIO_VERIFY_READY_MAX_TIME:-2}"
+CURL_READY_ATTEMPTS="${WORKORCH_MCP_STDIO_VERIFY_READY_ATTEMPTS:-50}"
 MCP_SERVER_ID="mcp-stdio-verify-$VERIFY_SUFFIX"
 MCP_CAPABILITY_ID="$MCP_SERVER_ID:tool:repo.summary"
 MCP_ENDPOINT_ROOT="${WORKORCH_MCP_ENDPOINT_DIR:-.workorch-data/system/mcp-endpoints}"
@@ -35,7 +39,7 @@ report_failure() {
 
 cleanup() {
   if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
-    curl -fsS -H "Content-Type: application/json" -X PUT \
+    curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS -H "Content-Type: application/json" -X PUT \
       "$BASE_URL/api/v1/workorch/configuration/llm" \
       -d @"$TMP_DIR/original-llm-update.json" >/dev/null 2>&1 || true
   fi
@@ -60,16 +64,80 @@ print(current)
 PY
 }
 
+json_first_id() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+items = data.get(sys.argv[2]) or []
+if items:
+    print(items[0].get("id", ""))
+PY
+}
+
 post_json() {
   local url="$1"
   local body="$2"
   local output="$3"
   local status
-  status="$(curl -sS -H "Content-Type: application/json" -X POST "$url" -d "$body" -o "$output" -w "%{http_code}" || true)"
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -H "Content-Type: application/json" -X POST "$url" -d "$body" -o "$output" -w "%{http_code}" || true)"
   case "$status" in
     200|201)
       ;;
     *)
+      echo "POST $url failed with HTTP $status" >&2
+      cat "$output" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
+put_json() {
+  local url="$1"
+  local body="$2"
+  local output="$3"
+  local status
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -H "Content-Type: application/json" -X PUT "$url" -d "$body" -o "$output" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      ;;
+    *)
+      echo "PUT $url failed with HTTP $status" >&2
+      cat "$output" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
+put_json_file() {
+  local url="$1"
+  local body_file="$2"
+  local output="$3"
+  local status
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -H "Content-Type: application/json" -X PUT "$url" -d @"$body_file" -o "$output" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201)
+      ;;
+    *)
+      echo "PUT $url failed with HTTP $status" >&2
+      cat "$output" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
+get_json() {
+  local url="$1"
+  local output="$2"
+  local status
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS "$url" -o "$output" -w "%{http_code}" || true)"
+  case "$status" in
+    200)
+      ;;
+    *)
+      echo "GET $url failed with HTTP $status" >&2
       cat "$output" >&2 || true
       return 1
       ;;
@@ -83,21 +151,58 @@ upsert_json() {
   local output="$4"
   local tmp="$output.tmp"
   local status
-  status="$(curl -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -H "Content-Type: application/json" -X POST "$collection_url" -d "$body" -o "$tmp" -w "%{http_code}" || true)"
   case "$status" in
     200|201)
       mv "$tmp" "$output"
       ;;
     409)
       rm -f "$tmp"
-      curl -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
+      curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS -H "Content-Type: application/json" -X PUT "$resource_url" -d "$body" >"$output"
       ;;
     *)
+      echo "POST $collection_url failed with HTTP $status" >&2
       cat "$tmp" >&2 || true
       rm -f "$tmp"
       return 1
       ;;
   esac
+}
+
+ensure_goal() {
+  local workspace_id="$1"
+  local text="$2"
+  local list_output="$TMP_DIR/goals-before.json"
+  local existing_id
+  get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" "$list_output"
+  existing_id="$(json_first_id "$list_output" "goals")"
+  if [[ -n "$existing_id" ]]; then
+    put_json "$BASE_URL/api/v1/workorch/goals/$existing_id" \
+      '{"text":"'"$text"'"}' \
+      "$TMP_DIR/goal.json"
+    return
+  fi
+  post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
+    '{"text":"'"$text"'"}' \
+    "$TMP_DIR/goal.json"
+}
+
+ensure_dod() {
+  local workspace_id="$1"
+  local item="$2"
+  local list_output="$TMP_DIR/dods-before.json"
+  local existing_id
+  get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" "$list_output"
+  existing_id="$(json_first_id "$list_output" "dods")"
+  if [[ -n "$existing_id" ]]; then
+    put_json "$BASE_URL/api/v1/workorch/dods/$existing_id" \
+      '{"items":["'"$item"'"]}' \
+      "$TMP_DIR/dod.json"
+    return
+  fi
+  post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
+    '{"items":["'"$item"'"]}' \
+    "$TMP_DIR/dod.json"
 }
 
 start_mock_provider() {
@@ -252,25 +357,25 @@ PY
 }
 
 wait_ready() {
-  for _ in $(seq 1 50); do
-    if curl -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
+  for _ in $(seq 1 "$CURL_READY_ATTEMPTS"); do
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "$BASE_URL/readyz" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS "$BASE_URL/readyz" >/dev/null
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "$BASE_URL/readyz" >/dev/null
 }
 
 wait_mock() {
-  for _ in $(seq 1 50); do
-    if curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+  for _ in $(seq 1 "$CURL_READY_ATTEMPTS"); do
+    if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
       -H 'Content-Type: application/json' \
       -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
     -H 'Content-Type: application/json' \
     -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
 }
@@ -428,13 +533,13 @@ start_mock_provider
 wait_mock
 wait_ready
 
-curl -fsS "$BASE_URL/readyz" >"$TMP_DIR/readyz.json"
+get_json "$BASE_URL/readyz" "$TMP_DIR/readyz.json"
 grep '"status": "ready"' "$TMP_DIR/readyz.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+get_json "$BASE_URL/api/v1/workorch/configuration" "$TMP_DIR/configuration.json"
 write_llm_update_payloads
-curl -fsS -H "Content-Type: application/json" -X PUT \
-  "$BASE_URL/api/v1/workorch/configuration/llm" \
-  -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
+put_json_file "$BASE_URL/api/v1/workorch/configuration/llm" \
+  "$TMP_DIR/verify-llm-update.json" \
+  "$TMP_DIR/configuration-updated.json"
 grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
 
 upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
@@ -442,18 +547,17 @@ upsert_json "$BASE_URL/api/v1/workorch/mcp/servers" \
   '{"id":"'"$MCP_SERVER_ID"'","name":"stdio verification","transport":"stdio","endpoint":"'"$MCP_HELPER"'","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"timeoutMillis":5000}' \
   "$TMP_DIR/mcp-server.json"
 grep '"transport": "stdio"' "$TMP_DIR/mcp-server.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=tool&q=repo.summary" >"$TMP_DIR/mcp-capabilities-derived.json"
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=tool&q=repo.summary" "$TMP_DIR/mcp-capabilities-derived.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-derived.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=resource&q=workspace" >"$TMP_DIR/mcp-resource-capabilities-derived.json"
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=resource&q=workspace" "$TMP_DIR/mcp-resource-capabilities-derived.json"
 grep '工作空间验收资料' "$TMP_DIR/mcp-resource-capabilities-derived.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" >"$TMP_DIR/mcp-prompt-capabilities-derived.json"
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?serverId=$MCP_SERVER_ID&kind=prompt&q=acceptance" "$TMP_DIR/mcp-prompt-capabilities-derived.json"
 grep '验收提示词' "$TMP_DIR/mcp-prompt-capabilities-derived.json" >/dev/null
-curl -fsS -H "Content-Type: application/json" -X PUT \
-  "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
-  -d '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","enabled":true,"approvalPolicy":"operator","status":"active"}' \
-  >"$TMP_DIR/mcp-capability-updated.json"
+put_json "$BASE_URL/api/v1/workorch/mcp/capabilities/$MCP_CAPABILITY_ID" \
+  '{"id":"'"$MCP_CAPABILITY_ID"'","serverId":"'"$MCP_SERVER_ID"'","kind":"tool","name":"repo.summary","displayName":"仓库摘要能力 E2E","description":"通过 MCP stdio 读取仓库摘要，用于能力目录、Workspace 绑定和 Run 证据验收。","category":"代码仓库","tags":["e2e","stdio","repo"],"usageHint":"当 Goal 需要仓库上下文摘要时使用。","inputSummary":"workspaceId、runId、stepId 和工具输入。","outputSummary":"返回仓库摘要 structuredContent。","stageHints":["execution","validation"],"riskLevel":"read_only","enabled":true,"approvalPolicy":"operator","status":"active"}' \
+  "$TMP_DIR/mcp-capability-updated.json"
 grep '"displayName": "仓库摘要能力 E2E"' "$TMP_DIR/mcp-capability-updated.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" >"$TMP_DIR/mcp-capabilities-filtered.json"
+get_json "$BASE_URL/api/v1/workorch/mcp/capabilities?category=%E4%BB%A3%E7%A0%81%E4%BB%93%E5%BA%93&stage=execution&riskLevel=read_only&enabled=true&q=stdio" "$TMP_DIR/mcp-capabilities-filtered.json"
 grep "\"id\": \"$MCP_CAPABILITY_ID\"" "$TMP_DIR/mcp-capabilities-filtered.json" >/dev/null
 
 post_json "$BASE_URL/api/v1/workorch/workspaces" \
@@ -462,15 +566,12 @@ post_json "$BASE_URL/api/v1/workorch/workspaces" \
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  '{"text":"Plan and execute one approved MCP stdio repo.summary tool call, then assess the DoD from the tool evidence."}' \
-  "$TMP_DIR/goal.json"
+ensure_goal "$workspace_id" \
+  "Plan and execute one approved MCP stdio repo.summary tool call, then assess the DoD from the tool evidence."
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-  '{"items":["stdio MCP tool call completes"]}' \
-  "$TMP_DIR/dod.json"
+ensure_dod "$workspace_id" "stdio MCP tool call completes"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
@@ -480,8 +581,8 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activati
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"
+get_json "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" "$TMP_DIR/snapshot.json"
+get_json "$BASE_URL/api/v1/workorch/runs/$run_id/observability" "$TMP_DIR/observability.json"
 grep '"selectedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 grep '"usedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 echo "workspaceId=$workspace_id"
