@@ -164,7 +164,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			return err
 		}
 		if ticket.State != common.DecisionTicketStateResolved {
-			if o.runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx, ticket) {
+			if runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx, o.steps, ticket) {
 				r.BlockingTicketID = ""
 				break
 			}

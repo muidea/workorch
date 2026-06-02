@@ -9,6 +9,7 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func (r *repairSubsystem) providerRetryAttemptCount(ctx context.Context, runID common.RunID, rootStepID common.StepID) int {
@@ -461,8 +462,8 @@ func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx cont
 	return knownReadableWorkspaceResourceDecisionContext(context)
 }
 
-func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx context.Context, ticket *decisionmodel.Ticket) bool {
-	if o == nil || o.steps == nil || ticket == nil || ticket.RunID == "" {
+func runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx context.Context, steps repository.StepRepository, ticket *decisionmodel.Ticket) bool {
+	if steps == nil || ticket == nil || ticket.RunID == "" {
 		return false
 	}
 	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
@@ -472,11 +473,11 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerHasSuccessEvidence(c
 	if scope.failureSignature == "" && scope.rootStepID == "" && scope.failedStepID == "" {
 		return false
 	}
-	steps, err := o.steps.ListByRun(ctx, ticket.RunID)
+	stepsForRun, err := steps.ListByRun(ctx, ticket.RunID)
 	if err != nil {
 		return false
 	}
-	for _, step := range steps {
+	for _, step := range stepsForRun {
 		if !isRuntimeRepairSuccessEvidenceStep(step, scope) {
 			continue
 		}
