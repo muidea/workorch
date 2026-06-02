@@ -326,6 +326,26 @@ func applyRuntimeRepairValidationEvidenceProjection(input map[string]any, covera
 	)
 }
 
+func applyRuntimeRepairGovernanceHistoryProjection(
+	ctx context.Context,
+	tickets repository.DecisionTicketRepository,
+	resolutions repository.DecisionResolutionRepository,
+	approvals repository.ApprovalRepository,
+	input map[string]any,
+	run *runModel.Run,
+) {
+	if input == nil || run == nil {
+		return
+	}
+	governanceHistory := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
+	if current := currentRunGovernanceHistory(ctx, tickets, resolutions, approvals, run); len(current) > 0 {
+		governanceHistory = append(current, governanceHistory...)
+	}
+	if len(governanceHistory) > 0 {
+		input["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -505,13 +525,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["failedExecutionGraph"] = o.llmContextManager().compactExecutionGraph(graph)
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
 	}
-	governanceHistory := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
-	if current := currentRunGovernanceHistory(ctx, o.tickets, o.resolutions, o.approvals, run); len(current) > 0 {
-		governanceHistory = append(current, governanceHistory...)
-	}
-	if len(governanceHistory) > 0 {
-		input["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
-	}
+	applyRuntimeRepairGovernanceHistoryProjection(ctx, o.tickets, o.resolutions, o.approvals, input, run)
 	if evidence := o.graphManager().completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
 		input[stepInputKeyGraphEvidence] = evidence
 		if snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence); len(snapshots) > 0 {

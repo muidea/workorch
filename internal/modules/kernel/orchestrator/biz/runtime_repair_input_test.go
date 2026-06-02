@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -307,5 +308,35 @@ func TestApplyRuntimeRepairValidationEvidenceProjectionSetsBoundedValidation(t *
 	}
 	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 4 {
 		t.Fatalf("repairGuidance = %+v, want four validation evidence guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairGovernanceHistoryProjectionCompactsExecutionContextHistory(t *testing.T) {
+	input := map[string]any{}
+	history := make([]map[string]any, 0, 7)
+	for idx := 0; idx < 7; idx++ {
+		history = append(history, map[string]any{
+			"id":       fmt.Sprintf("ticket-%03d", idx+1),
+			"kind":     "decision",
+			"state":    "resolved",
+			"reason":   "operator supplied required context",
+			"question": "provide context",
+		})
+	}
+	run := &runmodel.Run{
+		ID: "run-repair-governance-history",
+		ExecutionContext: map[string]any{
+			"governanceHistory": history,
+		},
+	}
+
+	applyRuntimeRepairGovernanceHistoryProjection(t.Context(), nil, nil, nil, input, run)
+
+	projected := mapSliceFromValue(input["governanceHistory"])
+	if len(projected) != 6 {
+		t.Fatalf("governanceHistory len = %d, want 6", len(projected))
+	}
+	if stringFromMap(projected[0], "id") != "ticket-001" || stringFromMap(projected[5], "id") != "ticket-006" {
+		t.Fatalf("governanceHistory = %+v, want first six entries preserved", projected)
 	}
 }
