@@ -201,7 +201,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 		}
 	}
 	if boolValue(resumeInput["repairPlanDecisionRetry"]) {
-		if specs, ok, err := o.runtimeRepairSpecsAfterResolvedDecision(ctx, run, stepID); ok || err != nil {
+		if specs, ok, err := runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
@@ -213,27 +213,30 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 	return o.nextDispatchSpecsAfterStep(ctx, run, stepID)
 }
 
-func (o *RuntimeOrchestrator) runtimeRepairSpecsAfterResolvedDecision(
+func runtimeRepairSpecsAfterResolvedDecision(
 	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
+	builder repairDispatchSpecBuilder,
 	run *runModel.Run,
 	stepID common.StepID,
 ) ([]stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || stepID == "" || o.steps == nil {
+	if steps == nil || repair == nil || builder == nil || run == nil || stepID == "" {
 		return nil, false, nil
 	}
-	step, err := o.steps.Get(ctx, stepID)
+	step, err := steps.Get(ctx, stepID)
 	if err != nil {
 		return nil, true, err
 	}
 	if step == nil || step.State != common.StepStateFailed {
 		return nil, false, nil
 	}
-	attempt := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
-	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
+	attempt := repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, step) + 1
+	stepID, err = uniqueDispatchStepID(ctx, steps, run.ID, runtimeRepairFollowUpStepID(run.ID, step, attempt))
 	if err != nil {
 		return nil, true, err
 	}
-	input := o.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, nil)
+	input := builder.runtimeRepairFollowUpStepInput(ctx, run, step, attempt, nil)
 	input["decisionAuthorizedRetry"] = true
 	return []stepDispatchSpec{{
 		ID:    stepID,
