@@ -894,11 +894,16 @@ func artifactContinuationApplyStepID(runID common.RunID, id common.ArtifactConti
 	return common.StepID(fmt.Sprintf("%s/artifact-apply-%s", runID, runtimeChildID(common.StepID(id), "")))
 }
 
-func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || o.evidence.ArtifactContinuations == nil {
+func artifactContinuationRecoverySpecs(
+	ctx context.Context,
+	steps repository.StepRepository,
+	continuations repository.ArtifactContinuationRepository,
+	run *runModel.Run,
+) ([]stepDispatchSpec, bool, error) {
+	if run == nil || steps == nil || continuations == nil {
 		return nil, false, nil
 	}
-	items, err := o.evidence.ArtifactContinuations.ListOpenByRun(ctx, run.ID)
+	items, err := continuations.ListOpenByRun(ctx, run.ID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -912,7 +917,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 	}
 	switch item.State {
 	case common.ArtifactContinuationStatePlanning, common.ArtifactContinuationStateChunking:
-		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationLLMStepID(run.ID, item))
+		stepID, err := uniqueDispatchStepID(ctx, steps, run.ID, artifactContinuationLLMStepID(run.ID, item))
 		if err != nil {
 			return nil, true, err
 		}
@@ -924,7 +929,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 			Input: input,
 		}}, true, nil
 	case common.ArtifactContinuationStateAssembling:
-		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationAssembleStepID(run.ID, item.ID))
+		stepID, err := uniqueDispatchStepID(ctx, steps, run.ID, artifactContinuationAssembleStepID(run.ID, item.ID))
 		if err != nil {
 			return nil, true, err
 		}
@@ -934,7 +939,7 @@ func (o *RuntimeOrchestrator) artifactContinuationRecoverySpecs(ctx context.Cont
 			Input: input,
 		}}, true, nil
 	case common.ArtifactContinuationStateApplying:
-		stepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationApplyStepID(run.ID, item.ID))
+		stepID, err := uniqueDispatchStepID(ctx, steps, run.ID, artifactContinuationApplyStepID(run.ID, item.ID))
 		if err != nil {
 			return nil, true, err
 		}

@@ -324,11 +324,7 @@ func TestArtifactContinuationRecoverySpecsDispatchByState(t *testing.T) {
 			if err := continuations.Create(ctx, item); err != nil {
 				t.Fatalf("create continuation: %v", err)
 			}
-			orch := &RuntimeOrchestrator{
-				evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
-			}
-
-			specs, ok, err := orch.artifactContinuationRecoverySpecs(ctx, &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind})
+			specs, ok, err := artifactContinuationRecoverySpecs(ctx, memory.NewStepRepository(), continuations, &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind})
 			if err != nil {
 				t.Fatalf("artifactContinuationRecoverySpecs() error = %v", err)
 			}
@@ -353,11 +349,7 @@ func TestArtifactContinuationRecoverySpecsIgnoreTerminalState(t *testing.T) {
 	if err := continuations.Create(ctx, item); err != nil {
 		t.Fatalf("create continuation: %v", err)
 	}
-	orch := &RuntimeOrchestrator{
-		evidence: RuntimeEvidenceRepositories{ArtifactContinuations: continuations},
-	}
-
-	specs, ok, err := orch.artifactContinuationRecoverySpecs(ctx, &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind})
+	specs, ok, err := artifactContinuationRecoverySpecs(ctx, memory.NewStepRepository(), continuations, &runmodel.Run{ID: item.RunID, WorkspaceID: item.WorkspaceID, InitialStepKind: llmWorkspaceExecutionStepKind})
 	if err != nil {
 		t.Fatalf("artifactContinuationRecoverySpecs() error = %v", err)
 	}

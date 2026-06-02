@@ -241,7 +241,15 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if !errors.Is(err, common.ErrConflict) {
 				return err
 			}
-			specs, specErr := runningTerminalStepRecoverySpecs(ctx, o.steps, o.artifactContinuationRecoverySpecs, o.nextDispatchSpecsFromStep, r)
+			specs, specErr := runningTerminalStepRecoverySpecs(
+				ctx,
+				o.steps,
+				func(ctx context.Context, run *runModel.Run) ([]stepDispatchSpec, bool, error) {
+					return artifactContinuationRecoverySpecs(ctx, o.steps, o.evidence.ArtifactContinuations, run)
+				},
+				o.nextDispatchSpecsFromStep,
+				r,
+			)
 			if specErr != nil {
 				return specErr
 			}
