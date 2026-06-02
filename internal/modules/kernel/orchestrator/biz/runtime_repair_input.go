@@ -527,6 +527,61 @@ func applyRuntimeRepairStateChangingActionPackageProjection(
 	}
 }
 
+func applyRuntimeRepairFailureScopeProjection(input map[string]any, class string, signature string) {
+	if input == nil {
+		return
+	}
+	if class != "" {
+		input[failureOutputKeyClass] = class
+		input[stepInputKeyRepairOfFailureClass] = class
+	}
+	if signature != "" {
+		input[failureOutputKeySignature] = signature
+		input[stepInputKeyRepairOfFailureSig] = signature
+	}
+}
+
+func applyRuntimeRepairStructuredFailureSignalsProjection(
+	input map[string]any,
+	signals map[string]any,
+) {
+	if input == nil || len(signals) == 0 {
+		return
+	}
+	input["structuredFailureSignals"] = signals
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
+		"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
+	)
+	if structuredFailureSignalsContainShapeConflict(signals) {
+		if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
+			input["primaryDiagnosticRepair"] = primary
+		}
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
+			"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
+		)
+	}
+}
+
+func applyRuntimeRepairFailureTargetScopeProjection(
+	input map[string]any,
+	targetScope string,
+	targetRepairAttempts int,
+) {
+	if input == nil || targetScope == "" {
+		return
+	}
+	input["failureTargetScope"] = targetScope
+	input["targetRepairAttempts"] = targetRepairAttempts
+	if boolValue(input["stateChangingOutputRequired"]) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"When failureTargetScope is present, verificationPlan must stay bounded to that scope and explain the exact targeted checks.",
+			"Do not run unbounded verification for scoped repairs unless an explicit target scope or filter is provided.",
+		)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -627,40 +682,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		)
 	}
 	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
-	if class != "" {
-		input[failureOutputKeyClass] = class
-		input[stepInputKeyRepairOfFailureClass] = class
-	}
-	if signature != "" {
-		input[failureOutputKeySignature] = signature
-		input[stepInputKeyRepairOfFailureSig] = signature
-	}
-	if signals := structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature); len(signals) > 0 {
-		input["structuredFailureSignals"] = signals
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use structuredFailureSignals as mechanical failure evidence only; paths, line refs, and identifiers must be reconciled with current target snapshots or fresh reads before patching.",
-			"Do not treat identifier-like tokens in failure text as proof that a named element should be invented; ground every referenced name in current resources or introduce it explicitly in the same patch.",
-		)
-		if structuredFailureSignalsContainShapeConflict(signals) {
-			if primary := primaryDiagnosticRepairContractFromSignals(signals); len(primary) > 0 {
-				input["primaryDiagnosticRepair"] = primary
-			}
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Prioritize the primary diagnostics from structuredFailureSignals before secondary cleanup: fix reported unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, and line-referenced target errors first.",
-				"When diagnostics identify a concrete target snapshot, reconcile that target with current visible resource or contract shape before changing secondary validation details, evidence wording, or unrelated quality improvements.",
-			)
-		}
-	}
+	applyRuntimeRepairFailureScopeProjection(input, class, signature)
+	applyRuntimeRepairStructuredFailureSignalsProjection(input, structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature))
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
-		input["failureTargetScope"] = targetScope
-		input["targetRepairAttempts"] = o.repairManager().runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
-		if boolValue(input["stateChangingOutputRequired"]) {
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"When failureTargetScope is present, verificationPlan must stay bounded to that scope and explain the exact targeted checks.",
-				"Do not run unbounded verification for scoped repairs unless an explicit target scope or filter is provided.",
-			)
-		}
+		applyRuntimeRepairFailureTargetScopeProjection(
+			input,
+			targetScope,
+			o.repairManager().runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)),
+		)
 	}
 	if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
 		input["strategyReassessment"] = reassessment

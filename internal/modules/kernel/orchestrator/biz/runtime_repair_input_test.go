@@ -626,3 +626,58 @@ func TestApplyRuntimeRepairStateChangingActionPackageProjectionRequiresStateChan
 		t.Fatalf("repairGuidance = %+v, want action package guidance", guidance)
 	}
 }
+
+func TestApplyRuntimeRepairFailureScopeProjectionAddsClassAndSignature(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairFailureScopeProjection(input, failureClassShellCommand, "class=shell_command_failed|failureTargets=main.go")
+
+	if input[failureOutputKeyClass] != failureClassShellCommand || input[stepInputKeyRepairOfFailureClass] != failureClassShellCommand {
+		t.Fatalf("failure class fields = %+v, want shell command class", input)
+	}
+	if input[failureOutputKeySignature] != "class=shell_command_failed|failureTargets=main.go" ||
+		input[stepInputKeyRepairOfFailureSig] != "class=shell_command_failed|failureTargets=main.go" {
+		t.Fatalf("failure signature fields = %+v, want signature copied", input)
+	}
+}
+
+func TestApplyRuntimeRepairStructuredFailureSignalsProjectionAddsPrimaryDiagnostic(t *testing.T) {
+	input := map[string]any{}
+	signals := map[string]any{
+		"targetRefs":  []string{"main.go"},
+		"lineRefs":    []map[string]any{{"targetRef": "main.go", "line": 12}},
+		"identifiers": []string{"MissingType"},
+		"messages":    []string{"undefined: MissingType"},
+	}
+
+	applyRuntimeRepairStructuredFailureSignalsProjection(input, signals)
+
+	projected := mapFromValue(input["structuredFailureSignals"])
+	if len(projected) == 0 {
+		t.Fatalf("structuredFailureSignals missing: %+v", input)
+	}
+	if primary := mapFromValue(input["primaryDiagnosticRepair"]); len(primary) == 0 {
+		t.Fatalf("primaryDiagnosticRepair missing for shape conflict signals: %+v", input)
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 4 {
+		t.Fatalf("repairGuidance = %+v, want four structured signal guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairFailureTargetScopeProjectionAddsScopedGuidanceForStateChangingRepair(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+	}
+
+	applyRuntimeRepairFailureTargetScopeProjection(input, "failureTargets=main.go", 3)
+
+	if stringFromMap(input, "failureTargetScope") != "failureTargets=main.go" {
+		t.Fatalf("failureTargetScope = %q, want main.go scope", stringFromMap(input, "failureTargetScope"))
+	}
+	if input["targetRepairAttempts"] != 3 {
+		t.Fatalf("targetRepairAttempts = %v, want 3", input["targetRepairAttempts"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 2 {
+		t.Fatalf("repairGuidance = %+v, want two scoped verification guidance items", guidance)
+	}
+}
