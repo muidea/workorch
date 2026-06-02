@@ -218,3 +218,47 @@ func TestApplyRuntimeRepairAssessmentOnlyCoverageProjectionSetsValidationContrac
 		t.Fatalf("repairGuidance missing")
 	}
 }
+
+func TestApplyRuntimeRepairConcreteEvidenceProjectionClearsStateChangingRequirement(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-concrete/step-1",
+		RunID: "run-repair-concrete",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"runtimeDiagnostics": map[string]any{
+				"claimAlignedEvidenceNeeded": true,
+				"missingDoDItems": []map[string]any{{
+					"id":   "dod-001",
+					"item": "must cite concrete evidence",
+				}},
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-001",
+					"item":              "must cover goal",
+				}},
+			},
+		},
+	}
+
+	applyRuntimeRepairConcreteEvidenceProjection(input, failed, true)
+
+	if stringFromMap(input, "repairObjective") != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repairObjective = %q, want concrete validation evidence", stringFromMap(input, "repairObjective"))
+	}
+	if input["evidenceRepairRequired"] != true {
+		t.Fatalf("evidenceRepairRequired = %v, want true", input["evidenceRepairRequired"])
+	}
+	if _, ok := input["stateChangingOutputRequired"]; ok {
+		t.Fatalf("stateChangingOutputRequired should be cleared: %v", input)
+	}
+	gap := mapFromValue(input["verificationEvidenceGap"])
+	if gap["claimAlignedEvidenceNeeded"] != true {
+		t.Fatalf("claimAlignedEvidenceNeeded = %v, want true", gap["claimAlignedEvidenceNeeded"])
+	}
+	if len(mapSliceFromValue(gap["missingDoD"])) != 1 || len(mapSliceFromValue(gap["missingGoal"])) != 1 {
+		t.Fatalf("verificationEvidenceGap = %+v, want missing DoD and Goal", gap)
+	}
+}

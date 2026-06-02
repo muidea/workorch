@@ -256,6 +256,29 @@ func applyRuntimeRepairAssessmentOnlyCoverageProjection(
 	}
 }
 
+func applyRuntimeRepairConcreteEvidenceProjection(input map[string]any, failedStep *runModel.Step, concreteEvidenceRepair bool) {
+	if input == nil || failedStep == nil || !concreteEvidenceRepair {
+		return
+	}
+	claimAlignedEvidenceNeeded := false
+	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		claimAlignedEvidenceNeeded = boolValue(diagnostics["claimAlignedEvidenceNeeded"])
+	}
+	input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+	input["evidenceRepairRequired"] = true
+	input["verificationEvidenceGap"] = map[string]any{
+		"kind":                       "dod_verification_evidence_gap",
+		"failedStepId":               string(failedStep.ID),
+		"failedStepKind":             string(failedStep.Kind),
+		"missingDoD":                 missingDoDItemsFromFailureOutput(failedStep.Output),
+		"missingGoal":                missingGoalCoverageFromStep(failedStep),
+		"missingDeliverable":         missingDeliverableCoverageFromStep(failedStep),
+		"claimAlignedEvidenceNeeded": claimAlignedEvidenceNeeded,
+	}
+	input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
+	delete(input, "stateChangingOutputRequired")
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -324,25 +347,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
-	if concreteEvidenceRepair {
-		claimAlignedEvidenceNeeded := false
-		if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
-			claimAlignedEvidenceNeeded = boolValue(diagnostics["claimAlignedEvidenceNeeded"])
-		}
-		input["repairObjective"] = repairObjectiveConcreteValidationEvidence
-		input["evidenceRepairRequired"] = true
-		input["verificationEvidenceGap"] = map[string]any{
-			"kind":                       "dod_verification_evidence_gap",
-			"failedStepId":               string(failedStep.ID),
-			"failedStepKind":             string(failedStep.Kind),
-			"missingDoD":                 missingDoDItemsFromFailureOutput(failedStep.Output),
-			"missingGoal":                missingGoalCoverageFromStep(failedStep),
-			"missingDeliverable":         missingDeliverableCoverageFromStep(failedStep),
-			"claimAlignedEvidenceNeeded": claimAlignedEvidenceNeeded,
-		}
-		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
-		delete(input, "stateChangingOutputRequired")
-	}
+	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
 	applyRuntimeRepairAssessmentOnlyCoverageProjection(ctx, o.steps, o.evidence, input, run, failedStep, assessmentOnlyCoverageRepair, coverageNeedsConcreteEvidence, validationRepairEscalatesToStateChanging)
 	if coverageNeedsConcreteEvidence {
 		delete(input, stepInputKeyAssessmentOnly)
