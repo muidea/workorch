@@ -215,7 +215,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	wg.Add(7)
 	go func() {
 		defer wg.Done()
-		manifest = o.executionContextWorkspaceFileManifest(ctx, run, step, workspace)
+		manifest = executionContextWorkspaceFileManifest(ctx, o.workspaces, run, step, workspace)
 	}()
 	go func() {
 		defer wg.Done()
@@ -1373,7 +1373,13 @@ func workspaceHistoryCheckedPackage(pkg stableExecutionContextPackage, acceptedR
 	return ret
 }
 
-func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) []map[string]any {
+func executionContextWorkspaceFileManifest(
+	ctx context.Context,
+	workspaces repository.WorkspaceRepository,
+	run *runModel.Run,
+	step *runModel.Step,
+	workspace *workspaceModel.Workspace,
+) []map[string]any {
 	if step != nil {
 		if manifest := mapSliceFromValue(step.Input[stepInputKeyWorkspaceFileManifest]); len(manifest) > 0 {
 			return compactWorkspaceFileManifest(manifest)
@@ -1382,8 +1388,8 @@ func (o *RuntimeOrchestrator) executionContextWorkspaceFileManifest(ctx context.
 	if !shouldIncludeWorkspaceManifestInExecutionContextPackage(run, step) {
 		return nil
 	}
-	if workspace == nil && o != nil && o.workspaces != nil && run != nil && run.WorkspaceID != "" {
-		loaded, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	if workspace == nil && workspaces != nil && run != nil && run.WorkspaceID != "" {
+		loaded, err := workspaces.Get(ctx, run.WorkspaceID)
 		if err == nil {
 			workspace = loaded
 		}
