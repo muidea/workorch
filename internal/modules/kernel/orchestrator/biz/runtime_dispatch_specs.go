@@ -196,7 +196,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 		}
 	}
 	if boolValue(resumeInput["providerRetryDecisionRetry"]) {
-		if specs, ok, err := o.providerRetrySpecsAfterResolvedDecision(ctx, run, stepID); ok || err != nil {
+		if specs, ok, err := providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.policy, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
@@ -251,15 +251,18 @@ func contextGateDecisionResumeInput(resumeInput map[string]any) bool {
 		strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) == decisionContextDependencyContextGate
 }
 
-func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
+func providerRetrySpecsAfterResolvedDecision(
 	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
+	policy RuntimePolicy,
 	run *runModel.Run,
 	stepID common.StepID,
 ) ([]stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || stepID == "" {
+	if steps == nil || repair == nil || run == nil || stepID == "" {
 		return nil, false, nil
 	}
-	step, err := o.steps.Get(ctx, stepID)
+	step, err := steps.Get(ctx, stepID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -267,12 +270,12 @@ func (o *RuntimeOrchestrator) providerRetrySpecsAfterResolvedDecision(
 		return nil, false, nil
 	}
 	rootStepID := providerRetryRootStepID(step)
-	attempt := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
-	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
+	attempt := repair.providerRetryAttemptCount(ctx, run.ID, rootStepID) + 1
+	stepID, err = uniqueDispatchStepID(ctx, steps, run.ID, providerRetryStepID(run.ID, rootStepID, attempt))
 	if err != nil {
 		return nil, true, err
 	}
-	input := providerRetryStepInputWithMaxAttempts(step, attempt, nil, maxProviderRetryAttemptsForPolicy(o.policy))
+	input := providerRetryStepInputWithMaxAttempts(step, attempt, nil, maxProviderRetryAttemptsForPolicy(policy))
 	input["decisionAuthorizedRetry"] = true
 	return []stepDispatchSpec{{
 		ID:    stepID,
