@@ -7,6 +7,7 @@ import (
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {
@@ -175,6 +176,37 @@ func applyRuntimeRepairFailureProjection(input map[string]any, failedStep *runMo
 	}
 }
 
+func applyRuntimeRepairMissingCoverageProjection(
+	ctx context.Context,
+	steps repository.StepRepository,
+	input map[string]any,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	assessmentOnlyCoverageRepair bool,
+) {
+	if input == nil || failedStep == nil {
+		return
+	}
+	if assessmentOnlyCoverageRepair {
+		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
+			input["missingGoalCoverage"] = missingGoalCoverageWithEvidenceCandidates(ctx, steps, run, failedStep, missingGoalCoverage)
+		}
+	}
+	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
+		input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, steps, run, failedStep, missingDoD)
+	}
+	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
+		input["missingDeliverableCoverage"] = missingDeliverableCoverage
+	}
+	if inheritCoverageRepairContext(input, failedStep) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Preserve inherited coverage gaps from the previous repair attempt; a contract failure on the repair wrapper does not clear the original Goal/DoD/deliverable gaps.",
+			"Use missingDoDItems, missingGoalCoverage, and missingDeliverableCoverage as the current unresolved scope unless current evidence explicitly closes an item.",
+		)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -213,24 +245,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	applyRuntimeRepairFailureProjection(input, failedStep)
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
-	if assessmentOnlyCoverageRepair {
-		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
-			input["missingGoalCoverage"] = missingGoalCoverageWithEvidenceCandidates(ctx, o.steps, run, failedStep, missingGoalCoverage)
-		}
-	}
-	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
-		input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, o.steps, run, failedStep, missingDoD)
-	}
-	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
-		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
-		input["missingDeliverableCoverage"] = missingDeliverableCoverage
-	}
-	if inheritCoverageRepairContext(input, failedStep) {
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Preserve inherited coverage gaps from the previous repair attempt; a contract failure on the repair wrapper does not clear the original Goal/DoD/deliverable gaps.",
-			"Use missingDoDItems, missingGoalCoverage, and missingDeliverableCoverage as the current unresolved scope unless current evidence explicitly closes an item.",
-		)
-	}
+	applyRuntimeRepairMissingCoverageProjection(ctx, o.steps, input, run, failedStep, assessmentOnlyCoverageRepair)
 	assessmentOnlyFailedCoverageRepair := assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep)
 	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && (coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
 		Input:  input,

@@ -129,3 +129,39 @@ func TestApplyRuntimeRepairFailureProjectionAddsDiagnosticsAndCoverageContext(t 
 		t.Fatalf("repairGuidance missing after projection")
 	}
 }
+
+func TestApplyRuntimeRepairMissingCoverageProjectionPreservesExistingDeliverableCoverage(t *testing.T) {
+	input := map[string]any{
+		"missingDeliverableCoverage": []map[string]any{{
+			"id": "already-present",
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-coverage/step-1",
+		RunID: "run-repair-coverage",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"runtimeDiagnostics": map[string]any{
+				"missingDoDItems": []map[string]any{{
+					"id":   "dod-001",
+					"item": "must verify the bounded outcome",
+				}},
+				"missingDeliverableCoverage": []map[string]any{{
+					"id": "from-failure",
+				}},
+			},
+		},
+	}
+
+	applyRuntimeRepairMissingCoverageProjection(t.Context(), nil, input, &runmodel.Run{ID: "run-repair-coverage"}, failed, false)
+
+	missingDoD := mapSliceFromValue(input["missingDoDItems"])
+	if len(missingDoD) != 1 || stringFromMap(missingDoD[0], "id") != "dod-001" {
+		t.Fatalf("missingDoDItems = %+v, want dod-001", missingDoD)
+	}
+	deliverable := mapSliceFromValue(input["missingDeliverableCoverage"])
+	if len(deliverable) != 1 || stringFromMap(deliverable[0], "id") != "already-present" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want preserved existing item", deliverable)
+	}
+}
