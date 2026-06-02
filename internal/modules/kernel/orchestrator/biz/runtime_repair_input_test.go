@@ -79,3 +79,53 @@ func TestRuntimeRepairBaseInputWithoutFailedStepUsesDefaults(t *testing.T) {
 		t.Fatalf("failedStepId should be absent without failed step: %v", input)
 	}
 }
+
+func TestApplyRuntimeRepairFailureProjectionAddsDiagnosticsAndCoverageContext(t *testing.T) {
+	coverageContext := coverageWorkItemContextFromItems("rev-1", []map[string]any{{
+		"id":                    "cwi-001",
+		"definitionRevision":    "rev-1",
+		"source":                "goal",
+		"sourceScope":           "goal_leaf",
+		"sourceRequirementId":   "goal-req-001",
+		"sourcePath":            "goal.leaves[0]",
+		"targetText":            "must produce a bounded state change",
+		"requiredEvidenceKinds": []string{"state_change", "validation"},
+		"status":                "open",
+	}}, nil, nil)
+	input := map[string]any{}
+	failed := &runmodel.Step{
+		ID:    "run-repair-failure/step-1",
+		RunID: "run-repair-failure",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"runtimeDiagnostics": map[string]any{
+				"kind":                     "dod_evidence_quality_gap",
+				coverageWorkItemContextKey: coverageContext,
+			},
+		},
+	}
+
+	applyRuntimeRepairFailureProjection(input, failed)
+
+	if stringFromMap(input, "repairObjective") != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repairObjective = %q, want concrete validation evidence", stringFromMap(input, "repairObjective"))
+	}
+	if input["evidenceRepairRequired"] != true {
+		t.Fatalf("evidenceRepairRequired = %v, want true", input["evidenceRepairRequired"])
+	}
+	if len(mapFromValue(input["verificationEvidenceGap"])) == 0 {
+		t.Fatalf("verificationEvidenceGap missing from input: %v", input)
+	}
+	if context := mapFromValue(input[coverageWorkItemContextKey]); len(mapSliceFromValue(context["unresolvedItems"])) != 1 {
+		t.Fatalf("coverageWorkItemContext = %+v, want one unresolved item", input[coverageWorkItemContextKey])
+	}
+	unresolved := mapSliceFromValue(input["unresolvedCoverageWorkItems"])
+	if len(unresolved) != 1 || stringFromMap(unresolved[0], "sourceRequirementId") != "goal-req-001" {
+		t.Fatalf("unresolvedCoverageWorkItems = %+v, want goal-req-001", unresolved)
+	}
+	guidance := stringSliceFromValue(input["repairGuidance"])
+	if len(guidance) == 0 {
+		t.Fatalf("repairGuidance missing after projection")
+	}
+}

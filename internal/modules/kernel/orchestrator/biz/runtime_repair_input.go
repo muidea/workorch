@@ -139,6 +139,42 @@ func runtimeRepairBaseInput(
 	return input
 }
 
+func applyRuntimeRepairFailureProjection(input map[string]any, failedStep *runModel.Step) {
+	if input == nil || failedStep == nil {
+		return
+	}
+	if diagnostics := runtimeRepairLastFailureDiagnostics(failedStep); len(diagnostics) > 0 {
+		input["lastFailureDiagnostics"] = diagnostics
+	}
+	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
+		input["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
+		if stringFromMap(diagnostics, "kind") == "dod_evidence_quality_gap" {
+			input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+			input["evidenceRepairRequired"] = true
+			input["verificationEvidenceGap"] = cloneStepPayload(diagnostics)
+			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
+		}
+	}
+	markCapabilityInputLocatorEvidenceRequired(input, failedStep)
+	coverageContext := mapFromValue(failedStep.Output[coverageWorkItemContextKey])
+	if len(coverageContext) == 0 {
+		coverageContext = mapFromValue(mapFromValue(failedStep.Output["runtimeDiagnostics"])[coverageWorkItemContextKey])
+	}
+	if len(coverageContext) == 0 {
+		return
+	}
+	applyCoverageWorkItemContext(input, coverageContext)
+	if unresolved := coverageWorkItemUnresolvedItemsFromContext(coverageContext); len(unresolved) > 0 {
+		input["unresolvedCoverageWorkItems"] = unresolved
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
+			"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
+			"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
+			"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
+		)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -175,35 +211,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input = o.convergenceManager().apply(input, contract)
 		return input
 	}
-	if diagnostics := runtimeRepairLastFailureDiagnostics(failedStep); len(diagnostics) > 0 {
-		input["lastFailureDiagnostics"] = diagnostics
-	}
-	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
-		input["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
-		if stringFromMap(diagnostics, "kind") == "dod_evidence_quality_gap" {
-			input["repairObjective"] = repairObjectiveConcreteValidationEvidence
-			input["evidenceRepairRequired"] = true
-			input["verificationEvidenceGap"] = cloneStepPayload(diagnostics)
-			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
-		}
-	}
-	markCapabilityInputLocatorEvidenceRequired(input, failedStep)
-	coverageContext := mapFromValue(failedStep.Output[coverageWorkItemContextKey])
-	if len(coverageContext) == 0 {
-		coverageContext = mapFromValue(mapFromValue(failedStep.Output["runtimeDiagnostics"])[coverageWorkItemContextKey])
-	}
-	if len(coverageContext) > 0 {
-		applyCoverageWorkItemContext(input, coverageContext)
-		if unresolved := coverageWorkItemUnresolvedItemsFromContext(coverageContext); len(unresolved) > 0 {
-			input["unresolvedCoverageWorkItems"] = unresolved
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
-				"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
-				"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
-				"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
-			)
-		}
-	}
+	applyRuntimeRepairFailureProjection(input, failedStep)
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
 	if assessmentOnlyCoverageRepair {
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
