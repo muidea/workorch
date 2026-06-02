@@ -262,3 +262,34 @@ func TestApplyRuntimeRepairConcreteEvidenceProjectionClearsStateChangingRequirem
 		t.Fatalf("verificationEvidenceGap = %+v, want missing DoD and Goal", gap)
 	}
 }
+
+func TestApplyRuntimeRepairCoverageNeedsConcreteEvidenceProjectionClearsAssessmentOnly(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"assessmentOnlyReason":     "dod_coverage_contract_correction",
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-coverage-needs-evidence/step-1",
+		RunID: "run-repair-coverage-needs-evidence",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+	}
+
+	applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(t.Context(), nil, RuntimeEvidenceRepositories{}, input, &runmodel.Run{ID: "run-repair-coverage-needs-evidence"}, failed, true, true)
+
+	if _, ok := input[stepInputKeyAssessmentOnly]; ok {
+		t.Fatalf("assessment-only flag should be cleared: %v", input)
+	}
+	if _, ok := input["assessmentOnlyReason"]; ok {
+		t.Fatalf("assessmentOnlyReason should be cleared: %v", input)
+	}
+	if input["completionFollowUp"] != false {
+		t.Fatalf("completionFollowUp = %v, want false", input["completionFollowUp"])
+	}
+	if stringFromMap(input, "evidenceRepairSource") != "failed_assessment_only_coverage_gap" {
+		t.Fatalf("evidenceRepairSource = %q, want failed assessment-only source", stringFromMap(input, "evidenceRepairSource"))
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 3 {
+		t.Fatalf("repairGuidance = %+v, want three coverage evidence guidance items", guidance)
+	}
+}

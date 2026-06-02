@@ -279,6 +279,39 @@ func applyRuntimeRepairConcreteEvidenceProjection(input map[string]any, failedSt
 	delete(input, "stateChangingOutputRequired")
 }
 
+func applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(
+	ctx context.Context,
+	steps repository.StepRepository,
+	evidence RuntimeEvidenceRepositories,
+	input map[string]any,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	coverageNeedsConcreteEvidence bool,
+	assessmentOnlyFailedCoverageRepair bool,
+) {
+	if input == nil || failedStep == nil || !coverageNeedsConcreteEvidence {
+		return
+	}
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	input["completionFollowUp"] = false
+	input["evidenceRepairSource"] = "coverage_gap_without_candidate_evidence"
+	if assessmentOnlyFailedCoverageRepair {
+		input["evidenceRepairSource"] = "failed_assessment_only_coverage_gap"
+	}
+	if closure := latestCompletionClosureEvidence(ctx, steps, evidence, run, failedStep); len(closure) > 0 {
+		input["latestClosureEvidence"] = closure
+		if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+			input["supersededFailureEvidence"] = superseded
+		}
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"At least one Goal/DoD/deliverable coverage gap still lacks acceptable concrete evidence; produce bounded verification evidence before another dodAssessment correction.",
+		"When latestClosureEvidence is present, prefer the latest successful evidence over older superseded failures in the same neutral scope.",
+		"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
+	)
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -349,26 +382,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
 	applyRuntimeRepairAssessmentOnlyCoverageProjection(ctx, o.steps, o.evidence, input, run, failedStep, assessmentOnlyCoverageRepair, coverageNeedsConcreteEvidence, validationRepairEscalatesToStateChanging)
-	if coverageNeedsConcreteEvidence {
-		delete(input, stepInputKeyAssessmentOnly)
-		delete(input, "assessmentOnlyReason")
-		input["completionFollowUp"] = false
-		input["evidenceRepairSource"] = "coverage_gap_without_candidate_evidence"
-		if assessmentOnlyFailedCoverageRepair {
-			input["evidenceRepairSource"] = "failed_assessment_only_coverage_gap"
-		}
-		if closure := latestCompletionClosureEvidence(ctx, o.steps, o.evidence, run, failedStep); len(closure) > 0 {
-			input["latestClosureEvidence"] = closure
-			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
-				input["supersededFailureEvidence"] = superseded
-			}
-		}
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"At least one Goal/DoD/deliverable coverage gap still lacks acceptable concrete evidence; produce bounded verification evidence before another dodAssessment correction.",
-			"When latestClosureEvidence is present, prefer the latest successful evidence over older superseded failures in the same neutral scope.",
-			"If new verification evidence closes a specific Goal requirement, ensure the next dodAssessment cites that exact evidenceRef and goalRequirementId.",
-		)
-	}
+	applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(ctx, o.steps, o.evidence, input, run, failedStep, coverageNeedsConcreteEvidence, assessmentOnlyFailedCoverageRepair)
 	if coverageValidationEvidenceRepair {
 		input["boundedValidationRequired"] = true
 		input["evidenceRepairSource"] = "coverage_gap_without_implementation_target"
