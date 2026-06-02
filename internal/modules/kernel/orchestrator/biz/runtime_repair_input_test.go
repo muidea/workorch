@@ -7,6 +7,7 @@ import (
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
 func TestRuntimeRepairBaseInputProjectsFailedStepContract(t *testing.T) {
@@ -338,5 +339,73 @@ func TestApplyRuntimeRepairGovernanceHistoryProjectionCompactsExecutionContextHi
 	}
 	if stringFromMap(projected[0], "id") != "ticket-001" || stringFromMap(projected[5], "id") != "ticket-006" {
 		t.Fatalf("governanceHistory = %+v, want first six entries preserved", projected)
+	}
+}
+
+func TestApplyRuntimeRepairGraphEvidenceProjectionAddsTargetSnapshots(t *testing.T) {
+	ctx := t.Context()
+	stepRepo := memory.NewStepRepository()
+	run := &runmodel.Run{ID: "run-repair-graph-evidence"}
+	root := &runmodel.Step{
+		ID:    "run-repair-graph-evidence/root",
+		RunID: run.ID,
+		Kind:  "llm",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: map[string]any{
+				"nodes": []map[string]any{{
+					"id":   "read-config",
+					"kind": "file/read",
+				}},
+			},
+		},
+	}
+	readStep := &runmodel.Step{
+		ID:    "run-repair-graph-evidence/read-config",
+		RunID: run.ID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(root.ID),
+			stepInputKeyGraphNodeID:     "read-config",
+		},
+		Output: map[string]any{
+			"stage":       "file_read",
+			"path":        "config/app.toml",
+			"exists":      true,
+			"content":     "enabled = true\n",
+			"contentHash": "hash-001",
+			"size":        15,
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-graph-evidence/failed",
+		RunID: run.ID,
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID: string(root.ID),
+		},
+	}
+	if err := stepRepo.Create(ctx, root); err != nil {
+		t.Fatalf("create root step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, readStep); err != nil {
+		t.Fatalf("create read step: %v", err)
+	}
+	if err := stepRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("create failed step: %v", err)
+	}
+	input := map[string]any{}
+
+	applyRuntimeRepairGraphEvidenceProjection(ctx, newGraphSubsystem(stepRepo, RuntimeEvidenceRepositories{}), input, run, failed)
+
+	evidence := mapSliceFromValue(input[stepInputKeyGraphEvidence])
+	if len(evidence) != 1 || stringFromMap(evidence[0], "nodeId") != "read-config" {
+		t.Fatalf("graphEvidence = %+v, want read-config evidence", evidence)
+	}
+	targets := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targets) != 1 || stringFromMap(targets[0], "targetRef") != "config/app.toml" {
+		t.Fatalf("failureTargetRepairContext = %+v, want config/app.toml snapshot", targets)
 	}
 }

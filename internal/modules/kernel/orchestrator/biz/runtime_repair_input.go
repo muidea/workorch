@@ -346,6 +346,24 @@ func applyRuntimeRepairGovernanceHistoryProjection(
 	}
 }
 
+func applyRuntimeRepairGraphEvidenceProjection(
+	ctx context.Context,
+	graph *graphSubsystem,
+	input map[string]any,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+) {
+	if input == nil || graph == nil {
+		return
+	}
+	if evidence := graph.completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
+		input[stepInputKeyGraphEvidence] = evidence
+		if snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence); len(snapshots) > 0 {
+			input["failureTargetRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["failureTargetRepairContext"]), snapshots)
+		}
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -526,12 +544,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
 	}
 	applyRuntimeRepairGovernanceHistoryProjection(ctx, o.tickets, o.resolutions, o.approvals, input, run)
-	if evidence := o.graphManager().completedGraphEvidence(ctx, run, failedStep); len(evidence) > 0 {
-		input[stepInputKeyGraphEvidence] = evidence
-		if snapshots := targetSnapshotsFromConcreteFailureEvidence(evidence); len(snapshots) > 0 {
-			input["failureTargetRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["failureTargetRepairContext"]), snapshots)
-		}
-	}
+	applyRuntimeRepairGraphEvidenceProjection(ctx, o.graphManager(), input, run, failedStep)
 	if progress := runtimeRepairCurrentExecutionProgress(ctx, o.steps, o.repairManager(), run, failedStep, input); len(progress) > 0 {
 		input["currentExecutionProgress"] = progress
 	}
