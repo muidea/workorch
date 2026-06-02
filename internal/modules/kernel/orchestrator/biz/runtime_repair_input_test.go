@@ -165,3 +165,56 @@ func TestApplyRuntimeRepairMissingCoverageProjectionPreservesExistingDeliverable
 		t.Fatalf("missingDeliverableCoverage = %+v, want preserved existing item", deliverable)
 	}
 }
+
+func TestApplyRuntimeRepairAssessmentOnlyCoverageProjectionSetsValidationContract(t *testing.T) {
+	input := map[string]any{}
+	run := &runmodel.Run{
+		ID: "run-repair-assessment-only",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"profile-a": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":       "deliverable-001",
+							"required": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-repair-assessment-only/step-1",
+		RunID: run.ID,
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"runtimeDiagnostics": map[string]any{
+				"missingDeliverableCoverage": []map[string]any{{
+					"id": "deliverable-001",
+				}},
+			},
+		},
+	}
+
+	applyRuntimeRepairAssessmentOnlyCoverageProjection(t.Context(), nil, RuntimeEvidenceRepositories{}, input, run, failed, true, false, false)
+
+	if input[stepInputKeySoulStage] != soulStageValidation {
+		t.Fatalf("soul stage = %v, want validation", input[stepInputKeySoulStage])
+	}
+	if runtimeStageFromStepInput(input) != runtimeStageVerification {
+		t.Fatalf("runtime stage = %v, want verification", runtimeStageFromStepInput(input))
+	}
+	if input[stepInputKeyAssessmentOnly] != true || input["completionFollowUp"] != true {
+		t.Fatalf("assessment-only flags missing: %v", input)
+	}
+	if stringFromMap(input, "repairObjective") != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repairObjective = %q, want assessment coverage correction", stringFromMap(input, "repairObjective"))
+	}
+	if required := stringSliceFromValue(input["requiredDeliverableCoverage"]); len(required) != 1 || required[0] != "deliverable-001" {
+		t.Fatalf("requiredDeliverableCoverage = %+v, want deliverable-001", input["requiredDeliverableCoverage"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) == 0 {
+		t.Fatalf("repairGuidance missing")
+	}
+}

@@ -207,6 +207,55 @@ func applyRuntimeRepairMissingCoverageProjection(
 	}
 }
 
+func applyRuntimeRepairAssessmentOnlyCoverageProjection(
+	ctx context.Context,
+	steps repository.StepRepository,
+	evidence RuntimeEvidenceRepositories,
+	input map[string]any,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	assessmentOnlyCoverageRepair bool,
+	coverageNeedsConcreteEvidence bool,
+	validationRepairEscalatesToStateChanging bool,
+) {
+	if input == nil || failedStep == nil ||
+		!assessmentOnlyCoverageRepair ||
+		coverageNeedsConcreteEvidence ||
+		validationRepairEscalatesToStateChanging {
+		return
+	}
+	input[stepInputKeySoulStage] = soulStageValidation
+	setRuntimeStage(input, runtimeStageVerification)
+	input[stepInputKeyAssessmentOnly] = true
+	input["completionFollowUp"] = true
+	input["assessmentOnlyReason"] = "dod_coverage_contract_correction"
+	input["repairObjective"] = "complete_dod_goal_coverage_assessment"
+	input["repairGuidance"] = []string{
+		"Return only completed or failed dodAssessment, or a real governance blocker.",
+		"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
+		"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
+		"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
+		"Add one independent dodAssessment.deliverableCoverage.items entry for every missingDeliverableCoverage entry or required deliverableExpectation id; each satisfied entry must copy the exact id and cite evidenceRefs or artifactRefs.",
+		"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
+		"When latestClosureEvidence is present, compare the latest successful evidence against older failed evidence in the same neutral scope; do not reject solely because an earlier superseded failure exists.",
+		"If latestClosureEvidence is still insufficient, explain the exact missing dimension and cite the latest evidence that was considered.",
+		"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
+		"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
+	}
+	if closure := latestCompletionClosureEvidence(ctx, steps, evidence, run, failedStep); len(closure) > 0 {
+		input["latestClosureEvidence"] = closure
+		if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
+			input["supersededFailureEvidence"] = superseded
+		}
+	}
+	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 {
+		input["missingDeliverableCoverage"] = missingDeliverableCoverage
+	}
+	if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
+		input["requiredDeliverableCoverage"] = requiredDeliverables
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -294,38 +343,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
 		delete(input, "stateChangingOutputRequired")
 	}
-	if assessmentOnlyCoverageRepair && !coverageNeedsConcreteEvidence && !validationRepairEscalatesToStateChanging {
-		input[stepInputKeySoulStage] = soulStageValidation
-		setRuntimeStage(input, runtimeStageVerification)
-		input[stepInputKeyAssessmentOnly] = true
-		input["completionFollowUp"] = true
-		input["assessmentOnlyReason"] = "dod_coverage_contract_correction"
-		input["repairObjective"] = "complete_dod_goal_coverage_assessment"
-		input["repairGuidance"] = []string{
-			"Return only completed or failed dodAssessment, or a real governance blocker.",
-			"Do not return executionGraph, shellCommands, patchRequests, mcpToolCalls, memoryWrites, or other executable work.",
-			"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
-			"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
-			"Add one independent dodAssessment.deliverableCoverage.items entry for every missingDeliverableCoverage entry or required deliverableExpectation id; each satisfied entry must copy the exact id and cite evidenceRefs or artifactRefs.",
-			"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
-			"When latestClosureEvidence is present, compare the latest successful evidence against older failed evidence in the same neutral scope; do not reject solely because an earlier superseded failure exists.",
-			"If latestClosureEvidence is still insufficient, explain the exact missing dimension and cite the latest evidence that was considered.",
-			"Each satisfied dodAssessment.goalCoverage item must cite concrete evidenceRefs from the candidate evidence or other available evidence.",
-			"If evidence does not support a Goal or DoD item, mark it failed/skipped with reason, residualRisks, and nextActions instead of claiming satisfaction.",
-		}
-		if closure := latestCompletionClosureEvidence(ctx, o.steps, o.evidence, run, failedStep); len(closure) > 0 {
-			input["latestClosureEvidence"] = closure
-			if superseded := mapSliceFromValue(closure["supersededFailures"]); len(superseded) > 0 {
-				input["supersededFailureEvidence"] = superseded
-			}
-		}
-		if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 {
-			input["missingDeliverableCoverage"] = missingDeliverableCoverage
-		}
-		if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
-			input["requiredDeliverableCoverage"] = requiredDeliverables
-		}
-	}
+	applyRuntimeRepairAssessmentOnlyCoverageProjection(ctx, o.steps, o.evidence, input, run, failedStep, assessmentOnlyCoverageRepair, coverageNeedsConcreteEvidence, validationRepairEscalatesToStateChanging)
 	if coverageNeedsConcreteEvidence {
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
