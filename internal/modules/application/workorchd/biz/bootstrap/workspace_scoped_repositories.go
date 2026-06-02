@@ -1223,6 +1223,20 @@ func (r *workspaceScopedStepRepository) Create(ctx context.Context, item *runmod
 }
 
 func (r *workspaceScopedStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	if runID := runIDFromStepID(id); runID != "" {
+		if root, ok := r.store.runRootByID(ctx, runID); ok {
+			item, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Get(ctx, id)
+			if err == nil {
+				return item, nil
+			}
+			if err != common.ErrNotFound {
+				return nil, err
+			}
+		}
+		if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
+			return nil, common.ErrNotFound
+		}
+	}
 	for _, root := range r.store.allRunRoots() {
 		item, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Get(ctx, id)
 		if err == nil {
@@ -2148,7 +2162,10 @@ func (r *workspaceScopedDecisionTicketRepository) Create(ctx context.Context, it
 }
 
 func (r *workspaceScopedDecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
-	for _, root := range r.store.allRunRoots() {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	for _, root := range r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)) {
 		item, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).Get(ctx, id)
 		if err == nil {
 			return item, nil
@@ -2324,7 +2341,10 @@ func (r *workspaceScopedApprovalRepository) Create(ctx context.Context, item *ap
 }
 
 func (r *workspaceScopedApprovalRepository) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	for _, root := range r.store.allRunRoots() {
+	if id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	for _, root := range r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)) {
 		item, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).Get(ctx, id)
 		if err == nil {
 			return item, nil

@@ -640,7 +640,7 @@ wait_run_state() {
   local deadline=$((SECONDS + RUN_WAIT_SECONDS))
 
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id" >"$output_file"
     if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
       return 0
     fi
@@ -658,7 +658,7 @@ wait_run_state_any() {
   local deadline=$((SECONDS + RUN_WAIT_SECONDS))
 
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id" >"$output_file"
     if python3 - "$output_file" "$@" <<'PY'
 import json
 import sys
@@ -704,11 +704,11 @@ assert_run_recovery_read_models() {
   local expected_state="$3"
   local expected_usage_source="${4:-}"
 
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/$label-snapshot-read-model.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/$label-observability-read-model.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-progress" >"$TMP_DIR/$label-task-progress.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/context-bundle" >"$TMP_DIR/$label-context-bundle.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id" >"$TMP_DIR/$label-events.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/$label-snapshot-read-model.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/$label-observability-read-model.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-progress?workspaceId=$workspace_id" >"$TMP_DIR/$label-task-progress.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/context-bundle?workspaceId=$workspace_id" >"$TMP_DIR/$label-context-bundle.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/$label-events.json"
   python3 - "$TMP_DIR/$label-snapshot-read-model.json" \
     "$TMP_DIR/$label-observability-read-model.json" \
     "$TMP_DIR/$label-task-progress.json" \
@@ -858,7 +858,7 @@ assert_run_llm_usage_semantics() {
   local run_id="$1"
   local expected_usage_source="$2"
   local expected_streaming="$3"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/$run_id-observability-usage.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/$run_id-observability-usage.json"
   python3 - "$TMP_DIR/$run_id-observability-usage.json" "$expected_usage_source" "$expected_streaming" <<'PY'
 import json
 import sys
@@ -994,16 +994,16 @@ activate_workspace_execution "$TMP_DIR/happy-activation.json"
 grep '"state": "completed"' "$TMP_DIR/happy-activation.json" >/dev/null
 happy_run_id="$(json_path "$TMP_DIR/happy-activation.json" "activation.run.id")"
 curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$happy_run_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/status" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id?workspaceId=$workspace_id" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/status?workspaceId=$workspace_id" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/happy-snapshot.json"
 grep '"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"memoryRefs"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"soulRouting"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"status": "resolved"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$happy_run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/happy-observability.json"
 grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
 assert_run_recovery_read_models "$happy_run_id" "happy" "completed" "estimated"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
@@ -1015,14 +1015,14 @@ decision_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.
 if [[ "$decision_state" == "blocked_on_decision" ]]; then
   ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
   ticket_path="$(url_encode "$ticket_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status" | grep '"state": "blocked_on_decision"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status?workspaceId=$workspace_id" | grep '"state": "blocked_on_decision"' >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" -H 'Content-Type: application/json' \
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" | grep '"decisionKind": "provide_missing_info"' >/dev/null
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
     -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
 elif [[ "$decision_state" == "completed" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$decision_run_id" >"$TMP_DIR/decision-auto-resolved-list.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" >"$TMP_DIR/decision-auto-resolved-list.json"
   ticket_id="$(python3 - "$TMP_DIR/decision-auto-resolved-list.json" <<'PY'
 import json
 import sys
@@ -1033,7 +1033,7 @@ print(items[0].get("id", ""))
 PY
 )"
   ticket_path="$(url_encode "$ticket_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-auto-resolved-detail.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/decision-auto-resolved-detail.json"
   grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
   grep '"state": "resolved"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
 else
@@ -1041,7 +1041,7 @@ else
   exit 1
 fi
 wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/observability?workspaceId=$workspace_id" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-decision.json"
 grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-after-decision.json" >/dev/null
@@ -1051,15 +1051,15 @@ grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/
 approval_run_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.id")"
 approval_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/status" | grep '"state": "blocked_on_approval"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/status?workspaceId=$workspace_id" | grep '"state": "blocked_on_approval"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-detail.json"
+curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path?workspaceId=$workspace_id" >"$TMP_DIR/approval-detail.json"
 [[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.action")" == "continue risky test path" ]]
 [[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.context.scenario")" == "approval" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject" | grep '"state": "rejected"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject?workspaceId=$workspace_id" | grep '"state": "rejected"' >/dev/null
 wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$approval_run_id/observability?workspaceId=$workspace_id" | grep '"terminal": true' >/dev/null
 assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed" "provider_native"
 
 activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
@@ -1067,24 +1067,24 @@ grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.j
 multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.id")"
 multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.blockingTicketId")"
 multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path" | grep '"decisionKind": "provide_missing_info"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/resolve" -H 'Content-Type: application/json' \
+curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path?workspaceId=$workspace_id" | grep '"decisionKind": "provide_missing_info"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
   -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
 wait_run_state "$multi_gate_run_id" "blocked_on_approval" "$TMP_DIR/multi-gate-approval-status.json"
 multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-status.json" "status.blockingApprovalId")"
 multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path" >"$TMP_DIR/multi-gate-approval-detail.json"
+curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path?workspaceId=$workspace_id" >"$TMP_DIR/multi-gate-approval-detail.json"
 grep '"state": "pending"' "$TMP_DIR/multi-gate-approval-detail.json" >/dev/null
 [[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.action")" == "complete multi-gate LLM path" ]]
 [[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.context.scenario")" == "decision_then_approval" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve" | grep '"state": "approved"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve?workspaceId=$workspace_id" | grep '"state": "approved"' >/dev/null
 wait_run_state "$multi_gate_run_id" "completed" "$TMP_DIR/multi-gate-completed-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot" >"$TMP_DIR/multi-gate-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/multi-gate-snapshot.json"
 grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/status" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/status?workspaceId=$workspace_id" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$multi_gate_run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/multi-gate-observability.json"
 grep '"terminal": true' "$TMP_DIR/multi-gate-observability.json" >/dev/null
 assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-after-governance.json"
@@ -1094,17 +1094,27 @@ grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/workspace-snapshot-after-go
 
 activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
-wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
+wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded" "blocked_on_decision"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
 schema_run_state="$(json_path "$TMP_DIR/schema-failure-status.json" "status.state")"
+if [[ "$schema_run_state" == "blocked_on_decision" ]]; then
+  schema_ticket_id="$(json_path "$TMP_DIR/schema-failure-status.json" "status.blockingTicketId")"
+  schema_ticket_path="$(url_encode "$schema_ticket_id")"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/schema-failure-decision.json"
+  grep '"recoveryPolicy": "runtime_repair_exhausted_requires_strategy"' "$TMP_DIR/schema-failure-decision.json" >/dev/null
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
+    -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","recoveryAction":"terminate"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
+  wait_run_state "$schema_run_id" "failed" "$TMP_DIR/schema-failure-terminated-status.json"
+  schema_run_state="failed"
+fi
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability?workspaceId=$workspace_id" | grep '"terminal": true' >/dev/null
 if [[ "$schema_run_state" == "superseded" ]]; then
   assert_run_recovery_read_models "$schema_run_id" "schema-failure" "superseded" "provider_native"
   schema_successor_run_id="$(find_replan_successor_run "$schema_run_id" "$TMP_DIR/schema-failure-workspace-snapshot.json")"
   [[ -n "$schema_successor_run_id" ]]
   wait_run_state "$schema_successor_run_id" "completed" "$TMP_DIR/schema-failure-successor-status.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_successor_run_id/snapshot" >"$TMP_DIR/schema-failure-successor-snapshot.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_successor_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/schema-failure-successor-snapshot.json"
   grep '"replanContinuation"' "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
   grep "\"predecessorRunId\": \"$schema_run_id\"" "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
   assert_run_recovery_read_models "$schema_successor_run_id" "schema-failure-successor" "completed" "provider_native"
@@ -1115,16 +1125,16 @@ fi
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null
 memory_run_id="$(json_path "$TMP_DIR/memory-recall-activation.json" "activation.run.id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/snapshot" >"$TMP_DIR/memory-recall-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/memory-recall-snapshot.json"
 grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep '"memoryRetrieval"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep "\"$MEMORY_ID\"" "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability" >"$TMP_DIR/memory-recall-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/memory-recall-observability.json"
 grep '"terminal": true' "$TMP_DIR/memory-recall-observability.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/context-bundle" >"$TMP_DIR/memory-recall-context-bundle.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/memory-recalls" >"$TMP_DIR/memory-recall-run-api.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/context-bundle?workspaceId=$workspace_id" >"$TMP_DIR/memory-recall-context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$memory_run_id/memory-recalls?workspaceId=$workspace_id" >"$TMP_DIR/memory-recall-run-api.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory-recalls" >"$TMP_DIR/memory-recall-workspace-api.json"
-curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$memory_run_id" >"$TMP_DIR/memory-recall-events.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$memory_run_id" >"$TMP_DIR/memory-recall-events.json"
 python3 - "$TMP_DIR/memory-recall-snapshot.json" \
   "$TMP_DIR/memory-recall-observability.json" \
   "$TMP_DIR/memory-recall-context-bundle.json" \

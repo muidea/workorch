@@ -253,7 +253,7 @@ func ListRunStepsWithSession(ctx context.Context, session *RuntimeSession, query
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return StepPage{}, err
 	}
@@ -285,7 +285,7 @@ func ListRunToolCallsWithSession(ctx context.Context, session *RuntimeSession, q
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return ToolCallPage{}, err
 	}
@@ -317,7 +317,7 @@ func ListRunRuntimeCheckpointsWithSession(ctx context.Context, session *RuntimeS
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return RuntimeCheckpointPage{}, err
 	}
@@ -349,7 +349,7 @@ func ListRunResultsWithSession(ctx context.Context, session *RuntimeSession, que
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return ResultPage{}, err
 	}
@@ -381,7 +381,7 @@ func ListRunPatchesWithSession(ctx context.Context, session *RuntimeSession, que
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return PatchPage{}, err
 	}
@@ -413,7 +413,7 @@ func ListRunValidationResultsWithSession(ctx context.Context, session *RuntimeSe
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return ValidationResultPage{}, err
 	}
@@ -445,7 +445,7 @@ func ListRunArtifactsWithSession(ctx context.Context, session *RuntimeSession, q
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(query.WorkspaceID))
 
 	runID := common.RunID(strings.TrimSpace(query.RunID))
-	runItem, err := deps.runs.Get(ctx, runID)
+	runItem, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return ArtifactPage{}, err
 	}

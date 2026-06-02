@@ -3943,6 +3943,42 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 	}
 }
 
+func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
+	state := newServerState(normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	resumed := make(chan common.WorkspaceID, 1)
+	state.resumeRun = func(ctx context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
+		if runID != "run-duplicate-resume" {
+			t.Fatalf("runID = %q, want run-duplicate-resume", runID)
+		}
+		workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+		resumed <- workspaceID
+		return appservice.Run{ID: runID, WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)}, nil
+	}
+
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: "ws-governance-resume",
+		RunID:       "run-duplicate-resume",
+	}}, 0)
+	select {
+	case workspaceID := <-resumed:
+		if workspaceID != "ws-governance-resume" {
+			t.Fatalf("resume workspace context = %q, want ws-governance-resume", workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("governance resume did not run")
+	}
+}
+
 func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {

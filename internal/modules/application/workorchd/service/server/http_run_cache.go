@@ -420,18 +420,32 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 	return ret
 }
 
+type governanceRunResumeRef struct {
+	WorkspaceID string
+	RunID       string
+}
+
 func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int) {
-	runIDs = uniqueNonEmptyStrings(runIDs)
+	refs := make([]governanceRunResumeRef, 0, len(runIDs))
 	for _, runID := range runIDs {
-		runID := runID
-		if !s.markGovernanceResumeStarted(runID) {
-			slog.Debug("workorch governance resume already scheduled", "runID", runID)
+		refs = append(refs, governanceRunResumeRef{RunID: runID})
+	}
+	s.scheduleGovernanceRunResumeRefs(refs, priority)
+}
+
+func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {
+	refs = uniqueGovernanceRunResumeRefs(refs)
+	for _, ref := range refs {
+		ref := ref
+		key := governanceRunResumeKey(ref)
+		if !s.markGovernanceResumeStarted(key) {
+			slog.Debug("workorch governance resume already scheduled", "workspaceID", ref.WorkspaceID, "runID", ref.RunID)
 			continue
 		}
 		s.backgroundWG.Add(1)
 		go func() {
 			defer s.backgroundWG.Done()
-			defer s.clearGovernanceResumeStarted(runID)
+			defer s.clearGovernanceResumeStarted(key)
 			var resumedRun appservice.Run
 			defer func() {
 				if resumedRun.ID != "" {
@@ -445,13 +459,16 @@ func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int
 			release, err := s.acquireRunSlotWithPriority(ctx, priority)
 			if err != nil {
 				s.metrics.runCanceled.Add(1)
-				slog.Warn("workorch governance resume queue failed", "runID", runID, "err", err)
+				slog.Warn("workorch governance resume queue failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
 				return
 			}
 			defer release()
-			item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, runID)
+			if ref.WorkspaceID != "" {
+				ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(ref.WorkspaceID))
+			}
+			item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, ref.RunID)
 			if err != nil {
-				slog.Warn("workorch governance resume failed", "runID", runID, "err", err)
+				slog.Warn("workorch governance resume failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
 				return
 			}
 			s.metrics.observeRunOutcome(item)
@@ -617,6 +634,54 @@ func runIDsFromApprovals(items []appservice.Approval) []string {
 		ret = append(ret, item.RunID)
 	}
 	return ret
+}
+
+func runResumeRefsFromDecisions(items []appservice.Decision) []governanceRunResumeRef {
+	ret := make([]governanceRunResumeRef, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, governanceRunResumeRef{
+			WorkspaceID: item.WorkspaceID,
+			RunID:       item.RunID,
+		})
+	}
+	return ret
+}
+
+func runResumeRefsFromApprovals(items []appservice.Approval) []governanceRunResumeRef {
+	ret := make([]governanceRunResumeRef, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, governanceRunResumeRef{
+			WorkspaceID: item.WorkspaceID,
+			RunID:       item.RunID,
+		})
+	}
+	return ret
+}
+
+func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceRunResumeRef {
+	seen := map[string]struct{}{}
+	ret := make([]governanceRunResumeRef, 0, len(items))
+	for _, item := range items {
+		item.WorkspaceID = strings.TrimSpace(item.WorkspaceID)
+		item.RunID = strings.TrimSpace(item.RunID)
+		if item.RunID == "" {
+			continue
+		}
+		key := governanceRunResumeKey(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, item)
+	}
+	return ret
+}
+
+func governanceRunResumeKey(item governanceRunResumeRef) string {
+	if item.WorkspaceID == "" {
+		return "/" + item.RunID
+	}
+	return item.WorkspaceID + "/" + item.RunID
 }
 
 func uniqueNonEmptyStrings(items []string) []string {

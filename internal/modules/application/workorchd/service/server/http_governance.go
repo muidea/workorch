@@ -3,14 +3,16 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/decisions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		state.metrics.decisionListRequests.Add(1)
 		query := decisionQueryFromRequest(r)
 		page, err := state.listDecisionPage(r.Context(), state.config.Backend, state.config.DataRoot, query)
@@ -27,7 +29,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions/:ticketId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			http.NotFound(w, r)
@@ -47,7 +49,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		state.metrics.approvalListRequests.Add(1)
 		query := approvalQueryFromRequest(r)
 		page, err := state.listApprovalPage(r.Context(), state.config.Backend, state.config.DataRoot, query)
@@ -64,7 +66,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
 		if !ok || action != "" {
 			http.NotFound(w, r)
@@ -87,7 +89,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 
 func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/decisions/:ticketId/resolve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		ticketID, action, ok := decisionActionFromPath(r.URL.Path)
 		if !ok || action != "resolve" {
 			http.NotFound(w, r)
@@ -107,7 +109,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
+		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromDecisions([]appservice.Decision{item}), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -116,7 +118,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		var req batchResolveDecisionsRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
@@ -132,7 +134,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.scheduleGovernanceRunResumes(runIDsFromDecisions(items), runPriorityFromRequest(r, 0))
+		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromDecisions(items), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, decisionsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -141,7 +143,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId/approve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
 		if !ok || action != "approve" {
 			http.NotFound(w, r)
@@ -153,7 +155,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
+		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -162,7 +164,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId/reject", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		approvalID, action, ok := approvalActionFromPath(r.URL.Path)
 		if !ok || action != "reject" {
 			http.NotFound(w, r)
@@ -174,7 +176,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.scheduleGovernanceRunResumes([]string{item.RunID}, runPriorityFromRequest(r, 0))
+		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -183,7 +185,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		r = r.WithContext(governanceRequestContext(r, state))
 		var req batchResolveApprovalsRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
@@ -202,7 +204,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			writeBusinessError(w, err)
 			return
 		}
-		state.scheduleGovernanceRunResumes(runIDsFromApprovals(items), runPriorityFromRequest(r, 0))
+		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals(items), runPriorityFromRequest(r, 0))
 		writeJSON(w, http.StatusOK, approvalsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -210,4 +212,12 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Approvals: items,
 		})
 	})
+}
+
+func governanceRequestContext(r *http.Request, state *serverState) context.Context {
+	ctx := appservice.ContextWithEventHub(r.Context(), state.eventHub)
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId")); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+	}
+	return ctx
 }

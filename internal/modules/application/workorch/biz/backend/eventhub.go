@@ -100,6 +100,9 @@ func (b *eventHubBackend) dispatchCommand(ctx context.Context, cmd events.CLICom
 }
 
 func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
+	if cmd.WorkspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
+	}
 	switch cmd.Command {
 	case events.CommandWorkspaceCreate:
 		ws, err := b.localBackend.ws.Create(ctx, CreateWorkspaceRequest{
@@ -555,11 +558,11 @@ func (b *eventHubRunBackend) Resume(ctx context.Context, id common.RunID, execut
 	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
 		payload = map[string]any{"executionContextPatch": executionContextPatch[0]}
 	}
-	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, "", id, "run", string(id), payload)
+	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), payload)
 	return decodeResultResource[RunInfo](result, err)
 }
 func (b *eventHubRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, "", id, "run", string(id), nil)
+	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), nil)
 	return decodeResultResource[RunInfo](result, err)
 }
 func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
@@ -567,7 +570,7 @@ func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	return decodeResultResources[RunInfo](result, err)
 }
 func (b *eventHubRunBackend) Status(ctx context.Context, id common.RunID) (*RunStatusInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunStatus, "", id, "run", string(id), nil)
+	result, err := b.parent.sendCommand(ctx, events.CommandRunStatus, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), nil)
 	return decodeResultResource[RunStatusInfo](result, err)
 }
 

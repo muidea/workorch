@@ -77,7 +77,7 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 		return Run{}, err
 	}
 
-	item, err := repo.Get(ctx, id)
+	item, err := getRunFromRepository(ctx, repo, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -108,7 +108,7 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
-	loadedRun, err := repo.Get(ctx, id)
+	loadedRun, err := getRunFromRepository(ctx, repo, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -120,7 +120,7 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 		return Run{}, err
 	}
 
-	item, err := repo.Get(ctx, id)
+	item, err := getRunFromRepository(ctx, repo, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -168,7 +168,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 		return Run{}, err
 	}
 
-	item, err := repo.Get(ctx, id)
+	item, err := getRunFromRepository(ctx, repo, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -198,7 +198,7 @@ func ReadRunWithSession(ctx context.Context, session *RuntimeSession, runID stri
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.RunID(runID))
+	item, err := getRunFromRepository(ctx, repo, common.RunID(runID))
 	if err != nil {
 		return Run{}, err
 	}
@@ -263,7 +263,7 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return err
 	}
-	item, err := deps.runs.Get(ctx, runID)
+	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return nil, nil, err
 	}
-	item, err := deps.runs.Get(ctx, runID)
+	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -23,7 +23,7 @@ import (
 )
 
 func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunSnapshot, error) {
-	item, err := deps.runs.Get(ctx, runID)
+	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
@@ -181,7 +181,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 }
 
 func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunSnapshot, error) {
-	item, err := deps.runs.Get(ctx, runID)
+	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
@@ -314,7 +314,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 }
 
 func readRunStatus(ctx context.Context, deps readModelDependencies, runID common.RunID) (RunStatus, error) {
-	item, err := deps.runs.Get(ctx, runID)
+	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return RunStatus{}, err
 	}

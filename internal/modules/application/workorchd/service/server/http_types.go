@@ -1874,7 +1874,10 @@ func (s *serverState) registerAutoGovernanceResumeWatcher() {
 		if strings.TrimSpace(envelope.RunID) == "" {
 			return nil
 		}
-		s.scheduleGovernanceRunResumes([]string{envelope.RunID}, 0)
+		s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+			WorkspaceID: envelope.WorkspaceID,
+			RunID:       envelope.RunID,
+		}}, 0)
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)

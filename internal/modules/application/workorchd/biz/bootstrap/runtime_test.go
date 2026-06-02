@@ -194,6 +194,130 @@ func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopedStepRepositoryUsesRuntimeWorkspaceForDuplicateRunIDs(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	rt := NewWithBackend("file", dataDir)
+	exports := rt.Exports()
+	runID := common.RunID("run-001")
+	stepID := common.StepID("run-001/step-1")
+	ctxA := common.ContextWithRuntimeWorkspaceID(ctx, "ws-step-scope-a")
+	ctxB := common.ContextWithRuntimeWorkspaceID(ctx, "ws-step-scope-b")
+
+	for _, workspaceID := range []common.WorkspaceID{"ws-step-scope-a", "ws-step-scope-b"} {
+		if err := exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", workspaceID, err)
+		}
+	}
+	if err := exports.Repositories.Steps.Create(ctxA, &runmodel.Step{
+		ID:     stepID,
+		RunID:  runID,
+		Kind:   "llm/workspace_execution",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"status": "completed"},
+	}); err != nil {
+		t.Fatalf("create step in workspace A: %v", err)
+	}
+	if item, err := exports.Repositories.Steps.Get(ctxA, stepID); err != nil || item.State != common.StepStateCompleted {
+		t.Fatalf("get step in workspace A = %+v, %v; want completed", item, err)
+	}
+	if _, err := exports.Repositories.Steps.Get(ctxB, stepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("get step in workspace B err = %v, want not found", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctxB, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "mcp/tool_call",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("create duplicate step in workspace B: %v", err)
+	}
+	item, err := exports.Repositories.Steps.Get(ctxB, stepID)
+	if err != nil {
+		t.Fatalf("get step in workspace B after create: %v", err)
+	}
+	if item.Kind != "mcp/tool_call" || item.State != common.StepStateDispatched {
+		t.Fatalf("workspace B step = %+v, want dispatched mcp/tool_call", item)
+	}
+}
+
+func TestWorkspaceScopedGovernanceRepositoriesUseRuntimeWorkspaceForDuplicateIDs(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	rt := NewWithBackend("file", dataDir)
+	exports := rt.Exports()
+	runID := common.RunID("run-001")
+	ticketID := common.TicketID("run-001-step-1-decision")
+	approvalID := common.ApprovalID("run-001-step-1-approval")
+	ctxA := common.ContextWithRuntimeWorkspaceID(ctx, "ws-governance-scope-a")
+	ctxB := common.ContextWithRuntimeWorkspaceID(ctx, "ws-governance-scope-b")
+
+	for _, workspaceID := range []common.WorkspaceID{"ws-governance-scope-a", "ws-governance-scope-b"} {
+		if err := exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateBlockedOnDecision,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", workspaceID, err)
+		}
+		if err := exports.Repositories.Tickets.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &decisionmodel.Ticket{
+			ID:           ticketID,
+			WorkspaceID:  workspaceID,
+			RunID:        runID,
+			StepID:       "run-001/step-1",
+			Reason:       "decision " + string(workspaceID),
+			DecisionKind: "provide_missing_info",
+			State:        common.DecisionTicketStateOpen,
+		}); err != nil {
+			t.Fatalf("create ticket %s: %v", workspaceID, err)
+		}
+		if err := exports.Repositories.Approvals.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &approvalmodel.Approval{
+			ID:          approvalID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      "run-001/step-1",
+			Reason:      "approval " + string(workspaceID),
+			Action:      "continue",
+			State:       common.ApprovalStatePending,
+		}); err != nil {
+			t.Fatalf("create approval %s: %v", workspaceID, err)
+		}
+	}
+
+	ticketA, err := exports.Repositories.Tickets.Get(ctxA, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket A: %v", err)
+	}
+	if ticketA.WorkspaceID != "ws-governance-scope-a" || ticketA.Reason != "decision ws-governance-scope-a" {
+		t.Fatalf("ticket A = %+v, want workspace A", ticketA)
+	}
+	ticketB, err := exports.Repositories.Tickets.Get(ctxB, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket B: %v", err)
+	}
+	if ticketB.WorkspaceID != "ws-governance-scope-b" || ticketB.Reason != "decision ws-governance-scope-b" {
+		t.Fatalf("ticket B = %+v, want workspace B", ticketB)
+	}
+	approvalA, err := exports.Repositories.Approvals.Get(ctxA, approvalID)
+	if err != nil {
+		t.Fatalf("get approval A: %v", err)
+	}
+	if approvalA.WorkspaceID != "ws-governance-scope-a" || approvalA.Reason != "approval ws-governance-scope-a" {
+		t.Fatalf("approval A = %+v, want workspace A", approvalA)
+	}
+	approvalB, err := exports.Repositories.Approvals.Get(ctxB, approvalID)
+	if err != nil {
+		t.Fatalf("get approval B: %v", err)
+	}
+	if approvalB.WorkspaceID != "ws-governance-scope-b" || approvalB.Reason != "approval ws-governance-scope-b" {
+		t.Fatalf("approval B = %+v, want workspace B", approvalB)
+	}
+}
+
 func TestNewWithBackendFileStoresAvailableArtifactContent(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()

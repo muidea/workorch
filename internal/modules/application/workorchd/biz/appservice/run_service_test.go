@@ -103,6 +103,106 @@ func TestResumeRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing
 	}
 }
 
+func TestWorkspaceScopedRunLookupDisambiguatesDuplicateRunIDs(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	for _, workspaceID := range []string{"ws-run-lookup-a", "ws-run-lookup-b"} {
+		if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, workspaceID, workspaceID, "", "workspaces/"+workspaceID); err != nil {
+			t.Fatalf("CreateWorkspaceWithBackend(%s): %v", workspaceID, err)
+		}
+		if _, err := CreateRunWithBackend(ctx, "file", dataRoot, workspaceID, "run-001", "", ""); err != nil {
+			t.Fatalf("CreateRunWithBackend(%s): %v", workspaceID, err)
+		}
+	}
+	if _, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-001"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped ReadRunWithBackend err = %v, want conflict", err)
+	}
+
+	session, sessionCtx := newTestRuntimeSession(t, "file", dataRoot)
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(sessionCtx, "ws-run-lookup-b")
+	run, err := ReadRunWithSession(scopedCtx, session.Borrow(), "run-001")
+	if err != nil {
+		t.Fatalf("ReadRunWithSession: %v", err)
+	}
+	if run.WorkspaceID != "ws-run-lookup-b" {
+		t.Fatalf("run workspace = %q, want ws-run-lookup-b", run.WorkspaceID)
+	}
+	status, err := ReadRunStatusWithSession(scopedCtx, session.Borrow(), "run-001")
+	if err != nil {
+		t.Fatalf("ReadRunStatusWithSession: %v", err)
+	}
+	if status.WorkspaceID != "ws-run-lookup-b" {
+		t.Fatalf("status workspace = %q, want ws-run-lookup-b", status.WorkspaceID)
+	}
+	snapshot, err := ReadRunSnapshotWithSession(scopedCtx, session.Borrow(), "run-001")
+	if err != nil {
+		t.Fatalf("ReadRunSnapshotWithSession: %v", err)
+	}
+	if snapshot.Run.WorkspaceID != "ws-run-lookup-b" || snapshot.Workspace.ID != "ws-run-lookup-b" {
+		t.Fatalf("snapshot run/workspace = %q/%q, want ws-run-lookup-b", snapshot.Run.WorkspaceID, snapshot.Workspace.ID)
+	}
+}
+
+func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	for _, workspaceID := range []string{"ws-recovery-duplicate-old", "ws-recovery-duplicate-new"} {
+		if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, workspaceID, workspaceID, "", "workspaces/"+workspaceID); err != nil {
+			t.Fatalf("CreateWorkspaceWithBackend(%s): %v", workspaceID, err)
+		}
+		if _, err := CreateRunWithBackend(ctx, "file", dataRoot, workspaceID, "run-001", "", ""); err != nil {
+			t.Fatalf("CreateRunWithBackend(%s): %v", workspaceID, err)
+		}
+	}
+	session, sessionCtx := newTestRuntimeSession(t, "file", dataRoot)
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	oldCtx := common.ContextWithRuntimeWorkspaceID(sessionCtx, "ws-recovery-duplicate-old")
+	oldRun, err := getRunFromRepository(oldCtx, exports.Repositories.Runs, "run-001")
+	if err != nil {
+		t.Fatalf("get old run: %v", err)
+	}
+	oldRun.State = common.RunStateSuperseded
+	if err := exports.Repositories.Runs.Update(oldCtx, oldRun); err != nil {
+		t.Fatalf("update old run: %v", err)
+	}
+	newCtx := common.ContextWithRuntimeWorkspaceID(sessionCtx, "ws-recovery-duplicate-new")
+	newRun, err := getRunFromRepository(newCtx, exports.Repositories.Runs, "run-001")
+	if err != nil {
+		t.Fatalf("get new run: %v", err)
+	}
+	newRun.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(newCtx, newRun); err != nil {
+		t.Fatalf("update new run: %v", err)
+	}
+	newWorkspace, err := exports.Repositories.Workspaces.Get(sessionCtx, "ws-recovery-duplicate-new")
+	if err != nil {
+		t.Fatalf("get new workspace: %v", err)
+	}
+	newWorkspace.ActiveRunID = "run-001"
+	newWorkspace.State = common.WorkspaceStateRunning
+	if err := exports.Repositories.Workspaces.Update(sessionCtx, newWorkspace); err != nil {
+		t.Fatalf("update new workspace: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].WorkspaceID != "ws-recovery-duplicate-new" || recovered[0].State != string(common.RunStateFailed) {
+		t.Fatalf("recovered = %+v, want failed duplicate-new run", recovered)
+	}
+	after, err := ReadRunWithSession(newCtx, session.Borrow(), "run-001")
+	if err != nil {
+		t.Fatalf("ReadRunWithSession after recovery: %v", err)
+	}
+	if after.State != string(common.RunStateFailed) || after.FailureReason != stuckRunningRunFailureReason {
+		t.Fatalf("after = %+v, want failed stuck run", after)
+	}
+}
+
 func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *testing.T) {
 	compressed := compressedContextForRunStart(&runmodel.Run{
 		ID:          "run-lightweight-start",
@@ -769,6 +869,195 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 		t.Fatalf("run state = %s, want completed after redispatch", runAfter.State)
 	}
 	_ = verifySession.Close(ctx)
+}
+
+func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-llm", "orphan llm workspace", "", "workspaces/orphan-llm"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-orphan-llm", "run-orphan-llm", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, "ws-orphan-llm")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = "run-orphan-llm"
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, "run-orphan-llm")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	runItem.InitialStepKind = "llm/workspace_execution"
+	runItem.ExecutionContext = map[string]any{
+		"activation": "workspace_execution",
+		"goal":       map[string]any{"text": "produce code"},
+		"dod":        map[string]any{"items": []any{"code output exists"}},
+	}
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    "run-orphan-llm/repair-provider",
+		RunID: "run-orphan-llm",
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+		Input: map[string]any{"runtimeStage": "repair"},
+	}); err != nil {
+		t.Fatalf("create dispatched llm step: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != "run-orphan-llm" || recovered[0].State != string(common.RunStateBlockedOnDecision) {
+		t.Fatalf("recovered = %+v, want blocked_on_decision orphan llm run", recovered)
+	}
+	runAfter, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-orphan-llm")
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend: %v", err)
+	}
+	if runAfter.BlockingTicketID == "" {
+		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
+	}
+	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
+	verifyExports, err := verifySession.Exports()
+	if err != nil {
+		t.Fatalf("verify exports: %v", err)
+	}
+	step, err := verifyExports.Repositories.Steps.Get(verifyCtx, "run-orphan-llm/repair-provider")
+	if err != nil {
+		t.Fatalf("get recovered llm step: %v", err)
+	}
+	if step.State != common.StepStateFailed {
+		t.Fatalf("step state = %q, want failed after provider recovery", step.State)
+	}
+}
+
+func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMissing(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-provider-retry", "orphan provider retry workspace", "", "workspaces/orphan-provider-retry"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, "ws-orphan-provider-retry", "run-orphan-provider-retry", "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, "ws-orphan-provider-retry")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = "run-orphan-provider-retry"
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(ctx, "run-orphan-provider-retry")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	runItem.InitialStepKind = "llm/workspace_execution"
+	runItem.ExecutionContext = map[string]any{
+		"activation": "workspace_execution",
+		"goal":       map[string]any{"text": "produce code"},
+		"dod":        map[string]any{"items": []any{"code output exists"}},
+	}
+	if err := exports.Repositories.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	rootStepID := common.StepID("run-orphan-provider-retry/repair-provider")
+	retryStepID := common.StepID("run-orphan-provider-retry/provider-retry-001-of-repair-provider")
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    rootStepID,
+		RunID: "run-orphan-provider-retry",
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Input: map[string]any{"runtimeStage": "repair"},
+		Output: map[string]any{
+			"status":       "failed",
+			"stage":        "llm_provider_timeout",
+			"error":        "provider timeout",
+			"failureClass": "provider_timeout",
+		},
+	}); err != nil {
+		t.Fatalf("create failed root step: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    retryStepID,
+		RunID: "run-orphan-provider-retry",
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+		Input: map[string]any{
+			"failedStepId":              string(rootStepID),
+			"providerRetryFollowUp":     true,
+			"providerRetryAttempt":      1,
+			"providerRetryRootStepId":   string(rootStepID),
+			"providerRetryMaxAttempts":  10,
+			"runtimeRecoveryAction":     "provider_retry",
+			"runtimeRecoveryRootStepId": string(rootStepID),
+		},
+	}); err != nil {
+		t.Fatalf("create dispatched provider retry step: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStuckRunningRunsWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != "run-orphan-provider-retry" || recovered[0].State != string(common.RunStateBlockedOnDecision) {
+		t.Fatalf("recovered = %+v, want blocked_on_decision provider retry run", recovered)
+	}
+	runAfter, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-orphan-provider-retry")
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend: %v", err)
+	}
+	if runAfter.BlockingTicketID == "" {
+		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
+	}
+	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
+	verifyExports, err := verifySession.Exports()
+	if err != nil {
+		t.Fatalf("verify exports: %v", err)
+	}
+	step, err := verifyExports.Repositories.Steps.Get(verifyCtx, retryStepID)
+	if err != nil {
+		t.Fatalf("get recovered provider retry step: %v", err)
+	}
+	if step.State != common.StepStateFailed {
+		t.Fatalf("provider retry state = %q, want failed after provider recovery", step.State)
+	}
 }
 
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {

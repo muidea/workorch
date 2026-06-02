@@ -306,24 +306,20 @@ func (b *localRunBackend) Resume(ctx context.Context, id common.RunID, execution
 
 func (b *localRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
 	s := b.parent.session.Borrow()
-	exports, err := s.Exports()
-	if err != nil {
-		return nil, err
-	}
-	r, err := exports.Repositories.Runs.Get(ctx, id)
+	r, err := appservice.ReadRunWithSession(ctx, s, string(id))
 	if err != nil {
 		return nil, err
 	}
 	return &RunInfo{
-		ID:                 r.ID,
-		WorkspaceID:        r.WorkspaceID,
-		GoalID:             r.GoalID,
-		DoDID:              r.DoDID,
+		ID:                 common.RunID(r.ID),
+		WorkspaceID:        common.WorkspaceID(r.WorkspaceID),
+		GoalID:             common.GoalID(r.GoalID),
+		DoDID:              common.DoDID(r.DoDID),
 		ExecutionContext:   r.ExecutionContext,
-		State:              r.State,
+		State:              common.RunState(r.State),
 		Priority:           r.Priority,
-		BlockingTicketID:   r.BlockingTicketID,
-		BlockingApprovalID: r.BlockingApprovalID,
+		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
 		FailureReason:      r.FailureReason,
 	}, nil
 }
