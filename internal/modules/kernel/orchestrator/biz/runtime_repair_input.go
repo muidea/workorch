@@ -448,6 +448,24 @@ func applyRuntimeRepairRootCauseCandidateProjection(input map[string]any, rootCa
 	)
 }
 
+func applyRuntimeRepairReadableResourceProjection(input map[string]any, readableResourceContext []map[string]any) {
+	if input == nil || len(readableResourceContext) == 0 {
+		return
+	}
+	input["readableResourceRepairContext"] = readableResourceContext
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"The previous decision requested information that is already available as a readable workspace resource.",
+		"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
+	)
+}
+
+func applyRuntimeRepairWorkspaceManifestProjection(input map[string]any, manifest []map[string]any) {
+	if input == nil || len(manifest) == 0 {
+		return
+	}
+	input[stepInputKeyWorkspaceFileManifest] = manifest
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -653,17 +671,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
 	}
 	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
-		input["readableResourceRepairContext"] = context
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"The previous decision requested information that is already available as a readable workspace resource.",
-			"Use readableResourceRepairContext as current evidence; do not ask the operator to paste the same resource content.",
-		)
+		applyRuntimeRepairReadableResourceProjection(input, context)
 	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 || len(rootCauseCandidates) > 0 {
 		manifest := o.repairManager().workspaceFileManifest(ctx, run)
-		if len(manifest) > 0 {
-			input[stepInputKeyWorkspaceFileManifest] = manifest
-		}
+		applyRuntimeRepairWorkspaceManifestProjection(input, manifest)
 	}
 	inheritPriorRepairContext(input, failedStep)
 	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)

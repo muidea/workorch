@@ -536,3 +536,38 @@ func TestRuntimeRepairContextProjectionHelpersIgnoreEmptyContext(t *testing.T) {
 		t.Fatalf("input = %+v, want no fields for empty contexts", input)
 	}
 }
+
+func TestApplyRuntimeRepairReadableResourceProjectionAddsGuidance(t *testing.T) {
+	input := map[string]any{}
+	context := []map[string]any{{
+		"path":    "README.md",
+		"content": "current readable content",
+	}}
+
+	applyRuntimeRepairReadableResourceProjection(input, context)
+
+	if len(mapSliceFromValue(input["readableResourceRepairContext"])) != 1 {
+		t.Fatalf("readableResourceRepairContext = %+v, want one readable resource", input["readableResourceRepairContext"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 2 {
+		t.Fatalf("repairGuidance = %+v, want two readable resource guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairWorkspaceManifestProjectionAddsOnlyNonEmptyManifest(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairWorkspaceManifestProjection(input, nil)
+	if _, ok := input[stepInputKeyWorkspaceFileManifest]; ok {
+		t.Fatalf("workspaceFileManifest should be absent for empty manifest: %v", input)
+	}
+
+	applyRuntimeRepairWorkspaceManifestProjection(input, []map[string]any{{
+		"path": "README.md",
+	}})
+
+	manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest])
+	if len(manifest) != 1 || stringFromMap(manifest[0], "path") != "README.md" {
+		t.Fatalf("workspaceFileManifest = %+v, want README.md", input[stepInputKeyWorkspaceFileManifest])
+	}
+}
