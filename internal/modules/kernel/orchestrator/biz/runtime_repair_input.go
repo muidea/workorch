@@ -312,6 +312,20 @@ func applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(
 	)
 }
 
+func applyRuntimeRepairValidationEvidenceProjection(input map[string]any, coverageValidationEvidenceRepair bool) {
+	if input == nil || !coverageValidationEvidenceRepair {
+		return
+	}
+	input["boundedValidationRequired"] = true
+	input["evidenceRepairSource"] = "coverage_gap_without_implementation_target"
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Unresolved Goal/DoD/deliverable coverage is currently a validation evidence gap because no concrete implementation target evidence is available.",
+		"Produce bounded shell/tool/MCP validation evidence that maps to the coverageTargetSet before attempting another assessment.",
+		"When an external dependency, credential, service, network endpoint, port, clock, filesystem path, or equivalent runtime prerequisite is unavailable, first try a neutral controlled substitute such as a temporary fixture, local stub/mock, alternate temporary config, isolated working directory, or available ephemeral port through the allowed validation tools; do not mark the item skipped or request a decision until such bounded substitute validation is impossible or would violate the Goal/DoD.",
+		"Do not return patch/apply unless a later validation failure provides concrete target refs, line refs, diagnostics, or current target snapshots.",
+	)
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -383,16 +397,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
 	applyRuntimeRepairAssessmentOnlyCoverageProjection(ctx, o.steps, o.evidence, input, run, failedStep, assessmentOnlyCoverageRepair, coverageNeedsConcreteEvidence, validationRepairEscalatesToStateChanging)
 	applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(ctx, o.steps, o.evidence, input, run, failedStep, coverageNeedsConcreteEvidence, assessmentOnlyFailedCoverageRepair)
-	if coverageValidationEvidenceRepair {
-		input["boundedValidationRequired"] = true
-		input["evidenceRepairSource"] = "coverage_gap_without_implementation_target"
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Unresolved Goal/DoD/deliverable coverage is currently a validation evidence gap because no concrete implementation target evidence is available.",
-			"Produce bounded shell/tool/MCP validation evidence that maps to the coverageTargetSet before attempting another assessment.",
-			"When an external dependency, credential, service, network endpoint, port, clock, filesystem path, or equivalent runtime prerequisite is unavailable, first try a neutral controlled substitute such as a temporary fixture, local stub/mock, alternate temporary config, isolated working directory, or available ephemeral port through the allowed validation tools; do not mark the item skipped or request a decision until such bounded substitute validation is impossible or would violate the Goal/DoD.",
-			"Do not return patch/apply unless a later validation failure provides concrete target refs, line refs, diagnostics, or current target snapshots.",
-		)
-	}
+	applyRuntimeRepairValidationEvidenceProjection(input, coverageValidationEvidenceRepair)
 	ensureCoverageRepairTargetSet(input)
 	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)
 	if transientExecutionTimeout {

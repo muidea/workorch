@@ -293,3 +293,19 @@ func TestApplyRuntimeRepairCoverageNeedsConcreteEvidenceProjectionClearsAssessme
 		t.Fatalf("repairGuidance = %+v, want three coverage evidence guidance items", guidance)
 	}
 }
+
+func TestApplyRuntimeRepairValidationEvidenceProjectionSetsBoundedValidation(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairValidationEvidenceProjection(input, true)
+
+	if input["boundedValidationRequired"] != true {
+		t.Fatalf("boundedValidationRequired = %v, want true", input["boundedValidationRequired"])
+	}
+	if stringFromMap(input, "evidenceRepairSource") != "coverage_gap_without_implementation_target" {
+		t.Fatalf("evidenceRepairSource = %q, want validation evidence source", stringFromMap(input, "evidenceRepairSource"))
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 4 {
+		t.Fatalf("repairGuidance = %+v, want four validation evidence guidance items", guidance)
+	}
+}
