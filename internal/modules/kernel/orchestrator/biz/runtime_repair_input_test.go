@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -1178,5 +1179,113 @@ func TestInheritCoverageRepairContextReadsInputOutputAndDiagnosticsWithoutOverwr
 	}
 	if items := mapSliceFromValue(input["missingDeliverableCoverage"]); len(items) != 1 || items[0]["id"] != "deliverable-from-failed-output" {
 		t.Fatalf("missingDeliverableCoverage = %+v, want failed output coverage inherited", input["missingDeliverableCoverage"])
+	}
+}
+
+func TestRuntimeRepairCurrentExecutionProgressProjectsCoverageEvidenceAndAttempts(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-current-progress")
+	steps := memory.NewStepRepository()
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-current-progress"}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/002-verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRepairOfRootStepID: string(runID) + "/graph-001",
+		},
+		Output: map[string]any{
+			"stage":                   "shell_command",
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command|targetRef=proxy/proxy_test.go",
+			"error":                   "go test failed",
+		},
+	}
+	for _, step := range []*runmodel.Step{
+		{
+			ID:    common.StepID(string(runID) + "/graph-001/001-build"),
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"stepSequence":              int64(1),
+				stepInputKeyGraphNodeID:     "build",
+				stepInputKeyGraphRootStepID: string(runID) + "/graph-001",
+			},
+			Output: map[string]any{
+				"status":   "completed",
+				"command":  "go test ./...",
+				"exitCode": 0,
+				"stdout":   "ok\n",
+			},
+		},
+		{
+			ID:    common.StepID(string(runID) + "/repair-001-of-graph-001-002-verify"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  1,
+				stepInputKeyRepairOfFailureSig:    "class=shell_command|targetRef=proxy/proxy_test.go",
+				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+				stepInputKeyRepairOfRootStepID:    string(runID) + "/graph-001",
+			},
+			Output: map[string]any{
+				"stage":                   "llm_execution_graph_plan",
+				failureOutputKeyClass:     failureClassShellCommand,
+				failureOutputKeySignature: "class=shell_command|targetRef=proxy/proxy_test.go",
+				"error":                   "repair did not change target",
+			},
+		},
+	} {
+		if err := steps.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	input := map[string]any{
+		failureOutputKeyClass: failureClassShellCommand,
+		"failureReason":       "go test failed",
+		"missingGoalCoverage": []map[string]any{{
+			"goalRequirementId": "goal-001",
+		}},
+		stepInputKeyGraphEvidence: []map[string]any{{
+			"stepId": "run-current-progress/graph-001/001-build",
+			"kind":   "shell/command",
+			"state":  "completed",
+			"output": map[string]any{
+				"stdout": "large output should be previewed",
+			},
+		}},
+		"coverageTargetSet": []map[string]any{{
+			"kind":       "goal",
+			"targetText": "goal-001",
+			"state":      "open",
+		}},
+	}
+
+	progress := runtimeRepairCurrentExecutionProgress(ctx, steps, newRepairSubsystem(steps, nil), run, failed, input)
+
+	if progress["runId"] != string(runID) ||
+		progress["failedStepId"] != string(failed.ID) ||
+		progress["failedStepKind"] != failed.Kind ||
+		progress["failureClass"] != failureClassShellCommand ||
+		progress["failureStage"] != "shell_command" ||
+		progress["failureReason"] != "go test failed" ||
+		int64FromValue(progress["coverageGapCount"]) != 1 {
+		t.Fatalf("currentExecutionProgress = %+v, want failed step and coverage summary", progress)
+	}
+	if evidence := mapSliceFromValue(progress["completedGraphEvidence"]); len(evidence) != 1 || evidence[0]["kind"] != "shell/command" {
+		t.Fatalf("completedGraphEvidence = %+v, want compact graph evidence", progress["completedGraphEvidence"])
+	}
+	if latest := mapSliceFromValue(progress["latestActionEvidence"]); len(latest) != 1 || latest[0]["graphNodeId"] != "build" {
+		t.Fatalf("latestActionEvidence = %+v, want latest successful action evidence", progress["latestActionEvidence"])
+	}
+	if attempts := mapSliceFromValue(progress["recentRepairAttempts"]); len(attempts) != 1 || int64FromValue(attempts[0]["attempt"]) != 1 {
+		t.Fatalf("recentRepairAttempts = %+v, want matching repair attempt", progress["recentRepairAttempts"])
+	}
+	if targets := mapSliceFromValue(progress["unresolvedCoverageTargets"]); len(targets) != 1 || targets[0]["targetText"] != "goal-001" {
+		t.Fatalf("unresolvedCoverageTargets = %+v, want coverage target set", progress["unresolvedCoverageTargets"])
 	}
 }
