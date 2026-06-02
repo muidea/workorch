@@ -905,8 +905,8 @@ func TestResetRuntimeRepairInputToRejectedResultContinuationSupersedesHistorical
 
 func TestPreserveStateChangingSchemaInvalidRepairContractKeepsExecutableRepair(t *testing.T) {
 	failed := &runmodel.Step{
-		ID:    "run-schema-invalid-contract/repair-001",
-		Kind:  llmWorkspaceExecutionStepKind,
+		ID:   "run-schema-invalid-contract/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			"stateChangingOutputRequired": true,
 			"repairObjective":             repairObjectiveStateChangingOutput,
@@ -954,8 +954,8 @@ func TestPreserveStateChangingSchemaInvalidRepairContractKeepsExecutableRepair(t
 
 func TestPreserveAssessmentOnlySchemaInvalidRepairContractKeepsAssessmentScope(t *testing.T) {
 	failed := &runmodel.Step{
-		ID:    "run-assessment-schema-invalid/repair-001",
-		Kind:  llmWorkspaceExecutionStepKind,
+		ID:   "run-assessment-schema-invalid/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyAssessmentOnly: true,
 			"assessmentOnlyReason":     "dod_coverage_contract_correction",
@@ -1002,8 +1002,8 @@ func TestPreserveAssessmentOnlySchemaInvalidRepairContractKeepsAssessmentScope(t
 
 func TestPreserveConcreteValidationSchemaInvalidRepairContractKeepsValidationEvidence(t *testing.T) {
 	failed := &runmodel.Step{
-		ID:    "run-validation-schema-invalid/repair-001",
-		Kind:  llmWorkspaceExecutionStepKind,
+		ID:   "run-validation-schema-invalid/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			"repairObjective":           repairObjectiveConcreteValidationEvidence,
 			"boundedValidationRequired": true,
