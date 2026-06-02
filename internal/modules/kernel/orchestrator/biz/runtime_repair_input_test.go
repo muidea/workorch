@@ -901,3 +901,153 @@ func TestResetRuntimeRepairInputToRejectedResultContinuationSupersedesHistorical
 		t.Fatalf("repairGuidance = %+v, want base evidence acquisition and rejected result continuation guidance", guidance)
 	}
 }
+
+func TestPreserveStateChangingSchemaInvalidRepairContractKeepsExecutableRepair(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-schema-invalid-contract/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"error":               "invalid llm decision json",
+		},
+	}
+	input := map[string]any{
+		"boundedValidationRequired": true,
+		"evidenceRepairRequired":    true,
+		stepInputKeyAssessmentOnly:  true,
+		"assessmentOnlyReason":      "stale_assessment",
+	}
+
+	if !preserveStateChangingSchemaInvalidRepairContract(input, failed) {
+		t.Fatalf("preserveStateChangingSchemaInvalidRepairContract returned false")
+	}
+	if input["schemaInvalidRepairMode"] != "single_valid_json_decision" ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true {
+		t.Fatalf("input = %+v, want state-changing schema invalid contract", input)
+	}
+	for _, key := range []string{"boundedValidationRequired", "evidenceRepairRequired", stepInputKeyAssessmentOnly, "assessmentOnlyReason"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be removed from state-changing schema invalid contract: %+v", key, input[key])
+		}
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if recovery := mapFromValue(pkg["schemaInvalidRecovery"]); recovery["required"] != true {
+		t.Fatalf("schemaInvalidRecovery = %+v, want required", recovery)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustReturnValidJSON"] != true || required["mustNotReuseRejectedJSON"] != true || required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("requiredOutput = %+v, want valid JSON state-changing contract", required)
+	}
+}
+
+func TestPreserveAssessmentOnlySchemaInvalidRepairContractKeepsAssessmentScope(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-assessment-schema-invalid/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			"assessmentOnlyReason":     "dod_coverage_contract_correction",
+			"repairObjective":          "complete_dod_goal_coverage_assessment",
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-001",
+				"raw":               "goal coverage gap",
+			}},
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"error":               "invalid llm decision json",
+		},
+	}
+	input := map[string]any{
+		"stateChangingOutputRequired":     true,
+		"boundedValidationRequired":       true,
+		"concreteFailureEvidenceRequired": true,
+	}
+
+	if !preserveAssessmentOnlySchemaInvalidRepairContract(input, failed) {
+		t.Fatalf("preserveAssessmentOnlySchemaInvalidRepairContract returned false")
+	}
+	if input[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		input[stepInputKeySoulStage] != soulStageValidation ||
+		input[stepInputKeyAssessmentOnly] != true ||
+		input["completionFollowUp"] != true ||
+		input["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("input = %+v, want assessment-only schema invalid recovery contract", input)
+	}
+	if missing := mapSliceFromValue(input["missingGoalCoverage"]); len(missing) != 1 || missing[0]["goalRequirementId"] != "goal-001" {
+		t.Fatalf("missingGoalCoverage = %+v, want copied assessment scope", input["missingGoalCoverage"])
+	}
+	for _, key := range []string{"stateChangingOutputRequired", "boundedValidationRequired", "concreteFailureEvidenceRequired"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be removed from assessment-only schema invalid contract: %+v", key, input[key])
+		}
+	}
+	if recovery := mapFromValue(input["assessmentSchemaInvalidRecovery"]); recovery["required"] != true {
+		t.Fatalf("assessmentSchemaInvalidRecovery = %+v, want required", recovery)
+	}
+}
+
+func TestPreserveConcreteValidationSchemaInvalidRepairContractKeepsValidationEvidence(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-validation-schema-invalid/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "verify runtime behavior",
+			}},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence": true,
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"error":               "invalid llm decision json",
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+	}
+
+	if !preserveConcreteValidationSchemaInvalidRepairContract(input, failed) {
+		t.Fatalf("preserveConcreteValidationSchemaInvalidRepairContract returned false")
+	}
+	if input["repairObjective"] != repairObjectiveConcreteValidationEvidence ||
+		input["boundedValidationRequired"] != true ||
+		input["evidenceRepairRequired"] != true ||
+		input["schemaInvalidRepairMode"] != "single_valid_json_decision" {
+		t.Fatalf("input = %+v, want concrete validation schema invalid recovery contract", input)
+	}
+	if targets := mapSliceFromValue(input["coverageTargetSet"]); len(targets) != 1 || targets[0]["targetText"] != "verify runtime behavior" {
+		t.Fatalf("coverageTargetSet = %+v, want inherited validation target", input["coverageTargetSet"])
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if recovery := mapFromValue(pkg["schemaInvalidRecovery"]); recovery["required"] != true {
+		t.Fatalf("schemaInvalidRecovery = %+v, want required", recovery)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		required["mustReturnValidJSON"] != true ||
+		required["mustNotReuseRejectedJSON"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want valid JSON concrete validation contract", required)
+	}
+}
