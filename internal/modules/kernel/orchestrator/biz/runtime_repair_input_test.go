@@ -1132,3 +1132,51 @@ func TestInheritPriorRepairContextFillsMissingContextWithoutOverwritingCurrentIn
 		t.Fatalf("repairGuidance = %+v, want inherited context and strategy guidance", guidance)
 	}
 }
+
+func TestInheritCoverageRepairContextReadsInputOutputAndDiagnosticsWithoutOverwritingCurrentInput(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:   "run-inherit-coverage/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"missingDoDItems": []map[string]any{{
+				"id": "dod-from-input",
+			}},
+		},
+		Output: map[string]any{
+			"missingGoalCoverage": []map[string]any{{
+				"goalRequirementId": "goal-from-output",
+			}},
+			"failedStepOutput": map[string]any{
+				"missingDeliverableCoverage": []map[string]any{{
+					"id": "deliverable-from-failed-output",
+				}},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-from-diagnostics",
+				}},
+			},
+		},
+	}
+	input := map[string]any{
+		"missingGoalCoverage": []map[string]any{{
+			"goalRequirementId": "goal-current",
+		}},
+	}
+
+	if !inheritCoverageRepairContext(input, failed) {
+		t.Fatalf("inheritCoverageRepairContext returned false")
+	}
+	if input["coverageRepairContextInherited"] != true || input["coverageRepairRequired"] != true {
+		t.Fatalf("input = %+v, want inherited coverage repair flags", input)
+	}
+	if items := mapSliceFromValue(input["missingDoDItems"]); len(items) != 1 || items[0]["id"] != "dod-from-input" {
+		t.Fatalf("missingDoDItems = %+v, want input coverage inherited", input["missingDoDItems"])
+	}
+	if items := mapSliceFromValue(input["missingGoalCoverage"]); len(items) != 1 || items[0]["goalRequirementId"] != "goal-current" {
+		t.Fatalf("missingGoalCoverage = %+v, want current input preserved", input["missingGoalCoverage"])
+	}
+	if items := mapSliceFromValue(input["missingDeliverableCoverage"]); len(items) != 1 || items[0]["id"] != "deliverable-from-failed-output" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want failed output coverage inherited", input["missingDeliverableCoverage"])
+	}
+}
