@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeModel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -633,6 +634,48 @@ func applyRuntimeRepairUnresolvedCoverageWorkItemGuidance(input map[string]any) 
 	)
 }
 
+func applyRuntimeRepairStrategyReassessmentProjection(input map[string]any, reassessment map[string]any) {
+	if input == nil || len(reassessment) == 0 {
+		return
+	}
+	input["strategyReassessment"] = reassessment
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"strategyReassessment.required is true: explicitly choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a real governance blocker.",
+		"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, repairMode, forbiddenRepair, and verificationPlan.",
+		"When continuing the same failed target, patch only if the current target snapshot and primary diagnostics show a concrete same-target correction; otherwise choose a grounded root-cause target or return a blocker.",
+		"When shifting root-cause target, patch a neutral grounded root-cause resource and declare relatedFailureTargets for the failed surface.",
+		"Do not weaken still-valid Goal or DoD constraints, remove valid evidence, or reduce the requested outcome to make verification pass.",
+	)
+}
+
+func applyRuntimeRepairPreviousGraphMetadataProjection(
+	input map[string]any,
+	failedStep *runModel.Step,
+	previousStepOutput map[string]any,
+	failedExecutionGraph runtimeModel.BlockExecutionGraph,
+	hasFailedExecutionGraph bool,
+) {
+	if input == nil || failedStep == nil {
+		return
+	}
+	input["previousStepKind"] = failedStep.Kind
+	input["previousStepOutput"] = previousStepOutput
+	if nodeID := graphNodeID(failedStep); nodeID != "" {
+		input[stepInputKeyGraphPreviousNodeID] = nodeID
+		input["failedGraphNodeId"] = nodeID
+	}
+	if completed := graphCompletedNodesFromStep(failedStep); len(completed) > 0 {
+		input[stepInputKeyGraphCompletedNodes] = completed
+	}
+	if branch := graphBranch(failedStep); branch != "" {
+		input[stepOutputKeyGraphBranch] = branch
+	}
+	if hasFailedExecutionGraph {
+		input["failedExecutionGraph"] = failedExecutionGraph
+		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -713,37 +756,18 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 			o.repairManager().runtimeRepairAttemptCountForFailureTargetInWindow(ctx, run.ID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)),
 		)
 	}
-	if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
-		input["strategyReassessment"] = reassessment
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"strategyReassessment.required is true: explicitly choose repairMode as continue_same_target_repair or shift_root_cause_target, or return a real governance blocker.",
-			"Explain the next repair target decision in neutral terms: failedSurface, rootCauseTarget, repairTargetDecision, repairMode, forbiddenRepair, and verificationPlan.",
-			"When continuing the same failed target, patch only if the current target snapshot and primary diagnostics show a concrete same-target correction; otherwise choose a grounded root-cause target or return a blocker.",
-			"When shifting root-cause target, patch a neutral grounded root-cause resource and declare relatedFailureTargets for the failed surface.",
-			"Do not weaken still-valid Goal or DoD constraints, remove valid evidence, or reduce the requested outcome to make verification pass.",
-		)
-	}
+	applyRuntimeRepairStrategyReassessmentProjection(input, repairStrategyReassessmentFromInput(input))
 	budgetScope := recoveryBudgetScope("runtime_repair", rootStepID, class, signature)
 	if targetScope != "" {
 		budgetScope["failureTargetScope"] = targetScope
 	}
 	input[stepInputKeyRecoveryBudgetScope] = budgetScope
-	input["previousStepKind"] = failedStep.Kind
-	input["previousStepOutput"] = o.llmContextManager().compactStepOutput(failedStep.Output)
-	if nodeID := graphNodeID(failedStep); nodeID != "" {
-		input[stepInputKeyGraphPreviousNodeID] = nodeID
-		input["failedGraphNodeId"] = nodeID
+	graph, hasGraph := runtimeGraphSpecFromStep(failedStep)
+	failedExecutionGraph := runtimeModel.BlockExecutionGraph{}
+	if hasGraph {
+		failedExecutionGraph = o.llmContextManager().compactExecutionGraph(graph)
 	}
-	if completed := graphCompletedNodesFromStep(failedStep); len(completed) > 0 {
-		input[stepInputKeyGraphCompletedNodes] = completed
-	}
-	if branch := graphBranch(failedStep); branch != "" {
-		input[stepOutputKeyGraphBranch] = branch
-	}
-	if graph, ok := runtimeGraphSpecFromStep(failedStep); ok {
-		input["failedExecutionGraph"] = o.llmContextManager().compactExecutionGraph(graph)
-		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
-	}
+	applyRuntimeRepairPreviousGraphMetadataProjection(input, failedStep, o.llmContextManager().compactStepOutput(failedStep.Output), failedExecutionGraph, hasGraph)
 	applyRuntimeRepairGovernanceHistoryProjection(ctx, o.tickets, o.resolutions, o.approvals, input, run)
 	applyRuntimeRepairGraphEvidenceProjection(ctx, o.graphManager(), input, run, failedStep)
 	if progress := runtimeRepairCurrentExecutionProgress(ctx, o.steps, o.repairManager(), run, failedStep, input); len(progress) > 0 {

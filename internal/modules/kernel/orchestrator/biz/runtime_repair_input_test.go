@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -757,5 +758,66 @@ func TestApplyRuntimeRepairUnresolvedCoverageWorkItemGuidanceAddsResolutionRules
 
 	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 4 {
 		t.Fatalf("repairGuidance = %+v, want four unresolved work item guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairStrategyReassessmentProjectionAddsDecisionGuidance(t *testing.T) {
+	input := map[string]any{}
+	reassessment := map[string]any{
+		"required":      true,
+		"failedSurface": "target.go",
+	}
+
+	applyRuntimeRepairStrategyReassessmentProjection(input, reassessment)
+
+	if projected := mapFromValue(input["strategyReassessment"]); projected["failedSurface"] != "target.go" {
+		t.Fatalf("strategyReassessment = %+v, want target.go failed surface", projected)
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 5 {
+		t.Fatalf("repairGuidance = %+v, want five reassessment guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairPreviousGraphMetadataProjectionAddsPreviousAndGraphFields(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:    "run-repair-graph-metadata/graph-001-plan",
+		RunID: "run-repair-graph-metadata",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:         "node-001",
+			stepInputKeyGraphRootStepID:     "run-repair-graph-metadata/root",
+			stepInputKeyGraphCompletedNodes: []string{"node-000"},
+		},
+		Output: map[string]any{
+			"stage":                  "llm_execution_graph_plan",
+			stepOutputKeyGraphBranch: "main",
+		},
+	}
+	input := map[string]any{}
+	previousOutput := map[string]any{"stage": "compact"}
+	graph := runtimemodel.BlockExecutionGraph{
+		Nodes: []runtimemodel.BlockExecutionNode{{ID: "node-001", Kind: "shell/command"}},
+	}
+
+	applyRuntimeRepairPreviousGraphMetadataProjection(input, failed, previousOutput, graph, true)
+
+	if input["previousStepKind"] != failed.Kind {
+		t.Fatalf("previousStepKind = %v, want %v", input["previousStepKind"], failed.Kind)
+	}
+	if mapFromValue(input["previousStepOutput"])["stage"] != "compact" {
+		t.Fatalf("previousStepOutput = %+v, want compact output", input["previousStepOutput"])
+	}
+	if input[stepInputKeyGraphPreviousNodeID] != "node-001" || input["failedGraphNodeId"] != "node-001" {
+		t.Fatalf("graph previous node fields missing: %+v", input)
+	}
+	if completed := stringSliceFromValue(input[stepInputKeyGraphCompletedNodes]); len(completed) != 1 || completed[0] != "node-000" {
+		t.Fatalf("graph completed nodes = %+v, want one node", input[stepInputKeyGraphCompletedNodes])
+	}
+	if input[stepOutputKeyGraphBranch] != "main" {
+		t.Fatalf("graph branch = %v, want main", input[stepOutputKeyGraphBranch])
+	}
+	if projected, ok := input["failedExecutionGraph"].(runtimemodel.BlockExecutionGraph); !ok || len(projected.Nodes) != 1 || input[stepInputKeyGraphRootStepID] == "" {
+		t.Fatalf("failed graph metadata missing: %+v", input)
 	}
 }
