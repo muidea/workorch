@@ -191,7 +191,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 	resumeInput map[string]any,
 ) ([]stepDispatchSpec, error) {
 	if boolValue(resumeInput["knownReadableDecisionRepair"]) {
-		if specs, ok, err := o.knownReadableDecisionRepairSpecs(ctx, run, stepID); ok || err != nil {
+		if specs, ok, err := knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
@@ -460,15 +460,19 @@ func contextIntegrityRetryStillMissingRequiredRepairContext(input map[string]any
 		len(mapFromValue(pkg["currentExecutionProgress"])) == 0
 }
 
-func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
+func knownReadableDecisionRepairSpecs(
 	ctx context.Context,
+	steps repository.StepRepository,
+	workspaces repository.WorkspaceRepository,
+	repair *repairSubsystem,
+	builder repairDispatchSpecBuilder,
 	run *runModel.Run,
 	stepID common.StepID,
 ) ([]stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || stepID == "" {
+	if steps == nil || repair == nil || builder == nil || run == nil || stepID == "" {
 		return nil, false, nil
 	}
-	step, err := o.steps.Get(ctx, stepID)
+	step, err := steps.Get(ctx, stepID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -479,7 +483,7 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	if decisionSpec.Reason == "" {
 		return nil, false, nil
 	}
-	decisionSpec.Context = enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, nil, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
+	decisionSpec.Context = enrichDecisionContextWithReadableWorkspaceResources(ctx, workspaces, run, nil, decisionSpec.Context, decisionSpec.Question, decisionSpec.Reason)
 	if !knownReadableWorkspaceResourceDecisionContext(decisionSpec.Context) {
 		return nil, false, nil
 	}
@@ -491,15 +495,15 @@ func (o *RuntimeOrchestrator) knownReadableDecisionRepairSpecs(
 	repairOf.Output["continuableDecisionConvertedToRepair"] = true
 	repairOf.Output["status"] = "failed"
 	repairOf.Output["error"] = "decision requested a workspace resource that is already readable"
-	attempt := o.repairManager().runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
-	stepID, err = uniqueDispatchStepID(ctx, o.steps, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
+	attempt := repair.runtimeRepairAttemptCountForStep(ctx, run.ID, &repairOf) + 1
+	stepID, err = uniqueDispatchStepID(ctx, steps, run.ID, runtimeRepairFollowUpStepID(run.ID, &repairOf, attempt))
 	if err != nil {
 		return nil, true, err
 	}
 	return []stepDispatchSpec{{
 		ID:    stepID,
 		Kind:  initialStepKind(run),
-		Input: o.runtimeRepairFollowUpStepInput(ctx, run, &repairOf, attempt, common.ErrInvalidArgument),
+		Input: builder.runtimeRepairFollowUpStepInput(ctx, run, &repairOf, attempt, common.ErrInvalidArgument),
 	}}, true, nil
 }
 
