@@ -1051,3 +1051,84 @@ func TestPreserveConcreteValidationSchemaInvalidRepairContractKeepsValidationEvi
 		t.Fatalf("requiredOutput = %+v, want valid JSON concrete validation contract", required)
 	}
 }
+
+func TestInheritPriorRepairContextFillsMissingContextWithoutOverwritingCurrentInput(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:   "run-inherit-prior/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":   "old-target.go",
+				"contentHash": "hash-old",
+			}},
+			"patchRepairContext": []map[string]any{{
+				"targetRef": "patch-target.go",
+			}},
+			"readableResourceRepairContext": []map[string]any{{
+				"targetRef": "readable.md",
+			}},
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id": "cwi-001",
+				},
+			},
+			stepInputKeyWorkspaceFileManifest: []map[string]any{{
+				"path": "old-target.go",
+			}},
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "targetRef=old-target.go",
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+			"rootCauseCandidateContext": []map[string]any{{
+				"targetRef": "candidate.go",
+			}},
+			"targetRepairAttempts": int64(4),
+			"failureTargetScope":   "targetRef=old-target.go",
+		},
+	}
+	input := map[string]any{
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":   "current-target.go",
+			"contentHash": "hash-current",
+		}},
+	}
+
+	inheritPriorRepairContext(input, failed)
+
+	targets := mapSliceFromValue(input["failureTargetRepairContext"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "current-target.go" {
+		t.Fatalf("failureTargetRepairContext = %+v, want current input preserved", input["failureTargetRepairContext"])
+	}
+	if patches := mapSliceFromValue(input["patchRepairContext"]); len(patches) != 1 || patches[0]["targetRef"] != "patch-target.go" {
+		t.Fatalf("patchRepairContext = %+v, want inherited patch context", input["patchRepairContext"])
+	}
+	if readable := mapSliceFromValue(input["readableResourceRepairContext"]); len(readable) != 1 || readable[0]["targetRef"] != "readable.md" {
+		t.Fatalf("readableResourceRepairContext = %+v, want inherited readable context", input["readableResourceRepairContext"])
+	}
+	if context := mapFromValue(input[coverageWorkItemContextKey]); stringFromMap(mapFromValue(context["currentFocus"]), "id") != "cwi-001" {
+		t.Fatalf("coverageWorkItemContext = %+v, want inherited current focus", input[coverageWorkItemContextKey])
+	}
+	if manifest := mapSliceFromValue(input[stepInputKeyWorkspaceFileManifest]); len(manifest) != 1 || manifest[0]["path"] != "old-target.go" {
+		t.Fatalf("workspaceFileManifest = %+v, want inherited manifest", input[stepInputKeyWorkspaceFileManifest])
+	}
+	if reassessment := mapFromValue(input["strategyReassessment"]); !boolValue(reassessment["required"]) {
+		t.Fatalf("strategyReassessment = %+v, want inherited reassessment", input["strategyReassessment"])
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); !boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"]) {
+		t.Fatalf("repairActionPackage = %+v, want inherited package", input["repairActionPackage"])
+	}
+	if candidates := mapSliceFromValue(input["rootCauseCandidateContext"]); len(candidates) != 1 || candidates[0]["targetRef"] != "candidate.go" {
+		t.Fatalf("rootCauseCandidateContext = %+v, want inherited root-cause candidates", input["rootCauseCandidateContext"])
+	}
+	if input["targetRepairAttempts"] != int64(4) || input["failureTargetScope"] != "targetRef=old-target.go" {
+		t.Fatalf("attempt/scope = %v/%v, want inherited values", input["targetRepairAttempts"], input["failureTargetScope"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) < 6 {
+		t.Fatalf("repairGuidance = %+v, want inherited context and strategy guidance", guidance)
+	}
+}
