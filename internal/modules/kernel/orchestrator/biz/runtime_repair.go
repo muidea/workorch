@@ -22,7 +22,6 @@ type repairSubsystem struct {
 }
 
 type repairRecoveryPolicy interface {
-	shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldBlockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldAttemptRuntimeRepair(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 }
@@ -439,7 +438,7 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return runtimeRecoveryActionContextIntegrityBlocked
 	}
-	if policy.shouldEscalateRuntimeRepairExhaustion(ctx, run, failedStep) {
+	if shouldEscalateRuntimeRepairExhaustion(ctx, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
 		return runtimeRecoveryActionRuntimeRepairExhausted
 	}
 	if policy.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
@@ -684,14 +683,14 @@ func rejectedCompletionFailureReason(step *runModel.Step, fallback string) strin
 	return summary
 }
 
-func (o *RuntimeOrchestrator) shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, canCreateDecisionTicket bool, run *runModel.Run, failedStep *runModel.Step) bool {
+	if repair == nil || run == nil || failedStep == nil || !canCreateDecisionTicket {
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(o.policy)
+	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(policy)
 }
 
 func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(

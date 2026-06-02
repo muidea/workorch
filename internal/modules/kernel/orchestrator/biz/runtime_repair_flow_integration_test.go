@@ -1070,7 +1070,7 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsRepairWrapperRootC
 	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want root/class wrapper attempts counted", got)
 	}
-	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-wrapper-root-class")}, failedStep) {
+	if !shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, orch.tickets != nil, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-wrapper-root-class")}, failedStep) {
 		t.Fatalf("repeated repair wrapper failures should exhaust runtime repair budget")
 	}
 }
@@ -1167,7 +1167,7 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want target scope exhausted", got)
 	}
-	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-scope")}, failedStep) {
+	if !shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, orch.tickets != nil, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-scope")}, failedStep) {
 		t.Fatalf("target-scoped repeated failure should escalate repair exhaustion")
 	}
 
@@ -1232,7 +1232,7 @@ func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *t
 	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != 0 {
 		t.Fatalf("effective attempt count = %d, want old graph-root attempts excluded", got)
 	}
-	if orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-window")}, failedStep) {
+	if shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, orch.tickets != nil, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-window")}, failedStep) {
 		t.Fatalf("new graph-root target failure should receive a fresh repair window")
 	}
 
@@ -1303,7 +1303,7 @@ func TestRuntimeOrchestrator_PatchApplyTargetBudgetCrossesGraphWindows(t *testin
 	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
 		t.Fatalf("effective attempt count = %d, want patch target attempts counted across graph roots", got)
 	}
-	if !orch.shouldEscalateRuntimeRepairExhaustion(ctx, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-patch-target-budget")}, failedStep) {
+	if !shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, orch.tickets != nil, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-patch-target-budget")}, failedStep) {
 		t.Fatalf("repeated patch target failure should escalate repair exhaustion")
 	}
 }
