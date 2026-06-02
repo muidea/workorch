@@ -836,3 +836,68 @@ func TestApplyRuntimeRepairValidationEscalationFollowUpGuidanceRequiresEscalatio
 		t.Fatalf("repairGuidance = %+v, want two escalation follow-up guidance items", guidance)
 	}
 }
+
+func TestResetRuntimeRepairInputToRejectedResultContinuationSupersedesHistoricalReplan(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-rejected-continuation-reset",
+		WorkspaceID: "ws-rejected-continuation-reset",
+		ExecutionContext: map[string]any{
+			"rejectedResultContinuation": map[string]any{
+				"resultId":         "result-001",
+				"summary":          "latest result still misses required evidence",
+				"requiredEvidence": []string{"read current target", "verify current behavior"},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-rejected-continuation-reset/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"reason": "historical replan target failed",
+		},
+	}
+	input := map[string]any{
+		"replanStateChangingContinuation": true,
+		"stateChangingOutputRequired":     true,
+		"patchRepairContext":              []map[string]any{{"targetRef": "old.go"}},
+		"failureTargetRepairContext":      []map[string]any{{"targetRef": "old.go"}},
+		"targetRepairAttempts":            3,
+		"strategyReassessment":            map[string]any{"required": true},
+	}
+
+	input = resetRuntimeRepairInputToRejectedResultContinuation(input, run, failed)
+
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("repairObjective = %v, want %s", input["repairObjective"], repairObjectiveAcquireFailureEvidence)
+	}
+	if input["concreteFailureEvidenceRequired"] != true {
+		t.Fatalf("concreteFailureEvidenceRequired = %v, want true", input["concreteFailureEvidenceRequired"])
+	}
+	for _, key := range []string{"replanStateChangingContinuation", "stateChangingOutputRequired", "patchRepairContext", "failureTargetRepairContext", "targetRepairAttempts", "strategyReassessment"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be removed when rejected result continuation supersedes historical replan: %+v", key, input[key])
+		}
+	}
+	progress := mapFromValue(input[stepInputKeyCurrentProgressDigest])
+	if stringFromMap(progress, "source") != "rejectedResultContinuation" {
+		t.Fatalf("currentProgressDigest = %+v, want rejected result continuation source", progress)
+	}
+	currentFailure := mapFromValue(input["currentFailure"])
+	if stringFromMap(currentFailure, "failureClass") != "rejected_result_continuation" {
+		t.Fatalf("currentFailure = %+v, want rejected result continuation failure", currentFailure)
+	}
+	historical := mapFromValue(input["historicalRepairAttempt"])
+	if historical["supersededBy"] != "rejectedResultContinuation" || historical["stepId"] != string(failed.ID) {
+		t.Fatalf("historicalRepairAttempt = %+v, want failed step lineage superseded by rejected result", historical)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if pkg["evidenceAcquisitionRequired"] != true || required["mustProduceConcreteFailureEvidence"] != true || required["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("repairActionPackage = %+v, requiredOutput = %+v, want evidence acquisition contract", pkg, required)
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) < 3 {
+		t.Fatalf("repairGuidance = %+v, want base evidence acquisition and rejected result continuation guidance", guidance)
+	}
+}
