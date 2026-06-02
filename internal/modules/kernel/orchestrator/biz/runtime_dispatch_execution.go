@@ -298,7 +298,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
-	if err := o.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+	if err := validateDoDAssessmentEvidenceQuality(ctx, o.steps, o.evidence, run, assessment); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
 	if o.coverageLedger().updateFromAssessment(run, step, assessment) && o.runs != nil {

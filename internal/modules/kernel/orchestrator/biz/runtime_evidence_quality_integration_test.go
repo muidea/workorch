@@ -50,7 +50,7 @@ func TestDoDAssessmentEvidenceQualityRejectsInconclusiveStepEvidence(t *testing.
 	}); err != nil {
 		t.Fatalf("seed validation result: %v", err)
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, &runmodel.Run{ID: runID}, map[string]any{
 		"items": []map[string]any{
 			{
 				"item":         "429 passthrough is covered",
@@ -127,7 +127,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsReadOnlySideEffectEvidence(t
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"items": []map[string]any{{
 			"item":         "side effect recorded",
 			"state":        "satisfied",
@@ -204,7 +204,7 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T)
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"items": []map[string]any{{
 			"item":         "side effect recorded",
 			"state":        "satisfied",
@@ -244,7 +244,7 @@ func TestDoDAssessmentEvidenceQualityRejectsArtifactChunkEvidence(t *testing.T) 
 		t.Fatalf("seed chunk step: %v", err)
 	}
 
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, &runmodel.Run{ID: runID}, map[string]any{
 		"items": []map[string]any{{
 			"item":         "assembled artifact is delivered",
 			"state":        "satisfied",
@@ -294,7 +294,7 @@ func TestDoDAssessmentEvidenceQualityAllowsArtifactApplyEvidence(t *testing.T) {
 		t.Fatalf("seed patch: %v", err)
 	}
 
-	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, &runmodel.Run{ID: runID}, map[string]any{
+	if err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, &runmodel.Run{ID: runID}, map[string]any{
 		"items": []map[string]any{{
 			"item":         "assembled artifact is delivered",
 			"state":        "satisfied",
@@ -345,7 +345,7 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsGitWriteDeliverableEvidence(
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"deliverableCoverage": map[string]any{
 			"items": []map[string]any{{
 				"id":           "version_control_snapshot",
@@ -617,7 +617,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsWrongGitWriteOperation(t *te
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"deliverableCoverage": []map[string]any{{
 			"id":           "version_control_snapshot",
 			"state":        "satisfied",
@@ -666,7 +666,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsZeroWorkAcceptedEvidence(t *
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"deliverableCoverage": []map[string]any{{
 			"id":           "version_control_snapshot",
 			"state":        "satisfied",
@@ -729,7 +729,7 @@ func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidenc
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"acceptanceDimensions": []map[string]any{{
 			"id":           "persistence_or_side_effect",
 			"state":        "satisfied",
@@ -773,7 +773,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsRejectedOnlyRequirement(t *t
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"acceptanceDimensions": []map[string]any{{
 			"id":           "runtime_entrypoint",
 			"state":        "satisfied",
@@ -807,7 +807,7 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsUntraceableDirectEvidence(t 
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"acceptanceDimensions": []map[string]any{{
 			"id":           "runtime_entrypoint",
 			"state":        "satisfied",
@@ -855,7 +855,7 @@ func TestDoDAssessmentClaimEvidenceRequirementRejectsGenericValidationEvidence(t
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"items": []map[string]any{{
 			"item":         "streaming response emits incremental chunks",
 			"state":        "satisfied",
@@ -905,7 +905,7 @@ func TestDoDAssessmentClaimEvidenceRequirementAcceptsAlignedCoverageTarget(t *te
 			},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, map[string]any{
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
 		"items": []map[string]any{{
 			"item":         claim,
 			"state":        "satisfied",
@@ -1003,7 +1003,7 @@ func TestCompletionGateNormalizesEvidenceRefsToCanonicalUsableRuntimeEvidence(t 
 	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(validStepID)}) {
 		t.Fatalf("evidenceRefs = %+v, want canonical valid step only", got)
 	}
-	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+	if err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, assessment); err != nil {
 		t.Fatalf("validate normalized evidence: %v", err)
 	}
 }
@@ -1132,7 +1132,7 @@ func TestDefinitionChangeAssessmentRejectsHistoricalOnlyEvidence(t *testing.T) {
 			}},
 		},
 	}
-	err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment)
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, assessment)
 	if !errors.Is(err, common.ErrInvalidArgument) ||
 		!strings.Contains(err.Error(), "requires current run evidenceRefs") {
 		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want current-run evidence rejection", err)
@@ -1170,7 +1170,7 @@ func TestDefinitionChangeAssessmentRejectsHistoricalOnlyEvidence(t *testing.T) {
 		"evidenceRefs": []string{currentValidationRef},
 	}}
 	assessment["deliverableCoverage"] = deliverableCoverage
-	if err := orch.validateDoDAssessmentEvidenceQuality(ctx, run, assessment); err != nil {
+	if err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, assessment); err != nil {
 		t.Fatalf("validateDoDAssessmentEvidenceQuality with current evidence: %v", err)
 	}
 }

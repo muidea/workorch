@@ -95,24 +95,30 @@ func runtimeStepEvidenceQuality(run *runModel.Run, step *runModel.Step, state co
 	return evidenceQualityFromRuntimeOutput(output)
 }
 
-func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.Context, run *runModel.Run, assessment map[string]any) error {
-	if o == nil || run == nil || assessment == nil {
+func validateDoDAssessmentEvidenceQuality(
+	ctx context.Context,
+	steps repository.StepRepository,
+	evidence RuntimeEvidenceRepositories,
+	run *runModel.Run,
+	assessment map[string]any,
+) error {
+	if run == nil || assessment == nil {
 		return nil
 	}
-	if err := validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, o.steps, o.evidence, run, assessment); err != nil {
+	if err := validateDefinitionChangeAssessmentCurrentRunEvidence(ctx, steps, evidence, run, assessment); err != nil {
 		return err
 	}
-	if err := validateArtifactContinuationAssessmentEvidenceRefs(ctx, o.steps, o.evidence.ValidationResults, assessment); err != nil {
+	if err := validateArtifactContinuationAssessmentEvidenceRefs(ctx, steps, evidence.ValidationResults, assessment); err != nil {
 		return err
 	}
 	items, ok := doDAssessmentItemMaps(assessment["items"])
-	if ok && o.evidence.ValidationResults != nil {
+	if ok && evidence.ValidationResults != nil {
 		for _, item := range items {
 			if strings.TrimSpace(stringFromMap(item, "state")) != "satisfied" {
 				continue
 			}
 			for _, ref := range evidenceRefsFromValue(item["evidenceRefs"]) {
-				verdict, ok, err := evidenceRefQualityVerdictFromRepository(ctx, o.evidence.ValidationResults, ref)
+				verdict, ok, err := evidenceRefQualityVerdictFromRepository(ctx, evidence.ValidationResults, ref)
 				if err != nil {
 					return err
 				}
@@ -141,7 +147,7 @@ func (o *RuntimeOrchestrator) validateDoDAssessmentEvidenceQuality(ctx context.C
 			}
 		}
 	}
-	if err := validateDoDAssessmentEvidenceKindRequirements(ctx, o.steps, o.evidence.ValidationResults, run, assessment); err != nil {
+	if err := validateDoDAssessmentEvidenceKindRequirements(ctx, steps, evidence.ValidationResults, run, assessment); err != nil {
 		return err
 	}
 	return nil
