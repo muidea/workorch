@@ -83,6 +83,62 @@ func runtimeRepairGraphLineageLabelStepID(failedStep *runModel.Step) common.Step
 	return ""
 }
 
+type runtimeRepairBaseInputDeps struct {
+	policy     RuntimePolicy
+	llmContext *llmContextSubsystem
+}
+
+func runtimeRepairBaseInputDepsFor(o *RuntimeOrchestrator) runtimeRepairBaseInputDeps {
+	if o == nil {
+		return runtimeRepairBaseInputDeps{}
+	}
+	return runtimeRepairBaseInputDeps{
+		policy:     o.policy,
+		llmContext: o.llmContextManager(),
+	}
+}
+
+func runtimeRepairBaseInput(
+	deps runtimeRepairBaseInputDeps,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	attempt int,
+	execErr error,
+) map[string]any {
+	previousStepID := common.StepID("")
+	if failedStep != nil {
+		previousStepID = failedStep.ID
+	}
+	input := nextStepInput(run, previousStepID)
+	input[stepInputKeySoulStage] = soulStageExecution
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeyRuntimeRepairFollowUp] = true
+	input[stepInputKeyRuntimeRepairAttempt] = attempt
+	input["maxRuntimeRepairAttempts"] = maxRuntimeRepairAttemptsForPolicy(deps.policy)
+	if execErr != nil {
+		input["failureReason"] = execErr.Error()
+	}
+	if failedStep == nil {
+		return input
+	}
+	input["failedStepId"] = string(failedStep.ID)
+	input[stepInputKeyRepairOfStepID] = string(failedStep.ID)
+	rootStepID := runtimeRepairRootStepID(failedStep)
+	input[stepInputKeyRepairOfRootStepID] = string(rootStepID)
+	input[stepInputKeyRecoveryAction] = string(runtimeRecoveryActionRuntimeRepair)
+	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
+	input[stepInputKeyRecoveryLineageType] = "runtime_repair"
+	input["failedStepKind"] = failedStep.Kind
+	input["failedStepState"] = string(failedStep.State)
+	llmContext := deps.llmContext
+	if llmContext == nil {
+		llmContext = newLLMContextSubsystem()
+	}
+	input["failedStepInput"] = llmContext.compactStepInput(failedStep.Input)
+	input["failedStepOutput"] = llmContext.compactStepOutput(failedStep.Output)
+	return input
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -108,33 +164,11 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	attempt int,
 	execErr error,
 ) map[string]any {
-	previousStepID := common.StepID("")
-	if failedStep != nil {
-		previousStepID = failedStep.ID
-	}
-	input := nextStepInput(run, previousStepID)
-	input[stepInputKeySoulStage] = soulStageExecution
-	setRuntimeStage(input, runtimeStageRepair)
-	input[stepInputKeyRuntimeRepairFollowUp] = true
-	input[stepInputKeyRuntimeRepairAttempt] = attempt
-	input["maxRuntimeRepairAttempts"] = maxRuntimeRepairAttemptsForPolicy(o.policy)
-	if execErr != nil {
-		input["failureReason"] = execErr.Error()
-	}
+	input := runtimeRepairBaseInput(runtimeRepairBaseInputDepsFor(o), run, failedStep, attempt, execErr)
 	if failedStep == nil {
 		return input
 	}
-	input["failedStepId"] = string(failedStep.ID)
-	input[stepInputKeyRepairOfStepID] = string(failedStep.ID)
 	rootStepID := runtimeRepairRootStepID(failedStep)
-	input[stepInputKeyRepairOfRootStepID] = string(rootStepID)
-	input[stepInputKeyRecoveryAction] = string(runtimeRecoveryActionRuntimeRepair)
-	input[stepInputKeyRecoveryRootStepID] = string(rootStepID)
-	input[stepInputKeyRecoveryLineageType] = "runtime_repair"
-	input["failedStepKind"] = failedStep.Kind
-	input["failedStepState"] = string(failedStep.State)
-	input["failedStepInput"] = o.llmContextManager().compactStepInput(failedStep.Input)
-	input["failedStepOutput"] = o.llmContextManager().compactStepOutput(failedStep.Output)
 	if runtimeRepairShouldReturnToRejectedResultContinuation(run, failedStep) {
 		input = resetRuntimeRepairInputToRejectedResultContinuation(input, run, failedStep)
 		contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
