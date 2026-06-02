@@ -42,10 +42,10 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	}
 	specs, err := o.nextDispatchSpecs(ctx, r)
 	if err != nil {
-		return err
+		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, ws); err != nil {
-		return errors.Join(err, o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
+		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
 }
@@ -254,7 +254,13 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				return specErr
 			}
 			if len(specs) == 0 {
-				return err
+				specs, specErr = runningInitialDispatchRecoverySpecs(ctx, o.steps, o.nextDispatchSpecs, r)
+				if specErr != nil {
+					return errors.Join(o.failRunningResume(ctx, r.ID, specErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
+				}
+				if len(specs) == 0 {
+					return err
+				}
 			}
 			r.State = common.RunStateRunning
 			r.FailureReason = ""

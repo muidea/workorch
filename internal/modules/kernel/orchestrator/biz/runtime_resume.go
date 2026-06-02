@@ -13,6 +13,7 @@ import (
 
 type artifactContinuationRecoverySpecsFunc func(context.Context, *runModel.Run) ([]stepDispatchSpec, bool, error)
 type nextDispatchSpecsFromStepFunc func(context.Context, *runModel.Run, *runModel.Step) ([]stepDispatchSpec, error)
+type nextDispatchSpecsFunc func(context.Context, *runModel.Run) ([]stepDispatchSpec, error)
 
 func runningTerminalStepRecoverySpecs(
 	ctx context.Context,
@@ -39,6 +40,25 @@ func runningTerminalStepRecoverySpecs(
 		return nil, nil
 	}
 	return nextFromStep(ctx, run, last)
+}
+
+func runningInitialDispatchRecoverySpecs(
+	ctx context.Context,
+	steps repository.StepRepository,
+	next nextDispatchSpecsFunc,
+	run *runModel.Run,
+) ([]stepDispatchSpec, error) {
+	if run == nil || steps == nil || next == nil {
+		return nil, common.ErrConflict
+	}
+	runSteps, err := steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(runSteps) != 0 {
+		return nil, nil
+	}
+	return next(ctx, run)
 }
 
 func (o *RuntimeOrchestrator) failRunningResume(ctx context.Context, runID common.RunID, cause error) error {

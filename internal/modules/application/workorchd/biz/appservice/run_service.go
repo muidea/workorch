@@ -402,7 +402,7 @@ func recordRecoveryMemoryRecallTrace(ctx context.Context, session *RuntimeSessio
 	if !containsString(sourceRefs, "memory_recall") {
 		return nil
 	}
-	existing, err := deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+	existing, err := deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, RunID: item.ID})
 	if err != nil {
 		return err
 	}

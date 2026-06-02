@@ -253,6 +253,18 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed memory recall trace: %v", err)
 	}
+	if err := exports.Repositories.MemoryRecallTraces.Create(ctx, &memorymodel.MemoryRecallTrace{
+		ID:                 "trace-recovery-other-workspace",
+		WorkspaceID:        "ws-recovery-memory-other",
+		RunID:              runID,
+		Stage:              "planning",
+		Source:             "activation",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"memory-other-workspace"},
+		EvidenceRef:        "trace-recovery-other-workspace",
+	}); err != nil {
+		t.Fatalf("seed other workspace memory recall trace: %v", err)
+	}
 
 	patch, _, err := compressedContextPatchForRun(ctx, session, runID)
 	if err != nil {
@@ -262,7 +274,7 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 	if !containsString(stringSliceFromAny(compressed["sourceSectionRefs"]), "memory_recall") {
 		t.Fatalf("compressed context = %+v, want memory_recall source section", compressed)
 	}
-	traces, err := exports.Repositories.MemoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{RunID: runID, Source: "recovery"})
+	traces, err := exports.Repositories.MemoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: workspaceID, RunID: runID, Source: "recovery"})
 	if err != nil {
 		t.Fatalf("list recovery traces: %v", err)
 	}
@@ -271,7 +283,7 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 		traces[0].Status != "inherited" ||
 		len(traces[0].RetrievedMemoryIDs) != 1 ||
 		traces[0].RetrievedMemoryIDs[0] != "memory-recovery-source" {
-		t.Fatalf("recovery traces = %+v, want inherited memory recall trace", traces)
+		t.Fatalf("recovery traces = %+v, want inherited workspace-scoped memory recall trace", traces)
 	}
 }
 

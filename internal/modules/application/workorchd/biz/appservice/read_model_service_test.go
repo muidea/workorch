@@ -1089,6 +1089,68 @@ func TestReadRunSnapshotReadsWorkspaceAndRunScopedEvidenceConcurrently(t *testin
 	}
 }
 
+func TestReadRunSnapshotScopesMemoryRecallTracesByWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-memory-snapshot")
+	otherWorkspaceID := common.WorkspaceID("ws-memory-snapshot-other")
+	runID := common.RunID("run-memory-snapshot")
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	memoryRecallRepo := memory.NewMemoryRecallTraceRepository()
+
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "memory snapshot", State: common.WorkspaceStateRunning}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := memoryRecallRepo.Create(ctx, &memorymodel.MemoryRecallTrace{
+		ID:                 "trace-memory-snapshot-current",
+		WorkspaceID:        workspaceID,
+		RunID:              runID,
+		Source:             "activation",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"memory-current"},
+	}); err != nil {
+		t.Fatalf("create current memory recall trace: %v", err)
+	}
+	if err := memoryRecallRepo.Create(ctx, &memorymodel.MemoryRecallTrace{
+		ID:                 "trace-memory-snapshot-other",
+		WorkspaceID:        otherWorkspaceID,
+		RunID:              runID,
+		Source:             "activation",
+		Status:             "selected",
+		RetrievedMemoryIDs: []common.MemoryID{"memory-other"},
+	}); err != nil {
+		t.Fatalf("create other memory recall trace: %v", err)
+	}
+
+	snapshot, err := readRunSnapshot(ctx, readModelDependencies{
+		workspaces:            workspaceRepo,
+		runs:                  runRepo,
+		steps:                 memory.NewStepRepository(),
+		results:               memory.NewResultRepository(),
+		artifacts:             memory.NewArtifactRepository(),
+		artifactContinuations: memory.NewArtifactContinuationRepository(),
+		eventRecords:          memory.NewEventRecordRepository(),
+		memoryRecalls:         memoryRecallRepo,
+		toolCalls:             memory.NewToolCallRepository(),
+		mcpCapabilities:       memory.NewMCPCapabilityRepository(),
+		patches:               memory.NewPatchRepository(),
+		validations:           memory.NewValidationResultRepository(),
+		checkpoints:           memory.NewRuntimeCheckpointRepository(),
+		tickets:               memory.NewDecisionTicketRepository(),
+		resolutions:           memory.NewDecisionResolutionRepository(),
+		approvals:             memory.NewApprovalRepository(),
+	}, runID)
+	if err != nil {
+		t.Fatalf("readRunSnapshot: %v", err)
+	}
+	if len(snapshot.MemoryRecallTraces) != 1 || snapshot.MemoryRecallTraces[0].ID != "trace-memory-snapshot-current" {
+		t.Fatalf("memory recall traces = %+v, want only current workspace trace", snapshot.MemoryRecallTraces)
+	}
+}
+
 func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)

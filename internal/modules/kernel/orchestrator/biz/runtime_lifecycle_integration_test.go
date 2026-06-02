@@ -17,6 +17,31 @@ import (
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
+type listFailingStepRepository struct {
+	inner *memory.StepRepository
+	err   error
+}
+
+func (r *listFailingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
+	return r.inner.Create(ctx, item)
+}
+
+func (r *listFailingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r *listFailingStepRepository) ListByRun(context.Context, common.RunID) ([]*runmodel.Step, error) {
+	return nil, r.err
+}
+
+func (r *listFailingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
+	return r.inner.Update(ctx, item)
+}
+
+func (r *listFailingStepRepository) Delete(ctx context.Context, id common.StepID) error {
+	return r.inner.Delete(ctx, id)
+}
+
 func TestRuntimeOrchestrator_RuntimeFailurePublishesWorkspaceReleaseEvent(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -120,6 +145,88 @@ func TestRuntimeOrchestrator_StartRunAllowsStaleTerminalActiveRun(t *testing.T) 
 	}
 	if ws.State != common.WorkspaceStateCompleted || ws.ActiveRunID != "" {
 		t.Fatalf("workspace = %+v, want completed with no stale active run", ws)
+	}
+}
+
+func TestRuntimeOrchestrator_StartRunFailsRunWhenInitialDispatchSpecBuildFails(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	listErr := errors.New("step list unavailable")
+	stepRepo := &listFailingStepRepository{inner: memory.NewStepRepository(), err: listErr}
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-start-initial-spec-fails")
+	runID := common.RunID("run-start-initial-spec-fails")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	r, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if r.State != common.RunStateFailed || !strings.Contains(r.FailureReason, listErr.Error()) {
+		t.Fatalf("run = %+v, want failed with initial dispatch error", r)
+	}
+	ws, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.State != common.WorkspaceStateFailed || ws.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want failed with active run released", ws)
+	}
+}
+
+func TestRuntimeOrchestrator_ResumeRunningRunWithNoStepsDispatchesInitialStep(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "ok"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, nil)
+
+	workspaceID := common.WorkspaceID("ws-running-empty-resume")
+	runID := common.RunID("run-running-empty-resume")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume run: %v", err)
+	}
+	r, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if r.State != common.RunStateCompleted {
+		t.Fatalf("run state = %q, want completed", r.State)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID(string(runID)+"/step-1"))
+	if err != nil {
+		t.Fatalf("get initial step: %v", err)
+	}
+	if step.State != common.StepStateCompleted {
+		t.Fatalf("step state = %q, want completed", step.State)
 	}
 }
 

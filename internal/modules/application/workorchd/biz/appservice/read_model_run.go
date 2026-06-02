@@ -105,7 +105,7 @@ func readRunSnapshot(ctx context.Context, deps readModelDependencies, runID comm
 		func() error {
 			var err error
 			if deps.memoryRecalls != nil {
-				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, RunID: item.ID})
 			}
 			return err
 		},
@@ -259,7 +259,7 @@ func readRunRecoverySnapshot(ctx context.Context, deps readModelDependencies, ru
 		func() error {
 			var err error
 			if deps.memoryRecalls != nil {
-				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{RunID: item.ID})
+				memoryRecallTraces, err = deps.memoryRecalls.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: item.WorkspaceID, RunID: item.ID})
 			}
 			return err
 		},
