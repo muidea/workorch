@@ -821,3 +821,18 @@ func TestApplyRuntimeRepairPreviousGraphMetadataProjectionAddsPreviousAndGraphFi
 		t.Fatalf("failed graph metadata missing: %+v", input)
 	}
 }
+
+func TestApplyRuntimeRepairValidationEscalationFollowUpGuidanceRequiresEscalationFlag(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
+	if _, ok := input["repairGuidance"]; ok {
+		t.Fatalf("repairGuidance should be absent without escalation flag: %+v", input)
+	}
+
+	input["validationRepairEscalatedToImplementation"] = true
+	applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 2 {
+		t.Fatalf("repairGuidance = %+v, want two escalation follow-up guidance items", guidance)
+	}
+}

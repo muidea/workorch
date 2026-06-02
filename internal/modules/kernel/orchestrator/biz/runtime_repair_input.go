@@ -676,6 +676,16 @@ func applyRuntimeRepairPreviousGraphMetadataProjection(
 	}
 }
 
+func applyRuntimeRepairValidationEscalationFollowUpGuidance(input map[string]any) {
+	if input == nil || !boolValue(input["validationRepairEscalatedToImplementation"]) {
+		return
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Repeated validation-only repair is no longer an acceptable next action for this coverage gap.",
+		"If concrete target evidence is still missing, acquire bounded implementation target evidence first; otherwise produce a state-changing repair before the next validation.",
+	)
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -803,12 +813,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	inheritPriorRepairContext(input, failedStep)
 	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)
 	applyRuntimeRepairStateChangingActionPackageProjection(input, failedStep, execErr)
-	if boolValue(input["validationRepairEscalatedToImplementation"]) {
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Repeated validation-only repair is no longer an acceptable next action for this coverage gap.",
-			"If concrete target evidence is still missing, acquire bounded implementation target evidence first; otherwise produce a state-changing repair before the next validation.",
-		)
-	}
+	applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
 	assessmentOnlySchemaInvalidRepair := preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
