@@ -36,7 +36,7 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 		step.Input = map[string]any{}
 	}
 	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, step.Input, nil, 0)
-	pkg := o.runExecutionContextPackage(ctx, run, step, workspace)
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(o), run, step, workspace)
 	step.Input[stepInputKeyExecutionContextPackage] = pkg
 	if policy := llmOutputPolicyValues(o.policy); len(policy) > 0 {
 		step.Input["llmOutputPolicy"] = policy
@@ -49,6 +49,37 @@ func (o *RuntimeOrchestrator) enrichLLMStepInputContext(ctx context.Context, run
 	}
 	promoteRepairActionPackageContext(step.Input)
 	_ = o.recordLLMStepInputMemoryRecallTrace(ctx, run, step, pkg)
+}
+
+type executionContextPackageDeps struct {
+	policy      RuntimePolicy
+	workspaces  repository.WorkspaceRepository
+	steps       repository.StepRepository
+	runs        repository.RunRepository
+	tickets     repository.DecisionTicketRepository
+	resolutions repository.DecisionResolutionRepository
+	approvals   repository.ApprovalRepository
+	memoryItems repository.MemoryItemRepository
+	graph       *graphSubsystem
+	results     *resultSubsystem
+}
+
+func runtimeExecutionContextPackageDeps(o *RuntimeOrchestrator) executionContextPackageDeps {
+	if o == nil {
+		return executionContextPackageDeps{}
+	}
+	return executionContextPackageDeps{
+		policy:      o.policy,
+		workspaces:  o.workspaces,
+		steps:       o.steps,
+		runs:        o.runs,
+		tickets:     o.tickets,
+		resolutions: o.resolutions,
+		approvals:   o.approvals,
+		memoryItems: o.evidence.MemoryItems,
+		graph:       o.graphManager(),
+		results:     o.resultManager(),
+	}
 }
 
 func promoteRepairActionPackageContext(input map[string]any) {
@@ -158,7 +189,7 @@ func currentFailureFromProgressDigest(digest map[string]any) map[string]any {
 	return compactLLMContextMap(ret, 1)
 }
 
-func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) map[string]any {
+func runExecutionContextPackage(ctx context.Context, deps executionContextPackageDeps, run *runModel.Run, step *runModel.Step, workspace *workspaceModel.Workspace) map[string]any {
 	if run == nil || step == nil {
 		return nil
 	}
@@ -174,7 +205,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 		"stage":       firstNonEmptyString(stringFromMap(step.Input, stepInputKeyRuntimeStage), stringFromMap(step.Input, stepInputKeySoulStage)),
 		"stageMode":   stringFromMap(step.Input, stepInputKeyRuntimeStageMode),
 	}
-	if policy := llmOutputPolicyValues(o.policy); len(policy) > 0 {
+	if policy := llmOutputPolicyValues(deps.policy); len(policy) > 0 {
 		ret["llmOutputPolicy"] = policy
 	}
 	if mode := strings.TrimSpace(stringFromMap(step.Input, "outputMode")); mode != "" {
@@ -215,7 +246,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	wg.Add(7)
 	go func() {
 		defer wg.Done()
-		manifest = executionContextWorkspaceFileManifest(ctx, o.workspaces, run, step, workspace)
+		manifest = executionContextWorkspaceFileManifest(ctx, deps.workspaces, run, step, workspace)
 	}()
 	go func() {
 		defer wg.Done()
@@ -223,7 +254,9 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 			result = stableContext.latestAcceptedResult
 			return
 		}
-		result = o.resultManager().latestAcceptedResultContext(ctx, run)
+		if deps.results != nil {
+			result = deps.results.latestAcceptedResultContext(ctx, run)
+		}
 		acceptedResultRead = true
 	}()
 	go func() {
@@ -232,28 +265,32 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 			deliverables = stableContext.currentDeliverables
 			return
 		}
-		deliverables = o.resultManager().currentDeliverableContexts(ctx, run)
+		if deps.results != nil {
+			deliverables = deps.results.currentDeliverableContexts(ctx, run)
+		}
 		deliverablesRead = true
 	}()
 	go func() {
 		defer wg.Done()
 		if shouldReadRecentFailureHistory(step) {
-			failures = recentFailureContexts(ctx, o.steps, run, step.ID, 6)
+			failures = recentFailureContexts(ctx, deps.steps, run, step.ID, 6)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		if shouldReadProcessEvidenceTimeline(step) {
-			processTimeline, progressDigest = o.graphManager().currentRunProcessEvidenceContext(ctx, run, step.ID)
+			if deps.graph != nil {
+				processTimeline, progressDigest = deps.graph.currentRunProcessEvidenceContext(ctx, run, step.ID)
+			}
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		currentGovernance = currentRunGovernanceHistory(ctx, o.tickets, o.resolutions, o.approvals, run)
+		currentGovernance = currentRunGovernanceHistory(ctx, deps.tickets, deps.resolutions, deps.approvals, run)
 	}()
 	go func() {
 		defer wg.Done()
-		refreshedMemories, memoryRetrieval = refreshedStepInputMemoryContext(ctx, o.evidence.MemoryItems, o.runs, run, step)
+		refreshedMemories, memoryRetrieval = refreshedStepInputMemoryContext(ctx, deps.memoryItems, deps.runs, run, step)
 	}()
 	wg.Wait()
 

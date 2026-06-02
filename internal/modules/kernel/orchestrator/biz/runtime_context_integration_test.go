@@ -210,7 +210,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesInputWorkspaceManifest
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, step, nil)
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, step, nil)
 
 	manifest := mapSliceFromValue(pkg["workspaceFileManifest"])
 	if len(manifest) != 1 || manifest[0]["path"] != "README.md" {
@@ -645,7 +645,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks(t *
 		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
 	}
 
-	firstPackage := orch.runExecutionContextPackage(ctx, run, firstStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
+	firstPackage := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, firstStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 1 {
 		t.Fatalf("first result ListByWorkspace count = %d, want initial history check", got)
 	}
@@ -666,7 +666,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesEmptyHistoryChecks(t *
 			stepInputKeyExecutionContextPackage: firstPackage,
 		},
 	}
-	secondPackage := orch.runExecutionContextPackage(ctx, run, followUpStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
+	secondPackage := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, followUpStep, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 1 {
 		t.Fatalf("result ListByWorkspace count = %d, want follow-up to reuse empty history check", got)
@@ -728,7 +728,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageReusesStableFollowUpPackage(
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 
 	if got := resultRepo.listByWorkspaceCount.Load(); got != 0 {
 		t.Fatalf("result ListByWorkspace count = %d, want 0 when stable result context is inherited", got)
@@ -778,7 +778,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageDoesNotScanProvidedWorkspace
 		Input: map[string]any{stepInputKeySoulStage: soulStageExecution},
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, step, workspace)
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, step, workspace)
 
 	if got := workspaceRepo.getCount.Load(); got != 0 {
 		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
@@ -827,7 +827,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesManifestForReplanSta
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, step, workspace)
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, step, workspace)
 
 	if got := workspaceRepo.getCount.Load(); got != 0 {
 		t.Fatalf("workspace Get count = %d, want 0 when workspace is already provided", got)
@@ -1868,7 +1868,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageIncludesRecentFailureSummary
 		t.Fatalf("seed failed step: %v", err)
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, &runmodel.Step{
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/repair-context"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
@@ -2366,7 +2366,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsInitialStepFailureHisto
 		t.Fatalf("seed run: %v", err)
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, &runmodel.Step{
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/step-1"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
@@ -2418,7 +2418,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageSkipsFailureHistoryForNormal
 		t.Fatalf("seed failed step: %v", err)
 	}
 
-	pkg := orch.runExecutionContextPackage(ctx, run, &runmodel.Step{
+	pkg := runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, &runmodel.Step{
 		ID:    common.StepID(string(runID) + "/llm-after-decision"),
 		RunID: runID,
 		Kind:  llmcommon.StepKindWorkspaceExecution,
@@ -2459,7 +2459,7 @@ func TestRuntimeOrchestrator_ExecutionContextPackageBuildsIndependentContextRead
 
 	done := make(chan map[string]any, 1)
 	go func() {
-		done <- orch.runExecutionContextPackage(ctx, run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
+		done <- runExecutionContextPackage(ctx, runtimeExecutionContextPackageDeps(orch), run, step, &workspacemodel.Workspace{ID: run.WorkspaceID, DeliverableDirectory: t.TempDir()})
 	}()
 
 	seen := map[string]bool{}

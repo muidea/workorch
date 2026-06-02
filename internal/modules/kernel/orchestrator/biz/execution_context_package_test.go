@@ -65,7 +65,7 @@ func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(context.Background(), run, step, nil)
+	pkg := runExecutionContextPackage(context.Background(), runtimeExecutionContextPackageDeps(orch), run, step, nil)
 
 	goal := mapFromValue(pkg["goal"])
 	if goal["id"] != "goal-context-definitions" || goal["text"] != "Build the requested gateway behavior." {
@@ -127,7 +127,7 @@ func TestRunExecutionContextPackagePreservesExecutionContractDetails(t *testing.
 		},
 	}
 
-	pkg := orch.runExecutionContextPackage(context.Background(), run, step, nil)
+	pkg := runExecutionContextPackage(context.Background(), runtimeExecutionContextPackageDeps(orch), run, step, nil)
 
 	contract := mapFromValue(pkg["executionContract"])
 	profiles := mapFromValue(contract["profileContracts"])
