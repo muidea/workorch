@@ -681,3 +681,81 @@ func TestApplyRuntimeRepairFailureTargetScopeProjectionAddsScopedGuidanceForStat
 		t.Fatalf("repairGuidance = %+v, want two scoped verification guidance items", guidance)
 	}
 }
+
+func TestApplyRuntimeRepairTransientRetryProjectionSetsRetryContract(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairTransientRetryProjection(input, true)
+
+	if stringFromMap(input, "repairObjective") != repairObjectiveTransientExecutionRetry {
+		t.Fatalf("repairObjective = %q, want transient retry", stringFromMap(input, "repairObjective"))
+	}
+	if input["executionTimeoutRetryAllowed"] != true {
+		t.Fatalf("executionTimeoutRetryAllowed = %v, want true", input["executionTimeoutRetryAllowed"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) == 0 {
+		t.Fatalf("repairGuidance missing transient retry guidance")
+	}
+}
+
+func TestApplyRuntimeRepairCapabilityPolicyProjectionClearsAssessmentOnly(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyAssessmentOnly: true,
+		"assessmentOnlyReason":     "coverage",
+	}
+	contract := map[string]any{
+		"policies": []map[string]any{{"policyId": "policy-001"}},
+	}
+
+	applyRuntimeRepairCapabilityPolicyProjection(input, contract)
+
+	if input["capabilityPolicyRepairRequired"] != true || stringFromMap(input, "repairObjective") != "repair_capability_policy_follow_up" {
+		t.Fatalf("capability policy contract missing: %+v", input)
+	}
+	if input["stateChangingOutputRequired"] != true {
+		t.Fatalf("stateChangingOutputRequired = %v, want true", input["stateChangingOutputRequired"])
+	}
+	if len(mapFromValue(input["capabilityPolicyRepairContract"])) == 0 {
+		t.Fatalf("capabilityPolicyRepairContract missing: %+v", input)
+	}
+	for _, key := range []string{stepInputKeyAssessmentOnly, "assessmentOnlyReason"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be cleared for capability policy repair: %+v", key, input)
+		}
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 3 {
+		t.Fatalf("repairGuidance = %+v, want three capability policy guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairStateChangingCoverageTargetGuidanceRequiresCoverageGap(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+	}
+
+	applyRuntimeRepairStateChangingCoverageTargetGuidance(input)
+	if _, ok := input["repairGuidance"]; ok {
+		t.Fatalf("repairGuidance should be absent without coverage gaps: %+v", input)
+	}
+
+	input["missingDoDItems"] = []map[string]any{{"id": "dod-001"}}
+	applyRuntimeRepairStateChangingCoverageTargetGuidance(input)
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 2 {
+		t.Fatalf("repairGuidance = %+v, want two coverage target guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairUnresolvedCoverageWorkItemGuidanceAddsResolutionRules(t *testing.T) {
+	input := map[string]any{
+		"unresolvedCoverageWorkItems": []map[string]any{{
+			"id":     "cwi-001",
+			"status": "open",
+		}},
+	}
+
+	applyRuntimeRepairUnresolvedCoverageWorkItemGuidance(input)
+
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 4 {
+		t.Fatalf("repairGuidance = %+v, want four unresolved work item guidance items", guidance)
+	}
+}

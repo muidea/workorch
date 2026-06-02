@@ -582,6 +582,57 @@ func applyRuntimeRepairFailureTargetScopeProjection(
 	}
 }
 
+func applyRuntimeRepairTransientRetryProjection(input map[string]any, transientExecutionTimeout bool) {
+	if input == nil || !transientExecutionTimeout {
+		return
+	}
+	input["repairObjective"] = repairObjectiveTransientExecutionRetry
+	input["executionTimeoutRetryAllowed"] = true
+	input["repairGuidance"] = transientExecutionRetryGuidance()
+}
+
+func applyRuntimeRepairCapabilityPolicyProjection(input map[string]any, contract map[string]any) {
+	if input == nil || len(contract) == 0 {
+		return
+	}
+	input["capabilityPolicyRepairRequired"] = true
+	input["repairObjective"] = "repair_capability_policy_follow_up"
+	input["stateChangingOutputRequired"] = true
+	input["capabilityPolicyRepairContract"] = contract
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"The previous execution graph violated a declared capability usage policy after a trigger node.",
+		"Repair the graph contract directly: for each triggered policy, add a dependent mcp/tool_call that matches the policy preferredTools, or declare a structured capabilityPolicySkips item with policyId/category and a non-empty reason.",
+		"Do not return assessment-only output for this repair; the failure is a mechanical execution-graph contract violation that can continue through a corrected graph or structured skip.",
+	)
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+}
+
+func applyRuntimeRepairStateChangingCoverageTargetGuidance(input map[string]any) {
+	if input == nil || !boolValue(input["stateChangingOutputRequired"]) {
+		return
+	}
+	if len(mapSliceFromValue(input["missingDoDItems"])) == 0 && len(missingGoalCoverageFromInput(input)) == 0 {
+		return
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"When missingDoDItems or missingGoalCoverage are present, at least one patch/apply node must declare coverageTargets and each entry must match the exact missing DoD item text or goalRequirementId/item it is intended to close.",
+		"Do not return a generic skeleton patch. If a state-changing artifact cannot be tied to a concrete missing coverage target, return a real governance blocker instead.",
+	)
+}
+
+func applyRuntimeRepairUnresolvedCoverageWorkItemGuidance(input map[string]any) {
+	if input == nil || len(mapSliceFromValue(input["unresolvedCoverageWorkItems"])) == 0 {
+		return
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
+		"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
+		"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
+		"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
+	)
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -642,45 +693,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(ctx, o.steps, o.evidence, input, run, failedStep, coverageNeedsConcreteEvidence, assessmentOnlyFailedCoverageRepair)
 	applyRuntimeRepairValidationEvidenceProjection(input, coverageValidationEvidenceRepair)
 	ensureCoverageRepairTargetSet(input)
-	transientExecutionTimeout := runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr)
-	if transientExecutionTimeout {
-		input["repairObjective"] = repairObjectiveTransientExecutionRetry
-		input["executionTimeoutRetryAllowed"] = true
-		input["repairGuidance"] = transientExecutionRetryGuidance()
-	}
+	applyRuntimeRepairTransientRetryProjection(input, runtimeRepairFailureIsTransientExecutionTimeout(failedStep, execErr))
 	if !assessmentOnlyCoverageRepair && !concreteEvidenceRepair && stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
 		input["repairGuidance"] = stateChangingRepairGuidance()
 	}
-	if contract := capabilityPolicyRepairContractFromFailure(run, failedStep, execErr); len(contract) > 0 {
-		input["capabilityPolicyRepairRequired"] = true
-		input["repairObjective"] = "repair_capability_policy_follow_up"
-		input["stateChangingOutputRequired"] = true
-		input["capabilityPolicyRepairContract"] = contract
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"The previous execution graph violated a declared capability usage policy after a trigger node.",
-			"Repair the graph contract directly: for each triggered policy, add a dependent mcp/tool_call that matches the policy preferredTools, or declare a structured capabilityPolicySkips item with policyId/category and a non-empty reason.",
-			"Do not return assessment-only output for this repair; the failure is a mechanical execution-graph contract violation that can continue through a corrected graph or structured skip.",
-		)
-		delete(input, stepInputKeyAssessmentOnly)
-		delete(input, "assessmentOnlyReason")
-	}
-	if boolValue(input["stateChangingOutputRequired"]) &&
-		(len(mapSliceFromValue(input["missingDoDItems"])) > 0 || len(missingGoalCoverageFromInput(input)) > 0) {
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"When missingDoDItems or missingGoalCoverage are present, at least one patch/apply node must declare coverageTargets and each entry must match the exact missing DoD item text or goalRequirementId/item it is intended to close.",
-			"Do not return a generic skeleton patch. If a state-changing artifact cannot be tied to a concrete missing coverage target, return a real governance blocker instead.",
-		)
-	}
-	if len(mapSliceFromValue(input["unresolvedCoverageWorkItems"])) > 0 {
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Resolve unresolvedCoverageWorkItems before returning an accepted result; each item requires its missing evidence kinds or a failed/skipped assessment with reason.",
-			"For assessment_pending items, return a bounded dodAssessment that explicitly maps the item by id, sourceRequirementId, sourcePath, or targetText.",
-			"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
-			"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
-		)
-	}
+	applyRuntimeRepairCapabilityPolicyProjection(input, capabilityPolicyRepairContractFromFailure(run, failedStep, execErr))
+	applyRuntimeRepairStateChangingCoverageTargetGuidance(input)
+	applyRuntimeRepairUnresolvedCoverageWorkItemGuidance(input)
 	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
 	applyRuntimeRepairFailureScopeProjection(input, class, signature)
 	applyRuntimeRepairStructuredFailureSignalsProjection(input, structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature))
