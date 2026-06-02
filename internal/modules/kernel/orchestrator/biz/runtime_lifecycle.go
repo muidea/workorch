@@ -182,7 +182,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 				break
 			}
-			if o.knownReadableDecisionBlockerCanAutoRepair(ctx, r, ticket) {
+			if knownReadableDecisionBlockerCanAutoRepair(ctx, o.steps, o.workspaces, r, ticket) {
 				ticket.State = common.DecisionTicketStateDismissed
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err

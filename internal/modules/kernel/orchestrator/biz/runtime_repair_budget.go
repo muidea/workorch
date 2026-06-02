@@ -457,8 +457,14 @@ func coverageTargetHasCompletedActionEvidenceCandidate(target map[string]any) bo
 	return false
 }
 
-func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
-	if o == nil || run == nil || ticket == nil || o.steps == nil {
+func knownReadableDecisionBlockerCanAutoRepair(
+	ctx context.Context,
+	steps repository.StepRepository,
+	workspaces repository.WorkspaceRepository,
+	run *runModel.Run,
+	ticket *decisionmodel.Ticket,
+) bool {
+	if steps == nil || run == nil || ticket == nil {
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) || ticket.State != common.DecisionTicketStateOpen {
@@ -468,11 +474,11 @@ func (o *RuntimeOrchestrator) knownReadableDecisionBlockerCanAutoRepair(ctx cont
 		strings.TrimSpace(ticket.DecisionKind) != decisioncommon.ResolutionTypeProvideMissingInfo {
 		return false
 	}
-	step, err := o.steps.Get(ctx, ticket.StepID)
+	step, err := steps.Get(ctx, ticket.StepID)
 	if err != nil || step == nil || step.State != common.StepStateCompleted {
 		return false
 	}
-	context := enrichDecisionContextWithReadableWorkspaceResources(ctx, o.workspaces, run, nil, ticket.Context, ticket.Question, ticket.Reason)
+	context := enrichDecisionContextWithReadableWorkspaceResources(ctx, workspaces, run, nil, ticket.Context, ticket.Question, ticket.Reason)
 	return knownReadableWorkspaceResourceDecisionContext(context)
 }
 
