@@ -23,7 +23,6 @@ type repairSubsystem struct {
 
 type repairRecoveryPolicy interface {
 	shouldAttemptProviderRetry(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
-	providerRetryBudgetExhausted(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldBlockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldAttemptRuntimeRepair(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
@@ -422,7 +421,7 @@ const (
 	runtimeRecoveryActionFailRun                 runtimeRecoveryAction = "fail_run"
 )
 
-func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, policy repairRecoveryPolicy, canCreateDecisionTicket bool) runtimeRecoveryAction {
+func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, policy repairRecoveryPolicy, runtimePolicy RuntimePolicy, canCreateDecisionTicket bool) runtimeRecoveryAction {
 	if policy == nil || run == nil || failedStep == nil {
 		return runtimeRecoveryActionFailRun
 	}
@@ -432,7 +431,7 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	if policy.shouldAttemptProviderRetry(ctx, run, failedStep) {
 		return runtimeRecoveryActionProviderRetry
 	}
-	if policy.providerRetryBudgetExhausted(ctx, run, failedStep) {
+	if providerRetryBudgetExhausted(ctx, r, runtimePolicy, run, failedStep) {
 		return runtimeRecoveryActionProviderRetryExhausted
 	}
 	if isLLMProviderRuntimeFailure(run, failedStep) {
@@ -457,7 +456,7 @@ func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, r
 	if o == nil {
 		return runtimeRecoveryActionFailRun
 	}
-	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o, o.tickets != nil)
+	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o, o.policy, o.tickets != nil)
 }
 
 func (r *repairSubsystem) blockRecoveryActionFromFailedStep(
@@ -778,14 +777,14 @@ func (o *RuntimeOrchestrator) shouldAttemptProviderRetry(ctx context.Context, ru
 	return false
 }
 
-func (o *RuntimeOrchestrator) providerRetryBudgetExhausted(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil {
+func providerRetryBudgetExhausted(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, run *runModel.Run, failedStep *runModel.Step) bool {
+	if repair == nil || run == nil || failedStep == nil {
 		return false
 	}
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return o.repairManager().providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttemptsForPolicy(o.policy)
+	return repair.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttemptsForPolicy(policy)
 }
 
 func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
