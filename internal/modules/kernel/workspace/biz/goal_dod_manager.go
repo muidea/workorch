@@ -29,7 +29,7 @@ func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals reposito
 }
 
 func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.DeliverableDirectory == "" {
+	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -48,7 +48,7 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservi
 }
 
 func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservice.EnsureWorkspaceCommand) error {
-	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.DeliverableDirectory == "" {
+	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -115,7 +115,7 @@ func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.Workspac
 }
 
 func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.DefineGoalCommand) error {
-	if cmd.GoalID == "" || cmd.WorkspaceID == "" || cmd.Text == "" {
+	if cmd.GoalID == "" || cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
 	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
@@ -140,7 +140,7 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 }
 
 func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.UpdateGoalCommand) error {
-	if cmd.GoalID == "" || cmd.Text == "" {
+	if cmd.GoalID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
 	goal, err := m.goals.Get(ctx, cmd.GoalID)
@@ -171,7 +171,7 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 		return common.ErrInvalidArgument
 	}
 	for _, item := range cmd.Items {
-		if item == "" {
+		if strings.TrimSpace(item) == "" {
 			return common.ErrInvalidArgument
 		}
 	}
@@ -202,7 +202,7 @@ func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.Upd
 		return common.ErrInvalidArgument
 	}
 	for _, item := range cmd.Items {
-		if item == "" {
+		if strings.TrimSpace(item) == "" {
 			return common.ErrInvalidArgument
 		}
 	}

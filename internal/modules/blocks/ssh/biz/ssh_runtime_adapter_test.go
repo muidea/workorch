@@ -96,6 +96,40 @@ func TestRuntimeAdapterExecutesPrivateKeySSHThroughShellCommand(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterBoundsSSHCommandOutput(t *testing.T) {
+	toolsDir := t.TempDir()
+	writeExecutable(t, filepath.Join(toolsDir, "ssh"), "#!/bin/sh\nyes x | head -c 70000\n")
+	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	adapter := NewRuntimeAdapterWithTimeout(5 * time.Second)
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID: "ws-ssh",
+		RunID:       "run-ssh",
+		StepID:      "run-ssh/ssh-1",
+		Kind:        "ssh/command",
+		Input: map[string]any{
+			"host":          "example.internal",
+			"username":      "fedquery",
+			"privateKey":    "test-private-key",
+			"command":       "large-output",
+			"timeoutMillis": 5000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute ssh command: %v", err)
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if len([]byte(stdout)) != MaxCommandOutputBytes {
+		t.Fatalf("stdout bytes = %d, want %d", len([]byte(stdout)), MaxCommandOutputBytes)
+	}
+	if result.Output["outputTruncated"] != true || result.Output["stdoutTruncated"] != true {
+		t.Fatalf("output = %+v, want stdout truncation metadata", result.Output)
+	}
+	if result.Output["stdoutBytes"] != 70000 {
+		t.Fatalf("stdoutBytes = %v, want 70000", result.Output["stdoutBytes"])
+	}
+}
+
 func TestRuntimeAdapterRejectsMissingAuthentication(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	_, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{

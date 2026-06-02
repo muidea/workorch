@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 const (
@@ -64,6 +65,7 @@ type readModelDependencies struct {
 	resolutions           repository.DecisionResolutionRepository
 	approvals             repository.ApprovalRepository
 	published             []events.WorkorchEvent
+	loadConfig            func() (workorchconfig.Config, error)
 }
 
 func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
@@ -116,6 +118,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 		resolutions:           exports.Repositories.Resolutions,
 		approvals:             exports.Repositories.Approvals,
 		published:             published,
+		loadConfig:            configLoaderFromExports(exports),
 	}, nil
 }
 

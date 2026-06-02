@@ -8,7 +8,6 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports, workspace *workspacemodel.Workspace, cmd ActivateWorkspaceExecutionCommand) (*soulmodel.Soul, SoulRouting, []common.SoulID, error) {
@@ -19,7 +18,7 @@ func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports,
 	if err != nil {
 		return nil, SoulRouting{}, nil, err
 	}
-	systemDefaultSoulID, err := configuredSystemDefaultSoulID()
+	systemDefaultSoulID, err := configuredSystemDefaultSoulID(ctx)
 	if err != nil {
 		return nil, SoulRouting{}, nil, err
 	}
@@ -134,8 +133,8 @@ func appendSoulIDOnce(input []common.SoulID, value common.SoulID) []common.SoulI
 	return append(input, value)
 }
 
-func configuredSystemDefaultSoulID() (common.SoulID, error) {
-	cfg, err := workorchconfig.Current()
+func configuredSystemDefaultSoulID(ctx context.Context) (common.SoulID, error) {
+	cfg, err := loadConfigFromContext(ctx)
 	if err != nil {
 		return "", err
 	}

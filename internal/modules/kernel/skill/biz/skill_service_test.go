@@ -57,4 +57,26 @@ func TestServiceRejectsInvalidSkill(t *testing.T) {
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid skill err = %v, want invalid argument", err)
 	}
+
+	err = service.CreateSkill(ctx, skillservice.CreateSkillCommand{
+		SkillID:      common.SkillID("skill-blank-values"),
+		Name:         "   ",
+		Version:      "v1",
+		Instruction:  "Use small verified steps.",
+		TriggerRules: []string{"go"},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create blank skill name err = %v, want invalid argument", err)
+	}
+
+	err = service.CreateSkill(ctx, skillservice.CreateSkillCommand{
+		SkillID:      common.SkillID("skill-blank-trigger"),
+		Name:         "blank trigger",
+		Version:      "v1",
+		Instruction:  "Use small verified steps.",
+		TriggerRules: []string{"go", "   "},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create blank trigger skill err = %v, want invalid argument", err)
+	}
 }

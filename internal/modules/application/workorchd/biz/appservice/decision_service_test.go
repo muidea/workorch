@@ -260,6 +260,38 @@ func TestReadDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	}
 }
 
+func TestDecisionOperationsHonorRuntimeWorkspaceScope(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-scope-a", "run-decision-scope")
+
+	readSession, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new read session: %v", err)
+	}
+	wrongCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-decision-scope-b")
+	if _, err := ReadDecisionWithSession(wrongCtx, readSession, started.BlockingTicketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ReadDecisionWithSession err = %v, want not found", err)
+	}
+
+	resolveSession, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new resolve session: %v", err)
+	}
+	if _, err := ResolveDecisionWithSession(wrongCtx, resolveSession, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
+	}); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ResolveDecisionWithSession err = %v, want not found", err)
+	}
+
+	item, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if item.State != string(common.DecisionTicketStateOpen) {
+		t.Fatalf("decision state = %q, want open after wrong-scope resolve", item.State)
+	}
+}
+
 func TestReadDecisionWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-decision-autogov"

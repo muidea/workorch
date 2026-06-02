@@ -173,6 +173,14 @@ func (s *RuntimeSession) Exports() (bootstrap.Exports, error) {
 	return s.Bootstrap.Exports(), nil
 }
 
+func (s *RuntimeSession) ConfigLoader() func() (workorchconfig.Config, error) {
+	exports, err := s.Exports()
+	if err != nil {
+		return nil
+	}
+	return configLoaderFromExports(exports)
+}
+
 func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstrap.Runtime, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -281,7 +289,8 @@ func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {
 			RunService:         runtime.RunService(),
 		},
 		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub: runtime.EventHub(),
+			EventHub:   runtime.EventHub(),
+			LoadConfig: workorchconfig.Current,
 		},
 	}
 }

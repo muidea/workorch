@@ -60,6 +60,9 @@ func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, appro
 	if err != nil {
 		return Approval{}, err
 	}
+	if err := ensureApprovalInRuntimeWorkspace(ctx, item); err != nil {
+		return Approval{}, err
+	}
 	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
 	if err != nil {
 		return Approval{}, err
@@ -182,7 +185,7 @@ func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, _, err := approvalDependenciesFromSession(session)
+	service, repo, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -190,8 +193,20 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
+	if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
+		existing, err := repo.Get(ctx, id)
+		if err != nil {
+			return Approval{}, err
+		}
+		if err := ensureApprovalInRuntimeWorkspace(ctx, existing); err != nil {
+			return Approval{}, err
+		}
+	}
 	item, err := service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 	if err != nil {
+		return Approval{}, err
+	}
+	if err := ensureApprovalInRuntimeWorkspace(ctx, item); err != nil {
 		return Approval{}, err
 	}
 	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
@@ -218,7 +233,7 @@ func ApproveApprovalFromEnv(ctx context.Context, approvalID string) (Approval, e
 }
 
 func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, _, err := approvalDependenciesFromSession(session)
+	service, repo, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -226,8 +241,20 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
+	if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
+		existing, err := repo.Get(ctx, id)
+		if err != nil {
+			return Approval{}, err
+		}
+		if err := ensureApprovalInRuntimeWorkspace(ctx, existing); err != nil {
+			return Approval{}, err
+		}
+	}
 	item, err := service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
 	if err != nil {
+		return Approval{}, err
+	}
+	if err := ensureApprovalInRuntimeWorkspace(ctx, item); err != nil {
 		return Approval{}, err
 	}
 	autoGovernance, err := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
@@ -284,6 +311,9 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 		if r.err != nil {
 			return nil, r.err
 		}
+		if err := ensureApprovalInRuntimeWorkspace(ctx, r.item); err != nil {
+			return nil, err
+		}
 		if r.item.State != common.ApprovalStatePending {
 			return nil, common.ErrConflict
 		}
@@ -304,6 +334,9 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 		if err != nil {
 			return nil, err
 		}
+		if err := ensureApprovalInRuntimeWorkspace(ctx, item); err != nil {
+			return nil, err
+		}
 		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
 		if autoErr != nil {
 			return nil, autoErr
@@ -311,6 +344,17 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 		ret = append(ret, mapApproval(item, autoGovernance))
 	}
 	return ret, nil
+}
+
+func ensureApprovalInRuntimeWorkspace(ctx context.Context, item *approvalmodel.Approval) error {
+	if item == nil {
+		return common.ErrNotFound
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" || item.WorkspaceID == workspaceID {
+		return nil
+	}
+	return common.ErrNotFound
 }
 
 func RejectApprovalWithBackend(ctx context.Context, backend string, dataRoot string, approvalID string) (Approval, error) {

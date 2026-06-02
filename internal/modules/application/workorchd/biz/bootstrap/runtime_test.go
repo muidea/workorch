@@ -31,6 +31,7 @@ import (
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -43,6 +44,22 @@ type testLifecycle struct {
 }
 
 type echoRuntimeAdapter struct{}
+
+type terminatingEventHub struct {
+	terminated bool
+}
+
+func (h *terminatingEventHub) Publish(context.Context, events.Envelope) error {
+	return nil
+}
+
+func (h *terminatingEventHub) Subscribe(string, events.Handler) func() {
+	return func() {}
+}
+
+func (h *terminatingEventHub) Terminate(context.Context) {
+	h.terminated = true
+}
 
 func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
 	return runtimemodel.StepExecutionResult{
@@ -825,10 +842,10 @@ func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	}
 }
 
-func TestModulePluginLifecycleRunsAndShutsDownInOrder(t *testing.T) {
+func TestRuntimeModuleLifecycleRunsAndShutsDownInOrder(t *testing.T) {
 	var runSeq []string
 	var teardownSeq []string
-	lifecycle, err := newModulePluginLifecycle([]lifecycle{
+	lifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
 		testLifecycle{id: "first", runSeq: &runSeq, teardownSeq: &teardownSeq},
 		testLifecycle{id: "second", runSeq: &runSeq, teardownSeq: &teardownSeq},
 	})
@@ -851,26 +868,78 @@ func TestModulePluginLifecycleRunsAndShutsDownInOrder(t *testing.T) {
 	}
 }
 
-func TestModulePluginLifecycleReturnsRunAndShutdownErrors(t *testing.T) {
+func TestRuntimeModuleLifecycleReturnsRunAndShutdownErrors(t *testing.T) {
 	errRun := errors.New("run failed")
-	pluginLifecycle, err := newModulePluginLifecycle([]lifecycle{
+	runtimeLifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
 		testLifecycle{id: "broken-run", runErr: errRun},
 	})
 	if err != nil {
 		t.Fatalf("new lifecycle: %v", err)
 	}
-	if err := pluginLifecycle.Run(); err == nil || !strings.Contains(err.Error(), errRun.Error()) {
+	if err := runtimeLifecycle.Run(); err == nil || !strings.Contains(err.Error(), errRun.Error()) {
 		t.Fatalf("run err = %v, want %v", err, errRun)
 	}
 
 	errShutdown := errors.New("shutdown failed")
-	pluginLifecycle, err = newModulePluginLifecycle([]lifecycle{
+	runtimeLifecycle, err = newRuntimeModuleLifecycle([]lifecycle{
 		testLifecycle{id: "broken-shutdown", teardownErr: errShutdown},
 	})
 	if err != nil {
 		t.Fatalf("new lifecycle: %v", err)
 	}
-	if err := pluginLifecycle.Shutdown(context.Background()); !errors.Is(err, errShutdown) {
+	if err := runtimeLifecycle.Shutdown(context.Background()); !errors.Is(err, errShutdown) {
 		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
+	}
+}
+
+func TestRuntimeModuleLifecycleContinuesShutdownAfterError(t *testing.T) {
+	errShutdown := errors.New("shutdown failed")
+	var teardownSeq []string
+	runtimeLifecycle, err := newRuntimeModuleLifecycle([]lifecycle{
+		testLifecycle{id: "first", teardownSeq: &teardownSeq},
+		testLifecycle{id: "broken", teardownSeq: &teardownSeq, teardownErr: errShutdown},
+		testLifecycle{id: "last", teardownSeq: &teardownSeq},
+	})
+	if err != nil {
+		t.Fatalf("new lifecycle: %v", err)
+	}
+
+	err = runtimeLifecycle.Shutdown(context.Background())
+	if !errors.Is(err, errShutdown) {
+		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
+	}
+	if got, want := strings.Join(teardownSeq, ","), "last,broken,first"; got != want {
+		t.Fatalf("teardown seq = %s, want %s", got, want)
+	}
+	if runtimeLifecycle.modules != nil {
+		t.Fatal("shutdown did not clear lifecycle modules")
+	}
+}
+
+func TestRuntimeShutdownTerminatesHubAfterTeardownError(t *testing.T) {
+	errShutdown := errors.New("shutdown failed")
+	var teardownSeq []string
+	hub := &terminatingEventHub{}
+	rt := &Runtime{
+		modules: []lifecycle{
+			testLifecycle{id: "first", teardownSeq: &teardownSeq},
+			testLifecycle{id: "broken", teardownSeq: &teardownSeq, teardownErr: errShutdown},
+			testLifecycle{id: "last", teardownSeq: &teardownSeq},
+		},
+		exports: Exports{Infrastructure: InfrastructureExports{EventHub: hub}},
+	}
+
+	err := rt.Shutdown(context.Background())
+	if !errors.Is(err, errShutdown) {
+		t.Fatalf("shutdown err = %v, want %v", err, errShutdown)
+	}
+	if got, want := strings.Join(teardownSeq, ","), "last,broken,first"; got != want {
+		t.Fatalf("teardown seq = %s, want %s", got, want)
+	}
+	if rt.modules != nil {
+		t.Fatal("runtime shutdown did not clear modules")
+	}
+	if !hub.terminated {
+		t.Fatal("runtime shutdown did not terminate event hub after teardown error")
 	}
 }

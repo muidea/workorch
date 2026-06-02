@@ -137,6 +137,36 @@ func TestReadApprovalWithBackendReturnsRejectedApproval(t *testing.T) {
 	}
 }
 
+func TestApprovalOperationsHonorRuntimeWorkspaceScope(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareApprovalRun(t, dataRoot, "ws-approval-scope-a", "run-approval-scope")
+
+	readSession, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new read session: %v", err)
+	}
+	wrongCtx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-approval-scope-b")
+	if _, err := ReadApprovalWithSession(wrongCtx, readSession, started.BlockingApprovalID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ReadApprovalWithSession err = %v, want not found", err)
+	}
+
+	approveSession, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("new approve session: %v", err)
+	}
+	if _, err := ApproveApprovalWithSession(wrongCtx, approveSession, started.BlockingApprovalID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("ApproveApprovalWithSession err = %v, want not found", err)
+	}
+
+	item, err := ReadApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("ReadApprovalWithBackend: %v", err)
+	}
+	if item.State != string(common.ApprovalStatePending) {
+		t.Fatalf("approval state = %q, want pending after wrong-scope approve", item.State)
+	}
+}
+
 func TestReadApprovalWithBackendIncludesAutoGovernanceSummary(t *testing.T) {
 	dataRoot := t.TempDir()
 	workspaceID := "ws-approval-autogov"

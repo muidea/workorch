@@ -263,6 +263,7 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return err
 	}
+	ctx = contextWithConfigLoader(ctx, deps.loadConfig)
 	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return err
@@ -276,6 +277,7 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx = contextWithConfigLoader(ctx, deps.loadConfig)
 	item, err := getRunFromRepository(ctx, deps.runs, runID)
 	if err != nil {
 		return nil, nil, err
@@ -537,7 +539,7 @@ func compressedContextForLoadedRun(ctx context.Context, deps readModelDependenci
 	if item == nil || item.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	compressed := compressedContextForRunStart(item)
+	compressed := compressedContextForRunStart(ctx, item)
 	if compressed != nil {
 		return compressed, nil
 	}
@@ -555,11 +557,11 @@ func compressedContextForLoadedRun(ctx context.Context, deps readModelDependenci
 	return compressedContextMap(compressedContextFromRunSnapshot(snapshot)), nil
 }
 
-func compressedContextForRunStart(item *runmodel.Run) map[string]any {
+func compressedContextForRunStart(ctx context.Context, item *runmodel.Run) map[string]any {
 	if item == nil || item.State != common.RunStateCreated || item.ID == "" || item.WorkspaceID == "" {
 		return nil
 	}
-	language := runDialogLanguage(item)
+	language := runDialogLanguage(ctx, item)
 	return compressedContextMap(CompressedContext{
 		Version:          "workorch.compressedContext.v1",
 		Mode:             "deterministic_recovery_summary",
@@ -589,7 +591,7 @@ func compressedContextForBlockedRunResume(ctx context.Context, deps readModelDep
 	if item == nil || item.ID == "" || item.WorkspaceID == "" {
 		return nil, nil
 	}
-	language := runDialogLanguage(item)
+	language := runDialogLanguage(ctx, item)
 	var blocker ProgressBlocker
 	recovery := RecoveryPlan{
 		Mode:       "continue",
@@ -790,14 +792,14 @@ func mapRun(item *runmodel.Run) Run {
 	}
 }
 
-func runDialogLanguage(item *runmodel.Run) string {
+func runDialogLanguage(ctx context.Context, item *runmodel.Run) string {
 	if item == nil || item.ExecutionContext == nil {
-		return defaultDialogLanguage()
+		return defaultDialogLanguageFromContext(ctx)
 	}
 	if lang, ok := item.ExecutionContext["dialogLanguage"].(string); ok {
 		if normalized := languageNameFromLocale(lang); normalized != "" {
 			return normalized
 		}
 	}
-	return defaultDialogLanguage()
+	return defaultDialogLanguageFromContext(ctx)
 }

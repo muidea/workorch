@@ -4,6 +4,7 @@ import (
 	"context"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -24,5 +25,8 @@ func New(deps Dependencies) *Module {
 }
 
 func (m *Module) ListEvents(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	if m == nil || m.listEvents == nil {
+		return nil, common.ErrInvalidArgument
+	}
 	return m.listEvents(ctx, query)
 }

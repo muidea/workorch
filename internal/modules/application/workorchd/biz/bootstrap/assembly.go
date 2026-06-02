@@ -242,7 +242,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		runModule,
 		governanceModule,
 	}
-	moduleLifecycle, err := newModulePluginLifecycle(modules)
+	moduleLifecycle, err := newRuntimeModuleLifecycle(modules)
 	mustSetup("module-lifecycle", err)
 	mustSetup("module-lifecycle", moduleLifecycle.Run())
 
@@ -286,7 +286,8 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 				RunService:         runModule.Service(),
 			},
 			Infrastructure: InfrastructureExports{
-				EventHub: eventHub,
+				EventHub:   eventHub,
+				LoadConfig: workorchconfig.Current,
 			},
 		},
 		modules:         modules,

@@ -70,19 +70,21 @@ type WorkspaceSetupDraftGenerator interface {
 	GenerateWorkspaceSetupDraft(context.Context, WorkspaceSetupDraftGenerationRequest) (WorkspaceSetupDraft, error)
 }
 
-type defaultWorkspaceSetupDraftGenerator struct{}
+type defaultWorkspaceSetupDraftGenerator struct {
+	loadConfig func() (workorchconfig.Config, error)
+}
 
 func GenerateWorkspaceSetupDraftWithBackend(ctx context.Context, backend string, dataRoot string, cmd WorkspaceSetupDraftGenerationCommand) (WorkspaceSetupDraft, error) {
 	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
 	if err != nil {
 		return WorkspaceSetupDraft{}, err
 	}
-	return GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, defaultWorkspaceSetupDraftGenerator{})
+	return GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, nil)
 }
 
 func GenerateWorkspaceSetupDraftWithSession(ctx context.Context, session *RuntimeSession, cmd WorkspaceSetupDraftGenerationCommand, generator WorkspaceSetupDraftGenerator) (ret WorkspaceSetupDraft, err error) {
 	if generator == nil {
-		generator = defaultWorkspaceSetupDraftGenerator{}
+		generator = defaultWorkspaceSetupDraftGenerator{loadConfig: session.ConfigLoader()}
 	}
 	request, err := BuildWorkspaceSetupDraftGenerationRequest(ctx, session, cmd)
 	if err != nil {
@@ -205,8 +207,14 @@ func WorkspaceSetupDraftRevisionBaseline(draft WorkspaceSetupDraft) WorkspaceSet
 	return NormalizeWorkspaceSetupDraft(draft)
 }
 
-func (defaultWorkspaceSetupDraftGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, request WorkspaceSetupDraftGenerationRequest) (WorkspaceSetupDraft, error) {
-	cfg, err := workorchconfig.Current()
+func (g defaultWorkspaceSetupDraftGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, request WorkspaceSetupDraftGenerationRequest) (WorkspaceSetupDraft, error) {
+	loadConfig := g.loadConfig
+	if loadConfig == nil {
+		loadConfig = func() (workorchconfig.Config, error) {
+			return workorchconfig.Config{}, nil
+		}
+	}
+	cfg, err := loadConfig()
 	if err != nil {
 		return WorkspaceSetupDraft{}, err
 	}

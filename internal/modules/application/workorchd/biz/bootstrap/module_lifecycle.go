@@ -2,87 +2,63 @@ package bootstrap
 
 import (
 	"context"
-
-	cd "github.com/muidea/magicCommon/def"
-	plugincommon "github.com/muidea/magicCommon/framework/plugin/common"
+	"errors"
+	"fmt"
 )
 
-type modulePluginLifecycle struct {
-	manager *plugincommon.PluginMgr
-	modules []*modulePluginAdapter
+type runtimeModuleLifecycle struct {
+	modules []lifecycle
 }
 
-type modulePluginAdapter struct {
-	module lifecycle
-	ctx    context.Context
-}
-
-func newModulePluginLifecycle(modules []lifecycle) (*modulePluginLifecycle, error) {
-	manager := plugincommon.NewPluginMgr("workorch-runtime-module")
-	ret := &modulePluginLifecycle{manager: manager}
+func newRuntimeModuleLifecycle(modules []lifecycle) (*runtimeModuleLifecycle, error) {
+	ret := &runtimeModuleLifecycle{}
+	seen := map[string]struct{}{}
 	for _, item := range modules {
-		adapter := &modulePluginAdapter{module: item}
-		if err := manager.Register(adapter); err != nil {
-			return nil, err
+		if item == nil {
+			continue
 		}
-		ret.modules = append(ret.modules, adapter)
+		id := item.ID()
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf("duplicate module id: %s", id)
+		}
+		seen[id] = struct{}{}
+		ret.modules = append(ret.modules, item)
 	}
 	return ret, nil
 }
 
-func (m *modulePluginLifecycle) Run() error {
-	if m == nil || m.manager == nil {
-		return nil
-	}
-	if err := m.manager.Run(context.Background()); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *modulePluginLifecycle) Shutdown(ctx context.Context) error {
+func (m *runtimeModuleLifecycle) Run() error {
 	if m == nil {
 		return nil
 	}
-	for idx := len(m.modules) - 1; idx >= 0; idx-- {
-		if err := m.modules[idx].shutdown(ctx); err != nil {
+	for _, item := range m.modules {
+		if item == nil {
+			continue
+		}
+		if err := item.Run(); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (m *runtimeModuleLifecycle) Shutdown(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	var shutdownErr error
+	for idx := len(m.modules) - 1; idx >= 0; idx-- {
+		item := m.modules[idx]
+		if item == nil {
+			continue
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := item.Teardown(ctx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+		}
+	}
 	m.modules = nil
-	return nil
-}
-
-func (m *modulePluginAdapter) ID() string {
-	if m == nil || m.module == nil {
-		return ""
-	}
-	return m.module.ID()
-}
-
-func (m *modulePluginAdapter) Run(_ context.Context) *cd.Error {
-	if m == nil || m.module == nil {
-		return nil
-	}
-	if err := m.module.Run(); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	return nil
-}
-
-func (m *modulePluginAdapter) Teardown(ctx context.Context) *cd.Error {
-	if err := m.shutdown(ctx); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
-	}
-	return nil
-}
-
-func (m *modulePluginAdapter) shutdown(ctx context.Context) error {
-	if m == nil || m.module == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return m.module.Teardown(ctx)
+	return shutdownErr
 }

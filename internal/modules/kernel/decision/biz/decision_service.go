@@ -25,7 +25,7 @@ func NewService(tickets repository.DecisionTicketRepository, resolutions reposit
 }
 
 func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTicketCommand) error {
-	if cmd.TicketID == "" || cmd.RunID == "" || cmd.Reason == "" {
+	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -63,7 +63,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 }
 
 func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTicketCommand) error {
-	if cmd.TicketID == "" || cmd.RunID == "" || cmd.Reason == "" {
+	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
 

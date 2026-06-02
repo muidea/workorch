@@ -2246,6 +2246,71 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 	assertSoulRoutingBinding(t, routingBindings, SoulBindingStageValidation, "soul-validation", "run_stage_override")
 }
 
+func TestActivateWorkspaceExecutionUsesInjectedConfigLoader(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "memory", "")
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
+	}
+	exports.Infrastructure.LoadConfig = func() (workorchconfig.Config, error) {
+		return workorchconfig.Config{
+			Server:  workorchconfig.ServerConfig{DefaultDialogLanguage: "zh-CN"},
+			Runtime: workorchconfig.RuntimeConfig{DefaultSoulID: "soul-injected-default"},
+		}, nil
+	}
+	if err := exports.Repositories.Souls.Create(ctx, &soulmodel.Soul{
+		ID:     "soul-injected-default",
+		Name:   "Injected Default",
+		SoulMD: "# Injected Default",
+	}); err != nil {
+		t.Fatalf("create soul: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-injected-config")
+	goalID := common.GoalID("goal-injected-config")
+	dodID := common.DoDID("dod-injected-config")
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:    workspaceID,
+		Title: "injected config workspace",
+		State: common.WorkspaceStateReady,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := exports.Repositories.Goals.Create(ctx, &workspacemodel.Goal{
+		ID:          goalID,
+		WorkspaceID: workspaceID,
+		Text:        "use injected config",
+	}); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if err := exports.Repositories.DoDs.Create(ctx, &workspacemodel.DoD{
+		ID:          dodID,
+		WorkspaceID: workspaceID,
+		Items:       []string{"use injected config"},
+		State:       common.DoDStateReady,
+	}); err != nil {
+		t.Fatalf("create dod: %v", err)
+	}
+	borrowed, err := NewRuntimeSessionFromExports(exports)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithSession(ctx, borrowed, string(workspaceID), ActivateWorkspaceExecutionCommand{
+		GoalID: string(goalID),
+		DoDID:  string(dodID),
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
+	}
+	if item.Run.ExecutionContext["dialogLanguage"] != "zh-CN" {
+		t.Fatalf("dialogLanguage = %q, want zh-CN", item.Run.ExecutionContext["dialogLanguage"])
+	}
+	routing := contextMapFromValue(t, item.Run.ExecutionContext["soulRouting"])
+	if routing["effectiveDefaultSoulId"] != "soul-injected-default" {
+		t.Fatalf("soulRouting = %+v, want injected default soul", routing)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()

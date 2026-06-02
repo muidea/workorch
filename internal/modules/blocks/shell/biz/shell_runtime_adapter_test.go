@@ -152,6 +152,33 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepBoundsCommandOutput(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "yes x | head -c 70000"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v", err)
+	}
+	stdout, _ := result.Output["stdout"].(string)
+	if len([]byte(stdout)) != MaxCommandOutputBytes {
+		t.Fatalf("stdout bytes = %d, want %d", len([]byte(stdout)), MaxCommandOutputBytes)
+	}
+	if result.Output["outputTruncated"] != true || result.Output["stdoutTruncated"] != true {
+		t.Fatalf("output = %+v, want stdout truncation metadata", result.Output)
+	}
+	if result.Output["stdoutBytes"] != 70000 {
+		t.Fatalf("stdoutBytes = %v, want 70000", result.Output["stdoutBytes"])
+	}
+}
+
 func TestRuntimeAdapterAppliesConfiguredZeroWorkEvidencePolicy(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

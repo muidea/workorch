@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/repository/memory"
@@ -57,6 +58,16 @@ func TestServiceCreateAndListServer(t *testing.T) {
 	if capabilities[0].DisplayName == "" || !capabilities[0].Enabled {
 		t.Fatalf("default capability = %+v, want display name and enabled", capabilities[0])
 	}
+	var toolCapabilityDisplayName string
+	for _, capability := range capabilities {
+		if capability.Kind == mcpmodel.CapabilityKindTool && capability.Name == "repo.summary" {
+			toolCapabilityDisplayName = capability.DisplayName
+			break
+		}
+	}
+	if toolCapabilityDisplayName != "工具 repo.summary" {
+		t.Fatalf("tool capability display name = %q, want generic display name", toolCapabilityDisplayName)
+	}
 }
 
 func TestServiceRejectsInvalidServer(t *testing.T) {
@@ -72,6 +83,15 @@ func TestServiceRejectsInvalidServer(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create invalid mcp server err = %v, want invalid argument", err)
+	}
+
+	err = service.CreateServer(ctx, mcpservice.CreateServerCommand{
+		ServerID:  common.MCPServerID("mcp-blank-name"),
+		Name:      "   ",
+		Transport: "stdio",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create blank mcp server name err = %v, want invalid argument", err)
 	}
 
 	err = service.CreateServer(ctx, mcpservice.CreateServerCommand{

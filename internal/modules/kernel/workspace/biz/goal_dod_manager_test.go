@@ -53,12 +53,51 @@ func TestGoalDoDManager_CreateWorkspace_ValidateArguments(t *testing.T) {
 	tests := []workspaceservice.CreateWorkspaceCommand{
 		{WorkspaceID: "", Title: "ok", DeliverableDirectory: "/tmp/workorch/ws-1"},
 		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "", DeliverableDirectory: "/tmp/workorch/ws-1"},
+		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "   ", DeliverableDirectory: "/tmp/workorch/ws-1"},
 		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "ok", DeliverableDirectory: ""},
+		{WorkspaceID: common.WorkspaceID("ws-1"), Title: "ok", DeliverableDirectory: "   "},
 	}
 	for _, tt := range tests {
 		if err := manager.CreateWorkspace(ctx, tt); !errors.Is(err, common.ErrInvalidArgument) {
 			t.Fatalf("cmd %#v err = %v, want invalid argument", tt, err)
 		}
+	}
+}
+
+func TestGoalDoDManager_DefineGoalAndDoDRejectBlankText(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	manager := NewGoalDoDManager(workspaceRepo, memory.NewGoalRepository(), memory.NewDoDRepository(), nil)
+	workspaceID := common.WorkspaceID("ws-blank-definition")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: "/tmp/ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{
+		GoalID:      "goal-blank",
+		WorkspaceID: workspaceID,
+		Text:        "   ",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("define blank goal err = %v, want invalid argument", err)
+	}
+	if err := manager.UpdateGoal(ctx, workspaceservice.UpdateGoalCommand{
+		GoalID: "goal-blank",
+		Text:   "   ",
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("update blank goal err = %v, want invalid argument", err)
+	}
+	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{
+		DoDID:       "dod-blank",
+		WorkspaceID: workspaceID,
+		Items:       []string{"valid item", "   "},
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("define blank dod item err = %v, want invalid argument", err)
+	}
+	if err := manager.UpdateDoD(ctx, workspaceservice.UpdateDoDCommand{
+		DoDID: "dod-blank",
+		Items: []string{"   "},
+	}); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("update blank dod item err = %v, want invalid argument", err)
 	}
 }
 

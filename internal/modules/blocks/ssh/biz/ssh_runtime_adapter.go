@@ -19,6 +19,8 @@ type RuntimeAdapter struct {
 	timeout time.Duration
 }
 
+const MaxCommandOutputBytes = 64 * 1024
+
 func NewRuntimeAdapter() *RuntimeAdapter {
 	return &RuntimeAdapter{timeout: 30 * time.Second}
 }
@@ -40,7 +42,7 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	defer cancel()
 
 	startedAt := time.Now().UTC()
-	stdout, stderr, exitCode, err := executeSSHCommand(runCtx, spec)
+	result, err := executeSSHCommand(runCtx, spec)
 	duration := time.Since(startedAt)
 	output := map[string]any{
 		"status":         "completed",
@@ -48,12 +50,20 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		"port":           spec.Port,
 		"username":       spec.Username,
 		"command":        spec.Command,
-		"stdout":         stdout,
-		"stderr":         stderr,
-		"exitCode":       exitCode,
+		"stdout":         result.Stdout,
+		"stderr":         result.Stderr,
+		"exitCode":       result.ExitCode,
 		"durationMillis": duration.Milliseconds(),
 		"timeoutMillis":  spec.Timeout.Milliseconds(),
 		"authMethod":     spec.authMethod(),
+	}
+	if result.StdoutTruncated || result.StderrTruncated {
+		output["outputTruncated"] = true
+		output["stdoutTruncated"] = result.StdoutTruncated
+		output["stderrTruncated"] = result.StderrTruncated
+		output["stdoutBytes"] = result.StdoutBytes
+		output["stderrBytes"] = result.StderrBytes
+		output["maxOutputBytes"] = MaxCommandOutputBytes
 	}
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
@@ -214,27 +224,94 @@ func numericInput(input any) (int64, bool, error) {
 	}
 }
 
-func executeSSHCommand(ctx context.Context, spec sshCommandSpec) (string, string, int, error) {
+type sshCommandResult struct {
+	Stdout          string
+	Stderr          string
+	ExitCode        int
+	StdoutTruncated bool
+	StderrTruncated bool
+	StdoutBytes     int
+	StderrBytes     int
+}
+
+func executeSSHCommand(ctx context.Context, spec sshCommandSpec) (sshCommandResult, error) {
 	commandName, args, cleanup, env, err := sshShellCommand(spec)
 	if err != nil {
-		return "", "", 0, err
+		return sshCommandResult{}, err
 	}
 	defer cleanup()
 	cmd := exec.CommandContext(ctx, commandName, args...)
 	cmd.Env = env
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newLimitedOutputBuffer(MaxCommandOutputBytes)
+	stderr := newLimitedOutputBuffer(MaxCommandOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err = cmd.Run()
 	exitCode := 0
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
 	}
-	if ctx.Err() != nil {
-		return stdout.String(), stderr.String(), exitCode, ctx.Err()
+	result := sshCommandResult{
+		Stdout:          stdout.String(),
+		Stderr:          stderr.String(),
+		ExitCode:        exitCode,
+		StdoutTruncated: stdout.Truncated(),
+		StderrTruncated: stderr.Truncated(),
+		StdoutBytes:     stdout.TotalBytes(),
+		StderrBytes:     stderr.TotalBytes(),
 	}
-	return stdout.String(), stderr.String(), exitCode, err
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	return result, err
+}
+
+type limitedOutputBuffer struct {
+	limit int
+	total int
+	buf   bytes.Buffer
+}
+
+func newLimitedOutputBuffer(limit int) *limitedOutputBuffer {
+	if limit <= 0 {
+		limit = MaxCommandOutputBytes
+	}
+	return &limitedOutputBuffer{limit: limit}
+}
+
+func (b *limitedOutputBuffer) Write(p []byte) (int, error) {
+	if b == nil {
+		return len(p), nil
+	}
+	written := len(p)
+	b.total += len(p)
+	if b.buf.Len() >= b.limit {
+		return written, nil
+	}
+	remaining := b.limit - b.buf.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	_, _ = b.buf.Write(p)
+	return written, nil
+}
+
+func (b *limitedOutputBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	return b.buf.String()
+}
+
+func (b *limitedOutputBuffer) Truncated() bool {
+	return b != nil && b.total > b.limit
+}
+
+func (b *limitedOutputBuffer) TotalBytes() int {
+	if b == nil {
+		return 0
+	}
+	return b.total
 }
 
 func sshShellCommand(spec sshCommandSpec) (string, []string, func(), []string, error) {

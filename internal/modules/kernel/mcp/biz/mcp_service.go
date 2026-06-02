@@ -98,7 +98,7 @@ func (s *Service) ListCapabilities(ctx context.Context, query mcpservice.Capabil
 }
 
 func validateServerCommand(cmd mcpservice.CreateServerCommand) error {
-	if cmd.ServerID == "" || cmd.Name == "" || cmd.Transport == "" {
+	if cmd.ServerID == "" || strings.TrimSpace(cmd.Name) == "" || strings.TrimSpace(cmd.Transport) == "" {
 		return common.ErrInvalidArgument
 	}
 	if cmd.TimeoutMillis < 0 {
@@ -219,14 +219,6 @@ func DefaultCapabilityID(serverID common.MCPServerID, kind string, name string) 
 }
 
 func defaultCapabilityDisplayName(kind string, name string) string {
-	switch name {
-	case "repo.summary":
-		return "仓库摘要"
-	case "workspace://acceptance":
-		return "工作空间验收资料"
-	case "workorch.acceptance":
-		return "验收提示词"
-	}
 	switch kind {
 	case mcpmodel.CapabilityKindTool:
 		return "工具 " + name

@@ -204,7 +204,7 @@ func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing
 }
 
 func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *testing.T) {
-	compressed := compressedContextForRunStart(&runmodel.Run{
+	compressed := compressedContextForRunStart(context.Background(), &runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
 		State:       common.RunStateCreated,
@@ -221,7 +221,7 @@ func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *test
 	if compressed["currentMilestone"] != "execution_steps" {
 		t.Fatalf("currentMilestone = %v, want execution_steps", compressed["currentMilestone"])
 	}
-	if compressedContextForRunStart(&runmodel.Run{
+	if compressedContextForRunStart(context.Background(), &runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
 		State:       common.RunStateRunning,

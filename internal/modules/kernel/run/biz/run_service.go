@@ -183,6 +183,17 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
 			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
+	} else if s.runs != nil {
+		loaded, err := s.runs.Get(ctx, cmd.RunID)
+		if err != nil {
+			return err
+		}
+		if loaded.State == common.RunStateRunning {
+			return common.ErrConflict
+		}
+		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
+			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, loaded, cloneExecutionContext(cmd.ExecutionContextPatch))
+		}
 	}
 	if len(cmd.ExecutionContextPatch) > 0 {
 		if patcher, ok := s.orchestrator.(ExecutionContextPatchOrchestrator); ok {
@@ -208,8 +219,7 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCom
 		return nil
 	}
 	if r.State != common.RunStateBlockedOnDecision &&
-		r.State != common.RunStateBlockedOnApproval &&
-		r.State != common.RunStateRunning {
+		r.State != common.RunStateBlockedOnApproval {
 		return common.ErrConflict
 	}
 	return s.ResumeRun(ctx, cmd)

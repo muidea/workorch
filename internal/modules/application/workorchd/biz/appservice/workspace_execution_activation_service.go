@@ -27,7 +27,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type ActivateWorkspaceExecutionCommand struct {
@@ -56,6 +55,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
+	ctx = contextWithConfigLoader(ctx, configLoaderFromExports(exports))
 	if exports.Services.RunService == nil ||
 		exports.Repositories.Workspaces == nil ||
 		exports.Repositories.Goals == nil ||
@@ -635,7 +635,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	}
 	dialogLanguage := languageNameFromLocale(cmd.DialogLanguage)
 	if dialogLanguage == "" {
-		dialogLanguage = defaultDialogLanguage()
+		dialogLanguage = defaultDialogLanguageFromContext(ctx)
 	}
 	if dialogLanguage != "" {
 		contextData["dialogLanguage"] = dialogLanguage
@@ -1458,7 +1458,7 @@ func activationMemoryHasTag(item *memorymodel.MemoryItem, tag string) bool {
 func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
 	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
 }, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, bool) {
-	cfg, err := workorchconfig.Current()
+	cfg, err := loadConfigFromContext(ctx)
 	if err != nil {
 		return nil, map[string]any{
 			"policy": "semantic_vector_search",
@@ -2463,7 +2463,7 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		if err != nil {
 			return "", err
 		}
-		createExecutionContext := executionContextForCreatedWorkspaceRun(runID, workspaceID, goalID, dodID, executionContext, priority)
+		createExecutionContext := executionContextForCreatedWorkspaceRun(ctx, runID, workspaceID, goalID, dodID, executionContext, priority)
 		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
 			RunID:              runID,
 			WorkspaceID:        workspaceID,
@@ -2744,7 +2744,7 @@ func traceFloatValue(value any) float64 {
 	}
 }
 
-func executionContextForCreatedWorkspaceRun(runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) map[string]any {
+func executionContextForCreatedWorkspaceRun(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) map[string]any {
 	createdRun := &runmodel.Run{
 		ID:               runID,
 		WorkspaceID:      workspaceID,
@@ -2759,7 +2759,7 @@ func executionContextForCreatedWorkspaceRun(runID common.RunID, workspaceID comm
 	if ret == nil {
 		ret = map[string]any{}
 	}
-	if compressed := compressedContextForRunStart(createdRun); compressed != nil {
+	if compressed := compressedContextForRunStart(ctx, createdRun); compressed != nil {
 		ret["compressedContext"] = compressed
 	}
 	return ret

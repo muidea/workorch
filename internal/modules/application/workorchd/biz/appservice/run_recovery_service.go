@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -26,6 +27,9 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 		exports.Repositories.Steps == nil ||
 		exports.Repositories.RuntimeCheckpoints == nil ||
 		exports.Repositories.Workspaces == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	if exports.Services.RunService == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	if err := recoverTerminalActiveWorkspacePointers(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs); err != nil {
@@ -52,10 +56,11 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 		if !isStuckRunningRunCandidate(ctx, exports.Repositories.RuntimeCheckpoints, item) {
 			continue
 		}
-		if err := failStuckRunningRun(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs, item); err != nil {
+		failed, err := failStuckRunningRun(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs, exports.Services.RunService, item)
+		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, mapRun(item))
+		ret = append(ret, mapRun(failed))
 	}
 	return ret, nil
 }
@@ -187,30 +192,31 @@ func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces work
 	return nil
 }
 
-func failStuckRunningRun(ctx context.Context, workspaces workspaceGetterUpdater, runs runUpdater, item *runmodel.Run) error {
-	if workspaces == nil || runs == nil || item == nil {
-		return common.ErrInvalidArgument
+func failStuckRunningRun(ctx context.Context, workspaces workspaceGetterUpdater, runs repository.RunRepository, runService runmodule.Service, item *runmodel.Run) (*runmodel.Run, error) {
+	if workspaces == nil || runs == nil || runService == nil || item == nil {
+		return nil, common.ErrInvalidArgument
 	}
-	item.State = common.RunStateFailed
-	item.BlockingTicketID = ""
-	item.BlockingApprovalID = ""
-	item.FailureReason = stuckRunningRunFailureReason
-	if err := runs.Update(ctx, item); err != nil {
-		return err
+	runCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	if err := runService.FailRun(runCtx, runmodule.FailRunCommand{RunID: item.ID, Reason: stuckRunningRunFailureReason}); err != nil {
+		return nil, err
 	}
-	workspace, err := workspaces.Get(ctx, item.WorkspaceID)
+	failed, err := getRunFromRepository(runCtx, runs, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := workspaces.Get(ctx, failed.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return nil
+			return failed, nil
 		}
-		return err
+		return nil, err
 	}
-	if workspace == nil || workspace.ActiveRunID != item.ID {
-		return nil
+	if workspace == nil || workspace.ActiveRunID != failed.ID {
+		return failed, nil
 	}
 	workspace.ActiveRunID = ""
-	workspace.State = recoveredWorkspaceStateForTerminalRun(item.State)
-	return workspaces.Update(ctx, workspace)
+	workspace.State = recoveredWorkspaceStateForTerminalRun(failed.State)
+	return failed, workspaces.Update(ctx, workspace)
 }
 
 func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Run, error) {
@@ -247,10 +253,6 @@ type workspaceListerUpdater interface {
 type workspaceGetterUpdater interface {
 	Get(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error)
 	Update(context.Context, *workspacemodel.Workspace) error
-}
-
-type runUpdater interface {
-	Update(context.Context, *runmodel.Run) error
 }
 
 func recoveredWorkspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {

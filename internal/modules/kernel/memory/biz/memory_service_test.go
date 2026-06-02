@@ -84,6 +84,18 @@ func TestServiceRejectsExecutionMemoryWithoutSource(t *testing.T) {
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create execution memory without source err = %v, want invalid argument", err)
 	}
+
+	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-blank-source"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		SourceType:  modulecommon.MemorySourceRun,
+		SourceRef:   "   ",
+		MemoryType:  modulecommon.MemoryTypeRunSummary,
+		Summary:     "source ref is blank",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create execution memory with blank source err = %v, want invalid argument", err)
+	}
 }
 
 func TestServiceRejectsUnsupportedMemoryType(t *testing.T) {
@@ -179,5 +191,33 @@ func TestServiceRejectsSensitiveMemoryText(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("create sensitive memory err = %v, want invalid argument", err)
+	}
+}
+
+func TestServiceRejectsBlankMemoryTextAndTags(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMemoryItemRepository())
+
+	err := service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-blank-summary"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		SourceType:  modulecommon.MemorySourceUser,
+		MemoryType:  modulecommon.MemoryTypeProjectContext,
+		Summary:     "   ",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create blank summary memory err = %v, want invalid argument", err)
+	}
+
+	err = service.CreateMemoryItem(ctx, memoryservice.CreateMemoryItemCommand{
+		MemoryID:    common.MemoryID("memory-blank-tag"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		SourceType:  modulecommon.MemorySourceUser,
+		MemoryType:  modulecommon.MemoryTypeProjectContext,
+		Summary:     "workspace memory",
+		Tags:        []string{"workspace", "   "},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("create blank tag memory err = %v, want invalid argument", err)
 	}
 }

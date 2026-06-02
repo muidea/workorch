@@ -82,6 +82,7 @@ func TestService_CreateApproval_ValidateArguments(t *testing.T) {
 
 	tests := []approvalservice.CreateApprovalCommand{
 		{ApprovalID: "", RunID: common.RunID("run-1"), Reason: "need human approval"},
+		{ApprovalID: common.ApprovalID("approval-1"), WorkspaceID: "", RunID: common.RunID("run-1"), Reason: "need human approval"},
 		{ApprovalID: common.ApprovalID("approval-1"), RunID: "", Reason: "need human approval"},
 		{ApprovalID: common.ApprovalID("approval-1"), RunID: common.RunID("run-1"), Reason: ""},
 	}

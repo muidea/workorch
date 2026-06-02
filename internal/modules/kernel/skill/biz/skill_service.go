@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"strings"
 
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
@@ -43,7 +44,10 @@ func (s *Service) ListSkills(ctx context.Context) ([]*skillmodel.Skill, error) {
 }
 
 func validateSkillCommand(cmd skillservice.CreateSkillCommand) error {
-	if cmd.SkillID == "" || cmd.Name == "" || cmd.Version == "" || cmd.Instruction == "" {
+	if cmd.SkillID == "" ||
+		strings.TrimSpace(cmd.Name) == "" ||
+		strings.TrimSpace(cmd.Version) == "" ||
+		strings.TrimSpace(cmd.Instruction) == "" {
 		return common.ErrInvalidArgument
 	}
 	if hasBlank(cmd.TriggerRules) ||
@@ -75,7 +79,7 @@ func skillFromCommand(cmd skillservice.CreateSkillCommand) *skillmodel.Skill {
 
 func hasBlank(values []string) bool {
 	for _, value := range values {
-		if value == "" {
+		if strings.TrimSpace(value) == "" {
 			return true
 		}
 	}

@@ -34,7 +34,7 @@ func (s *Service) Startup(ctx context.Context, serviceName string, eventHub even
 	}
 	s.eventHub = eventHub
 	s.backgroundRoutine = backgroundRoutine
-	s.http = NewHTTPServerWithEventHub(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"))
+	s.http = NewHTTPServerWithEventHubAndBackground(s.config, workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http"), backgroundRoutine)
 	s.done = make(chan error, 1)
 	s.runStarted.Store(false)
 	if err := s.http.Validate(ctx); err != nil {
@@ -48,15 +48,26 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	if s == nil || s.http == nil {
 		return cd.NewError(cd.IllegalParam, "workorch http server is not configured")
 	}
-	s.runStarted.Store(true)
-	go func() {
+
+	runHTTPServer := func() {
 		err := s.http.Start()
 		if err != nil {
 			slog.Error("workorch http server stopped with error", "err", err)
 		}
 		s.done <- err
 		close(s.done)
-	}()
+	}
+
+	s.runStarted.Store(true)
+	if s.backgroundRoutine != nil {
+		if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
+			s.runStarted.Store(false)
+			return cd.NewError(cd.Unexpected, err.Error())
+		}
+		return nil
+	}
+
+	go runHTTPServer()
 	return nil
 }
 

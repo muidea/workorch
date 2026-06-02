@@ -1,8 +1,9 @@
 package appservice
 
 import (
+	"context"
+
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func detectSystemLocale() string {
@@ -18,12 +19,16 @@ func prefersChinese(language string) bool {
 }
 
 func defaultDialogLanguage() string {
-	if cfg, err := workorchconfig.Current(); err == nil {
+	return detectSystemLocale()
+}
+
+func defaultDialogLanguageFromContext(ctx context.Context) string {
+	if cfg, err := loadConfigFromContext(ctx); err == nil {
 		if lang := dialoglanguage.NormalizeTag(cfg.Server.DefaultDialogLanguage); lang != "" {
 			return lang
 		}
 	}
-	return detectSystemLocale()
+	return defaultDialogLanguage()
 }
 
 func localizedMilestoneTitle(language string, milestoneID string) string {

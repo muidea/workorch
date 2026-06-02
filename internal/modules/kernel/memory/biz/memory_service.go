@@ -62,7 +62,11 @@ func (s *Service) SearchMemory(ctx context.Context, query repository.MemorySearc
 }
 
 func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
-	if cmd.MemoryID == "" || cmd.WorkspaceID == "" || cmd.SourceType == "" || cmd.MemoryType == "" || cmd.Summary == "" {
+	if cmd.MemoryID == "" ||
+		cmd.WorkspaceID == "" ||
+		strings.TrimSpace(cmd.SourceType) == "" ||
+		strings.TrimSpace(cmd.MemoryType) == "" ||
+		strings.TrimSpace(cmd.Summary) == "" {
 		return common.ErrInvalidArgument
 	}
 	if !modulecommon.IsSupportedSourceType(cmd.SourceType) || !modulecommon.IsSupportedMemoryType(cmd.MemoryType) {
@@ -74,11 +78,11 @@ func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
 	if hasBlank(cmd.Tags) {
 		return common.ErrInvalidArgument
 	}
-	if cmd.SourceType != modulecommon.MemorySourceUser && cmd.SourceRef == "" {
+	if cmd.SourceType != modulecommon.MemorySourceUser && strings.TrimSpace(cmd.SourceRef) == "" {
 		return common.ErrInvalidArgument
 	}
 	if cmd.SourceType == modulecommon.MemorySourceUser &&
-		cmd.SourceRef == "" &&
+		strings.TrimSpace(cmd.SourceRef) == "" &&
 		cmd.MemoryType != modulecommon.MemoryTypeProjectContext &&
 		cmd.MemoryType != modulecommon.MemoryTypeUserPreference {
 		return common.ErrInvalidArgument
@@ -112,7 +116,7 @@ func memoryItemFromCommand(cmd memoryservice.CreateMemoryItemCommand) *memorymod
 
 func hasBlank(values []string) bool {
 	for _, value := range values {
-		if value == "" {
+		if strings.TrimSpace(value) == "" {
 			return true
 		}
 	}

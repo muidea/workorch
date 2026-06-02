@@ -85,6 +85,9 @@ func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticke
 	if err != nil {
 		return Decision{}, err
 	}
+	if err := ensureDecisionTicketInRuntimeWorkspace(ctx, item); err != nil {
+		return Decision{}, err
+	}
 	resolution, err := resolutionForTicket(ctx, resolutions, item)
 	if err != nil {
 		return Decision{}, err
@@ -255,6 +258,9 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	if err != nil {
 		return Decision{}, err
 	}
+	if err := ensureDecisionTicketInRuntimeWorkspace(ctx, ticket); err != nil {
+		return Decision{}, err
+	}
 	if ticket.State != common.DecisionTicketStateOpen {
 		return Decision{}, common.ErrConflict
 	}
@@ -323,6 +329,9 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		if r.err != nil {
 			return nil, r.err
 		}
+		if err := ensureDecisionTicketInRuntimeWorkspace(ctx, r.item); err != nil {
+			return nil, err
+		}
 		if r.item.State != common.DecisionTicketStateOpen {
 			return nil, common.ErrConflict
 		}
@@ -351,6 +360,17 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		ret = append(ret, mapDecision(item, resolution, autoGovernance))
 	}
 	return ret, nil
+}
+
+func ensureDecisionTicketInRuntimeWorkspace(ctx context.Context, item *decisionmodel.Ticket) error {
+	if item == nil {
+		return common.ErrNotFound
+	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" || item.WorkspaceID == workspaceID {
+		return nil
+	}
+	return common.ErrNotFound
 }
 
 func withDecisionSemanticPayload(payload map[string]any, semantic governancecommon.DecisionSemanticNormalization) map[string]any {

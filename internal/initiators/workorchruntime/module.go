@@ -105,6 +105,7 @@ func (r *Runtime) Teardown(_ context.Context) {
 	r.memoryService = nil
 	r.skillService = nil
 	r.mcpService = nil
+	r.eventStreamService = nil
 	r.workspaceService = nil
 	r.decisionService = nil
 	r.approvalService = nil

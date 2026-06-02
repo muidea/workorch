@@ -10,6 +10,27 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorch/app"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	"github.com/muidea/workorch/internal/pkg/common"
+
+	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
+	_ "github.com/muidea/workorch/internal/modules/application/workorch"
+	_ "github.com/muidea/workorch/internal/modules/blocks/file"
+	_ "github.com/muidea/workorch/internal/modules/blocks/git"
+	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
+	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
+	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
+	_ "github.com/muidea/workorch/internal/modules/blocks/ssh"
+	_ "github.com/muidea/workorch/internal/modules/blocks/web"
+	_ "github.com/muidea/workorch/internal/modules/kernel/approval"
+	_ "github.com/muidea/workorch/internal/modules/kernel/decision"
+	_ "github.com/muidea/workorch/internal/modules/kernel/eventstream"
+	_ "github.com/muidea/workorch/internal/modules/kernel/governance"
+	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
+	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
+	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	_ "github.com/muidea/workorch/internal/modules/kernel/run"
+	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
+	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
+	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
 func main() {

@@ -24,7 +24,7 @@ func NewService(approvals repository.ApprovalRepository, eventHub events.Hub) *S
 }
 
 func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.CreateApprovalCommand) error {
-	if cmd.ApprovalID == "" || cmd.RunID == "" || cmd.Reason == "" {
+	if cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
 
@@ -61,7 +61,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 }
 
 func (s *Service) EnsureApproval(ctx context.Context, cmd approvalservice.CreateApprovalCommand) error {
-	if cmd.ApprovalID == "" || cmd.RunID == "" || cmd.Reason == "" {
+	if cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
 

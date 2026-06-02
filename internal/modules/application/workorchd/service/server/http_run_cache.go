@@ -102,9 +102,7 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 		return
 	}
 	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	s.backgroundWG.Add(1)
-	go func() {
-		defer s.backgroundWG.Done()
+	if !s.scheduleBackground("run_snapshot_cache_warm", func(context.Context) {
 		warmCtx, cancel := context.WithTimeout(s.backgroundContext(), runSnapshotCacheTTL)
 		defer cancel()
 		if workspaceID != "" {
@@ -113,7 +111,10 @@ func (s *serverState) warmRunSnapshotCache(ctx context.Context, runID string, st
 		defer s.finishRunSnapshotInflight(warmCtx, runID)
 		item, err := s.readRunSnapshot(warmCtx, s.config.Backend, s.config.DataRoot, runID)
 		s.completeRunSnapshotInflight(warmCtx, runID, item, err)
-	}()
+	}) {
+		s.completeRunSnapshotInflight(ctx, runID, appservice.RunSnapshot{}, common.ErrConflict)
+		s.finishRunSnapshotInflight(ctx, runID)
+	}
 }
 
 func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (appservice.RunSnapshot, error) {
@@ -442,9 +443,7 @@ func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResume
 			slog.Debug("workorch governance resume already scheduled", "workspaceID", ref.WorkspaceID, "runID", ref.RunID)
 			continue
 		}
-		s.backgroundWG.Add(1)
-		go func() {
-			defer s.backgroundWG.Done()
+		if !s.scheduleBackground("governance_run_resume", func(context.Context) {
 			defer s.clearGovernanceResumeStarted(key)
 			var resumedRun appservice.Run
 			defer func() {
@@ -476,7 +475,9 @@ func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResume
 				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
 			}
 			resumedRun = item
-		}()
+		}) {
+			s.clearGovernanceResumeStarted(key)
+		}
 	}
 }
 
@@ -535,9 +536,7 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 	s.replanContinuationStarted[key] = struct{}{}
 	s.replanContinuationMu.Unlock()
 
-	s.backgroundWG.Add(1)
-	go func() {
-		defer s.backgroundWG.Done()
+	if !s.scheduleBackground("replan_continuation", func(context.Context) {
 		runCtx := appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
 		release, err := s.acquireRunSlotWithPriority(runCtx, priority)
 		if err != nil {
@@ -556,7 +555,9 @@ func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, wo
 		}
 		s.metrics.observeRunOutcome(activation.Run)
 		s.notifyRunStatusChangedForRun(activation.Run)
-	}()
+	}) {
+		s.clearReplanContinuationStarted(key)
+	}
 }
 
 func (s *serverState) clearReplanContinuationStarted(key string) {

@@ -106,6 +106,7 @@ func TestService_CreateTicket_ValidateArguments(t *testing.T) {
 
 	tests := []decisionservice.CreateTicketCommand{
 		{TicketID: "", RunID: common.RunID("run-1"), Reason: "need operator decision"},
+		{TicketID: common.TicketID("ticket-1"), WorkspaceID: "", RunID: common.RunID("run-1"), Reason: "need operator decision"},
 		{TicketID: common.TicketID("ticket-1"), RunID: "", Reason: "need operator decision"},
 		{TicketID: common.TicketID("ticket-1"), RunID: common.RunID("run-1"), Reason: ""},
 	}

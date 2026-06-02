@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 
 	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
@@ -14,6 +15,7 @@ import (
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 type lifecycle interface {
@@ -25,7 +27,7 @@ type lifecycle interface {
 type Runtime struct {
 	exports         Exports
 	modules         []lifecycle
-	moduleLifecycle *modulePluginLifecycle
+	moduleLifecycle *runtimeModuleLifecycle
 }
 
 type RepositoryExports struct {
@@ -68,7 +70,8 @@ type ServiceExports struct {
 }
 
 type InfrastructureExports struct {
-	EventHub events.Hub
+	EventHub   events.Hub
+	LoadConfig func() (workorchconfig.Config, error)
 }
 
 type Exports struct {
@@ -78,15 +81,16 @@ type Exports struct {
 }
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
+	var shutdownErr error
 	if r.moduleLifecycle != nil && len(r.modules) == len(r.moduleLifecycle.modules) {
 		if err := r.moduleLifecycle.Shutdown(ctx); err != nil {
-			return err
+			shutdownErr = errors.Join(shutdownErr, err)
 		}
 		r.moduleLifecycle = nil
 	} else {
 		for idx := len(r.modules) - 1; idx >= 0; idx-- {
 			if err := r.modules[idx].Teardown(ctx); err != nil {
-				return err
+				shutdownErr = errors.Join(shutdownErr, err)
 			}
 		}
 	}
@@ -94,7 +98,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	if terminator, ok := r.exports.Infrastructure.EventHub.(interface{ Terminate(context.Context) }); ok {
 		terminator.Terminate(ctx)
 	}
-	return nil
+	return shutdownErr
 }
 
 func (r *Runtime) Exports() Exports {

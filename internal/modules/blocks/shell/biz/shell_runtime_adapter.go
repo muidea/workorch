@@ -17,6 +17,7 @@ import (
 const (
 	DefaultCommandTimeout = 60 * time.Second
 	MaxCommandTimeout     = 10 * time.Minute
+	MaxCommandOutputBytes = 64 * 1024
 )
 
 type RuntimeAdapter struct {
@@ -89,26 +90,36 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	cmd := exec.CommandContext(runCtx, execCommand, execArgs...)
 	cmd.Dir = deliverableDirectory
 	cmd.Env = a.filteredEnv()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newLimitedOutputBuffer(MaxCommandOutputBytes)
+	stderr := newLimitedOutputBuffer(MaxCommandOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err = cmd.Run()
 	duration := time.Since(startedAt)
 	exitCode := 0
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
 	}
+	stdoutText := stdout.String()
+	stderrText := stderr.String()
 	output := map[string]any{
 		"status":         "completed",
 		"command":        command,
 		"args":           args,
 		"workingDir":     deliverableDirectory,
-		"stdout":         stdout.String(),
-		"stderr":         sanitizeSuccessfulCommandStderr(command, args, exitCode, stdout.String(), stderr.String()),
+		"stdout":         stdoutText,
+		"stderr":         sanitizeSuccessfulCommandStderr(command, args, exitCode, stdoutText, stderrText),
 		"exitCode":       exitCode,
 		"durationMillis": duration.Milliseconds(),
 		"timeoutMillis":  timeout.Milliseconds(),
+	}
+	if stdout.Truncated() || stderr.Truncated() {
+		output["outputTruncated"] = stdout.Truncated() || stderr.Truncated()
+		output["stdoutTruncated"] = stdout.Truncated()
+		output["stderrTruncated"] = stderr.Truncated()
+		output["stdoutBytes"] = stdout.TotalBytes()
+		output["stderrBytes"] = stderr.TotalBytes()
+		output["maxOutputBytes"] = MaxCommandOutputBytes
 	}
 	if commandNormalization != "" {
 		output["actualCommand"] = filepath.Base(execCommand)
@@ -124,6 +135,54 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+type limitedOutputBuffer struct {
+	limit int
+	total int
+	buf   bytes.Buffer
+}
+
+func newLimitedOutputBuffer(limit int) *limitedOutputBuffer {
+	if limit <= 0 {
+		limit = MaxCommandOutputBytes
+	}
+	return &limitedOutputBuffer{limit: limit}
+}
+
+func (b *limitedOutputBuffer) Write(p []byte) (int, error) {
+	if b == nil {
+		return len(p), nil
+	}
+	written := len(p)
+	b.total += len(p)
+	if b.buf.Len() >= b.limit {
+		return written, nil
+	}
+	remaining := b.limit - b.buf.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	_, _ = b.buf.Write(p)
+	return written, nil
+}
+
+func (b *limitedOutputBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	return b.buf.String()
+}
+
+func (b *limitedOutputBuffer) Truncated() bool {
+	return b != nil && b.total > b.limit
+}
+
+func (b *limitedOutputBuffer) TotalBytes() int {
+	if b == nil {
+		return 0
+	}
+	return b.total
 }
 
 func normalizeShellExecutionCommand(command string, args []string) (string, []string, string) {

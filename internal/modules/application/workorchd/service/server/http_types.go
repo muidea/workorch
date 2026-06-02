@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -648,6 +649,7 @@ type serverState struct {
 	runQueueWaiters                 []*runQueueWaiter
 	runQueueSequence                uint64
 	activeRunSlots                  int64
+	backgroundRoutine               task.BackgroundRoutine
 	backgroundWG                    sync.WaitGroup
 	backgroundCtx                   context.Context
 	backgroundCancel                context.CancelFunc
@@ -897,8 +899,12 @@ func NewHTTPServer(config Config) *HTTPServer {
 }
 
 func NewHTTPServerWithEventHub(config Config, eventHub events.Hub) *HTTPServer {
+	return NewHTTPServerWithEventHubAndBackground(config, eventHub, nil)
+}
+
+func NewHTTPServerWithEventHubAndBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
 	config = normalizeConfig(config)
-	state := newServerState(config, eventHub)
+	state := newServerStateWithBackground(config, eventHub, backgroundRoutine)
 	handler := newMuxWithState(state)
 	return &HTTPServer{
 		config: config,
@@ -966,6 +972,10 @@ func newMuxWithState(state *serverState) http.Handler {
 }
 
 func newServerState(config Config, eventHub events.Hub) *serverState {
+	return newServerStateWithBackground(config, eventHub, nil)
+}
+
+func newServerStateWithBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	state := &serverState{
 		config:                          config,
@@ -1060,6 +1070,7 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 		updateServerConfiguration:       appservice.UpdateServerConfiguration,
 		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
 		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
+		backgroundRoutine:               backgroundRoutine,
 		backgroundCtx:                   backgroundCtx,
 		backgroundCancel:                backgroundCancel,
 		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
@@ -1990,6 +2001,28 @@ func (s *serverState) waitBackground(ctx context.Context) error {
 	}
 }
 
+func (s *serverState) scheduleBackground(name string, fn func(context.Context)) bool {
+	if s == nil || fn == nil {
+		return false
+	}
+	ctx := s.backgroundContext()
+	s.backgroundWG.Add(1)
+	run := func() {
+		defer s.backgroundWG.Done()
+		fn(ctx)
+	}
+	if s.backgroundRoutine != nil {
+		if err := s.backgroundRoutine.AsyncFunction(run); err != nil {
+			s.backgroundWG.Done()
+			slog.Warn("workorch background task scheduling failed", "task", name, "err", err)
+			return false
+		}
+		return true
+	}
+	go run()
+	return true
+}
+
 func (s *serverState) backgroundContext() context.Context {
 	if s != nil && s.backgroundCtx != nil {
 		return s.backgroundCtx
@@ -2001,10 +2034,7 @@ func (s *serverState) scheduleStartupRecovery() {
 	if s == nil {
 		return
 	}
-	ctx := s.backgroundContext()
-	s.backgroundWG.Add(1)
-	go func() {
-		defer s.backgroundWG.Done()
+	s.scheduleBackground("startup_recovery", func(ctx context.Context) {
 		timer := time.NewTimer(500 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -2015,7 +2045,7 @@ func (s *serverState) scheduleStartupRecovery() {
 		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, s.eventHub)); err != nil {
 			slog.Warn("workorch startup run recovery failed", "err", err)
 		}
-	}()
+	})
 }
 
 func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
