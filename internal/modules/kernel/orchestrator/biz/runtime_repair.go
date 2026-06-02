@@ -368,7 +368,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		}
 		return o.FailRun(ctx, run.ID, reason)
 	}
-	switch o.recoveryActionForFailedStep(ctx, run, failedStep) {
+	switch runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), o.policy, o.runtime != nil, o.tickets != nil, run, failedStep) {
 	case runtimeRecoveryActionProviderRetry:
 		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, maxProviderRetryAttemptsForPolicy(o.policy), o, true)
 		if err != nil {
@@ -445,11 +445,11 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	return runtimeRecoveryActionFailRun
 }
 
-func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) runtimeRecoveryAction {
-	if o == nil {
+func runtimeRecoveryActionForFailedStep(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, runtimeAvailable bool, canCreateDecisionTicket bool, run *runModel.Run, failedStep *runModel.Step) runtimeRecoveryAction {
+	if repair == nil {
 		return runtimeRecoveryActionFailRun
 	}
-	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o.policy, o.runtime != nil, o.tickets != nil)
+	return repair.recoveryActionForFailedStep(ctx, run, failedStep, policy, runtimeAvailable, canCreateDecisionTicket)
 }
 
 func (r *repairSubsystem) blockRecoveryActionFromFailedStep(

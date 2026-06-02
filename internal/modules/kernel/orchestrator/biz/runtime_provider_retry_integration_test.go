@@ -484,7 +484,7 @@ func TestRuntimeOrchestrator_ProviderProtocolInvalidUsesProviderRetry(t *testing
 		t.Fatalf("seed failed step: %v", err)
 	}
 
-	action := orch.recoveryActionForFailedStep(ctx, run, failed)
+	action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failed)
 	if action != runtimeRecoveryActionProviderRetry {
 		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionProviderRetry)
 	}

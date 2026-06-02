@@ -14,6 +14,10 @@ func shouldBlockOnDuplicateRuntimeFailureForTest(ctx context.Context, orch *Runt
 	return shouldBlockOnDuplicateRuntimeFailure(ctx, orch.steps, orch.repairManager(), orch.policy, orch.tickets != nil, run, failedStep)
 }
 
+func runtimeRecoveryActionForFailedStepForTest(ctx context.Context, orch *RuntimeOrchestrator, run *runmodel.Run, failedStep *runmodel.Step) runtimeRecoveryAction {
+	return runtimeRecoveryActionForFailedStep(ctx, orch.repairManager(), orch.policy, orch.runtime != nil, orch.tickets != nil, run, failedStep)
+}
+
 func TestMaxRuntimeRepairAttemptsUsesConfiguredPolicy(t *testing.T) {
 	orch := &RuntimeOrchestrator{
 		policy: NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
@@ -214,7 +218,7 @@ func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *test
 	if shouldAttemptProviderRetry(ctx, orch.repairManager(), orch.policy, orch.runtime != nil, run, failed) {
 		t.Fatalf("expected runtime contract violation to avoid provider retry")
 	}
-	if action := orch.recoveryActionForFailedStep(ctx, run, failed); action != runtimeRecoveryActionRuntimeRepair {
+	if action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failed); action != runtimeRecoveryActionRuntimeRepair {
 		t.Fatalf("recoveryActionForFailedStep = %s, want runtime_repair", action)
 	}
 }

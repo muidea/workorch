@@ -41,7 +41,7 @@ func TestRuntimeContextIntegrityGateFailureIsNotStateChangingRepair(t *testing.T
 		},
 	}
 	orch := &RuntimeOrchestrator{}
-	if action := orch.recoveryActionForFailedStep(t.Context(), run, step); action != runtimeRecoveryActionContextIntegrityBlocked {
+	if action := runtimeRecoveryActionForFailedStepForTest(t.Context(), orch, run, step); action != runtimeRecoveryActionContextIntegrityBlocked {
 		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionContextIntegrityBlocked)
 	}
 }
@@ -121,7 +121,7 @@ func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T
 		runtime: &stubRuntimeAdapter{},
 		steps:   memory.NewStepRepository(),
 	}
-	if action := orch.recoveryActionForFailedStep(t.Context(), run, step); action != runtimeRecoveryActionRuntimeRepair {
+	if action := runtimeRecoveryActionForFailedStepForTest(t.Context(), orch, run, step); action != runtimeRecoveryActionRuntimeRepair {
 		t.Fatalf("recoveryActionForFailedStep = %q, want %q", action, runtimeRecoveryActionRuntimeRepair)
 	}
 	input := orch.runtimeRepairFollowUpStepInput(t.Context(), run, step, 1, common.ErrInvalidArgument)
