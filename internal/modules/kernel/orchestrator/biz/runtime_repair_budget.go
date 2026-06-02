@@ -347,8 +347,15 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTargetInWindow(ctx 
 	return count
 }
 
-func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
-	if o == nil || run == nil || ticket == nil || o.steps == nil {
+func duplicateRuntimeFailureBlockerCanAutoResume(
+	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
+	policy RuntimePolicy,
+	run *runModel.Run,
+	ticket *decisionmodel.Ticket,
+) bool {
+	if steps == nil || repair == nil || run == nil || ticket == nil {
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) || ticket.State != common.DecisionTicketStateOpen {
@@ -357,7 +364,7 @@ func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx co
 	if !strings.HasSuffix(string(ticket.ID), "duplicate-failure-decision") {
 		return false
 	}
-	failedStep, err := o.steps.Get(ctx, ticket.StepID)
+	failedStep, err := steps.Get(ctx, ticket.StepID)
 	if err != nil || failedStep == nil || failedStep.State != common.StepStateFailed {
 		return false
 	}
@@ -366,8 +373,8 @@ func (o *RuntimeOrchestrator) duplicateRuntimeFailureBlockerCanAutoResume(ctx co
 	if signature == "" || !duplicateRepairDecisionFailureClass(class) {
 		return false
 	}
-	attempts := o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
-	return attempts > 0 && attempts < maxRuntimeRepairAttemptsForPolicy(o.policy)
+	attempts := repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
+	return attempts > 0 && attempts < maxRuntimeRepairAttemptsForPolicy(policy)
 }
 
 func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {

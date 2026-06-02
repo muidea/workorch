@@ -168,7 +168,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 				break
 			}
-			if o.duplicateRuntimeFailureBlockerCanAutoResume(ctx, r, ticket) {
+			if duplicateRuntimeFailureBlockerCanAutoResume(ctx, o.steps, o.repairManager(), o.policy, r, ticket) {
 				resumeAfterStepID = ticket.StepID
 				r.BlockingTicketID = ""
 				break
