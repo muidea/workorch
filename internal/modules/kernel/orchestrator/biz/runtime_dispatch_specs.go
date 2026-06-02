@@ -42,7 +42,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	}
 	if len(steps) == 0 {
 		input := initialStepInput(run)
-		input = o.hydrateInitialRepairTargetSnapshots(ctx, run, input)
+		input = hydrateInitialRepairTargetSnapshots(ctx, o.workspaces, o.convergenceManager(), run, input)
 		if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
 			input["llmProviderId"] = providerID
 		}
@@ -60,9 +60,18 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	return o.nextDispatchSpecsFromStep(ctx, run, last)
 }
 
-func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Context, run *runModel.Run, input map[string]any) map[string]any {
-	if o == nil || o.workspaces == nil || run == nil || len(input) == 0 {
+func hydrateInitialRepairTargetSnapshots(
+	ctx context.Context,
+	workspaces repository.WorkspaceRepository,
+	convergence *convergenceSubsystem,
+	run *runModel.Run,
+	input map[string]any,
+) map[string]any {
+	if workspaces == nil || run == nil || len(input) == 0 {
 		return input
+	}
+	if convergence == nil {
+		convergence = newConvergenceSubsystem()
 	}
 	if !boolValue(input["replanStateChangingContinuation"]) && runtimeStageFromStepInput(input) != runtimeStageRepair {
 		return input
@@ -70,11 +79,11 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 	pkg := mapFromValue(input["repairActionPackage"])
 	targetRefs := initialRepairTargetRefs(input, pkg)
 	if len(targetRefs) == 0 {
-		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
+		return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
-	workspace, err := o.workspaces.Get(ctx, run.WorkspaceID)
+	workspace, err := workspaces.Get(ctx, run.WorkspaceID)
 	if err != nil || workspace == nil || strings.TrimSpace(workspace.DeliverableDirectory) == "" {
-		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
+		return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
 	var snapshots []map[string]any
 	for _, targetRef := range targetRefs {
@@ -88,7 +97,7 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 		snapshots = append(snapshots, item)
 	}
 	if len(snapshots) == 0 {
-		return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
+		return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
 	}
 	input["patchRepairContext"] = mergeRepairTargetSnapshots(mapSliceFromValue(input["patchRepairContext"]), snapshots)
 	pkg = repairActionPackageForEvidenceAcquisitionFollowUp(input, pkg, snapshots)
@@ -100,7 +109,7 @@ func (o *RuntimeOrchestrator) hydrateInitialRepairTargetSnapshots(ctx context.Co
 		"Runtime loaded current target snapshots from repairTargetSet before this replan repair. Use patchRepairContext and repairActionPackage.targetSnapshots as the current patch baseline.",
 		"Do not generate stale hunks from historical summaries when current target snapshots are available.",
 	)
-	return o.convergenceManager().apply(input, o.convergenceManager().build(run, nil, nil, map[string]any{"input": input}, nil))
+	return convergence.apply(input, convergence.build(run, nil, nil, map[string]any{"input": input}, nil))
 }
 
 func initialRepairTargetRefs(input map[string]any, pkg map[string]any) []string {
