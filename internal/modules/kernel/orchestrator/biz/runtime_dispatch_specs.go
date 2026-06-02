@@ -206,7 +206,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
 		}
 	}
 	if contextGateDecisionResumeInput(resumeInput) {
-		if specs, ok, err := o.contextIntegritySpecsAfterResolvedDecision(ctx, run, stepID, resumeInput); ok || err != nil {
+		if specs, ok, err := contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, resumeInput); ok || err != nil {
 			return specs, err
 		}
 	}
@@ -284,16 +284,17 @@ func providerRetrySpecsAfterResolvedDecision(
 	}}, true, nil
 }
 
-func (o *RuntimeOrchestrator) contextIntegritySpecsAfterResolvedDecision(
+func contextIntegritySpecsAfterResolvedDecision(
 	ctx context.Context,
+	steps repository.StepRepository,
 	run *runModel.Run,
 	stepID common.StepID,
 	resumeInput map[string]any,
 ) ([]stepDispatchSpec, bool, error) {
-	if o == nil || run == nil || stepID == "" {
+	if steps == nil || run == nil || stepID == "" {
 		return nil, false, nil
 	}
-	step, err := o.steps.Get(ctx, stepID)
+	step, err := steps.Get(ctx, stepID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -305,7 +306,7 @@ func (o *RuntimeOrchestrator) contextIntegritySpecsAfterResolvedDecision(
 		return nil, true, common.ErrConflict
 	}
 	baseID := common.StepID(fmt.Sprintf("%s/context-gate-retry", step.ID))
-	nextStepID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, baseID)
+	nextStepID, err := uniqueDispatchStepID(ctx, steps, run.ID, baseID)
 	if err != nil {
 		return nil, true, err
 	}
