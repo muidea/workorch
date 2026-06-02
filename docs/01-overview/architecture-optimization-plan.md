@@ -698,9 +698,9 @@ recovery action selector wrapper 收口只将 recovery action selector 的 orche
 LLM context 测试拆分只迁移 compact input/output、artifact chunk omission、lineage compaction、redacted patch omission 测试落点，不改变测试断言或 runtime context 行为。
 runtime orchestrator 集成测试拆分只移动测试函数文件归属，公共 stub/helper 保留在 `runtime_orchestrator_test.go`，不改变测试输入、断言或覆盖意图。
 
-### 4.2 待继续收口
+### 4.2 阶段收口状态
 
-| 项 | 状态 | 下一步 |
+| 项 | 状态 | 结果 |
 |----|------|--------|
 | P1 orchestrator 子系统组合化后续项 | 已完成 | P1.1-P1.108 已完成代码收口、测试补齐与边界归档；状态变更型 run/step/ticket/approval/evidence/result 写入仍由 `RuntimeOrchestrator` 协调，子系统与 helper 只承担读取、投影、合同构造、候选选择或窄接口委派；当前 `RuntimeOrchestrator` receiver 方法数为 71，orchestrator 源码最大生产文件为 `runtime_graph.go`，约 2,822 行 |
 | P2 application 大文件拆分后续项 | 已完成 | read model 已降至约 1,293 行；`http.go` 已降至约 45 行，server shared helpers 已按类型、默认代理、run cache/queue、query helper、response helper 拆分；application 层剩余大文件不再作为本阶段阻塞项 |
