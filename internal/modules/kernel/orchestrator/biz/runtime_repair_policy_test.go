@@ -207,7 +207,7 @@ func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *test
 			"reason":              "invalid argument: executionGraph patch/apply input invalid: invalid argument: patch diff contains redacted runtime markers",
 		},
 	}
-	if orch.shouldAttemptProviderRetry(ctx, run, failed) {
+	if shouldAttemptProviderRetry(ctx, orch.repairManager(), orch.policy, orch.runtime != nil, run, failed) {
 		t.Fatalf("expected runtime contract violation to avoid provider retry")
 	}
 	if action := orch.recoveryActionForFailedStep(ctx, run, failed); action != runtimeRecoveryActionRuntimeRepair {
