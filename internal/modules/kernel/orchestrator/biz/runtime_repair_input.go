@@ -407,7 +407,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		input[stepInputKeyGraphRootStepID] = string(graphRootStepID(failedStep))
 	}
 	governanceHistory := mapSliceFromValue(run.ExecutionContext["governanceHistory"])
-	if current := o.currentRunGovernanceHistory(ctx, run); len(current) > 0 {
+	if current := currentRunGovernanceHistory(ctx, o.tickets, o.resolutions, o.approvals, run); len(current) > 0 {
 		governanceHistory = append(current, governanceHistory...)
 	}
 	if len(governanceHistory) > 0 {

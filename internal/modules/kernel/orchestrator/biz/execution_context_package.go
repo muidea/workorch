@@ -249,7 +249,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}()
 	go func() {
 		defer wg.Done()
-		currentGovernance = o.currentRunGovernanceHistory(ctx, run)
+		currentGovernance = currentRunGovernanceHistory(ctx, o.tickets, o.resolutions, o.approvals, run)
 	}()
 	go func() {
 		defer wg.Done()
@@ -1241,14 +1241,20 @@ func stepInputMemoryScoreReason(item *memorymodel.MemoryItem, currentRunID commo
 	return strings.Join(parts, ":")
 }
 
-func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, run *runModel.Run) []map[string]any {
-	if o == nil || run == nil || run.ID == "" {
+func currentRunGovernanceHistory(
+	ctx context.Context,
+	tickets repository.DecisionTicketRepository,
+	resolutions repository.DecisionResolutionRepository,
+	approvals repository.ApprovalRepository,
+	run *runModel.Run,
+) []map[string]any {
+	if run == nil || run.ID == "" {
 		return nil
 	}
 	var ret []map[string]any
 
-	if o.tickets != nil {
-		tickets, err := o.tickets.ListByRunID(ctx, run.ID)
+	if tickets != nil {
+		tickets, err := tickets.ListByRunID(ctx, run.ID)
 		if err == nil {
 			for _, t := range tickets {
 				if t == nil {
@@ -1263,8 +1269,8 @@ func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, r
 					"question":     t.Question,
 					"stepId":       string(t.StepID),
 				}
-				if t.State == common.DecisionTicketStateResolved && o.resolutions != nil {
-					if resolution, err := o.resolutions.GetByTicketID(ctx, t.ID); err == nil && resolution != nil {
+				if t.State == common.DecisionTicketStateResolved && resolutions != nil {
+					if resolution, err := resolutions.GetByTicketID(ctx, t.ID); err == nil && resolution != nil {
 						item["resolutionId"] = string(resolution.ID)
 						item["resolutionType"] = string(resolution.Type)
 						item["resolutionPayload"] = cloneStepPayload(resolution.Payload)
@@ -1275,8 +1281,8 @@ func (o *RuntimeOrchestrator) currentRunGovernanceHistory(ctx context.Context, r
 		}
 	}
 
-	if o.approvals != nil {
-		approvals, err := o.approvals.ListByRunID(ctx, run.ID)
+	if approvals != nil {
+		approvals, err := approvals.ListByRunID(ctx, run.ID)
 		if err == nil {
 			for _, a := range approvals {
 				if a == nil {
