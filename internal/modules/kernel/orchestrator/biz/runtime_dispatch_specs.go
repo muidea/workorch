@@ -687,14 +687,26 @@ func previousExecutionStepID(step *runModel.Step) common.StepID {
 	return ""
 }
 
-func (o *RuntimeOrchestrator) dispatchStepSpecsWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
+type dispatchGraphStepBatchWithWorkspaceFunc func(context.Context, *runModel.Run, []stepDispatchSpec, *workspaceModel.Workspace) error
+
+func dispatchStepSpecsWithWorkspace(
+	ctx context.Context,
+	dispatchStep dispatchStepWithWorkspaceFunc,
+	dispatchGraphBatch dispatchGraphStepBatchWithWorkspaceFunc,
+	run *runModel.Run,
+	specs []stepDispatchSpec,
+	workspace *workspaceModel.Workspace,
+) error {
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
-	if len(specs) == 1 {
-		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
+	if dispatchStep == nil || dispatchGraphBatch == nil {
+		return common.ErrInvalidArgument
 	}
-	return o.dispatchGraphStepBatchWithWorkspace(ctx, run, specs, workspace)
+	if len(specs) == 1 {
+		return dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
+	}
+	return dispatchGraphBatch(ctx, run, specs, workspace)
 }
 
 type dispatchStepWithWorkspaceFunc func(context.Context, *runModel.Run, common.StepID, string, map[string]any, *workspaceModel.Workspace) error

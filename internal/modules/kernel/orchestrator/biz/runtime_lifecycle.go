@@ -44,7 +44,7 @@ func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) 
 	if err != nil {
 		return err
 	}
-	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, ws); err != nil {
+	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, ws); err != nil {
 		return errors.Join(err, o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
@@ -66,7 +66,7 @@ func (o *RuntimeOrchestrator) DispatchNextStep(ctx context.Context, runID common
 	if err != nil {
 		return err
 	}
-	return o.dispatchStepSpecsWithWorkspace(ctx, r, specs, nil)
+	return dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, nil)
 }
 
 func (o *RuntimeOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
@@ -261,7 +261,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			if publishErr := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); publishErr != nil {
 				return publishErr
 			}
-			if dispatchErr := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); dispatchErr != nil {
+			if dispatchErr := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, workspace); dispatchErr != nil {
 				return errors.Join(o.failRunningResume(ctx, r.ID, dispatchErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 			}
 			return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
@@ -304,7 +304,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		return o.failRunningResume(ctx, r.ID, err)
 	}
 	mergeResumeInput(specs, resumeInput)
-	if err := o.dispatchStepSpecsWithWorkspace(ctx, r, specs, workspace); err != nil {
+	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, workspace); err != nil {
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
