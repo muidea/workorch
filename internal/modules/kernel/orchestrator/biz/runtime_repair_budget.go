@@ -377,8 +377,15 @@ func duplicateRuntimeFailureBlockerCanAutoResume(
 	return attempts > 0 && attempts < maxRuntimeRepairAttemptsForPolicy(policy)
 }
 
-func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx context.Context, run *runModel.Run, ticket *decisionmodel.Ticket) bool {
-	if o == nil || run == nil || ticket == nil || o.steps == nil {
+func runtimeRepairExhaustionBlockerCanAutoResume(
+	ctx context.Context,
+	steps repository.StepRepository,
+	repair *repairSubsystem,
+	policy RuntimePolicy,
+	run *runModel.Run,
+	ticket *decisionmodel.Ticket,
+) bool {
+	if steps == nil || repair == nil || run == nil || ticket == nil {
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) || ticket.State != common.DecisionTicketStateOpen {
@@ -390,10 +397,10 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") {
 		return false
 	}
-	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxRuntimeRepairAttemptsForPolicy(o.policy) {
+	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxRuntimeRepairAttemptsForPolicy(policy) {
 		return false
 	}
-	failedStep, err := o.steps.Get(ctx, ticket.StepID)
+	failedStep, err := steps.Get(ctx, ticket.StepID)
 	if err != nil || failedStep == nil || failedStep.State != common.StepStateFailed {
 		return false
 	}
@@ -413,7 +420,7 @@ func (o *RuntimeOrchestrator) runtimeRepairExhaustionBlockerCanAutoResume(ctx co
 			return false
 		}
 	}
-	return o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttemptsForPolicy(o.policy)
+	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttemptsForPolicy(policy)
 }
 
 func runtimeRepairExhaustionHasCompletedCoverageEvidence(context map[string]any) bool {

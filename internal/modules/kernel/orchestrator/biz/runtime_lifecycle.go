@@ -173,7 +173,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 				break
 			}
-			if o.runtimeRepairExhaustionBlockerCanAutoResume(ctx, r, ticket) {
+			if runtimeRepairExhaustionBlockerCanAutoResume(ctx, o.steps, o.repairManager(), o.policy, r, ticket) {
 				ticket.State = common.DecisionTicketStateDismissed
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err
