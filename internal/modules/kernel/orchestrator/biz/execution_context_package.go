@@ -253,7 +253,7 @@ func (o *RuntimeOrchestrator) runExecutionContextPackage(ctx context.Context, ru
 	}()
 	go func() {
 		defer wg.Done()
-		refreshedMemories, memoryRetrieval = o.refreshedStepInputMemoryContext(ctx, run, step)
+		refreshedMemories, memoryRetrieval = refreshedStepInputMemoryContext(ctx, o.evidence.MemoryItems, o.runs, run, step)
 	}()
 	wg.Wait()
 
@@ -743,12 +743,18 @@ func cloneLLMContextValue(value any) any {
 	}
 }
 
-func (o *RuntimeOrchestrator) refreshedStepInputMemoryContext(ctx context.Context, run *runModel.Run, step *runModel.Step) ([]map[string]any, map[string]any) {
-	if o == nil || o.evidence.MemoryItems == nil || run == nil || run.WorkspaceID == "" {
+func refreshedStepInputMemoryContext(
+	ctx context.Context,
+	memories repository.MemoryItemRepository,
+	runs repository.RunRepository,
+	run *runModel.Run,
+	step *runModel.Step,
+) ([]map[string]any, map[string]any) {
+	if memories == nil || run == nil || run.WorkspaceID == "" {
 		return nil, nil
 	}
-	items, err := o.evidence.MemoryItems.ListByWorkspaceID(ctx, run.WorkspaceID)
-	runStates := stepInputMemoryRunStates(ctx, o.runs, run.WorkspaceID)
+	items, err := memories.ListByWorkspaceID(ctx, run.WorkspaceID)
+	runStates := stepInputMemoryRunStates(ctx, runs, run.WorkspaceID)
 	refreshSource := stepInputMemoryRefreshSource(step)
 	if err != nil {
 		return nil, map[string]any{
