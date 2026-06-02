@@ -312,6 +312,32 @@ func TestApplyRuntimeRepairValidationEvidenceProjectionSetsBoundedValidation(t *
 	}
 }
 
+func TestApplyRuntimeRepairValidationEscalationProjectionSwitchesToStateChanging(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyAssessmentOnly:  true,
+		"assessmentOnlyReason":      "previous-assessment",
+		"boundedValidationRequired": true,
+		"evidenceRepairSource":      "validation-only",
+	}
+
+	applyRuntimeRepairValidationEscalationProjection(input, true)
+
+	if input["validationRepairEscalatedToImplementation"] != true {
+		t.Fatalf("validationRepairEscalatedToImplementation = %v, want true", input["validationRepairEscalatedToImplementation"])
+	}
+	if stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
+		t.Fatalf("state-changing contract missing: %+v", input)
+	}
+	for _, key := range []string{stepInputKeyAssessmentOnly, "assessmentOnlyReason", "boundedValidationRequired", "evidenceRepairSource"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("%s should be cleared after validation escalation: %+v", key, input)
+		}
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 3 {
+		t.Fatalf("repairGuidance = %+v, want three escalation guidance items", guidance)
+	}
+}
+
 func TestApplyRuntimeRepairGovernanceHistoryProjectionCompactsExecutionContextHistory(t *testing.T) {
 	input := map[string]any{}
 	history := make([]map[string]any, 0, 7)

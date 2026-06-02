@@ -326,6 +326,24 @@ func applyRuntimeRepairValidationEvidenceProjection(input map[string]any, covera
 	)
 }
 
+func applyRuntimeRepairValidationEscalationProjection(input map[string]any, validationRepairEscalatesToStateChanging bool) {
+	if input == nil || !validationRepairEscalatesToStateChanging {
+		return
+	}
+	input["validationRepairEscalatedToImplementation"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"This coverage gap has already been repaired through validation-only attempts and now has concrete implementation target evidence.",
+		"Switch to a state-changing implementation repair before another verification pass; do not continue the validation-only loop against the same target evidence.",
+		"Produce the smallest state-changing artifact that makes the next bounded verification meaningful.",
+	)
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairSource")
+}
+
 func applyRuntimeRepairGovernanceHistoryProjection(
 	ctx context.Context,
 	tickets repository.DecisionTicketRepository,
@@ -561,20 +579,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	validationRepairEscalatesToStateChanging := coverageGapEligibleForValidationRepair &&
 		coverageValidationHasTargetEvidence &&
 		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input)
-	if validationRepairEscalatesToStateChanging {
-		input["validationRepairEscalatedToImplementation"] = true
-		input["repairObjective"] = repairObjectiveStateChangingOutput
-		input["stateChangingOutputRequired"] = true
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"This coverage gap has already been repaired through validation-only attempts and now has concrete implementation target evidence.",
-			"Switch to a state-changing implementation repair before another verification pass; do not continue the validation-only loop against the same target evidence.",
-			"Produce the smallest state-changing artifact that makes the next bounded verification meaningful.",
-		)
-		delete(input, stepInputKeyAssessmentOnly)
-		delete(input, "assessmentOnlyReason")
-		delete(input, "boundedValidationRequired")
-		delete(input, "evidenceRepairSource")
-	}
+	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
 	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
