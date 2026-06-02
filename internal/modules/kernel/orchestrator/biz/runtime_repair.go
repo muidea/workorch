@@ -23,7 +23,6 @@ type repairSubsystem struct {
 
 type repairRecoveryPolicy interface {
 	shouldBlockOnDuplicateRuntimeFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
-	shouldAttemptRuntimeRepair(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 }
 
 type repairDispatchSpecBuilder interface {
@@ -444,7 +443,7 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	if policy.shouldBlockOnDuplicateRuntimeFailure(ctx, run, failedStep) {
 		return runtimeRecoveryActionDuplicateFailure
 	}
-	if policy.shouldAttemptRuntimeRepair(ctx, run, failedStep) {
+	if shouldAttemptRuntimeRepair(ctx, r, runtimePolicy, runtimeAvailable, run, failedStep) {
 		return runtimeRecoveryActionRuntimeRepair
 	}
 	return runtimeRecoveryActionFailRun
@@ -742,8 +741,8 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
 }
 
-func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil || o.runtime == nil || o.steps == nil {
+func shouldAttemptRuntimeRepair(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, runtimeAvailable bool, run *runModel.Run, failedStep *runModel.Step) bool {
+	if repair == nil || run == nil || failedStep == nil || !runtimeAvailable {
 		return false
 	}
 	if !requiresDoDAssessmentCompletionGate(run) {
@@ -755,7 +754,7 @@ func (o *RuntimeOrchestrator) shouldAttemptRuntimeRepair(ctx context.Context, ru
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return false
 	}
-	if o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(o.policy) {
+	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(policy) {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)
