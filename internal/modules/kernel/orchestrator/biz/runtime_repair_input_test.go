@@ -409,3 +409,66 @@ func TestApplyRuntimeRepairGraphEvidenceProjectionAddsTargetSnapshots(t *testing
 		t.Fatalf("failureTargetRepairContext = %+v, want config/app.toml snapshot", targets)
 	}
 }
+
+func TestApplyRuntimeRepairPatchContextProjectionRequiresStateChangingRepair(t *testing.T) {
+	input := map[string]any{}
+	patchContext := []map[string]any{{
+		"targetRef":        "src/app.go",
+		"contentHash":      "hash-current",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+	}}
+	patchSuggestions := []map[string]any{{
+		"operation": "text_replace",
+		"baseHash":  "hash-current",
+	}}
+
+	applyRuntimeRepairPatchContextProjection(input, patchContext, patchSuggestions, nil)
+
+	if stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput {
+		t.Fatalf("repairObjective = %q, want state-changing output", stringFromMap(input, "repairObjective"))
+	}
+	if input["stateChangingOutputRequired"] != true {
+		t.Fatalf("stateChangingOutputRequired = %v, want true", input["stateChangingOutputRequired"])
+	}
+	if len(mapSliceFromValue(input["patchRepairContext"])) != 1 {
+		t.Fatalf("patchRepairContext = %+v, want one snapshot", input["patchRepairContext"])
+	}
+	if len(mapSliceFromValue(input["patchRepairSuggestions"])) != 1 {
+		t.Fatalf("patchRepairSuggestions = %+v, want one suggestion", input["patchRepairSuggestions"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) < 10 {
+		t.Fatalf("repairGuidance len = %d, want patch guidance", len(guidance))
+	}
+}
+
+func TestApplyRuntimeRepairPatchContextProjectionKeepsSatisfiedPatchAsValidation(t *testing.T) {
+	input := map[string]any{}
+	patchContext := []map[string]any{{
+		"targetRef":   "src/app.go",
+		"contentHash": "hash-current",
+	}}
+	satisfiedSignals := []map[string]any{{
+		"targetRef": "src/app.go",
+		"reason":    "current target already contains intended change",
+	}}
+
+	applyRuntimeRepairPatchContextProjection(input, patchContext, nil, satisfiedSignals)
+
+	if input["stateChangeAlreadySatisfiedByCurrentTarget"] != true {
+		t.Fatalf("stateChangeAlreadySatisfiedByCurrentTarget = %v, want true", input["stateChangeAlreadySatisfiedByCurrentTarget"])
+	}
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) != 1 {
+		t.Fatalf("currentTargetAlreadySatisfiesFailedPatch = %+v, want one signal", input["currentTargetAlreadySatisfiesFailedPatch"])
+	}
+	if _, ok := input["stateChangingOutputRequired"]; ok {
+		t.Fatalf("stateChangingOutputRequired should not be set when patch is already satisfied: %v", input)
+	}
+	if stringFromMap(input, "repairObjective") != "" {
+		t.Fatalf("repairObjective = %q, want unchanged objective", stringFromMap(input, "repairObjective"))
+	}
+	guidance := stringSliceFromValue(input["repairGuidance"])
+	if len(guidance) < 12 {
+		t.Fatalf("repairGuidance len = %d, want patch guidance plus satisfied guidance", len(guidance))
+	}
+}

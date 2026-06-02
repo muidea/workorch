@@ -364,6 +364,52 @@ func applyRuntimeRepairGraphEvidenceProjection(
 	}
 }
 
+func applyRuntimeRepairPatchContextProjection(
+	input map[string]any,
+	patchContext []map[string]any,
+	patchSuggestions []map[string]any,
+	satisfiedSignals []map[string]any,
+) {
+	if input == nil || len(patchContext) == 0 {
+		return
+	}
+	input["patchRepairContext"] = patchContext
+	if len(patchSuggestions) > 0 {
+		input["patchRepairSuggestions"] = patchSuggestions
+	}
+	if len(satisfiedSignals) > 0 {
+		input["currentTargetAlreadySatisfiesFailedPatch"] = satisfiedSignals
+		input["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+	}
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) == 0 &&
+		!boolValue(input["concreteFailureEvidenceRequired"]) &&
+		stringFromMap(input, "repairObjective") != repairObjectiveConcreteValidationEvidence &&
+		stringFromMap(input, "repairObjective") != repairObjectiveTransientExecutionRetry {
+		input["repairObjective"] = repairObjectiveStateChangingOutput
+		input["stateChangingOutputRequired"] = true
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
+		"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
+		"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
+		"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
+		"Never copy runtime redaction marker tokens, omitted sections, or truncated snapshot text into patch/apply content or diff.",
+		"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
+		"If patchRepairSuggestions are present, prefer patch/apply text_replace with exact oldText/newText/baseHash, or use that evidence to construct the smallest current unified_diff/file/edit repair.",
+		"If patch application failed because of malformed unified_diff syntax, return patch/apply text_replace with exact oldText/newText/baseHash or a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@.",
+		"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
+		"Any MCP tool call that synchronizes modified file content must include the complete current file content in input.content together with the target path; do not emit path-only, root-only, or partial sync requests.",
+		"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
+		"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
+	)
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
+			"Do not repeat the same failed patch when this signal is present; return a bounded concrete validation evidence graph, or a failed dodAssessment/blocker if validation cannot be produced.",
+		)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -550,41 +596,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	patchContext := o.repairManager().runtimeRepairPatchContext(ctx, run, failedStep)
 	if len(patchContext) > 0 {
-		input["patchRepairContext"] = patchContext
-		if suggestions := o.repairManager().runtimeRepairPatchSuggestions(ctx, run, failedStep); len(suggestions) > 0 {
-			input["patchRepairSuggestions"] = suggestions
-		}
-		if satisfied := o.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep); len(satisfied) > 0 {
-			input["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
-			input["stateChangeAlreadySatisfiedByCurrentTarget"] = true
-		}
-		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) == 0 &&
-			!boolValue(input["concreteFailureEvidenceRequired"]) &&
-			stringFromMap(input, "repairObjective") != repairObjectiveConcreteValidationEvidence &&
-			stringFromMap(input, "repairObjective") != repairObjectiveTransientExecutionRetry {
-			input["repairObjective"] = repairObjectiveStateChangingOutput
-			input["stateChangingOutputRequired"] = true
-		}
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use patchRepairContext as the current target snapshot for patch repair; treat the failed patch text as stale or untrusted.",
-			"When the failure is a diff context mismatch or file/edit oldText conflict, do not retry the same stale hunk or oldText; rebuild the smallest patch from patchRepairContext.content/contentHash.",
-			"When using baseHash, copy the literal contentHash value from the current target snapshot; never output unresolved references such as ${...}, {{...}}, or symbolic placeholders.",
-			"Use complete patch/apply file_write only when the current snapshot is marked safeForFileWrite/contentComplete and contains no redaction markers; otherwise use patch/apply text_replace with exact oldText/newText/baseHash, a minimal unified_diff with exact visible context, file/edit with exact oldText, or first read the target.",
-			"Never copy runtime redaction marker tokens, omitted sections, or truncated snapshot text into patch/apply content or diff.",
-			"If a previous patch was rejected for redacted runtime markers, discard that diff entirely and rebuild from current unredacted file/read or patchRepairContext content; do not transform redacted marker text into source content.",
-			"If patchRepairSuggestions are present, prefer patch/apply text_replace with exact oldText/newText/baseHash, or use that evidence to construct the smallest current unified_diff/file/edit repair.",
-			"If patch application failed because of malformed unified_diff syntax, return patch/apply text_replace with exact oldText/newText/baseHash or a complete standard unified diff with explicit line ranges such as @@ -12,3 +12,4 @@.",
-			"Before adding new target content, reconcile the current snapshot and modify an existing equivalent item instead of creating duplicate named artifacts.",
-			"Any MCP tool call that synchronizes modified file content must include the complete current file content in input.content together with the target path; do not emit path-only, root-only, or partial sync requests.",
-			"When patching resources that reference existing named elements, patch against names that already exist in current workspace resources unless the Goal explicitly requires introducing a new named element.",
-			"If the current target snapshot proves the failed patch is no longer required, return a bounded verification evidence graph instead of another patch; do not use read-only inspection as the only evidence.",
+		applyRuntimeRepairPatchContextProjection(
+			input,
+			patchContext,
+			o.repairManager().runtimeRepairPatchSuggestions(ctx, run, failedStep),
+			o.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep),
 		)
-		if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"currentTargetAlreadySatisfiesFailedPatch is a mechanical signal that the failed artifact's intended line changes are already reflected in the current target snapshot.",
-				"Do not repeat the same failed patch when this signal is present; return a bounded concrete validation evidence graph, or a failed dodAssessment/blocker if validation cannot be produced.",
-			)
-		}
 	}
 	targetContext := o.repairManager().runtimeRepairFailureTargetContext(ctx, run, failedStep)
 	if len(targetContext) > 0 {
