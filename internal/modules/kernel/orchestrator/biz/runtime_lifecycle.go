@@ -299,7 +299,25 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
-	specs, err := o.nextDispatchSpecsAfterResolvedDecision(ctx, r, resumeAfterStepID, resumeInput)
+	specs, err := nextDispatchSpecsAfterResolvedDecision(
+		ctx,
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.policy, run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID, input map[string]any) ([]stepDispatchSpec, bool, error) {
+			return contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, input)
+		},
+		o.nextDispatchSpecsAfterStep,
+		r,
+		resumeAfterStepID,
+		resumeInput,
+	)
 	if err != nil {
 		return o.failRunningResume(ctx, r.ID, err)
 	}

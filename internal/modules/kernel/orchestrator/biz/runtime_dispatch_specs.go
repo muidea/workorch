@@ -184,33 +184,45 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 	return nil, common.ErrConflict
 }
 
-func (o *RuntimeOrchestrator) nextDispatchSpecsAfterResolvedDecision(
+type resolvedDecisionDispatchSpecsFunc func(context.Context, *runModel.Run, common.StepID) ([]stepDispatchSpec, bool, error)
+type contextIntegrityDispatchSpecsFunc func(context.Context, *runModel.Run, common.StepID, map[string]any) ([]stepDispatchSpec, bool, error)
+type nextDispatchSpecsAfterStepFunc func(context.Context, *runModel.Run, common.StepID) ([]stepDispatchSpec, error)
+
+func nextDispatchSpecsAfterResolvedDecision(
 	ctx context.Context,
+	knownReadableRepair resolvedDecisionDispatchSpecsFunc,
+	providerRetry resolvedDecisionDispatchSpecsFunc,
+	runtimeRepair resolvedDecisionDispatchSpecsFunc,
+	contextIntegrity contextIntegrityDispatchSpecsFunc,
+	nextAfterStep nextDispatchSpecsAfterStepFunc,
 	run *runModel.Run,
 	stepID common.StepID,
 	resumeInput map[string]any,
 ) ([]stepDispatchSpec, error) {
+	if knownReadableRepair == nil || providerRetry == nil || runtimeRepair == nil || contextIntegrity == nil || nextAfterStep == nil {
+		return nil, common.ErrInvalidArgument
+	}
 	if boolValue(resumeInput["knownReadableDecisionRepair"]) {
-		if specs, ok, err := knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID); ok || err != nil {
+		if specs, ok, err := knownReadableRepair(ctx, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
 	if boolValue(resumeInput["providerRetryDecisionRetry"]) {
-		if specs, ok, err := providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.policy, run, stepID); ok || err != nil {
+		if specs, ok, err := providerRetry(ctx, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
 	if boolValue(resumeInput["repairPlanDecisionRetry"]) {
-		if specs, ok, err := runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID); ok || err != nil {
+		if specs, ok, err := runtimeRepair(ctx, run, stepID); ok || err != nil {
 			return specs, err
 		}
 	}
 	if contextGateDecisionResumeInput(resumeInput) {
-		if specs, ok, err := contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, resumeInput); ok || err != nil {
+		if specs, ok, err := contextIntegrity(ctx, run, stepID, resumeInput); ok || err != nil {
 			return specs, err
 		}
 	}
-	return o.nextDispatchSpecsAfterStep(ctx, run, stepID)
+	return nextAfterStep(ctx, run, stepID)
 }
 
 func runtimeRepairSpecsAfterResolvedDecision(
