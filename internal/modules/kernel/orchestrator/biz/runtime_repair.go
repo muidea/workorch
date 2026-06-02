@@ -22,7 +22,6 @@ type repairSubsystem struct {
 }
 
 type repairRecoveryPolicy interface {
-	shouldBlockOnProviderConfigFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldAttemptProviderRetry(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	providerRetryBudgetExhausted(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
 	shouldEscalateRuntimeRepairExhaustion(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool
@@ -423,11 +422,11 @@ const (
 	runtimeRecoveryActionFailRun                 runtimeRecoveryAction = "fail_run"
 )
 
-func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, policy repairRecoveryPolicy) runtimeRecoveryAction {
+func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, policy repairRecoveryPolicy, canCreateDecisionTicket bool) runtimeRecoveryAction {
 	if policy == nil || run == nil || failedStep == nil {
 		return runtimeRecoveryActionFailRun
 	}
-	if policy.shouldBlockOnProviderConfigFailure(ctx, run, failedStep) {
+	if shouldBlockOnProviderConfigFailure(canCreateDecisionTicket, run, failedStep) {
 		return runtimeRecoveryActionProviderRetryExhausted
 	}
 	if policy.shouldAttemptProviderRetry(ctx, run, failedStep) {
@@ -458,7 +457,7 @@ func (o *RuntimeOrchestrator) recoveryActionForFailedStep(ctx context.Context, r
 	if o == nil {
 		return runtimeRecoveryActionFailRun
 	}
-	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o)
+	return o.repairManager().recoveryActionForFailedStep(ctx, run, failedStep, o, o.tickets != nil)
 }
 
 func (r *repairSubsystem) blockRecoveryActionFromFailedStep(
@@ -557,8 +556,8 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 	}
 }
 
-func (o *RuntimeOrchestrator) shouldBlockOnProviderConfigFailure(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
-	if o == nil || run == nil || failedStep == nil || o.tickets == nil {
+func shouldBlockOnProviderConfigFailure(canCreateDecisionTicket bool, run *runModel.Run, failedStep *runModel.Step) bool {
+	if !canCreateDecisionTicket || run == nil || failedStep == nil {
 		return false
 	}
 	if !isLLMProviderRuntimeFailure(run, failedStep) {
