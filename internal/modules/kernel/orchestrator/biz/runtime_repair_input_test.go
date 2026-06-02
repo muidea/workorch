@@ -571,3 +571,32 @@ func TestApplyRuntimeRepairWorkspaceManifestProjectionAddsOnlyNonEmptyManifest(t
 		t.Fatalf("workspaceFileManifest = %+v, want README.md", input[stepInputKeyWorkspaceFileManifest])
 	}
 }
+
+func TestApplyRuntimeRepairStateChangingActionPackageProjectionRequiresStateChangingFlag(t *testing.T) {
+	input := map[string]any{}
+	failed := &runmodel.Step{
+		ID:    "run-repair-action-package/step-1",
+		RunID: "run-repair-action-package",
+		Kind:  "llm",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stderr": "target file mismatch",
+		},
+	}
+
+	applyRuntimeRepairStateChangingActionPackageProjection(input, failed, errors.New("exit status 1"))
+	if len(input) != 0 {
+		t.Fatalf("input = %+v, want no projection without stateChangingOutputRequired", input)
+	}
+
+	input["stateChangingOutputRequired"] = true
+	applyRuntimeRepairStateChangingActionPackageProjection(input, failed, errors.New("exit status 1"))
+
+	if len(mapFromValue(input["lastFailureDiagnostics"])) == 0 {
+		t.Fatalf("lastFailureDiagnostics missing from state-changing projection: %+v", input)
+	}
+	guidance := stringSliceFromValue(input["repairGuidance"])
+	if len(guidance) < 2 {
+		t.Fatalf("repairGuidance = %+v, want action package guidance", guidance)
+	}
+}

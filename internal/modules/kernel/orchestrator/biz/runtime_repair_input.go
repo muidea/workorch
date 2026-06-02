@@ -466,6 +466,49 @@ func applyRuntimeRepairWorkspaceManifestProjection(input map[string]any, manifes
 	input[stepInputKeyWorkspaceFileManifest] = manifest
 }
 
+func applyRuntimeRepairStateChangingActionPackageProjection(
+	input map[string]any,
+	failedStep *runModel.Step,
+	execErr error,
+) {
+	if input == nil || failedStep == nil || !boolValue(input["stateChangingOutputRequired"]) {
+		return
+	}
+	if _, ok := input["lastFailureDiagnostics"]; !ok {
+		if fallback := runtimeRepairLastFailureDiagnostics(failedStep); len(fallback) > 0 {
+			input["lastFailureDiagnostics"] = fallback
+		}
+	}
+	narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
+	if pkg := repairActionPackageFromRepairInput(input, failedStep.Output); len(pkg) > 0 {
+		if repairActionPackageRequiresEvidenceAcquisition(pkg) {
+			delete(input, "stateChangingOutputRequired")
+			input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+			input["concreteFailureEvidenceRequired"] = true
+			input["evidenceAcquisitionReason"] = stringFromMap(pkg, "evidenceAcquisitionReason")
+			input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
+		}
+		input["repairActionPackage"] = pkg
+		compactStateChangingRepairInputAroundActionPackage(input)
+	}
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
+	)
+	if !boolValue(input["concreteFailureEvidenceRequired"]) {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a real governance blocker.",
+		)
+	}
+	if stateChangingSchemaInvalidRepair(failedStep) {
+		input["schemaInvalidRepairMode"] = "single_valid_json_decision"
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"Previous repair output was rejected before execution because the LLM decision JSON was invalid; rebuild a single valid JSON object from repairActionPackage and current target snapshots.",
+			"Do not copy any rawContentPreview or repairRawContentPreview from the rejected output; do not include markdown, comments, duplicate JSON objects, trailing braces, or partial arrays.",
+			"If returning executionGraph, every node must be a complete JSON object and must follow repairActionPackage.requiredOutput acceptedKinds.",
+		)
+	}
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -679,41 +722,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	inheritPriorRepairContext(input, failedStep)
 	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)
-	if boolValue(input["stateChangingOutputRequired"]) {
-		if _, ok := input["lastFailureDiagnostics"]; !ok {
-			if fallback := runtimeRepairLastFailureDiagnostics(failedStep); len(fallback) > 0 {
-				input["lastFailureDiagnostics"] = fallback
-			}
-		}
-		narrowStateChangingRecoveryInput(input, failedStep, execErr, "runtime_repair")
-		if pkg := repairActionPackageFromRepairInput(input, failedStep.Output); len(pkg) > 0 {
-			if repairActionPackageRequiresEvidenceAcquisition(pkg) {
-				delete(input, "stateChangingOutputRequired")
-				input["repairObjective"] = repairObjectiveAcquireFailureEvidence
-				input["concreteFailureEvidenceRequired"] = true
-				input["evidenceAcquisitionReason"] = stringFromMap(pkg, "evidenceAcquisitionReason")
-				input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
-			}
-			input["repairActionPackage"] = pkg
-			compactStateChangingRepairInputAroundActionPackage(input)
-		}
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
-		)
-		if !boolValue(input["concreteFailureEvidenceRequired"]) {
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a real governance blocker.",
-			)
-		}
-		if stateChangingSchemaInvalidRepair(failedStep) {
-			input["schemaInvalidRepairMode"] = "single_valid_json_decision"
-			input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-				"Previous repair output was rejected before execution because the LLM decision JSON was invalid; rebuild a single valid JSON object from repairActionPackage and current target snapshots.",
-				"Do not copy any rawContentPreview or repairRawContentPreview from the rejected output; do not include markdown, comments, duplicate JSON objects, trailing braces, or partial arrays.",
-				"If returning executionGraph, every node must be a complete JSON object and must follow repairActionPackage.requiredOutput acceptedKinds.",
-			)
-		}
-	}
+	applyRuntimeRepairStateChangingActionPackageProjection(input, failedStep, execErr)
 	if boolValue(input["validationRepairEscalatedToImplementation"]) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"Repeated validation-only repair is no longer an acceptable next action for this coverage gap.",
