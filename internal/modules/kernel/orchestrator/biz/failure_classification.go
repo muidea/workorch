@@ -24,6 +24,7 @@ const (
 	failureClassProviderStreamIncomplete = "provider_stream_incomplete"
 	failureClassLLMDecisionInvalid       = "llm_decision_invalid"
 	failureClassDoDCoverageMissing       = "dod_coverage_missing"
+	failureClassCoverageActionableGap    = "coverage_actionable_gap"
 	failureClassWorkspacePath            = "workspace_path_conflict"
 	failureClassShellCommand             = "shell_command_failed"
 	failureClassPatchApply               = "patch_apply_failed"

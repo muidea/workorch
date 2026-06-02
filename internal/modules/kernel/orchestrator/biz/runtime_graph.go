@@ -1744,6 +1744,16 @@ func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[
 	if currentFailure := repairActionCurrentFailure(input); len(currentFailure) > 0 {
 		return currentFailure
 	}
+	for _, context := range []map[string]any{
+		mapFromValue(input["coverageWorkItemContext"]),
+		mapFromValue(pkg["coverageWorkItemContext"]),
+		mapFromValue(mapFromValue(input["executionContextPackage"])["coverageWorkItemContext"]),
+		mapFromValue(mapFromValue(input["executionContext"])["coverageWorkItemContext"]),
+	} {
+		if currentFailure := currentFailureFromCoverageWorkItemContext(context); len(currentFailure) > 0 {
+			return currentFailure
+		}
+	}
 	for _, source := range []map[string]any{
 		input,
 		pkg,
@@ -1789,6 +1799,80 @@ func currentFailureForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[
 		}
 	}
 	return nil
+}
+
+func currentFailureFromCoverageWorkItemContext(context map[string]any) map[string]any {
+	focus := mapFromValue(context["currentFocus"])
+	if len(focus) == 0 {
+		for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+			if coverageWorkItemHasOpenGap(item) {
+				focus = item
+				break
+			}
+		}
+	}
+	if !coverageWorkItemHasOpenGap(focus) {
+		return nil
+	}
+	reason := firstNonEmptyString(
+		stringFromMap(focus, "currentGap"),
+		coverageWorkItemMissingEvidenceReason(focus),
+		"coverage work item requires additional evidence",
+	)
+	ret := map[string]any{
+		"failureClass":        failureClassCoverageActionableGap,
+		"failureReason":       truncateLLMContextString(reason),
+		"reason":              truncateLLMContextString(reason),
+		"source":              "coverageWorkItemContext",
+		"evidenceValidity":    "actionable_gap",
+		"coverageWorkItemId":  stringFromMap(focus, "id"),
+		"sourceRequirementId": stringFromMap(focus, "sourceRequirementId"),
+		"sourceScope":         stringFromMap(focus, "sourceScope"),
+		"sourcePath":          stringFromMap(focus, "sourcePath"),
+		"targetRef":           stringFromMap(focus, "targetText"),
+		"targetScope":         stringFromMap(focus, "sourceScope"),
+	}
+	if refs := stringSliceFromValue(focus["acceptedEvidenceRefs"]); len(refs) > 0 {
+		ret["acceptedEvidenceRefs"] = limitedStrings(refs, 8)
+	}
+	if missing := stringSliceFromValue(focus["missingEvidenceKinds"]); len(missing) > 0 {
+		ret["missingEvidenceKinds"] = limitedStrings(missing, 8)
+	}
+	if required := stringSliceFromValue(focus["requiredEvidenceKinds"]); len(required) > 0 {
+		ret["requiredEvidenceKinds"] = limitedStrings(required, 8)
+	}
+	return compactLLMContextMap(ret, 1)
+}
+
+func coverageWorkItemHasOpenGap(item map[string]any) bool {
+	if len(item) == 0 {
+		return false
+	}
+	status := strings.TrimSpace(strings.ToLower(stringFromMap(item, "status")))
+	if status == "satisfied" || status == "closed" || status == "completed" {
+		return false
+	}
+	if len(stringSliceFromValue(item["missingEvidenceKinds"])) > 0 {
+		return true
+	}
+	if strings.TrimSpace(stringFromMap(item, "currentGap")) != "" {
+		return true
+	}
+	if len(stringSliceFromValue(item["requiredEvidenceKinds"])) > 0 && len(stringSliceFromValue(item["acceptedEvidenceRefs"])) == 0 {
+		return true
+	}
+	return false
+}
+
+func coverageWorkItemMissingEvidenceReason(item map[string]any) string {
+	missing := stringSliceFromValue(item["missingEvidenceKinds"])
+	if len(missing) == 0 {
+		missing = stringSliceFromValue(item["requiredEvidenceKinds"])
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return "missing accepted evidence binding for required evidence kind: " + strings.Join(limitedStrings(missing, 8), ", ")
 }
 
 func currentExecutionProgressForEvidenceAcquisitionFollowUp(input map[string]any, pkg map[string]any) map[string]any {

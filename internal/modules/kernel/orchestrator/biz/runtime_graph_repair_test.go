@@ -219,6 +219,37 @@ func TestCurrentProgressDigestPrefersConcreteDiagnosticsOverGenericExitStatus(t 
 	}
 }
 
+func TestEvidenceAcquisitionFollowUpUsesCoverageFocusAsActionableGap(t *testing.T) {
+	input := map[string]any{
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-source-change",
+				"status":                "open",
+				"sourceRequirementId":   "source_change",
+				"sourceScope":           "deliverable",
+				"sourcePath":            "executionContract.profileContracts.generic.deliverableExpectations[0]",
+				"targetText":            "source_change",
+				"currentGap":            "missing accepted evidence binding for required evidence kind: validation, state_change",
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+			},
+		},
+	}
+
+	failure := currentFailureForEvidenceAcquisitionFollowUp(input, nil)
+
+	if failure["failureClass"] != failureClassCoverageActionableGap ||
+		failure["evidenceValidity"] != "actionable_gap" ||
+		failure["coverageWorkItemId"] != "cwi-source-change" ||
+		failure["sourceRequirementId"] != "source_change" {
+		t.Fatalf("currentFailure = %+v, want coverage actionable gap", failure)
+	}
+	if !strings.Contains(stringFromMap(failure, "reason"), "validation") ||
+		!strings.Contains(stringFromMap(failure, "reason"), "state_change") {
+		t.Fatalf("currentFailure.reason = %q, want missing evidence kinds", stringFromMap(failure, "reason"))
+	}
+}
+
 func TestCurrentProgressDigestDoesNotPromoteSuccessfulActionEvidenceToFailure(t *testing.T) {
 	input := map[string]any{
 		"currentExecutionProgress": map[string]any{

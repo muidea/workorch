@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -73,10 +74,17 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 				return
 			}
 		}
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
 		for {
 			select {
 			case <-r.Context().Done():
 				return
+			case <-heartbeat.C:
+				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
 			case envelope := <-eventCh:
 				if !writeSSEEnvelope(w, flusher, envelope) {
 					return

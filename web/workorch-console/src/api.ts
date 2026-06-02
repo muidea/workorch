@@ -27,7 +27,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (dedupeKey) {
     inflightGets.set(dedupeKey, promise);
-    promise.finally(() => inflightGets.delete(dedupeKey));
+    promise.then(
+      () => inflightGets.delete(dedupeKey),
+      () => inflightGets.delete(dedupeKey)
+    );
   }
 
   return promise;

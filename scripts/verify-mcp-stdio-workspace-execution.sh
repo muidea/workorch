@@ -144,6 +144,36 @@ get_json() {
   esac
 }
 
+run_api_url() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local action="${3:-}"
+  local suffix=""
+  if [[ -n "$action" ]]; then
+    suffix="/$action"
+  fi
+  printf '%s/api/v1/workorch/workspaces/%s/runs/%s%s' "$BASE_URL" "$workspace_id" "$run_id" "$suffix"
+}
+
+wait_run_state() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local expected_state="$3"
+  local output="$4"
+  local status_url
+  status_url="$(run_api_url "$workspace_id" "$run_id" "status")"
+  get_json "$status_url?waitState=$expected_state&waitTimeoutMillis=120000&waitIntervalMillis=500" "$output"
+  python3 - "$output" "$expected_state" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+state = (data.get("status") or {}).get("state")
+if state != sys.argv[2]:
+    raise SystemExit(f"run state is {state!r}, want {sys.argv[2]!r}")
+PY
+}
+
 upsert_json() {
   local collection_url="$1"
   local resource_url="$2"
@@ -581,8 +611,9 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activati
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-get_json "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" "$TMP_DIR/snapshot.json"
-get_json "$BASE_URL/api/v1/workorch/runs/$run_id/observability" "$TMP_DIR/observability.json"
+wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/run-status.json"
+get_json "$(run_api_url "$workspace_id" "$run_id" "snapshot")" "$TMP_DIR/snapshot.json"
+get_json "$(run_api_url "$workspace_id" "$run_id" "observability")" "$TMP_DIR/observability.json"
 grep '"selectedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 grep '"usedCapabilities"' "$TMP_DIR/observability.json" >/dev/null
 echo "workspaceId=$workspace_id"

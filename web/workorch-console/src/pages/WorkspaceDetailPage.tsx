@@ -663,6 +663,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setRunEventLoading(true);
     try {
       const items = await workorchApi.listEventRecords({
+        workspaceId,
         runId,
         cursorAfterId,
         limit: runtimeEventPageLimit
@@ -694,7 +695,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         workorchApi.listRunPatches(runId, { workspaceId, limit: runtimePatchPageLimit }),
         workorchApi.listRunValidationResults(runId, { workspaceId, limit: runtimeValidationPageLimit }),
         workorchApi.listRunArtifacts(runId, { workspaceId, limit: runtimeArtifactPageLimit }),
-        workorchApi.listEventRecords({ runId, limit: runtimeEventPageLimit })
+        workorchApi.listEventRecords({ workspaceId, runId, limit: runtimeEventPageLimit })
       ]);
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
@@ -787,17 +788,17 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       setRunValidationLoading(true);
       setRunArtifactLoading(true);
       const [nextRunSnapshot, nextRunObservability, nextRunContextBundle, nextRunSteps, nextRunToolCalls, nextRunCheckpoints, nextRunResults, nextRunPatches, nextRunValidations, nextRunArtifacts, nextRunEvents] = await Promise.all([
-        workorchApi.readRunSnapshot(projectedRun.id, workspaceId),
-        workorchApi.readRunObservability(projectedRun.id, workspaceId),
-        workorchApi.readRunContextBundle(projectedRun.id, workspaceId),
-        workorchApi.listRunSteps(projectedRun.id, { workspaceId, limit: runtimeStepPageLimit }),
-        workorchApi.listRunToolCalls(projectedRun.id, { workspaceId, limit: runtimeToolCallPageLimit }),
-        workorchApi.listRunRuntimeCheckpoints(projectedRun.id, { workspaceId, limit: runtimeCheckpointPageLimit }),
-        workorchApi.listRunResults(projectedRun.id, { workspaceId, limit: runtimeResultPageLimit }),
-        workorchApi.listRunPatches(projectedRun.id, { workspaceId, limit: runtimePatchPageLimit }),
-        workorchApi.listRunValidationResults(projectedRun.id, { workspaceId, limit: runtimeValidationPageLimit }),
-        workorchApi.listRunArtifacts(projectedRun.id, { workspaceId, limit: runtimeArtifactPageLimit }),
-        workorchApi.listEventRecords({ runId: projectedRun.id, limit: runtimeEventPageLimit })
+        workorchApi.readRunSnapshot(projectedRun.id, targetWorkspaceId),
+        workorchApi.readRunObservability(projectedRun.id, targetWorkspaceId),
+        workorchApi.readRunContextBundle(projectedRun.id, targetWorkspaceId),
+        workorchApi.listRunSteps(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeStepPageLimit }),
+        workorchApi.listRunToolCalls(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeToolCallPageLimit }),
+        workorchApi.listRunRuntimeCheckpoints(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeCheckpointPageLimit }),
+        workorchApi.listRunResults(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeResultPageLimit }),
+        workorchApi.listRunPatches(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimePatchPageLimit }),
+        workorchApi.listRunValidationResults(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeValidationPageLimit }),
+        workorchApi.listRunArtifacts(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeArtifactPageLimit }),
+        workorchApi.listEventRecords({ workspaceId: targetWorkspaceId, runId: projectedRun.id, limit: runtimeEventPageLimit })
       ]).finally(() => {
         setRunEventLoading(false);
         setRunStepLoading(false);
