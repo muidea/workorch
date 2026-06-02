@@ -472,3 +472,67 @@ func TestApplyRuntimeRepairPatchContextProjectionKeepsSatisfiedPatchAsValidation
 		t.Fatalf("repairGuidance len = %d, want patch guidance plus satisfied guidance", len(guidance))
 	}
 }
+
+func TestApplyRuntimeRepairFailureTargetContextProjectionAddsTargetGuidance(t *testing.T) {
+	input := map[string]any{}
+	targetContext := []map[string]any{{
+		"targetRef":   "src/app.go",
+		"contentHash": "hash-current",
+		"source":      "failure_target_current_workspace_file",
+	}}
+
+	applyRuntimeRepairFailureTargetContextProjection(input, targetContext)
+
+	if len(mapSliceFromValue(input["failureTargetRepairContext"])) != 1 {
+		t.Fatalf("failureTargetRepairContext = %+v, want one target snapshot", input["failureTargetRepairContext"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 5 {
+		t.Fatalf("repairGuidance = %+v, want five target context guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairResourceShapeProjectionAddsShapeGuidance(t *testing.T) {
+	input := map[string]any{}
+	shapeContext := []map[string]any{{
+		"targetRef": "src/config.go",
+		"source":    "same_directory_resource_shape",
+	}}
+
+	applyRuntimeRepairResourceShapeProjection(input, shapeContext)
+
+	if len(mapSliceFromValue(input["resourceShapeAlignmentContext"])) != 1 {
+		t.Fatalf("resourceShapeAlignmentContext = %+v, want one shape item", input["resourceShapeAlignmentContext"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 3 {
+		t.Fatalf("repairGuidance = %+v, want three shape guidance items", guidance)
+	}
+}
+
+func TestApplyRuntimeRepairRootCauseCandidateProjectionAddsRootCauseGuidance(t *testing.T) {
+	input := map[string]any{}
+	rootCauseCandidates := []map[string]any{{
+		"targetRef": "src/dependency.go",
+		"source":    "adjacent_resource",
+	}}
+
+	applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
+
+	if len(mapSliceFromValue(input["rootCauseCandidateContext"])) != 1 {
+		t.Fatalf("rootCauseCandidateContext = %+v, want one root cause candidate", input["rootCauseCandidateContext"])
+	}
+	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) != 3 {
+		t.Fatalf("repairGuidance = %+v, want three root cause guidance items", guidance)
+	}
+}
+
+func TestRuntimeRepairContextProjectionHelpersIgnoreEmptyContext(t *testing.T) {
+	input := map[string]any{}
+
+	applyRuntimeRepairFailureTargetContextProjection(input, nil)
+	applyRuntimeRepairResourceShapeProjection(input, nil)
+	applyRuntimeRepairRootCauseCandidateProjection(input, nil)
+
+	if len(input) != 0 {
+		t.Fatalf("input = %+v, want no fields for empty contexts", input)
+	}
+}

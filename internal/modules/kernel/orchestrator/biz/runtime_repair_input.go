@@ -410,6 +410,44 @@ func applyRuntimeRepairPatchContextProjection(
 	}
 }
 
+func applyRuntimeRepairFailureTargetContextProjection(input map[string]any, targetContext []map[string]any) {
+	if input == nil || len(targetContext) == 0 {
+		return
+	}
+	input["failureTargetRepairContext"] = targetContext
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
+		"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
+		"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
+		"When a failure mentions missing names, invalid attributes, or contract-entry mismatches, do not invent new names in the target patch; first reconcile the target with currently visible resource shape from relevant existing resources, or read the relevant resource before patching.",
+		"When the failure text contains line-referenced unresolved names, invalid attributes, shape mismatches, or equivalent resource-shape diagnostics in the failure target, repair those reported blockers before secondary validation, formatting, or evidence refinements.",
+	)
+}
+
+func applyRuntimeRepairResourceShapeProjection(input map[string]any, shapeContext []map[string]any) {
+	if input == nil || len(shapeContext) == 0 {
+		return
+	}
+	input["resourceShapeAlignmentContext"] = shapeContext
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use resourceShapeAlignmentContext as current same-directory resource evidence when diagnostics report unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, or equivalent resource-shape conflicts.",
+		"Before introducing new named elements or attributes, reconcile the failed target with existing current workspace resources in resourceShapeAlignmentContext.",
+		"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
+	)
+}
+
+func applyRuntimeRepairRootCauseCandidateProjection(input map[string]any, rootCauseCandidates []map[string]any) {
+	if input == nil || len(rootCauseCandidates) == 0 {
+		return
+	}
+	input["rootCauseCandidateContext"] = rootCauseCandidates
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Use rootCauseCandidateContext to evaluate grounded adjacent or referenced resources when the failed surface may be unblocked by changing a related current workspace resource.",
+		"Do not assume the failed surface itself is the root cause when current workspace resources show adjacent or referenced resources that the failed surface depends on.",
+		"If choosing a rootCauseTarget that differs from the failed surface, patch that resource directly and declare relatedFailureTargets for the failed surface being unblocked.",
+	)
+}
+
 func runtimeEmbeddedGraphLineageLabel(runID common.RunID, stepID common.StepID) common.StepID {
 	raw := strings.TrimSpace(string(stepID))
 	if raw == "" {
@@ -605,31 +643,14 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	}
 	targetContext := o.repairManager().runtimeRepairFailureTargetContext(ctx, run, failedStep)
 	if len(targetContext) > 0 {
-		input["failureTargetRepairContext"] = targetContext
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use failureTargetRepairContext as the current snapshot for targets identified by the failed evidence.",
-			"When failed evidence points at a concrete target resource, generate the smallest auditable patch/apply state change against that current snapshot before rerunning verification.",
-			"Use workspaceFileManifest to reconcile target resources with other known workspace resources; avoid replacing unrelated existing artifacts just to satisfy one failure target.",
-			"When a failure mentions missing names, invalid attributes, or contract-entry mismatches, do not invent new names in the target patch; first reconcile the target with currently visible resource shape from relevant existing resources, or read the relevant resource before patching.",
-			"When the failure text contains line-referenced unresolved names, invalid attributes, shape mismatches, or equivalent resource-shape diagnostics in the failure target, repair those reported blockers before secondary validation, formatting, or evidence refinements.",
-		)
+		applyRuntimeRepairFailureTargetContextProjection(input, targetContext)
 	}
 	if shapeContext := o.repairManager().runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
-		input["resourceShapeAlignmentContext"] = shapeContext
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use resourceShapeAlignmentContext as current same-directory resource evidence when diagnostics report unresolved names, invalid attributes, shape mismatches, contract-entry mismatches, or equivalent resource-shape conflicts.",
-			"Before introducing new named elements or attributes, reconcile the failed target with existing current workspace resources in resourceShapeAlignmentContext.",
-			"If the failed target disagrees with current resource shape, prefer the smallest coherent state change that aligns the target and existing resources; do not invent replacement contracts from failure text alone.",
-		)
+		applyRuntimeRepairResourceShapeProjection(input, shapeContext)
 	}
 	rootCauseCandidates := o.repairManager().runtimeRepairRootCauseCandidateContext(ctx, run, failedStep)
 	if len(rootCauseCandidates) > 0 {
-		input["rootCauseCandidateContext"] = rootCauseCandidates
-		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-			"Use rootCauseCandidateContext to evaluate grounded adjacent or referenced resources when the failed surface may be unblocked by changing a related current workspace resource.",
-			"Do not assume the failed surface itself is the root cause when current workspace resources show adjacent or referenced resources that the failed surface depends on.",
-			"If choosing a rootCauseTarget that differs from the failed surface, patch that resource directly and declare relatedFailureTargets for the failed surface being unblocked.",
-		)
+		applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
 	}
 	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
 		input["readableResourceRepairContext"] = context
