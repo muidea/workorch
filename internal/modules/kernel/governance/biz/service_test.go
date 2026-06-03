@@ -2,10 +2,12 @@ package governance
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	magictask "github.com/muidea/magicCommon/task"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -18,6 +20,168 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+type testWorkspaceDefinitions struct {
+	goals interface {
+		Get(context.Context, common.GoalID) (*workspacemodel.Goal, error)
+	}
+	dods interface {
+		Get(context.Context, common.DoDID) (*workspacemodel.DoD, error)
+	}
+}
+
+func (r testWorkspaceDefinitions) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
+	return r.goals.Get(ctx, id)
+}
+
+func (r testWorkspaceDefinitions) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
+	return r.dods.Get(ctx, id)
+}
+
+type recordingBackgroundRoutine struct {
+	asyncFunctions atomic.Int32
+	mu             sync.Mutex
+	done           []chan struct{}
+}
+
+func (r *recordingBackgroundRoutine) AsyncTask(task magictask.Task) error {
+	return r.AsyncFunction(task.Run)
+}
+
+func (r *recordingBackgroundRoutine) SyncTask(task magictask.Task) error {
+	task.Run()
+	return nil
+}
+
+func (r *recordingBackgroundRoutine) SyncTaskWithTimeOut(task magictask.Task, _ time.Duration) error {
+	task.Run()
+	return nil
+}
+
+func (r *recordingBackgroundRoutine) AsyncFunction(function func()) error {
+	r.asyncFunctions.Add(1)
+	done := make(chan struct{})
+	r.mu.Lock()
+	r.done = append(r.done, done)
+	r.mu.Unlock()
+	go func() {
+		defer close(done)
+		function()
+	}()
+	return nil
+}
+
+func (r *recordingBackgroundRoutine) SyncFunction(function func()) error {
+	function()
+	return nil
+}
+
+func (r *recordingBackgroundRoutine) SyncFunctionWithTimeOut(function func(), _ time.Duration) error {
+	function()
+	return nil
+}
+
+func (r *recordingBackgroundRoutine) Timer(_ context.Context, task magictask.Task, _, _ time.Duration) error {
+	return r.AsyncTask(task)
+}
+
+func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
+	r.mu.Lock()
+	done := append([]chan struct{}(nil), r.done...)
+	r.mu.Unlock()
+	for _, item := range done {
+		select {
+		case <-item:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
+func TestServiceUsesBackgroundRoutineForWorkerAndReconciliation(t *testing.T) {
+	ctx := context.Background()
+	routine := &recordingBackgroundRoutine{}
+	svc := NewService(Dependencies{
+		Tickets:              memory.NewDecisionTicketRepository(),
+		Resolutions:          memory.NewDecisionResolutionRepository(),
+		Approvals:            memory.NewApprovalRepository(),
+		Runs:                 memory.NewRunRepository(),
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: memory.NewGoalRepository(), dods: memory.NewDoDRepository()},
+		MemoryItems:          memory.NewMemoryItemRepository(),
+		AutoGovernanceTraces: memory.NewAutoGovernanceTraceRepository(),
+		EventHub:             events.NewMemoryHub(),
+		ResolveDecision:      func(context.Context, common.TicketID, string, map[string]any) error { return nil },
+		ResolveApproval:      func(context.Context, common.ApprovalID) error { return nil },
+		ResumeRun:            func(context.Context, common.RunID) error { return nil },
+		LoadConfig:           testGovernanceConfig(true, 0.82, 3),
+		BackgroundRoutine:    routine,
+	})
+	mustNoErr(t, svc.Start())
+	svc.Stop()
+	if !routine.Shutdown(ctx) {
+		t.Fatal("background routine tasks did not stop")
+	}
+	if got := routine.asyncFunctions.Load(); got < 2 {
+		t.Fatalf("background async functions = %d, want at least worker and reconciliation tasks", got)
+	}
+}
+
+func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	svc := NewService(Dependencies{EventHub: hub})
+	trace := &governancemodel.AutoGovernanceTrace{
+		ID:                "trace-scope",
+		WorkspaceID:       "ws-governance-event-scope",
+		RunID:             "run-governance-event-scope",
+		StepID:            "run-governance-event-scope/step-1",
+		ItemType:          "approval",
+		ItemID:            "approval-governance-event-scope",
+		Action:            "escalate",
+		RiskLevel:         "L2",
+		Confidence:        0.91,
+		PolicyMatched:     "workspace_write_allowed",
+		PolicyBlocked:     "",
+		BudgetBefore:      1,
+		BudgetAfter:       2,
+		PromptFingerprint: "prompt-key",
+		Status:            "evaluated",
+		Reason:            "scope contract",
+	}
+	for _, topic := range []string{
+		events.TopicGovernanceAutoEvaluated,
+		events.TopicGovernanceAutoResolved,
+		events.TopicGovernanceAutoEscalated,
+		events.TopicGovernanceAutoBlocked,
+	} {
+		if err := svc.publishGovernanceEvent(ctx, topic, trace, "manual_escalation"); err != nil {
+			t.Fatalf("publish %s: %v", topic, err)
+		}
+	}
+	published := hub.Published()
+	if len(published) != 4 {
+		t.Fatalf("published events = %d, want 4", len(published))
+	}
+	for _, envelope := range published {
+		if envelope.Version != events.WorkorchEventVersion ||
+			envelope.WorkspaceID != string(trace.WorkspaceID) ||
+			envelope.RunID != string(trace.RunID) ||
+			envelope.StepID != string(trace.StepID) ||
+			envelope.SubjectType != "auto_governance_trace" ||
+			envelope.SubjectID != string(trace.ID) {
+			t.Fatalf("governance envelope missing scope: %+v", envelope)
+		}
+		if envelope.Payload[events.PayloadKeyTraceID] != string(trace.ID) ||
+			envelope.Payload[events.PayloadKeyItemType] != trace.ItemType ||
+			envelope.Payload[events.PayloadKeyItemID] != trace.ItemID {
+			t.Fatalf("governance payload missing trace refs: %+v", envelope.Payload)
+		}
+		if _, ok := events.DecodeAutoGovernanceEvent(envelope); !ok {
+			t.Fatalf("governance envelope did not decode: %+v", envelope)
+		}
+	}
+}
 
 func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	ctx := context.Background()
@@ -64,8 +228,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -96,6 +259,9 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolvedTicket == ticketID && resumedRun == runID
+	})
 
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
@@ -163,8 +329,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 		Resolutions:          memory.NewDecisionResolutionRepository(),
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -189,6 +354,10 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, traceID, func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 
 	if resolveCount != 0 {
 		t.Fatalf("resolve count = %d, want 0", resolveCount)
@@ -197,11 +366,6 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 		t.Fatalf("resume count = %d, want 0", resumeCount)
 	}
 
-	traceID := common.AutoGovernanceTraceID(string(ticketID) + "/auto-governance")
-	trace, err := traceRepo.Get(ctx, traceID)
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
-	}
 	if trace.Status != "escalated" {
 		t.Fatalf("trace status = %s, want escalated", trace.Status)
 	}
@@ -268,8 +432,7 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -301,6 +464,9 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolvedTicket == ticketID && resumedRun == runID
+	})
 
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
@@ -370,8 +536,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -403,6 +568,9 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolvedTicket == ticketID && resumedRun == runID
+	})
 
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
@@ -465,8 +633,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 		Resolutions:          memory.NewDecisionResolutionRepository(),
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -491,13 +658,12 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 
 	if resolveCount != 0 || resumeCount != 0 {
 		t.Fatalf("resolve/resume count = %d/%d, want 0/0", resolveCount, resumeCount)
-	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
 	}
 	if trace.Status != "escalated" || trace.PolicyBlocked != "missing_replan_fields" {
 		t.Fatalf("trace = %+v, want missing_replan_fields escalation", trace)
@@ -546,8 +712,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 		Resolutions:          memory.NewDecisionResolutionRepository(),
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -572,12 +737,11 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 	if resolveCount != 0 || resumeCount != 0 {
 		t.Fatalf("resolve/resume count = %d/%d, want 0/0", resolveCount, resumeCount)
-	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
 	}
 	if trace.Status != "escalated" || trace.PolicyBlocked != "external_recovery_required" {
 		t.Fatalf("trace = %+v, want external recovery escalation", trace)
@@ -720,8 +884,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -752,6 +915,9 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolvedTicket == ticketID && resumedRun == runID
+	})
 
 	if resolvedTicket != ticketID {
 		t.Fatalf("resolved ticket = %s, want %s", resolvedTicket, ticketID)
@@ -862,8 +1028,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 		Resolutions:          memory.NewDecisionResolutionRepository(),
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -885,13 +1050,12 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 
 	if resolveCount != 0 {
 		t.Fatalf("resolve count = %d, want 0", resolveCount)
-	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
 	}
 	if trace.Status != "escalated" || trace.PolicyBlocked != "low_confidence" {
 		t.Fatalf("trace = %+v, want low confidence escalation", trace)
@@ -939,8 +1103,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -970,6 +1133,9 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolveCount == 1 && resumeCount == 1
+	})
 
 	if resolveCount != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount)
@@ -1038,8 +1204,7 @@ func TestServiceAutoApprovesWorkspaceWriteOnStartupWhenCreatedEventWasMissed(t *
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -1134,8 +1299,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -1165,6 +1329,9 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	waitForGovernanceCondition(t, func() bool {
+		return resolveCount.Load() == 1 && resumeCount.Load() == 1
+	})
 
 	if resolveCount.Load() != 1 {
 		t.Fatalf("resolve count = %d, want 1", resolveCount.Load())
@@ -1251,8 +1418,7 @@ func TestServiceStartReturnsWithoutWaitingForBlockedRunResume(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -1366,8 +1532,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -1392,16 +1557,15 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 
 	if resolveCount != 0 {
 		t.Fatalf("resolve count = %d, want 0", resolveCount)
 	}
 	if resumeCount != 0 {
 		t.Fatalf("resume count = %d, want 0", resumeCount)
-	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(approvalID)+"/auto-governance"))
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
 	}
 	if trace.Status != "escalated" || trace.Action != "escalate" {
 		t.Fatalf("trace = %+v, want escalated", trace)
@@ -1478,8 +1642,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		Resolutions:          resolutionRepo,
 		Approvals:            approvalRepo,
 		Runs:                 runRepo,
-		Goals:                goalRepo,
-		DoDs:                 dodRepo,
+		WorkspaceDefinitions: testWorkspaceDefinitions{goals: goalRepo, dods: dodRepo},
 		MemoryItems:          memoryRepo,
 		AutoGovernanceTraces: traceRepo,
 		EventHub:             hub,
@@ -1528,15 +1691,14 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 		WorkspaceID: string(workspaceID),
 		RunID:       string(runID),
 	}))
+	trace := waitForGovernanceTrace(t, ctx, traceRepo, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"), func(trace *governancemodel.AutoGovernanceTrace) bool {
+		return trace.Status == "escalated"
+	})
 	if resolveCount != 0 {
 		t.Fatalf("resolve count = %d, want 0 when repeated prompt budget exhausted", resolveCount)
 	}
 	if resumeCount != 0 {
 		t.Fatalf("resume count = %d, want 0 when repeated prompt budget exhausted", resumeCount)
-	}
-	trace, err := traceRepo.Get(ctx, common.AutoGovernanceTraceID(string(ticketID)+"/auto-governance"))
-	if err != nil {
-		t.Fatalf("get trace: %v", err)
 	}
 	if trace.Status != "escalated" || trace.PolicyBlocked != "repeated_prompt_exhausted" {
 		t.Fatalf("trace = %+v, want repeated prompt exhaustion", trace)
@@ -1605,6 +1767,47 @@ func cloneMap(input map[string]any) map[string]any {
 		ret[key] = value
 	}
 	return ret
+}
+
+func waitForGovernanceCondition(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("condition was not satisfied before timeout")
+}
+
+func waitForGovernanceTrace(
+	t *testing.T,
+	ctx context.Context,
+	repo interface {
+		Get(context.Context, common.AutoGovernanceTraceID) (*governancemodel.AutoGovernanceTrace, error)
+	},
+	traceID common.AutoGovernanceTraceID,
+	condition func(*governancemodel.AutoGovernanceTrace) bool,
+) *governancemodel.AutoGovernanceTrace {
+	t.Helper()
+	var last *governancemodel.AutoGovernanceTrace
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		trace, err := repo.Get(ctx, traceID)
+		if err == nil && trace != nil {
+			last = trace
+			if condition == nil || condition(trace) {
+				return trace
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if last != nil {
+		t.Fatalf("trace %s did not satisfy condition before timeout: %+v", traceID, last)
+	}
+	t.Fatalf("trace %s was not created before timeout", traceID)
+	return nil
 }
 
 func mustNoErr(t *testing.T, err error) {

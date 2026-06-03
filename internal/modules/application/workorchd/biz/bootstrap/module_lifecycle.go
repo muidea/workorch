@@ -27,7 +27,7 @@ func newRuntimeModuleLifecycle(modules []lifecycle) (*runtimeModuleLifecycle, er
 	return ret, nil
 }
 
-func (m *runtimeModuleLifecycle) Run() error {
+func (m *runtimeModuleLifecycle) Start() error {
 	if m == nil {
 		return nil
 	}
@@ -35,7 +35,7 @@ func (m *runtimeModuleLifecycle) Run() error {
 		if item == nil {
 			continue
 		}
-		if err := item.Run(); err != nil {
+		if err := item.Start(); err != nil {
 			return err
 		}
 	}
@@ -55,7 +55,7 @@ func (m *runtimeModuleLifecycle) Shutdown(ctx context.Context) error {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		if err := item.Teardown(ctx); err != nil {
+		if err := item.Stop(ctx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
 	}

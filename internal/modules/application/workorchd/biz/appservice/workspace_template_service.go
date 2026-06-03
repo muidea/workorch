@@ -163,11 +163,11 @@ func validateWorkspaceTemplateSouls(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return err
 	}
-	if exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	if template.DefaultSoulID != "" {
-		if _, err := exports.Repositories.Souls.Get(ctx, common.SoulID(template.DefaultSoulID)); err != nil {
+		if _, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.SoulID(template.DefaultSoulID)); err != nil {
 			return err
 		}
 	}
@@ -175,7 +175,7 @@ func validateWorkspaceTemplateSouls(ctx context.Context, session *RuntimeSession
 		if strings.TrimSpace(soulID) == "" {
 			continue
 		}
-		if _, err := exports.Repositories.Souls.Get(ctx, common.SoulID(soulID)); err != nil {
+		if _, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.SoulID(soulID)); err != nil {
 			return err
 		}
 	}

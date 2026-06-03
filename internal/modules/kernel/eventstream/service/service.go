@@ -10,18 +10,21 @@ import (
 
 type Service interface {
 	ListEvents(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	PurgeWorkspaceEvents(context.Context, common.WorkspaceID) (int, error)
 }
 
 type Dependencies struct {
-	ListEvents func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	ListEvents           func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	PurgeWorkspaceEvents func(context.Context, common.WorkspaceID) (int, error)
 }
 
 type Module struct {
-	listEvents func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	listEvents           func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+	purgeWorkspaceEvents func(context.Context, common.WorkspaceID) (int, error)
 }
 
 func New(deps Dependencies) *Module {
-	return &Module{listEvents: deps.ListEvents}
+	return &Module{listEvents: deps.ListEvents, purgeWorkspaceEvents: deps.PurgeWorkspaceEvents}
 }
 
 func (m *Module) ListEvents(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
@@ -29,4 +32,11 @@ func (m *Module) ListEvents(ctx context.Context, query repository.EventRecordQue
 		return nil, common.ErrInvalidArgument
 	}
 	return m.listEvents(ctx, query)
+}
+
+func (m *Module) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
+	if m == nil || m.purgeWorkspaceEvents == nil {
+		return 0, common.ErrInvalidArgument
+	}
+	return m.purgeWorkspaceEvents(ctx, workspaceID)
 }

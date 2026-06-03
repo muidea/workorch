@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -257,7 +258,6 @@ func TestRejectApprovalWithBackendReturnsConflictAfterApproved(t *testing.T) {
 func TestApproveApprovalWithSessionReusesReturnedApproval(t *testing.T) {
 	ctx := context.Background()
 	repo := newAppserviceCountingApprovalRepository()
-	service := newReturningApprovalService(repo)
 	approvalID := common.ApprovalID("approval-appservice-approve-loaded")
 	if err := repo.Create(ctx, &approvalmodel.Approval{
 		ID:          approvalID,
@@ -269,7 +269,7 @@ func TestApproveApprovalWithSessionReusesReturnedApproval(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed approval: %v", err)
 	}
-	session := newApprovalOnlySession(t, service, repo)
+	session := newApprovalOnlySession(t, repo)
 	before := repo.getCount.Load()
 
 	item, err := ApproveApprovalWithSession(ctx, session, string(approvalID))
@@ -287,7 +287,6 @@ func TestApproveApprovalWithSessionReusesReturnedApproval(t *testing.T) {
 func TestBatchResolveApprovalsWithSessionReusesReturnedApprovals(t *testing.T) {
 	ctx := context.Background()
 	repo := newAppserviceCountingApprovalRepository()
-	service := newReturningApprovalService(repo)
 	firstID := common.ApprovalID("approval-appservice-batch-a")
 	secondID := common.ApprovalID("approval-appservice-batch-b")
 	for _, id := range []common.ApprovalID{firstID, secondID} {
@@ -302,7 +301,7 @@ func TestBatchResolveApprovalsWithSessionReusesReturnedApprovals(t *testing.T) {
 			t.Fatalf("seed approval %s: %v", id, err)
 		}
 	}
-	session := newApprovalOnlySession(t, service, repo)
+	session := newApprovalOnlySession(t, repo)
 	before := repo.getCount.Load()
 
 	items, err := BatchResolveApprovalsWithSession(ctx, session, BatchResolveApprovalCommand{
@@ -453,57 +452,45 @@ func (r *appserviceCountingApprovalRepository) Delete(ctx context.Context, id co
 	return r.inner.Delete(ctx, id)
 }
 
-func newReturningApprovalService(repo *appserviceCountingApprovalRepository) *approvalservice.Module {
-	resolve := func(ctx context.Context, cmd approvalservice.ResolveApprovalCommand, state common.ApprovalState) (*approvalmodel.Approval, error) {
-		if cmd.ApprovalID == "" {
-			return nil, common.ErrInvalidArgument
-		}
-		item, err := repo.Get(ctx, cmd.ApprovalID)
-		if err != nil {
-			return nil, err
-		}
-		if item.State == state {
-			return item, nil
-		}
-		if item.State != common.ApprovalStatePending {
-			return nil, common.ErrConflict
-		}
-		item.State = state
-		if err := repo.Update(ctx, item); err != nil {
-			return nil, err
-		}
-		return item, nil
-	}
-	return approvalservice.New(approvalservice.Dependencies{
-		EnsureApproved: func(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
-			_, err := resolve(ctx, cmd, common.ApprovalStateApproved)
-			return err
-		},
-		EnsureApprovedAndReturn: func(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
-			return resolve(ctx, cmd, common.ApprovalStateApproved)
-		},
-		EnsureRejected: func(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
-			_, err := resolve(ctx, cmd, common.ApprovalStateRejected)
-			return err
-		},
-		EnsureRejectedAndReturn: func(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
-			return resolve(ctx, cmd, common.ApprovalStateRejected)
-		},
-	})
-}
-
-func newApprovalOnlySession(t *testing.T, service *approvalservice.Module, repo *appserviceCountingApprovalRepository) *RuntimeSession {
+func newApprovalOnlySession(t *testing.T, repo *appserviceCountingApprovalRepository) *RuntimeSession {
 	t.Helper()
 
-	bootstrapRuntime := bootstrap.NewWithBackend("memory", "")
+	eventHub := events.NewMemoryHub()
+	approvalModule := approvalmodule.New()
+	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: repo, EventHub: eventHub}); err != nil {
+		t.Fatalf("setup approval module: %v", err)
+	}
+	if err := approvalModule.Start(); err != nil {
+		t.Fatalf("run approval module: %v", err)
+	}
 	t.Cleanup(func() {
-		if err := bootstrapRuntime.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown bootstrap runtime: %v", err)
+		if err := approvalModule.Stop(context.Background()); err != nil {
+			t.Errorf("teardown approval module: %v", err)
 		}
 	})
-	exports := bootstrapRuntime.Exports()
-	exports.Services.ApprovalService = service
-	exports.Repositories.Approvals = repo
+	exports := bootstrap.Exports{
+		Repositories: bootstrap.RepositoryExports{
+			Workspaces:            memory.NewWorkspaceRepository(),
+			Runs:                  memory.NewRunRepository(),
+			Steps:                 memory.NewStepRepository(),
+			Results:               memory.NewResultRepository(),
+			Artifacts:             memory.NewArtifactRepository(),
+			ArtifactContinuations: memory.NewArtifactContinuationRepository(),
+			EventRecords:          memory.NewEventRecordRepository(),
+			MemoryRecallTraces:    memory.NewMemoryRecallTraceRepository(),
+			MCPCapabilities:       memory.NewMCPCapabilityRepository(),
+			ToolCalls:             memory.NewToolCallRepository(),
+			Patches:               memory.NewPatchRepository(),
+			ValidationResults:     memory.NewValidationResultRepository(),
+			RuntimeCheckpoints:    memory.NewRuntimeCheckpointRepository(),
+			Tickets:               memory.NewDecisionTicketRepository(),
+			Resolutions:           memory.NewDecisionResolutionRepository(),
+			Approvals:             repo,
+		},
+		Infrastructure: bootstrap.InfrastructureExports{
+			EventHub: eventHub,
+		},
+	}
 	session, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)

@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/muidea/magicCommon/framework/application"
+	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/framework/service"
+	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	cliconfig "github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 	"github.com/muidea/workorch/internal/modules/application/workorch/service/cli"
-	workorchserver "github.com/muidea/workorch/internal/modules/application/workorchd"
-	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -125,18 +126,13 @@ func runLocal(ctx context.Context, programName string, args StartupArgs) (err er
 		return waitServer(ctx)
 	}
 
-	session, err := appservice.NewRuntimeSessionFromInitiator()
-	if err != nil {
-		return fmt.Errorf("create runtime session: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, session.Close(context.Background()))
-	}()
-	exports, err := session.Exports()
+	be, closeBackend, err := backend.NewEmbeddedEventHub()
 	if err != nil {
 		return err
 	}
-	be := backend.NewEventHub(session, exports.Infrastructure.EventHub)
+	defer func() {
+		err = errors.Join(err, closeBackend(context.Background()))
+	}()
 
 	workingDir, _ := os.Getwd()
 	defaultWS := ResolveDefaultWorkspace(context.Background(), be, workingDir, ExtractCLIConfigPath(args.CobraArgs))
@@ -178,8 +174,12 @@ func applicationShutdownTimeout() time.Duration {
 }
 
 func waitServer(ctx context.Context) error {
+	done, err := queryServerDoneChannel(ctx)
+	if err != nil {
+		return err
+	}
 	select {
-	case err, ok := <-workorchserver.Done():
+	case err, ok := <-done:
 		if ok {
 			return err
 		}
@@ -187,6 +187,36 @@ func waitServer(ctx context.Context) error {
 	case <-ctx.Done():
 		return nil
 	}
+}
+
+func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
+	var helper runtimecommon.Helper
+	runtime, err := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
+	if err != nil {
+		return nil, err
+	}
+	hub := runtime.EventHub()
+	if hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	publishErr := hub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicWorkorchDCommandDone,
+		SourceModule: "workorch/app",
+		SubjectType:  "workorchd",
+		SubjectID:    "server",
+	})
+	response, ok := events.ResponseEnvelope(publishErr)
+	if !ok {
+		if publishErr != nil {
+			return nil, publishErr
+		}
+		return nil, common.ErrInvalidArgument
+	}
+	done, ok := response.Payload[events.PayloadKeyDoneChannel].(<-chan error)
+	if !ok || done == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return done, nil
 }
 
 func ConfigureDirectory(configDir string) {

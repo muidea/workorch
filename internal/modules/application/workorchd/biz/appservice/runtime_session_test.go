@@ -10,7 +10,6 @@ import (
 	"unsafe"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -28,11 +27,11 @@ func (l runtimeSessionTestLifecycle) ID() string {
 	return l.id
 }
 
-func (runtimeSessionTestLifecycle) Run() error {
+func (runtimeSessionTestLifecycle) Start() error {
 	return nil
 }
 
-func (l runtimeSessionTestLifecycle) Teardown(context.Context) error {
+func (l runtimeSessionTestLifecycle) Stop(context.Context) error {
 	if l.teardownSeq != nil {
 		*l.teardownSeq = append(*l.teardownSeq, l.ID())
 	}
@@ -49,11 +48,17 @@ func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
 	}
 
 	published := hub.Published()
-	if len(published) != 1 {
-		t.Fatalf("len(published) = %d, want 1", len(published))
+	if len(published) != 3 {
+		t.Fatalf("len(published) = %d, want 3", len(published))
 	}
-	if published[0].Topic != events.TopicWorkspaceCreated {
-		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCreated)
+	if published[0].Topic != events.TopicWorkspaceCommandCreate {
+		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCommandCreate)
+	}
+	if published[1].Topic != events.TopicWorkspaceCreated {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicWorkspaceCreated)
+	}
+	if published[2].Topic != events.TopicWorkspaceCommandGet {
+		t.Fatalf("third topic = %s, want %s", published[2].Topic, events.TopicWorkspaceCommandGet)
 	}
 }
 
@@ -178,7 +183,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Services.WorkspaceService != nil {
+	if exports.Repositories.Workspaces != nil || exports.Infrastructure.EventHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 
@@ -187,7 +192,7 @@ func TestRuntimeSessionExportsReturnsInvalidArgumentWhenBootstrapMissing(t *test
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid argument", err)
 	}
-	if exports.Services.WorkspaceService != nil {
+	if exports.Repositories.Workspaces != nil || exports.Infrastructure.EventHub != nil {
 		t.Fatalf("exports = %#v, want zero exports", exports)
 	}
 }
@@ -207,7 +212,7 @@ func TestRuntimeSessionExportsReturnsAssembledCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	if exports.Services.WorkspaceService == nil || exports.Repositories.Workspaces == nil || exports.Infrastructure.EventHub == nil {
+	if exports.Repositories.Workspaces == nil || exports.Infrastructure.EventHub == nil {
 		t.Fatalf("exports missing assembled capabilities: %#v", exports)
 	}
 }
@@ -237,11 +242,7 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 	}
 
 	exports := bootstrapRuntime.Exports()
-	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          "ws-long-lived-export-session",
-		Title:                "long lived export session",
-		DeliverableDirectory: "workspaces/ws-long-lived-export-session",
-	}); err != nil {
+	if err := newEventHubActionPort(exports.Infrastructure.EventHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}
 	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
@@ -307,6 +308,51 @@ func TestNewRuntimeSessionWithBackendReturnsInvalidArgumentWhenBackendUnsupporte
 	}
 }
 
+func TestRuntimeSessionWithBackendPublishesOrchestratorCommand(t *testing.T) {
+	session, err := NewRuntimeSessionWithBackend("file", t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close(context.Background()) })
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	err = exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
+		Topic: events.TopicOrchestratorCommandCancelRun,
+		Payload: map[string]any{
+			events.PayloadKeyRunID: "run-missing",
+		},
+	})
+	if err == nil {
+		t.Fatalf("Publish returned nil, want handler error")
+	}
+	if _, ok := events.ResponseEnvelope(err); ok {
+		t.Fatalf("Publish returned response, want handler error")
+	}
+}
+
+func TestRuntimeSessionRunServiceBlockOnApprovalUsesEventCommand(t *testing.T) {
+	session, err := NewRuntimeSessionWithBackend("file", t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close(context.Background()) })
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	ctx := context.Background()
+	ensureTestWorkspace(t, ctx, session, "ws-session-command")
+	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	if err := actions.EnsureRun(ctx, "run-session-command", "ws-session-command"); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := actions.EnsureRunBlockedOnApproval(ctx, "run-session-command", "approval-session-command"); err != nil {
+		t.Fatalf("BlockOnApproval: %v", err)
+	}
+}
+
 func TestNewRuntimeSessionFromEnvReturnsInvalidArgumentWhenBackendUnsupported(t *testing.T) {
 	useWorkorchTestConfig(t, "unsupported", t.TempDir())
 
@@ -334,12 +380,27 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 		}
 	})
 
-	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          common.WorkspaceID("ws-runtime-session-default-file"),
-		Title:                "runtime session default file backend",
-		DeliverableDirectory: "workspaces/ws-runtime-session-default-file",
-		InternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-runtime-session-default-file"),
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	if err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
+		Topic:        events.TopicWorkspaceCommandCreate,
+		SourceModule: "workorchd/appservice/runtime-session-test",
+		SubjectType:  "workspace",
+		SubjectID:    "ws-runtime-session-default-file",
+		WorkspaceID:  "ws-runtime-session-default-file",
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:          "ws-runtime-session-default-file",
+			events.PayloadKeyTitle:                "runtime session default file backend",
+			events.PayloadKeyDeliverableDirectory: "workspaces/ws-runtime-session-default-file",
+			events.PayloadKeyInternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-runtime-session-default-file"),
+		},
 	}); err != nil {
+		if _, ok := events.ResponseEnvelope(err); !ok {
+			t.Fatalf("create workspace: %v", err)
+		}
+	} else {
 		t.Fatalf("create workspace: %v", err)
 	}
 

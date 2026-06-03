@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -119,6 +121,61 @@ func (r staticRunRepository) Update(context.Context, *runmodel.Run) error {
 
 func (r staticRunRepository) Delete(context.Context, common.RunID) error {
 	return common.ErrInvalidArgument
+}
+
+func workspaceGovernanceHistory(
+	ctx context.Context,
+	tickets repository.DecisionTicketRepository,
+	resolutions repository.DecisionResolutionRepository,
+	runs repository.RunRepository,
+	workspaceID common.WorkspaceID,
+	goalID common.GoalID,
+	dodID common.DoDID,
+	limit int,
+) []map[string]any {
+	if tickets == nil || resolutions == nil || runs == nil || workspaceID == "" || limit <= 0 {
+		return nil
+	}
+	workspaceTickets, err := tickets.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(limit, len(workspaceTickets)))
+	for _, ticket := range workspaceTickets {
+		if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
+			continue
+		}
+		run, err := runs.Get(ctx, ticket.RunID)
+		if err != nil || run == nil || run.WorkspaceID != workspaceID {
+			continue
+		}
+		if goalID != "" && run.GoalID != goalID {
+			continue
+		}
+		if dodID != "" && run.DoDID != dodID {
+			continue
+		}
+		resolution, err := resolutions.GetByTicketID(ctx, ticket.ID)
+		if err != nil || resolution == nil {
+			continue
+		}
+		ret = append(ret, common.RedactSensitiveMap(map[string]any{
+			"ticketId":          string(ticket.ID),
+			"runId":             string(ticket.RunID),
+			"stepId":            string(ticket.StepID),
+			"decisionKind":      ticket.DecisionKind,
+			"reason":            ticket.Reason,
+			"question":          ticket.Question,
+			"ticketContext":     compactActivationFailureContext(ticket.Context),
+			"resolutionId":      string(resolution.ID),
+			"resolutionType":    resolution.Type,
+			"resolutionPayload": compactActivationDecisionPayload(resolution.Payload),
+		}))
+		if len(ret) >= limit {
+			break
+		}
+	}
+	return ret
 }
 
 type countingRunRepository struct {
@@ -427,6 +484,89 @@ func (s *blockingMCPService) ListCapabilities(ctx context.Context, query mcpmodu
 }
 
 var _ mcpmodule.Service = (*blockingMCPService)(nil)
+
+type countingActivationEventHub struct {
+	base   events.Hub
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func (h *countingActivationEventHub) Publish(ctx context.Context, envelope events.Envelope) error {
+	if h == nil || h.base == nil {
+		return common.ErrInvalidArgument
+	}
+	h.mu.Lock()
+	if h.counts == nil {
+		h.counts = map[string]int{}
+	}
+	h.counts[envelope.Topic]++
+	h.mu.Unlock()
+	return h.base.Publish(ctx, envelope)
+}
+
+func (h *countingActivationEventHub) Subscribe(topic string, handler events.Handler) func() {
+	if h == nil || h.base == nil {
+		return func() {}
+	}
+	return h.base.Subscribe(topic, handler)
+}
+
+func (h *countingActivationEventHub) Count(topic string) int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.counts[topic]
+}
+
+type blockingActivationEventHub struct {
+	base    events.Hub
+	started chan<- string
+	release <-chan struct{}
+	labels  map[string]string
+}
+
+func (h *blockingActivationEventHub) Publish(ctx context.Context, envelope events.Envelope) error {
+	if h != nil && h.labels != nil {
+		if label := h.labels[envelope.Topic]; label != "" {
+			select {
+			case h.started <- label:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			select {
+			case <-h.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	if h == nil || h.base == nil {
+		return common.ErrInvalidArgument
+	}
+	return h.base.Publish(ctx, envelope)
+}
+
+func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Handler) func() {
+	if h == nil || h.base == nil {
+		return func() {}
+	}
+	return h.base.Subscribe(topic, handler)
+}
+
+func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
+	hub := events.NewMemoryHub()
+	err := publishActivationRunCommand(context.Background(), hub, events.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
+		events.PayloadKeyRunID: "run-activation",
+	})
+	if err == nil {
+		t.Fatal("publishActivationRunCommand returned nil, want missing response error")
+	}
+	if !strings.Contains(err.Error(), "returned no response") {
+		t.Fatalf("publishActivationRunCommand error = %v, want missing response error", err)
+	}
+}
 
 type countingGoalRepository struct {
 	base      repository.GoalRepository
@@ -1647,10 +1787,8 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	countingGoals := &countingGoalRepository{base: exports.Repositories.Goals}
-	countingDoDs := &countingDoDRepository{base: exports.Repositories.DoDs}
-	exports.Repositories.Goals = countingGoals
-	exports.Repositories.DoDs = countingDoDs
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
+	exports.Infrastructure.EventHub = countingHub
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -1663,11 +1801,15 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
 		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
 	}
-	if countingGoals.listCalls != 2 || countingDoDs.listCalls != 2 {
-		t.Fatalf("list calls goals=%d dods=%d, want selection plus effective definition lists", countingGoals.listCalls, countingDoDs.listCalls)
+	if countingHub.Count(events.TopicWorkspaceCommandListGoalsByWS) != 2 || countingHub.Count(events.TopicWorkspaceCommandListDoDsByWS) != 2 {
+		t.Fatalf("definition list commands goals=%d dods=%d, want selection plus effective definition lists",
+			countingHub.Count(events.TopicWorkspaceCommandListGoalsByWS),
+			countingHub.Count(events.TopicWorkspaceCommandListDoDsByWS))
 	}
-	if countingGoals.getCalls != 0 || countingDoDs.getCalls != 0 {
-		t.Fatalf("get calls goals=%d dods=%d, want no definition reload", countingGoals.getCalls, countingDoDs.getCalls)
+	if countingHub.Count(events.TopicWorkspaceCommandGetGoal) != 0 || countingHub.Count(events.TopicWorkspaceCommandGetDoD) != 0 {
+		t.Fatalf("definition get commands goals=%d dods=%d, want no definition reload",
+			countingHub.Count(events.TopicWorkspaceCommandGetGoal),
+			countingHub.Count(events.TopicWorkspaceCommandGetDoD))
 	}
 }
 
@@ -1797,8 +1939,15 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	}
 	started := make(chan string, 2)
 	release := make(chan struct{})
-	exports.Repositories.Goals = &blockingGoalRepository{base: exports.Repositories.Goals, started: started, release: release}
-	exports.Repositories.DoDs = &blockingDoDRepository{base: exports.Repositories.DoDs, started: started, release: release}
+	exports.Infrastructure.EventHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.EventHub,
+		started: started,
+		release: release,
+		labels: map[string]string{
+			events.TopicWorkspaceCommandListGoalsByWS: "goal",
+			events.TopicWorkspaceCommandListDoDsByWS:  "dod",
+		},
+	}
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -1865,8 +2014,8 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
-	exports.Repositories.Runs = countingRuns
+	countingHub := &countingActivationEventHub{base: exports.Infrastructure.EventHub}
+	exports.Infrastructure.EventHub = countingHub
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -1879,8 +2028,8 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	if item.Run.ID == "" || item.Run.ID != item.Snapshot.TaskProgress.RunID {
 		t.Fatalf("activation run=%+v taskProgress=%+v, want response run from run snapshot", item.Run, item.Snapshot.TaskProgress)
 	}
-	if countingRuns.getCalls != 1 {
-		t.Fatalf("run Get calls = %d, want RunSnapshot read only", countingRuns.getCalls)
+	if countingHub.Count(events.TopicRunCommandGet) != 1 {
+		t.Fatalf("run get commands = %d, want RunSnapshot read only", countingHub.Count(events.TopicRunCommandGet))
 	}
 }
 
@@ -1915,9 +2064,18 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 		t.Fatalf("create dod: %v", err)
 	}
 	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
-	countingService := &countingRunService{Service: exports.Services.RunService}
+	var createdRuns []*runmodel.Run
+	unsubscribe := exports.Infrastructure.EventHub.Subscribe(events.TopicRunCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+		item, ok := envelope.Payload[events.PayloadKeyRun].(*runmodel.Run)
+		if ok && item != nil {
+			cloned := *item
+			cloned.ExecutionContext = cloneContextMap(item.ExecutionContext)
+			createdRuns = append(createdRuns, &cloned)
+		}
+		return nil
+	})
+	defer unsubscribe()
 	exports.Repositories.Runs = countingRuns
-	exports.Services.RunService = countingService
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -1927,25 +2085,25 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithSession: %v", err)
 	}
-	if len(countingService.createCommands) != 1 {
-		t.Fatalf("create commands = %d, want one activation CreateRun command", len(countingService.createCommands))
+	if len(createdRuns) != 1 {
+		t.Fatalf("created run events = %d, want one activation run payload", len(createdRuns))
 	}
-	createCommand := countingService.createCommands[0]
-	compressed, ok := createCommand.ExecutionContext["compressedContext"].(map[string]any)
+	createdRun := createdRuns[0]
+	compressed, ok := createdRun.ExecutionContext["compressedContext"].(map[string]any)
 	if !ok {
-		t.Fatalf("create executionContext = %+v, want inline compressedContext", createCommand.ExecutionContext)
+		t.Fatalf("create executionContext = %+v, want inline compressedContext", createdRun.ExecutionContext)
 	}
-	if compressed["runId"] != string(createCommand.RunID) ||
+	if compressed["runId"] != string(createdRun.ID) ||
 		compressed["runId"] != item.Run.ID ||
 		compressed["workspaceId"] != string(workspace.ID) ||
 		compressed["mode"] != "deterministic_recovery_summary" {
 		t.Fatalf("create compressedContext = %+v, want created activation run identity", compressed)
 	}
-	if createCommand.GoalID != goal.ID || createCommand.DoDID != dod.ID {
-		t.Fatalf("create command goal/dod = %s/%s, want activation definitions", createCommand.GoalID, createCommand.DoDID)
+	if createdRun.GoalID != goal.ID || createdRun.DoDID != dod.ID {
+		t.Fatalf("created run goal/dod = %s/%s, want activation definitions", createdRun.GoalID, createdRun.DoDID)
 	}
-	if createCommand.Priority != 7 {
-		t.Fatalf("create priority = %d, want activation priority", createCommand.Priority)
+	if createdRun.Priority != 7 {
+		t.Fatalf("create priority = %d, want activation priority", createdRun.Priority)
 	}
 	if len(countingRuns.createRuns) > 0 {
 		runCompressed := runCompressedContext(t, mapRun(countingRuns.createRuns[0]))
@@ -1999,8 +2157,8 @@ func TestActivationResponseWorkspaceSnapshotReusesRunSnapshotWorkspace(t *testin
 	if item.Snapshot.Workspace.ID != string(workspace.ID) {
 		t.Fatalf("activation snapshot workspace=%+v, want selected workspace", item.Snapshot.Workspace)
 	}
-	if countingWorkspaces.getCalls != 2 {
-		t.Fatalf("workspace Get calls = %d, want lightweight activation path without extra full workspace snapshot read", countingWorkspaces.getCalls)
+	if countingWorkspaces.getCalls != 0 {
+		t.Fatalf("workspace repository Get calls = %d, want appservice workspace reads through owner EventHub command", countingWorkspaces.getCalls)
 	}
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Runs[0].ID != item.Run.ID {
 		t.Fatalf("activation snapshot runs = %+v, want only current activation run", item.Snapshot.Runs)
@@ -2057,9 +2215,16 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 
 	started := make(chan string, 3)
 	release := make(chan struct{})
-	exports.Repositories.Souls = &blockingSoulRepository{base: exports.Repositories.Souls, started: started, release: release}
-	exports.Services.MemoryService = &blockingMemoryService{started: started, release: release}
-	exports.Repositories.Tickets = &blockingDecisionTicketRepository{base: exports.Repositories.Tickets, started: started, release: release}
+	exports.Infrastructure.EventHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.EventHub,
+		started: started,
+		release: release,
+		labels: map[string]string{
+			events.TopicSoulCommandGet:                 "soul",
+			events.TopicMemoryCommandListByWorkspace:   "memory",
+			events.TopicDecisionCommandListTicketsByWS: "governance",
+		},
+	}
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -2127,7 +2292,7 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 	if err := exports.Repositories.DoDs.Create(ctx, dod); err != nil {
 		t.Fatalf("create dod: %v", err)
 	}
-	if err := exports.Services.MCPService.CreateServer(ctx, mcpmodule.CreateServerCommand{
+	if err := createTestMCPServerWithExports(ctx, exports, mcpmodule.CreateServerCommand{
 		ServerID:     "mcp-activation-mcp-parallel",
 		Name:         "Activation MCP Parallel",
 		Transport:    "stdio",
@@ -2139,7 +2304,15 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 
 	started := make(chan string, 2)
 	release := make(chan struct{})
-	exports.Services.MCPService = &blockingMCPService{base: exports.Services.MCPService, started: started, release: release}
+	exports.Infrastructure.EventHub = &blockingActivationEventHub{
+		base:    exports.Infrastructure.EventHub,
+		started: started,
+		release: release,
+		labels: map[string]string{
+			events.TopicMCPCommandGetServer:     "mcp-server",
+			events.TopicMCPCommandGetCapability: "mcp-capability",
+		},
+	}
 	borrowed, err := NewRuntimeSessionFromExports(exports)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
@@ -2463,7 +2636,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	if err := exports.Services.MCPService.CreateServer(ctx, mcpmodule.CreateServerCommand{
+	if err := createTestMCPServerWithExports(ctx, exports, mcpmodule.CreateServerCommand{
 		ServerID:      common.MCPServerID("mcp-template-default"),
 		Name:          "Template Default MCP",
 		Transport:     "stdio",
@@ -2475,7 +2648,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	}); err != nil {
 		t.Fatalf("CreateServer: %v", err)
 	}
-	if _, err := exports.Services.MCPService.UpdateCapability(ctx, mcpmodule.UpdateCapabilityCommand{
+	if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
 		ID:        common.MCPCapabilityID("mcp-template-default:tool:tool.lookup"),
 		ServerID:  common.MCPServerID("mcp-template-default"),
 		Kind:      "tool",
@@ -3225,8 +3398,20 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 			Tags:        []string{"accepted_input", "tool_context"},
 		},
 	}}
+	hub := events.NewMemoryHub()
+	hub.Subscribe(events.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		wsID := common.WorkspaceID("")
+		if raw, _ := envelope.Payload[events.PayloadKeyWorkspaceID].(string); raw != "" {
+			wsID = common.WorkspaceID(raw)
+		}
+		items, err := service.ListMemoryByWorkspace(ctx, wsID)
+		if err != nil {
+			return err
+		}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyMemoryItems: items}})
+	})
 
-	items, evidence, err := selectedMemoryItems(ctx, workspaceID, service, nil, nil, nil)
+	items, evidence, err := selectedMemoryItems(ctx, workspaceID, hub, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("selectedMemoryItems: %v", err)
 	}
@@ -3368,11 +3553,12 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := session.Bootstrap.Exports()
 	oldRunID := common.RunID("run-activation-terminal-active-old")
-	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:       oldRunID,
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(goal.ID),
 		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateRunning,
 	}); err != nil {
 		t.Fatalf("CreateRun old active: %v", err)
 	}
@@ -3425,11 +3611,12 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := session.Bootstrap.Exports()
 	oldRunID := common.RunID("run-activation-rejected-terminal-old")
-	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:       oldRunID,
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(goal.ID),
 		DoDID:       common.DoDID(dod.ID),
+		State:       common.RunStateFailed,
 	}); err != nil {
 		t.Fatalf("CreateRun old terminal: %v", err)
 	}
@@ -3514,11 +3701,12 @@ func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefin
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
 	exports := session.Bootstrap.Exports()
 	oldRunID := common.RunID("run-activation-replace-active-old")
-	if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:       oldRunID,
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          oldRunID,
 		WorkspaceID: common.WorkspaceID(workspace.ID),
 		GoalID:      common.GoalID(oldGoal.ID),
 		DoDID:       common.DoDID(oldDoD.ID),
+		State:       common.RunStateRunning,
 		ExecutionContext: map[string]any{
 			"goalId": oldGoal.ID,
 			"goal": map[string]any{

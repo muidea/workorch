@@ -4,15 +4,6 @@ import (
 	"context"
 	"errors"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
-	eventstreammodule "github.com/muidea/workorch/internal/modules/kernel/eventstream"
-	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
-	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
-	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
-	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -20,8 +11,8 @@ import (
 
 type lifecycle interface {
 	ID() string
-	Run() error
-	Teardown(context.Context) error
+	Start() error
+	Stop(context.Context) error
 }
 
 type Runtime struct {
@@ -57,18 +48,6 @@ type RepositoryExports struct {
 	Approvals             repository.ApprovalRepository
 }
 
-type ServiceExports struct {
-	WorkspaceService   workspacemodule.Service
-	SoulService        soulmodule.Service
-	MemoryService      memorymodule.Service
-	SkillService       skillmodule.Service
-	MCPService         mcpmodule.Service
-	EventStreamService eventstreammodule.Service
-	DecisionService    decisionmodule.Service
-	ApprovalService    approvalmodule.Service
-	RunService         runmodule.Service
-}
-
 type InfrastructureExports struct {
 	EventHub   events.Hub
 	LoadConfig func() (workorchconfig.Config, error)
@@ -76,7 +55,6 @@ type InfrastructureExports struct {
 
 type Exports struct {
 	Repositories   RepositoryExports
-	Services       ServiceExports
 	Infrastructure InfrastructureExports
 }
 
@@ -89,7 +67,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 		r.moduleLifecycle = nil
 	} else {
 		for idx := len(r.modules) - 1; idx >= 0; idx-- {
-			if err := r.modules[idx].Teardown(ctx); err != nil {
+			if err := r.modules[idx].Stop(ctx); err != nil {
 				shutdownErr = errors.Join(shutdownErr, err)
 			}
 		}

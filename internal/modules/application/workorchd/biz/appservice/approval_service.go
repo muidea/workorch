@@ -3,13 +3,11 @@ package appservice
 import (
 	"context"
 	"strings"
-	"sync"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type Approval struct {
@@ -49,14 +47,14 @@ type BatchResolveApprovalCommand struct {
 }
 
 func ReadApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	_, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.ApprovalID(approvalID))
+	item, err := readApprovalByOwnerCommand(ctx, hub, common.ApprovalID(approvalID))
 	if err != nil {
 		return Approval{}, err
 	}
@@ -87,25 +85,19 @@ func ReadApprovalFromEnv(ctx context.Context, approvalID string) (Approval, erro
 }
 
 func ListApprovalsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runID string) (ret []Approval, err error) {
-	_, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.List(ctx)
+	items, err := approvalsForQuery(ctx, hub, workspaceID, runID)
 	if err != nil {
 		return nil, err
 	}
 	ret = make([]Approval, 0, len(items))
 	for _, item := range items {
-		if workspaceID != "" && string(item.WorkspaceID) != workspaceID {
-			continue
-		}
-		if runID != "" && string(item.RunID) != runID {
-			continue
-		}
 		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "approval", string(item.ID))
 		if autoErr != nil {
 			return nil, autoErr
@@ -124,29 +116,16 @@ func ListApprovalsWithBackend(ctx context.Context, backend string, dataRoot stri
 }
 
 func ListApprovalPageWithSession(ctx context.Context, session *RuntimeSession, query ApprovalQuery) (ret ApprovalPage, err error) {
-	_, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return ApprovalPage{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.List(ctx)
+	filtered, err := approvalsForQuery(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return ApprovalPage{}, err
-	}
-	filtered := make([]*approvalmodel.Approval, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if query.WorkspaceID != "" && string(item.WorkspaceID) != query.WorkspaceID {
-			continue
-		}
-		if query.RunID != "" && string(item.RunID) != query.RunID {
-			continue
-		}
-		filtered = append(filtered, item)
 	}
 	pageApprovals, limit, cursorAfterID, nextCursor, hasMore := pageApprovals(filtered, query)
 	approvals := make([]Approval, 0, len(pageApprovals))
@@ -185,16 +164,16 @@ func ListApprovalsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
 	if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
-		existing, err := repo.Get(ctx, id)
+		existing, err := readApprovalByOwnerCommand(ctx, hub, id)
 		if err != nil {
 			return Approval{}, err
 		}
@@ -202,7 +181,7 @@ func ApproveApprovalWithSession(ctx context.Context, session *RuntimeSession, ap
 			return Approval{}, err
 		}
 	}
-	item, err := service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+	item, err := resolveApprovalByEventHub(ctx, hub, events.TopicApprovalCommandEnsureApproved, id)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -233,16 +212,16 @@ func ApproveApprovalFromEnv(ctx context.Context, approvalID string) (Approval, e
 }
 
 func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, approvalID string) (ret Approval, err error) {
-	service, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return Approval{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.ApprovalID(approvalID)
 	if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
-		existing, err := repo.Get(ctx, id)
+		existing, err := readApprovalByOwnerCommand(ctx, hub, id)
 		if err != nil {
 			return Approval{}, err
 		}
@@ -250,7 +229,7 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 			return Approval{}, err
 		}
 	}
-	item, err := service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+	item, err := resolveApprovalByEventHub(ctx, hub, events.TopicApprovalCommandEnsureRejected, id)
 	if err != nil {
 		return Approval{}, err
 	}
@@ -265,11 +244,11 @@ func RejectApprovalWithSession(ctx context.Context, session *RuntimeSession, app
 }
 
 func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveApprovalCommand) (ret []Approval, err error) {
-	service, repo, err := approvalDependenciesFromSession(session)
+	hub, err := approvalDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	if len(cmd.ApprovalIDs) == 0 {
@@ -298,15 +277,9 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 		err  error
 	}
 	reads := make([]approvalRead, len(cmd.ApprovalIDs))
-	var wg sync.WaitGroup
 	for i, approvalID := range cmd.ApprovalIDs {
-		wg.Add(1)
-		go func(idx int, aID string) {
-			defer wg.Done()
-			reads[idx].item, reads[idx].err = repo.Get(ctx, common.ApprovalID(aID))
-		}(i, approvalID)
+		reads[i].item, reads[i].err = readApprovalByOwnerCommand(ctx, hub, common.ApprovalID(approvalID))
 	}
-	wg.Wait()
 	for _, r := range reads {
 		if r.err != nil {
 			return nil, r.err
@@ -327,9 +300,9 @@ func BatchResolveApprovalsWithSession(ctx context.Context, session *RuntimeSessi
 			err  error
 		)
 		if action == "approve" {
-			item, err = service.EnsureApprovedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+			item, err = resolveApprovalByEventHub(ctx, hub, events.TopicApprovalCommandEnsureApproved, id)
 		} else {
-			item, err = service.EnsureRejectedAndReturn(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: id})
+			item, err = resolveApprovalByEventHub(ctx, hub, events.TopicApprovalCommandEnsureRejected, id)
 		}
 		if err != nil {
 			return nil, err
@@ -389,15 +362,63 @@ func BatchResolveApprovalsFromEnv(ctx context.Context, cmd BatchResolveApprovalC
 	return BatchResolveApprovalsWithSession(ctx, session, cmd)
 }
 
-func approvalDependenciesFromSession(session *RuntimeSession) (approvalmodule.Service, repository.ApprovalRepository, error) {
+func approvalDependenciesFromSession(session *RuntimeSession) (events.Hub, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if exports.Services.ApprovalService == nil || exports.Repositories.Approvals == nil {
-		return nil, nil, common.ErrInvalidArgument
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
 	}
-	return exports.Services.ApprovalService, exports.Repositories.Approvals, nil
+	return exports.Infrastructure.EventHub, nil
+}
+
+func approvalsForQuery(ctx context.Context, hub events.Hub, workspaceID string, runID string) ([]*approvalmodel.Approval, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	var (
+		items []*approvalmodel.Approval
+		err   error
+	)
+	switch {
+	case runID != "":
+		items, err = listApprovalsByRunOwnerCommand(ctx, hub, common.RunID(runID))
+	case workspaceID != "":
+		items, err = listApprovalsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
+	default:
+		items, err = listApprovalsByOwnerCommand(ctx, hub)
+	}
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*approvalmodel.Approval, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if workspaceID != "" && string(item.WorkspaceID) != workspaceID {
+			continue
+		}
+		if runID != "" && string(item.RunID) != runID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
+func resolveApprovalByEventHub(ctx context.Context, hub events.Hub, topic string, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, topic, "approval", string(approvalID), "", "", map[string]any{
+		events.PayloadKeyApprovalID: string(approvalID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyApproval].(*approvalmodel.Approval)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
 }
 
 func mapApproval(item *approvalmodel.Approval, autoGovernance *AutoGovernanceSummary) Approval {

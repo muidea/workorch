@@ -2,94 +2,80 @@ package appservice
 
 import (
 	"context"
+	"fmt"
 
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-type workspaceServiceActions struct {
-	service workspacemodule.Service
+type eventHubActionPort struct {
+	hub events.Hub
 }
 
-func newWorkspaceActionPort(service workspacemodule.Service) WorkspaceActionRuntime {
-	return workspaceServiceActions{service: service}
+func newEventHubActionPort(hub events.Hub) *eventHubActionPort {
+	return &eventHubActionPort{hub: hub}
 }
 
-func (p workspaceServiceActions) EnsureWorkspace(ctx context.Context, workspaceID common.WorkspaceID, title string) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureWorkspace(ctx context.Context, workspaceID common.WorkspaceID, title string) error {
+	if p == nil || p.hub == nil || workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureWorkspace(ctx, workspacemodule.EnsureWorkspaceCommand{
-		WorkspaceID:          workspaceID,
-		Title:                title,
-		DeliverableDirectory: "workspaces/" + string(workspaceID),
+	return p.publish(ctx, events.TopicWorkspaceCommandEnsure, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
+		events.PayloadKeyWorkspaceID:          string(workspaceID),
+		events.PayloadKeyTitle:                title,
+		events.PayloadKeyDeliverableDirectory: "workspaces/" + string(workspaceID),
 	})
 }
 
-type runServiceActions struct {
-	service runmodule.Service
-}
-
-func newRunActionPort(service runmodule.Service) RunActionRuntime {
-	return runServiceActions{service: service}
-}
-
-func (p runServiceActions) EnsureRun(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureRun(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {
+	if p == nil || p.hub == nil || runID == "" || workspaceID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureRun(ctx, runmodule.CreateRunCommand{
-		RunID:       runID,
-		WorkspaceID: workspaceID,
+	return p.publish(ctx, events.TopicRunCommandEnsure, "run", string(runID), workspaceID, runID, "", map[string]any{
+		events.PayloadKeyRunID:       string(runID),
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 }
 
-func (p runServiceActions) EnsureRunStarted(ctx context.Context, runID common.RunID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureRunStarted(ctx context.Context, runID common.RunID) error {
+	if p == nil || p.hub == nil || runID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: runID})
-}
-
-func (p runServiceActions) EnsureRunBlockedOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
-	if p.service == nil {
-		return common.ErrInvalidArgument
-	}
-	return p.service.EnsureBlockedOnDecision(ctx, runmodule.BlockOnDecisionCommand{
-		RunID:    runID,
-		TicketID: ticketID,
+	return p.publish(ctx, events.TopicRunCommandStart, "run", string(runID), "", runID, "", map[string]any{
+		events.PayloadKeyRunID: string(runID),
 	})
 }
 
-func (p runServiceActions) EnsureRunBlockedOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureRunBlockedOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
+	if p == nil || p.hub == nil || runID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureBlockedOnApproval(ctx, runmodule.BlockOnApprovalCommand{
-		RunID:      runID,
-		ApprovalID: approvalID,
+	return p.publish(ctx, events.TopicOrchestratorCommandBlockDecision, "run", string(runID), "", runID, "", map[string]any{
+		events.PayloadKeyRunID:            string(runID),
+		events.PayloadKeyBlockingTicketID: string(ticketID),
 	})
 }
 
-func (p runServiceActions) EnsureRunResumed(ctx context.Context, runID common.RunID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureRunBlockedOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
+	if p == nil || p.hub == nil || runID == "" || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureResumed(ctx, runmodule.ResumeRunCommand{RunID: runID})
+	return p.publish(ctx, events.TopicOrchestratorCommandBlockApproval, "run", string(runID), "", runID, "", map[string]any{
+		events.PayloadKeyRunID:              string(runID),
+		events.PayloadKeyBlockingApprovalID: string(approvalID),
+	})
 }
 
-type decisionServiceActions struct {
-	service decisionmodule.Service
+func (p *eventHubActionPort) EnsureRunResumed(ctx context.Context, runID common.RunID) error {
+	if p == nil || p.hub == nil || runID == "" {
+		return common.ErrInvalidArgument
+	}
+	return p.publish(ctx, events.TopicRunCommandEnsureResumed, "run", string(runID), "", runID, "", map[string]any{
+		events.PayloadKeyRunID: string(runID),
+	})
 }
 
-func newDecisionActionPort(service decisionmodule.Service) DecisionActionRuntime {
-	return decisionServiceActions{service: service}
-}
-
-func (p decisionServiceActions) EnsureTicket(
+func (p *eventHubActionPort) EnsureTicket(
 	ctx context.Context,
 	ticketID common.TicketID,
 	workspaceID common.WorkspaceID,
@@ -97,45 +83,37 @@ func (p decisionServiceActions) EnsureTicket(
 	stepID common.StepID,
 	reason string,
 ) error {
-	if p.service == nil {
+	if p == nil || p.hub == nil || ticketID == "" || workspaceID == "" || runID == "" || stepID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureTicket(ctx, decisionmodule.CreateTicketCommand{
-		TicketID:    ticketID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		Reason:      reason,
+	return p.publish(ctx, events.TopicDecisionCommandEnsureTicket, "decision_ticket", string(ticketID), workspaceID, runID, stepID, map[string]any{
+		events.PayloadKeyBlockingTicketID: string(ticketID),
+		events.PayloadKeyWorkspaceID:      string(workspaceID),
+		events.PayloadKeyRunID:            string(runID),
+		events.PayloadKeyStepID:           string(stepID),
+		events.PayloadKeyReason:           reason,
 	})
 }
 
-func (p decisionServiceActions) EnsureResolvedTicket(
+func (p *eventHubActionPort) EnsureResolvedTicket(
 	ctx context.Context,
 	resolutionID common.ResolutionID,
 	ticketID common.TicketID,
 	resolutionType string,
 	payload map[string]any,
 ) error {
-	if p.service == nil {
+	if p == nil || p.hub == nil || resolutionID == "" || ticketID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: resolutionID,
-		TicketID:     ticketID,
-		Type:         resolutionType,
-		Payload:      payload,
+	return p.publish(ctx, events.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), "", "", "", map[string]any{
+		events.PayloadKeyResolutionID:     string(resolutionID),
+		events.PayloadKeyBlockingTicketID: string(ticketID),
+		events.PayloadKeyType:             resolutionType,
+		events.PayloadKeyPayload:          cloneActionPayload(payload),
 	})
 }
 
-type approvalServiceActions struct {
-	service approvalmodule.Service
-}
-
-func newApprovalActionPort(service approvalmodule.Service) ApprovalActionRuntime {
-	return approvalServiceActions{service: service}
-}
-
-func (p approvalServiceActions) EnsureApproval(
+func (p *eventHubActionPort) EnsureApproval(
 	ctx context.Context,
 	approvalID common.ApprovalID,
 	workspaceID common.WorkspaceID,
@@ -143,28 +121,66 @@ func (p approvalServiceActions) EnsureApproval(
 	stepID common.StepID,
 	reason string,
 ) error {
-	if p.service == nil {
+	if p == nil || p.hub == nil || approvalID == "" || workspaceID == "" || runID == "" || stepID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureApproval(ctx, approvalmodule.CreateApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: workspaceID,
-		RunID:       runID,
-		StepID:      stepID,
-		Reason:      reason,
+	return p.publish(ctx, events.TopicApprovalCommandEnsure, "approval", string(approvalID), workspaceID, runID, stepID, map[string]any{
+		events.PayloadKeyApprovalID:  string(approvalID),
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+		events.PayloadKeyRunID:       string(runID),
+		events.PayloadKeyStepID:      string(stepID),
+		events.PayloadKeyReason:      reason,
 	})
 }
 
-func (p approvalServiceActions) EnsureApprovalApproved(ctx context.Context, approvalID common.ApprovalID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureApprovalApproved(ctx context.Context, approvalID common.ApprovalID) error {
+	if p == nil || p.hub == nil || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureApproved(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: approvalID})
+	return p.publish(ctx, events.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), "", "", "", map[string]any{
+		events.PayloadKeyApprovalID: string(approvalID),
+	})
 }
 
-func (p approvalServiceActions) EnsureApprovalRejected(ctx context.Context, approvalID common.ApprovalID) error {
-	if p.service == nil {
+func (p *eventHubActionPort) EnsureApprovalRejected(ctx context.Context, approvalID common.ApprovalID) error {
+	if p == nil || p.hub == nil || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.service.EnsureRejected(ctx, approvalmodule.ResolveApprovalCommand{ApprovalID: approvalID})
+	return p.publish(ctx, events.TopicApprovalCommandEnsureRejected, "approval", string(approvalID), "", "", "", map[string]any{
+		events.PayloadKeyApprovalID: string(approvalID),
+	})
+}
+
+func (p *eventHubActionPort) publish(ctx context.Context, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, payload map[string]any) error {
+	if p == nil || p.hub == nil || topic == "" || subjectID == "" {
+		return common.ErrInvalidArgument
+	}
+	err := p.hub.Publish(ctx, events.Envelope{
+		Topic:        topic,
+		SourceModule: "workorchd/appservice/runtime-actions",
+		SubjectType:  subjectType,
+		SubjectID:    subjectID,
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		StepID:       string(stepID),
+		Payload:      payload,
+	})
+	if _, ok := events.ResponseEnvelope(err); ok {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("runtime action command %s returned no response", topic)
+}
+
+func cloneActionPayload(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }

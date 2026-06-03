@@ -108,6 +108,30 @@ func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.Workspac
 	if err != nil {
 		return err
 	}
+	goals, err := m.goals.ListByWorkspaceID(ctx, id)
+	if err != nil {
+		return err
+	}
+	dods, err := m.dods.ListByWorkspaceID(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, goal := range goals {
+		if goal == nil {
+			continue
+		}
+		if err := m.goals.Delete(ctx, goal.ID); err != nil {
+			return err
+		}
+	}
+	for _, dod := range dods {
+		if dod == nil {
+			continue
+		}
+		if err := m.dods.Delete(ctx, dod.ID); err != nil {
+			return err
+		}
+	}
 	if err := m.workspaces.Delete(ctx, id); err != nil {
 		return err
 	}

@@ -133,6 +133,41 @@ func TestGoalDoDManager_CreateWorkspace_RejectsDuplicateWorkspaceID(t *testing.T
 	}
 }
 
+func TestGoalDoDManager_DeleteWorkspacePurgesGoalAndDoD(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	goalRepo := memory.NewGoalRepository()
+	dodRepo := memory.NewDoDRepository()
+	manager := NewGoalDoDManager(workspaceRepo, goalRepo, dodRepo, nil)
+	workspaceID := common.WorkspaceID("ws-delete-cascade")
+	if err := manager.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
+		WorkspaceID:          workspaceID,
+		Title:                "delete cascade",
+		DeliverableDirectory: "/tmp/workorch/ws-delete-cascade",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := manager.DefineGoal(ctx, workspaceservice.DefineGoalCommand{WorkspaceID: workspaceID, GoalID: "goal-delete-cascade", Text: "goal"}); err != nil {
+		t.Fatalf("define goal: %v", err)
+	}
+	if err := manager.DefineDoD(ctx, workspaceservice.DefineDoDCommand{WorkspaceID: workspaceID, DoDID: "dod-delete-cascade", Items: []string{"dod"}}); err != nil {
+		t.Fatalf("define dod: %v", err)
+	}
+
+	if err := manager.DeleteWorkspace(ctx, workspaceID); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+	if _, err := workspaceRepo.Get(ctx, workspaceID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("workspace get err = %v, want not found", err)
+	}
+	if _, err := goalRepo.Get(ctx, "goal-delete-cascade"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("goal get err = %v, want not found", err)
+	}
+	if _, err := dodRepo.Get(ctx, "dod-delete-cascade"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("dod get err = %v, want not found", err)
+	}
+}
+
 func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewWorkspaceRepository()

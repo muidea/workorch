@@ -21,6 +21,9 @@ type CreateTicketCommand struct {
 type ResolveTicketCommand struct {
 	ResolutionID common.ResolutionID
 	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
 	Type         string
 	Payload      map[string]any
 }

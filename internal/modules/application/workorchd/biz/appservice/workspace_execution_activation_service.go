@@ -15,12 +15,11 @@ import (
 
 	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
-	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -56,16 +55,12 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		return WorkspaceExecutionActivation{}, err
 	}
 	ctx = contextWithConfigLoader(ctx, configLoaderFromExports(exports))
-	if exports.Services.RunService == nil ||
-		exports.Repositories.Workspaces == nil ||
-		exports.Repositories.Goals == nil ||
-		exports.Repositories.DoDs == nil ||
-		exports.Repositories.Runs == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return WorkspaceExecutionActivation{}, common.ErrInvalidArgument
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	workspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+	workspace, err := readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
@@ -74,7 +69,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 		return WorkspaceExecutionActivation{}, err
 	}
 	if workspace.ActiveRunID != "" {
-		run, err := exports.Repositories.Runs.Get(ctx, workspace.ActiveRunID)
+		run, err := readRunByOwnerCommand(ctx, exports.Infrastructure.EventHub, workspace.ActiveRunID)
 		if err != nil {
 			return WorkspaceExecutionActivation{}, err
 		}
@@ -91,14 +86,16 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
-				if err := exports.Services.RunService.SupersedeRun(ctx, runmodule.SupersedeRunCommand{RunID: run.ID}); err != nil {
+				if err := publishActivationRunCommand(ctx, exports.Infrastructure.EventHub, events.TopicRunCommandSupersede, "run", string(run.ID), workspace.ID, run.ID, map[string]any{
+					events.PayloadKeyRunID: string(run.ID),
+				}); err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
 				runID, err := createAndStartWorkspaceExecutionRun(ctx, session, common.WorkspaceID(workspaceID), goal.ID, dod.ID, executionContext, cmd.Priority, cmd.LLMProviderID)
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
-				startedRun, err := exports.Repositories.Runs.Get(ctx, runID)
+				startedRun, err := readRunByOwnerCommand(ctx, exports.Infrastructure.EventHub, runID)
 				if err != nil {
 					return WorkspaceExecutionActivation{}, err
 				}
@@ -131,7 +128,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
-	startedRun, err := exports.Repositories.Runs.Get(ctx, runID)
+	startedRun, err := readRunByOwnerCommand(ctx, exports.Infrastructure.EventHub, runID)
 	if err != nil {
 		return WorkspaceExecutionActivation{}, err
 	}
@@ -210,7 +207,7 @@ func latestWorkspaceDoD(items []*workspacemodel.DoD) *workspacemodel.DoD {
 	return nil
 }
 
-func orderedWorkspaceGoals(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, items []*workspacemodel.Goal) []*workspacemodel.Goal {
+func orderedWorkspaceGoals(ctx context.Context, eventRecords readModelEventRecordReader, workspaceID common.WorkspaceID, items []*workspacemodel.Goal) []*workspacemodel.Goal {
 	return orderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicGoalDefined, items, func(item *workspacemodel.Goal) common.GoalID {
 		if item == nil {
 			return ""
@@ -219,7 +216,7 @@ func orderedWorkspaceGoals(ctx context.Context, eventRecords repository.EventRec
 	})
 }
 
-func orderedWorkspaceDoDs(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, items []*workspacemodel.DoD) []*workspacemodel.DoD {
+func orderedWorkspaceDoDs(ctx context.Context, eventRecords readModelEventRecordReader, workspaceID common.WorkspaceID, items []*workspacemodel.DoD) []*workspacemodel.DoD {
 	return orderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicDoDDefined, items, func(item *workspacemodel.DoD) common.DoDID {
 		if item == nil {
 			return ""
@@ -228,7 +225,7 @@ func orderedWorkspaceDoDs(ctx context.Context, eventRecords repository.EventReco
 	})
 }
 
-func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, topic string, items []T, idOf func(T) ID) []T {
+func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRecords readModelEventRecordReader, workspaceID common.WorkspaceID, topic string, items []T, idOf func(T) ID) []T {
 	ordered := append([]T(nil), items...)
 	if eventRecords == nil || len(ordered) == 0 {
 		return ordered
@@ -282,7 +279,7 @@ func orderedWorkspaceDefinitions[T any, ID ~string](ctx context.Context, eventRe
 	return ret
 }
 
-func workspaceDefinitionRevisionContexts(ctx context.Context, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, topic string) []map[string]any {
+func workspaceDefinitionRevisionContexts(ctx context.Context, eventRecords readModelEventRecordReader, workspaceID common.WorkspaceID, topic string) []map[string]any {
 	if eventRecords == nil {
 		return nil
 	}
@@ -334,11 +331,17 @@ func workspaceDefinitionRevisionContexts(ctx context.Context, eventRecords repos
 	return ret
 }
 
-func effectiveWorkspaceGoal(ctx context.Context, goals repository.GoalRepository, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, selected *workspacemodel.Goal) (*workspacemodel.Goal, []map[string]any, error) {
-	if goals == nil || selected == nil {
+func effectiveWorkspaceGoal(
+	ctx context.Context,
+	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
+	eventRecords readModelEventRecordReader,
+	workspaceID common.WorkspaceID,
+	selected *workspacemodel.Goal,
+) (*workspacemodel.Goal, []map[string]any, error) {
+	if listByWorkspaceID == nil || selected == nil {
 		return selected, nil, nil
 	}
-	items, err := goals.ListByWorkspaceID(ctx, workspaceID)
+	items, err := listByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,11 +374,17 @@ func effectiveWorkspaceGoal(ctx context.Context, goals repository.GoalRepository
 	return &effective, contexts, nil
 }
 
-func effectiveWorkspaceDoD(ctx context.Context, dods repository.DoDRepository, eventRecords repository.EventRecordRepository, workspaceID common.WorkspaceID, selected *workspacemodel.DoD) (*workspacemodel.DoD, []map[string]any, error) {
-	if dods == nil || selected == nil {
+func effectiveWorkspaceDoD(
+	ctx context.Context,
+	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
+	eventRecords readModelEventRecordReader,
+	workspaceID common.WorkspaceID,
+	selected *workspacemodel.DoD,
+) (*workspacemodel.DoD, []map[string]any, error) {
+	if listByWorkspaceID == nil || selected == nil {
 		return selected, nil, nil
 	}
-	items, err := dods.ListByWorkspaceID(ctx, workspaceID)
+	items, err := listByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -422,14 +431,19 @@ func activeRunDefinitionStale(ctx context.Context, session *RuntimeSession, work
 		return true
 	}
 	exports, err := session.Exports()
-	if err != nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+	if err != nil || exports.Infrastructure.EventHub == nil {
 		return true
 	}
-	effectiveGoal, _, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspaceID, selectedGoal)
+	eventRecords := eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}
+	effectiveGoal, _, err := effectiveWorkspaceGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+		return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspaceID, selectedGoal)
 	if err != nil || effectiveGoal == nil {
 		return true
 	}
-	effectiveDoD, _, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspaceID, selectedDoD)
+	effectiveDoD, _, err := effectiveWorkspaceDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+		return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspaceID, selectedDoD)
 	if err != nil || effectiveDoD == nil {
 		return true
 	}
@@ -477,18 +491,26 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSe
 	if err != nil {
 		return nil, nil, err
 	}
+	if exports.Infrastructure.EventHub == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	eventRecords := eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}
 
 	var goal *workspacemodel.Goal
 	var dod *workspacemodel.DoD
 	err = activationContextReadTasks(
 		func() error {
 			var err error
-			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, exports.Repositories.EventRecords, workspaceID, common.GoalID(cmd.GoalID))
+			goal, err = selectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+				return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, eventRecords, workspaceID, common.GoalID(cmd.GoalID))
 			return err
 		},
 		func() error {
 			var err error
-			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, exports.Repositories.EventRecords, workspaceID, common.DoDID(cmd.DoDID))
+			dod, err = selectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+				return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, eventRecords, workspaceID, common.DoDID(cmd.DoDID))
 			return err
 		},
 	)
@@ -501,7 +523,7 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, session *RuntimeSe
 func selectWorkspaceExecutionGoal(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error),
-	eventRecords repository.EventRecordRepository,
+	eventRecords readModelEventRecordReader,
 	workspaceID common.WorkspaceID,
 	requestedID common.GoalID,
 ) (*workspacemodel.Goal, error) {
@@ -531,7 +553,7 @@ func selectWorkspaceExecutionGoal(
 func selectWorkspaceExecutionDoD(
 	ctx context.Context,
 	listByWorkspaceID func(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error),
-	eventRecords repository.EventRecordRepository,
+	eventRecords readModelEventRecordReader,
 	workspaceID common.WorkspaceID,
 	requestedID common.DoDID,
 ) (*workspacemodel.DoD, error) {
@@ -569,23 +591,26 @@ func buildWorkspaceExecutionContext(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return nil, err
 	}
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
 	var goal *workspacemodel.Goal
 	var dod *workspacemodel.DoD
 	var workspace *workspacemodel.Workspace
 	if err := activationContextReadTasks(
 		func() error {
 			var err error
-			goal, err = exports.Repositories.Goals.Get(ctx, goalID)
+			goal, err = readGoalByOwnerCommand(ctx, exports.Infrastructure.EventHub, goalID)
 			return err
 		},
 		func() error {
 			var err error
-			dod, err = exports.Repositories.DoDs.Get(ctx, dodID)
+			dod, err = readDoDByOwnerCommand(ctx, exports.Infrastructure.EventHub, dodID)
 			return err
 		},
 		func() error {
 			var err error
-			workspace, err = exports.Repositories.Workspaces.Get(ctx, workspaceID)
+			workspace, err = readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
 			return err
 		},
 	); err != nil {
@@ -602,16 +627,24 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	if err != nil {
 		return nil, err
 	}
-	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspace.ID, goal)
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	eventRecords := eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}
+	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+		return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspace.ID, goal)
 	if err != nil {
 		return nil, err
 	}
-	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspace.ID, dod)
+	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+		return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspace.ID, dod)
 	if err != nil {
 		return nil, err
 	}
-	goalRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicGoalDefined)
-	doDRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicDoDDefined)
+	goalRevisions := workspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicGoalDefined)
+	doDRevisions := workspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicDoDDefined)
 	contextData := map[string]any{
 		"activation":  "workspace_execution",
 		"workspaceId": string(workspace.ID),
@@ -659,11 +692,11 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		},
 		func() error {
 			var err error
-			memories, retrievalEvidence, err = selectedMemoryItems(ctx, workspace.ID, exports.Services.MemoryService, memoryIDs, effectiveGoal, effectiveDoD)
+			memories, retrievalEvidence, err = selectedMemoryItems(ctx, workspace.ID, exports.Infrastructure.EventHub, memoryIDs, effectiveGoal, effectiveDoD)
 			return err
 		},
 		func() error {
-			governanceHistory = workspaceGovernanceHistory(ctx, exports.Repositories.Tickets, exports.Repositories.Resolutions, exports.Repositories.Runs, workspace.ID, effectiveGoal.ID, effectiveDoD.ID, 10)
+			governanceHistory = workspaceGovernanceHistoryByOwnerCommand(ctx, exports.Infrastructure.EventHub, workspace.ID, effectiveGoal.ID, effectiveDoD.ID, 10)
 			return nil
 		},
 	)
@@ -720,12 +753,12 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 	err = activationContextReadTasks(
 		func() error {
 			var err error
-			mcpServers, err = selectedMCPServers(ctx, exports.Services.MCPService, mcpServerIDs, workspace)
+			mcpServers, err = selectedMCPServers(ctx, exports.Infrastructure.EventHub, mcpServerIDs, workspace)
 			return err
 		},
 		func() error {
 			var err error
-			mcpCapabilities, err = selectedMCPCapabilities(ctx, exports.Services.MCPService, capabilityIDs)
+			mcpCapabilities, err = selectedMCPCapabilities(ctx, exports.Infrastructure.EventHub, capabilityIDs)
 			return err
 		},
 	)
@@ -741,7 +774,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		contextData["mcpCapabilities"] = mcpCapabilityContexts(mcpCapabilities)
 	}
 
-	if err := validateSoulRoutingCapabilitySelection(ctx, exports.Services.SoulService, soulRouting, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories(mcpCapabilities), requiredToolKinds(skills)); err != nil {
+	if err := validateSoulRoutingCapabilitySelection(ctx, exports.Infrastructure.EventHub, soulRouting, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories(mcpCapabilities), requiredToolKinds(skills)); err != nil {
 		return nil, err
 	}
 
@@ -763,7 +796,7 @@ func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session 
 		}
 	}
 	if !definitionChangeImpactChanged(definitionChangeImpact) {
-		rejectedContinuation, err := rejectedResultContinuationForActivation(ctx, exports.Repositories.Results, workspace.ID, effectiveGoal.ID, effectiveDoD.ID)
+		rejectedContinuation, err := rejectedResultContinuationForActivation(ctx, exports.Infrastructure.EventHub, workspace.ID, effectiveGoal.ID, effectiveDoD.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -1061,20 +1094,18 @@ func activationContextReadTasks(tasks ...func() error) error {
 	return runReadModelTasks(tasks...)
 }
 
-func workspaceGovernanceHistory(
+func workspaceGovernanceHistoryByOwnerCommand(
 	ctx context.Context,
-	tickets repository.DecisionTicketRepository,
-	resolutions repository.DecisionResolutionRepository,
-	runs repository.RunRepository,
+	hub events.Hub,
 	workspaceID common.WorkspaceID,
 	goalID common.GoalID,
 	dodID common.DoDID,
 	limit int,
 ) []map[string]any {
-	if tickets == nil || resolutions == nil || runs == nil || workspaceID == "" || limit <= 0 {
+	if hub == nil || workspaceID == "" || limit <= 0 {
 		return nil
 	}
-	workspaceTickets, err := tickets.ListByWorkspaceID(ctx, workspaceID)
+	workspaceTickets, err := listDecisionTicketsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -1083,7 +1114,7 @@ func workspaceGovernanceHistory(
 		if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
 			continue
 		}
-		run, err := runs.Get(ctx, ticket.RunID)
+		run, err := readRunByOwnerCommand(ctx, hub, ticket.RunID)
 		if err != nil || run == nil || run.WorkspaceID != workspaceID {
 			continue
 		}
@@ -1093,7 +1124,7 @@ func workspaceGovernanceHistory(
 		if dodID != "" && run.DoDID != dodID {
 			continue
 		}
-		resolution, err := resolutions.GetByTicketID(ctx, ticket.ID)
+		resolution, err := readDecisionResolutionByTicketOwnerCommand(ctx, hub, ticket.ID)
 		if err != nil || resolution == nil {
 			continue
 		}
@@ -1127,7 +1158,7 @@ func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, 
 	if err != nil {
 		return nil, err
 	}
-	if exports.Repositories.Skills == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	type skillResult struct {
@@ -1140,7 +1171,7 @@ func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, 
 		wg.Add(1)
 		go func(idx int, sid string) {
 			defer wg.Done()
-			item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(sid))
+			item, err := readSkillByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.SkillID(sid))
 			if err == nil {
 				results[idx].item = mapSkill(item)
 				return
@@ -1163,13 +1194,11 @@ func selectedSkills(ctx context.Context, session *RuntimeSession, ids []string, 
 	return ret, nil
 }
 
-func selectedMCPServers(ctx context.Context, service interface {
-	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
-}, ids []string, workspace *workspacemodel.Workspace) ([]*mcpmodel.Server, error) {
+func selectedMCPServers(ctx context.Context, hub events.Hub, ids []string, workspace *workspacemodel.Workspace) ([]*mcpmodel.Server, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if service == nil {
+	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	type serverResult struct {
@@ -1182,7 +1211,7 @@ func selectedMCPServers(ctx context.Context, service interface {
 		wg.Add(1)
 		go func(idx int, sid string) {
 			defer wg.Done()
-			results[idx].item, results[idx].err = service.GetServer(ctx, common.MCPServerID(sid))
+			results[idx].item, results[idx].err = mcpServerByEventHub(ctx, hub, common.MCPServerID(sid))
 		}(i, id)
 	}
 	wg.Wait()
@@ -1238,13 +1267,11 @@ func expandWorkspaceContextPlaceholders(value string, workspace *workspacemodel.
 	return value
 }
 
-func selectedMCPCapabilities(ctx context.Context, service interface {
-	GetCapability(context.Context, common.MCPCapabilityID) (*mcpmodel.Capability, error)
-}, ids []string) ([]*mcpmodel.Capability, error) {
+func selectedMCPCapabilities(ctx context.Context, hub events.Hub, ids []string) ([]*mcpmodel.Capability, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if service == nil {
+	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	type capResult struct {
@@ -1257,7 +1284,7 @@ func selectedMCPCapabilities(ctx context.Context, service interface {
 		wg.Add(1)
 		go func(idx int, cid string) {
 			defer wg.Done()
-			results[idx].item, results[idx].err = service.GetCapability(ctx, common.MCPCapabilityID(cid))
+			results[idx].item, results[idx].err = mcpCapabilityByEventHub(ctx, hub, common.MCPCapabilityID(cid))
 		}(i, id)
 	}
 	wg.Wait()
@@ -1309,12 +1336,8 @@ func appendDefaultIDs(base []string, defaults []string) []string {
 	return ret
 }
 
-func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
-	GetMemoryItem(context.Context, common.MemoryID) (*memorymodel.MemoryItem, error)
-	ListMemoryByWorkspace(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
-	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
-}, ids []string, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, error) {
-	if service == nil {
+func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, hub events.Hub, ids []string, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, error) {
+	if hub == nil {
 		if len(ids) > 0 {
 			return nil, nil, common.ErrInvalidArgument
 		}
@@ -1331,7 +1354,7 @@ func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 			wg.Add(1)
 			go func(idx int, mid string) {
 				defer wg.Done()
-				results[idx].item, results[idx].err = service.GetMemoryItem(ctx, common.MemoryID(mid))
+				results[idx].item, results[idx].err = memoryItemByEventHub(ctx, hub, common.MemoryID(mid))
 			}(i, id)
 		}
 		wg.Wait()
@@ -1357,7 +1380,7 @@ func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 			"retrievedMemoryIds": memoryItemIDs(ret),
 		}, nil
 	}
-	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, workspaceID, service, goal, dod)
+	semanticItems, semanticEvidence, semanticHandled := semanticMemoryItems(ctx, workspaceID, hub, goal, dod)
 	if semanticHandled {
 		selected := activationVisibleMemoryItems(semanticItems, 8)
 		if semanticEvidence == nil {
@@ -1369,7 +1392,7 @@ func selectedMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 		}
 		return selected, semanticEvidence, nil
 	}
-	items, err := service.ListMemoryByWorkspace(ctx, workspaceID)
+	items, err := memoryItemsByWorkspaceEventHub(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1455,9 +1478,7 @@ func activationMemoryHasTag(item *memorymodel.MemoryItem, tag string) bool {
 	return false
 }
 
-func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, service interface {
-	SearchMemory(context.Context, repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error)
-}, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, bool) {
+func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, hub events.Hub, goal *workspacemodel.Goal, dod *workspacemodel.DoD) ([]*memorymodel.MemoryItem, map[string]any, bool) {
 	cfg, err := loadConfigFromContext(ctx)
 	if err != nil {
 		return nil, map[string]any{
@@ -1482,31 +1503,13 @@ func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 		"retrievedMemoryIds":  []string{},
 		"retrievedMemoryHits": []map[string]any{},
 	}
-	defaultProviderID, providerConfigs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
+	embedding, err := generateEmbeddingByEventHub(ctx, hub, providerID, queryText)
 	if err != nil {
 		evidence["status"] = "degraded"
 		evidence["reason"] = err.Error()
 		return nil, evidence, true
 	}
-	providerConfig, ok := providerConfigs[providerID]
-	if !ok {
-		evidence["status"] = "degraded"
-		evidence["reason"] = fmt.Sprintf("embedding provider %q is not configured", providerID)
-		return nil, evidence, true
-	}
-	if providerConfig.Unavailable {
-		evidence["status"] = "degraded"
-		evidence["reason"] = providerConfig.UnavailableReason
-		return nil, evidence, true
-	}
-	adapter := llmbiz.NewRuntimeAdapterFromConfigs(defaultProviderID, providerConfigs)
-	embedding, err := adapter.GenerateEmbedding(ctx, providerID, queryText)
-	if err != nil {
-		evidence["status"] = "degraded"
-		evidence["reason"] = err.Error()
-		return nil, evidence, true
-	}
-	items, err := service.SearchMemory(ctx, repository.MemorySearchQuery{
+	items, err := searchMemoryByEventHub(ctx, hub, repository.MemorySearchQuery{
 		WorkspaceID: workspaceID,
 		Vector:      embedding.Vector,
 		MinScore:    0.1,
@@ -1523,6 +1526,103 @@ func semanticMemoryItems(ctx context.Context, workspaceID common.WorkspaceID, se
 	evidence["retrievedMemoryIds"] = memoryItemIDs(items)
 	evidence["retrievedMemoryHits"] = memoryRetrievalHits(items)
 	return items, evidence, true
+}
+
+func generateEmbeddingByEventHub(ctx context.Context, hub events.Hub, providerID string, input string) (llmmodels.ProviderEmbeddingResult, error) {
+	if hub == nil || strings.TrimSpace(providerID) == "" || strings.TrimSpace(input) == "" {
+		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicLLMCommandGenerateEmbedding,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "llm_embedding",
+		SubjectID:    strings.TrimSpace(providerID),
+		Payload: map[string]any{
+			events.PayloadKeyProviderID: strings.TrimSpace(providerID),
+			events.PayloadKeyInput:      strings.TrimSpace(input),
+		},
+	})
+	if response, ok := events.ResponseEnvelope(err); ok {
+		embedding, ok := response.Payload[events.PayloadKeyProviderEmbedding].(llmmodels.ProviderEmbeddingResult)
+		if !ok {
+			return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+		}
+		return embedding, nil
+	}
+	if err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	return llmmodels.ProviderEmbeddingResult{}, common.ErrNotFound
+}
+
+func mcpServerByEventHub(ctx context.Context, hub events.Hub, id common.MCPServerID) (*mcpmodel.Server, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMCPCommandGetServer, "mcp_server", string(id), "", "", map[string]any{
+		events.PayloadKeyServerID: string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func mcpCapabilityByEventHub(ctx context.Context, hub events.Hub, id common.MCPCapabilityID) (*mcpmodel.Capability, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMCPCommandGetCapability, "mcp_capability", string(id), "", "", map[string]any{
+		events.PayloadKeyCapabilityID: string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func memoryItemByEventHub(ctx context.Context, hub events.Hub, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMemoryCommandGet, "memory", string(id), "", "", map[string]any{
+		events.PayloadKeyMemoryID: string(id),
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyMemoryItem].(*memorymodel.MemoryItem)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func memoryItemsByWorkspaceEventHub(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return items, nil
+}
+
+func searchMemoryByEventHub(ctx context.Context, hub events.Hub, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMemoryCommandSearch, "memory_search", string(query.WorkspaceID), query.WorkspaceID, "", map[string]any{
+		events.PayloadKeyMemorySearchQuery: query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return items, nil
 }
 
 func normalizeStringIDs(input []string) []string {
@@ -1805,11 +1905,11 @@ func mcpCapabilityContexts(items []*mcpmodel.Capability) []map[string]any {
 	return ret
 }
 
-func rejectedResultContinuationForActivation(ctx context.Context, results repository.ResultRepository, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
-	if results == nil || workspaceID == "" || goalID == "" || dodID == "" {
+func rejectedResultContinuationForActivation(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID) (map[string]any, error) {
+	if hub == nil || workspaceID == "" || goalID == "" || dodID == "" {
 		return nil, nil
 	}
-	items, err := results.ListByWorkspace(ctx, workspaceID)
+	items, err := listResultsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2459,20 +2559,30 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 		return "", err
 	}
 	for attempt := 0; attempt < 8; attempt++ {
-		runID, err := nextWorkspaceExecutionRunID(ctx, exports.Repositories.Runs, workspaceID)
+		runID, err := nextWorkspaceExecutionRunID(ctx, exports.Infrastructure.EventHub, workspaceID)
 		if err != nil {
 			return "", err
 		}
 		createExecutionContext := executionContextForCreatedWorkspaceRun(ctx, runID, workspaceID, goalID, dodID, executionContext, priority)
-		if err := exports.Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-			RunID:              runID,
-			WorkspaceID:        workspaceID,
-			GoalID:             goalID,
-			DoDID:              dodID,
-			DefinitionRevision: definitionRevisionIDFromExecutionContext(createExecutionContext),
-			InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
-			ExecutionContext:   createExecutionContext,
-			Priority:           priority,
+		if err := publishActivationRunCommand(ctx, exports.Infrastructure.EventHub, events.TopicRunCommandCreate, "run", string(runID), workspaceID, runID, map[string]any{
+			events.PayloadKeyRun: &runmodel.Run{
+				ID:                 runID,
+				WorkspaceID:        workspaceID,
+				GoalID:             goalID,
+				DoDID:              dodID,
+				DefinitionRevision: definitionRevisionIDFromExecutionContext(createExecutionContext),
+				InitialStepKind:    llmcommon.StepKindWorkspaceExecution,
+				ExecutionContext:   createExecutionContext,
+				State:              common.RunStateCreated,
+				Priority:           priority,
+			},
+			events.PayloadKeyRunID:            string(runID),
+			events.PayloadKeyWorkspaceID:      string(workspaceID),
+			events.PayloadKeyGoalID:           string(goalID),
+			events.PayloadKeyDoDID:            string(dodID),
+			events.PayloadKeyKind:             llmcommon.StepKindWorkspaceExecution,
+			events.PayloadKeyExecutionContext: createExecutionContext,
+			events.PayloadKeyPriority:         priority,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
@@ -2483,9 +2593,11 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 			return "", err
 		}
 		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, llmProviderID), workspaceID)
-		if err := exports.Services.RunService.EnsureStarted(startCtx, runmodule.StartRunCommand{RunID: runID}); err != nil {
+		if err := publishActivationRunCommand(startCtx, exports.Infrastructure.EventHub, events.TopicRunCommandStart, "run", string(runID), workspaceID, runID, map[string]any{
+			events.PayloadKeyRunID: string(runID),
+		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
-				run, getErr := exports.Repositories.Runs.Get(ctx, runID)
+				run, getErr := readRunByOwnerCommand(ctx, exports.Infrastructure.EventHub, runID)
 				if getErr != nil {
 					return "", getErr
 				}
@@ -2493,9 +2605,9 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 					return runID, nil
 				}
 			}
-			_ = exports.Services.RunService.FailRun(ctx, runmodule.FailRunCommand{
-				RunID:  runID,
-				Reason: fmt.Sprintf("activation start failed: %v", err),
+			_ = publishActivationRunCommand(ctx, exports.Infrastructure.EventHub, events.TopicRunCommandFail, "run", string(runID), workspaceID, runID, map[string]any{
+				events.PayloadKeyRunID:         string(runID),
+				events.PayloadKeyFailureReason: fmt.Sprintf("activation start failed: %v", err),
 			})
 			return "", err
 		}
@@ -2504,11 +2616,33 @@ func createAndStartWorkspaceExecutionRun(ctx context.Context, session *RuntimeSe
 	return "", common.ErrConflict
 }
 
-func nextWorkspaceExecutionRunID(ctx context.Context, runs repository.RunRepository, workspaceID common.WorkspaceID) (common.RunID, error) {
-	if runs == nil || workspaceID == "" {
+func publishActivationRunCommand(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) error {
+	if hub == nil || topic == "" {
+		return common.ErrInvalidArgument
+	}
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:        topic,
+		SourceModule: "application/workorchd/workspace-activation",
+		SubjectType:  subjectType,
+		SubjectID:    subjectID,
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		Payload:      payload,
+	})
+	if _, ok := events.ResponseEnvelope(err); ok {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("activation run command %s returned no response", topic)
+}
+
+func nextWorkspaceExecutionRunID(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) (common.RunID, error) {
+	if hub == nil || workspaceID == "" {
 		return "", common.ErrInvalidArgument
 	}
-	items, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	items, err := listRunsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -2564,7 +2698,7 @@ func isActivationObservableRunState(state common.RunState) bool {
 }
 
 func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap.Exports, runID common.RunID, workspaceID common.WorkspaceID, executionContext map[string]any) error {
-	if exports.Repositories.MemoryRecallTraces == nil || runID == "" || workspaceID == "" {
+	if exports.Infrastructure.EventHub == nil || runID == "" || workspaceID == "" {
 		return nil
 	}
 	retrieval, _ := executionContext["memoryRetrieval"].(map[string]any)
@@ -2599,11 +2733,8 @@ func recordActivationMemoryRecallTrace(ctx context.Context, exports appbootstrap
 		trace.RetrievedMemoryIDs = traceMemoryIDs(executionContext["memoryIds"])
 	}
 	trace.SelectedMemoryIDs = append([]common.MemoryID(nil), trace.RetrievedMemoryIDs...)
-	if err := exports.Repositories.MemoryRecallTraces.Upsert(ctx, trace); err != nil {
+	if err := publishMemoryRecallTraceUpsert(ctx, exports.Infrastructure.EventHub, trace); err != nil {
 		return err
-	}
-	if exports.Infrastructure.EventHub == nil {
-		return nil
 	}
 	return exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,

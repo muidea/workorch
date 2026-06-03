@@ -20,6 +20,7 @@ type CreateRunCommand struct {
 
 type StartRunCommand struct{ RunID common.RunID }
 type ResumeRunCommand struct {
+	WorkspaceID           common.WorkspaceID
 	RunID                 common.RunID
 	LoadedRun             *runmodel.Run
 	ExecutionContextPatch map[string]any

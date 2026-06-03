@@ -98,6 +98,9 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 	if err != nil {
 		return err
 	}
+	if !ticketMatchesResolveScope(ticket, cmd) {
+		return common.ErrNotFound
+	}
 	if ticket.State != common.DecisionTicketStateOpen {
 		return common.ErrConflict
 	}
@@ -171,6 +174,9 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	if err != nil {
 		return nil, nil, err
 	}
+	if !ticketMatchesResolveScope(ticket, cmd) {
+		return nil, nil, common.ErrNotFound
+	}
 	if ticket.State == common.DecisionTicketStateResolved {
 		resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
 		if err != nil {
@@ -189,6 +195,22 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 		return nil, nil, err
 	}
 	return ticket, resolution, nil
+}
+
+func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) bool {
+	if ticket == nil {
+		return false
+	}
+	if cmd.WorkspaceID != "" && ticket.WorkspaceID != cmd.WorkspaceID {
+		return false
+	}
+	if cmd.RunID != "" && ticket.RunID != cmd.RunID {
+		return false
+	}
+	if cmd.StepID != "" && ticket.StepID != cmd.StepID {
+		return false
+	}
+	return true
 }
 
 func sameResolutionPayload(left map[string]any, right map[string]any) bool {

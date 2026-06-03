@@ -15,9 +15,11 @@ import (
 
 const (
 	defaultMagicHubCapacity           = 1024
+	defaultMagicHubSubscribeTimeout   = 100 * time.Millisecond
 	defaultMagicHubUnsubscribeTimeout = 100 * time.Millisecond
 	wildcardTopic                     = "*"
 	magicWildcardTopic                = "/#"
+	magicWorkorchObserverDestination  = "/_workorch_observer/#"
 	defaultMagicHubOwner              = "workorch/events"
 )
 
@@ -41,8 +43,9 @@ type workspaceRevisionState struct {
 var sharedMagicRevisionStates sync.Map
 
 type magicSubscription struct {
-	topic   string
-	eventID string
+	topic     string
+	eventID   string
+	localOnly bool
 }
 
 type magicDispatchObserver struct {
@@ -94,11 +97,14 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
 	h.published = append(h.published, cloneEnvelope(envelope))
 	h.mu.Unlock()
+	if err := h.dispatchLocalWildcard(ctx, envelope); err != nil {
+		return err
+	}
 
 	ev := magicevent.NewEventWithContext(
 		envelope.Topic,
 		envelope.SourceModule,
-		magicWildcardTopic,
+		magicWorkorchObserverDestination,
 		magicevent.NewHeader(),
 		ctx,
 		cloneEnvelope(envelope),
@@ -114,6 +120,9 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 	if data, resultErr := result.Get(); resultErr == nil {
 		if envelope, ok := data.(Envelope); ok {
 			return Response(envelope)
+		}
+		if err, ok := data.(error); ok {
+			return err
 		}
 		return nil
 	}
@@ -133,11 +142,14 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
 	h.published = append(h.published, cloneEnvelope(envelope))
 	h.mu.Unlock()
+	if err := h.dispatchLocalWildcard(ctx, envelope); err != nil {
+		return err
+	}
 
 	ev := magicevent.NewEventWithContext(
 		envelope.Topic,
 		envelope.SourceModule,
-		magicWildcardTopic,
+		magicWorkorchObserverDestination,
 		magicevent.NewHeader(),
 		ctx,
 		cloneEnvelope(envelope),
@@ -194,22 +206,30 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 		return func() {}
 	}
 	eventID := magicEventID(topic)
+	localOnly := eventID == magicWildcardTopic
 
 	h.mu.Lock()
 	id := h.nextID
 	h.nextID++
 	observer := h.observers[eventID]
+	needsSubscribe := false
 	if observer == nil {
 		observer = &magicDispatchObserver{id: magicObserverID(h.owner, eventID), handlers: map[int]Handler{}}
 		h.observers[eventID] = observer
-		h.hub.Subscribe(eventID, observer)
+		if !localOnly {
+			needsSubscribe = true
+		}
 	}
 	observer.add(id, handler)
 	h.subscriptions[id] = magicSubscription{
-		topic:   topic,
-		eventID: eventID,
+		topic:     topic,
+		eventID:   eventID,
+		localOnly: localOnly,
 	}
 	h.mu.Unlock()
+	if needsSubscribe {
+		subscribeMagicHubWithTimeout(h.hub, eventID, observer, defaultMagicHubSubscribeTimeout)
+	}
 
 	return func() {
 		h.mu.Lock()
@@ -227,7 +247,7 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 			}
 		}
 		h.mu.Unlock()
-		if ok && observer != nil {
+		if ok && observer != nil && !subscription.localOnly {
 			done := make(chan struct{})
 			go func() {
 				h.hub.Unsubscribe(subscription.eventID, observer)
@@ -241,7 +261,51 @@ func (h *MagicHub) Subscribe(topic string, handler Handler) func() {
 	}
 }
 
+func subscribeMagicHubWithTimeout(hub magicevent.Hub, eventID string, observer magicevent.Observer, timeout time.Duration) {
+	if hub == nil || observer == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		hub.Subscribe(eventID, observer)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
+func (h *MagicHub) dispatchLocalWildcard(ctx context.Context, envelope Envelope) error {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	observer := h.observers[magicWildcardTopic]
+	var handlers []Handler
+	if observer != nil {
+		handlers = observer.snapshotHandlers()
+	}
+	h.mu.RUnlock()
+	for _, handler := range handlers {
+		if handler == nil {
+			continue
+		}
+		if err := handler(ctx, cloneEnvelope(envelope)); err != nil {
+			if _, ok := ResponseEnvelope(err); ok {
+				continue
+			}
+			return fmt.Errorf("handle event %s: %w", envelope.Topic, err)
+		}
+	}
+	return nil
+}
+
 func workorchEventLaneKey(envelope Envelope) string {
+	runID := strings.TrimSpace(envelope.RunID)
+	if runID != "" {
+		return "run/" + runID
+	}
 	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
 	if workspaceID != "" {
 		return "workspace/" + workspaceID
@@ -296,6 +360,8 @@ func (o *magicDispatchObserver) Notify(ev magicevent.Event, result magicevent.Re
 	}
 
 	handlers := o.snapshotHandlers()
+	var response Envelope
+	hasResponse := false
 	for _, handler := range handlers {
 		if handler == nil {
 			continue
@@ -303,13 +369,18 @@ func (o *magicDispatchObserver) Notify(ev magicevent.Event, result magicevent.Re
 		if err := handler(ev.Context(), cloneEnvelope(envelope)); err != nil {
 			if result != nil {
 				if responseEnvelope, ok := ResponseEnvelope(err); ok {
-					result.Set(responseEnvelope, nil)
-					return
+					hasResponse = true
+					response = responseEnvelope
+					continue
 				}
-				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
+				result.Set(err, nil)
 			}
 			return
 		}
+	}
+	if result != nil && hasResponse {
+		result.Set(response, nil)
+		return
 	}
 	if result != nil {
 		result.Set(nil, nil)

@@ -8,6 +8,7 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -31,6 +32,10 @@ const (
 )
 
 func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.ProviderConfig, error) {
+	return llmproviderconfig.LoadProviderConfig(providerID, values)
+}
+
+func loadProviderConfigLocal(providerID string, values map[string]string) (llmmodels.ProviderConfig, error) {
 	timeout := defaultProviderTimeout
 	if raw := strings.TrimSpace(values[llmcommon.EnvTimeout]); raw != "" {
 		parsed, err := time.ParseDuration(raw)
@@ -93,6 +98,10 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 }
 
 func LoadProviderConfigs(defaultProviderID string, valueSets map[string]map[string]string) (string, map[string]llmmodels.ProviderConfig, error) {
+	return llmproviderconfig.LoadProviderConfigs(defaultProviderID, valueSets)
+}
+
+func loadProviderConfigsLocal(defaultProviderID string, valueSets map[string]map[string]string) (string, map[string]llmmodels.ProviderConfig, error) {
 	defaultProviderID = normalizedProviderID(defaultProviderID)
 	if defaultProviderID == "" {
 		defaultProviderID = llmcommon.DefaultProviderID
@@ -116,6 +125,10 @@ func LoadProviderConfigs(defaultProviderID string, valueSets map[string]map[stri
 }
 
 func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
+	return llmproviderconfig.RedactedProviderConfig(cfg)
+}
+
+func redactedProviderConfigLocal(cfg llmmodels.ProviderConfig) llmmodels.RedactedProviderConfig {
 	capabilities := effectiveProviderCapabilities(cfg.Capabilities)
 	return llmmodels.RedactedProviderConfig{
 		ID:               cfg.ID,
@@ -141,6 +154,10 @@ func normalizedProviderID(providerID string) string {
 }
 
 func RedactSecret(value string) string {
+	return llmproviderconfig.RedactSecret(value)
+}
+
+func redactSecretLocal(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""

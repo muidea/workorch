@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -74,21 +72,21 @@ type BatchResolveDecisionCommand struct {
 }
 
 func ReadDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string) (ret Decision, err error) {
-	_, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	hub, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return Decision{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := tickets.Get(ctx, common.TicketID(ticketID))
+	item, err := readDecisionTicketByOwnerCommand(ctx, hub, common.TicketID(ticketID))
 	if err != nil {
 		return Decision{}, err
 	}
 	if err := ensureDecisionTicketInRuntimeWorkspace(ctx, item); err != nil {
 		return Decision{}, err
 	}
-	resolution, err := resolutionForTicket(ctx, resolutions, item)
+	resolution, err := resolutionForTicketByOwnerCommand(ctx, hub, item)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -116,53 +114,28 @@ func ReadDecisionFromEnv(ctx context.Context, ticketID string) (Decision, error)
 }
 
 func ListDecisionsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runID string) (ret []Decision, err error) {
-	_, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	hub, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := tickets.List(ctx)
+	candidates, err := decisionTicketsForQuery(ctx, hub, workspaceID, runID)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*decisionmodel.Ticket, 0, len(items))
-	for _, item := range items {
-		if workspaceID != "" && string(item.WorkspaceID) != workspaceID {
-			continue
-		}
-		if runID != "" && string(item.RunID) != runID {
-			continue
-		}
-		candidates = append(candidates, item)
-	}
-	type decisionRead struct {
-		item       *decisionmodel.Ticket
-		resolution *decisionmodel.Resolution
-		err        error
-	}
-	reads := make([]decisionRead, len(candidates))
-	var wg sync.WaitGroup
-	for i, item := range candidates {
-		wg.Add(1)
-		go func(idx int, t *decisionmodel.Ticket) {
-			defer wg.Done()
-			reads[idx].item = t
-			reads[idx].resolution, reads[idx].err = resolutionForTicket(ctx, resolutions, t)
-		}(i, item)
-	}
-	wg.Wait()
 	ret = make([]Decision, 0, len(candidates))
-	for _, r := range reads {
-		if r.err != nil {
-			return nil, r.err
+	for _, item := range candidates {
+		resolution, resolutionErr := resolutionForTicketByOwnerCommand(ctx, hub, item)
+		if resolutionErr != nil {
+			return nil, resolutionErr
 		}
-		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, r.item.WorkspaceID, r.item.RunID, "ticket", string(r.item.ID))
+		autoGovernance, autoErr := latestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
 		if autoErr != nil {
 			return nil, autoErr
 		}
-		ret = append(ret, mapDecision(r.item, r.resolution, autoGovernance))
+		ret = append(ret, mapDecision(item, resolution, autoGovernance))
 	}
 	return ret, nil
 }
@@ -176,32 +149,19 @@ func ListDecisionsWithBackend(ctx context.Context, backend string, dataRoot stri
 }
 
 func ListDecisionPageWithSession(ctx context.Context, session *RuntimeSession, query DecisionQuery) (ret DecisionPage, err error) {
-	_, tickets, resolutions, err := decisionDependenciesFromSession(session)
+	hub, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return DecisionPage{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := tickets.List(ctx)
+	filtered, err := decisionTicketsForQuery(ctx, hub, query.WorkspaceID, query.RunID)
 	if err != nil {
 		return DecisionPage{}, err
 	}
-	filtered := make([]*decisionmodel.Ticket, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if query.WorkspaceID != "" && string(item.WorkspaceID) != query.WorkspaceID {
-			continue
-		}
-		if query.RunID != "" && string(item.RunID) != query.RunID {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
 	pageTickets, limit, cursorAfterID, nextCursor, hasMore := pageDecisionTickets(filtered, query)
-	resolutionMap, err := resolutionsForTickets(ctx, resolutions, pageTickets)
+	resolutionMap, err := resolutionsForTicketsByOwnerCommand(ctx, hub, pageTickets)
 	if err != nil {
 		return DecisionPage{}, err
 	}
@@ -241,11 +201,11 @@ func ListDecisionsFromEnv(ctx context.Context, workspaceID string, runID string)
 }
 
 func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ticketID string, cmd ResolveDecisionCommand) (ret Decision, err error) {
-	service, tickets, _, err := decisionDependenciesFromSession(session)
+	hub, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return Decision{}, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
@@ -254,7 +214,7 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	}
 	resolutionType := semantic.ResolutionType
 	payload := withDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
-	ticket, err := tickets.Get(ctx, common.TicketID(ticketID))
+	ticket, err := readDecisionTicketByOwnerCommand(ctx, hub, common.TicketID(ticketID))
 	if err != nil {
 		return Decision{}, err
 	}
@@ -270,12 +230,16 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 	}
 	payload = common.RedactSensitiveMap(payload)
 
-	item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
-		TicketID:     common.TicketID(ticketID),
-		Type:         resolutionType,
-		Payload:      payload,
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
+		events.PayloadKeyResolutionID:     "resolution-" + ticketID + "-" + resolutionType,
+		events.PayloadKeyBlockingTicketID: ticketID,
+		events.PayloadKeyType:             resolutionType,
+		events.PayloadKeyPayload:          payload,
 	})
+	if err != nil {
+		return Decision{}, err
+	}
+	item, resolution, err := decisionResponseItems(response)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -288,11 +252,11 @@ func ResolveDecisionWithSession(ctx context.Context, session *RuntimeSession, ti
 }
 
 func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSession, cmd BatchResolveDecisionCommand) (ret []Decision, err error) {
-	service, tickets, _, err := decisionDependenciesFromSession(session)
+	hub, err := decisionDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
-	traces := autoGovernanceTraceRepositoryFromSession(session)
+	traces := autoGovernanceTraceReaderFromSession(session)
 	defer session.CloseOnReturn(ctx, &err)
 
 	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
@@ -316,15 +280,9 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 		err  error
 	}
 	reads := make([]ticketRead, len(cmd.TicketIDs))
-	var wg sync.WaitGroup
 	for i, ticketID := range cmd.TicketIDs {
-		wg.Add(1)
-		go func(idx int, tID string) {
-			defer wg.Done()
-			reads[idx].item, reads[idx].err = tickets.Get(ctx, common.TicketID(tID))
-		}(i, ticketID)
+		reads[i].item, reads[i].err = readDecisionTicketByOwnerCommand(ctx, hub, common.TicketID(ticketID))
 	}
-	wg.Wait()
 	for _, r := range reads {
 		if r.err != nil {
 			return nil, r.err
@@ -343,13 +301,18 @@ func BatchResolveDecisionsWithSession(ctx context.Context, session *RuntimeSessi
 	payload = common.RedactSensitiveMap(payload)
 
 	ret = make([]Decision, 0, len(cmd.TicketIDs))
-	for _, ticketID := range cmd.TicketIDs {
-		item, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, decisionmodule.ResolveTicketCommand{
-			ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
-			TicketID:     common.TicketID(ticketID),
-			Type:         resolutionType,
-			Payload:      cloneDecisionPayload(payload),
+	for _, r := range reads {
+		ticketID := string(r.item.ID)
+		response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, r.item.WorkspaceID, r.item.RunID, map[string]any{
+			events.PayloadKeyResolutionID:     "resolution-" + ticketID + "-" + resolutionType,
+			events.PayloadKeyBlockingTicketID: ticketID,
+			events.PayloadKeyType:             resolutionType,
+			events.PayloadKeyPayload:          cloneDecisionPayload(payload),
 		})
+		if err != nil {
+			return nil, err
+		}
+		item, resolution, err := decisionResponseItems(response)
 		if err != nil {
 			return nil, err
 		}
@@ -844,22 +807,56 @@ func BatchResolveDecisionsFromEnv(ctx context.Context, cmd BatchResolveDecisionC
 	return BatchResolveDecisionsWithSession(ctx, session, cmd)
 }
 
-func decisionDependenciesFromSession(session *RuntimeSession) (decisionmodule.Service, repository.DecisionTicketRepository, repository.DecisionResolutionRepository, error) {
+func decisionDependenciesFromSession(session *RuntimeSession) (events.Hub, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	if exports.Services.DecisionService == nil || exports.Repositories.Tickets == nil || exports.Repositories.Resolutions == nil {
-		return nil, nil, nil, common.ErrInvalidArgument
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
 	}
-	return exports.Services.DecisionService, exports.Repositories.Tickets, exports.Repositories.Resolutions, nil
+	return exports.Infrastructure.EventHub, nil
 }
 
-func resolutionForTicket(ctx context.Context, resolutions repository.DecisionResolutionRepository, item *decisionmodel.Ticket) (*decisionmodel.Resolution, error) {
-	if item == nil || resolutions == nil || item.State != common.DecisionTicketStateResolved {
+func decisionTicketsForQuery(ctx context.Context, hub events.Hub, workspaceID string, runID string) ([]*decisionmodel.Ticket, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	runID = strings.TrimSpace(runID)
+	var (
+		items []*decisionmodel.Ticket
+		err   error
+	)
+	switch {
+	case runID != "":
+		items, err = listDecisionTicketsByRunOwnerCommand(ctx, hub, common.RunID(runID))
+	case workspaceID != "":
+		items, err = listDecisionTicketsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
+	default:
+		items, err = listDecisionTicketsByOwnerCommand(ctx, hub)
+	}
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*decisionmodel.Ticket, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if workspaceID != "" && string(item.WorkspaceID) != workspaceID {
+			continue
+		}
+		if runID != "" && string(item.RunID) != runID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
+func resolutionForTicketByOwnerCommand(ctx context.Context, hub events.Hub, item *decisionmodel.Ticket) (*decisionmodel.Resolution, error) {
+	if item == nil || hub == nil || item.State != common.DecisionTicketStateResolved {
 		return nil, nil
 	}
-	resolution, err := resolutions.GetByTicketID(ctx, item.ID)
+	resolution, err := readDecisionResolutionByTicketOwnerCommand(ctx, hub, item.ID)
 	if errors.Is(err, common.ErrNotFound) {
 		return nil, nil
 	}
@@ -867,6 +864,35 @@ func resolutionForTicket(ctx context.Context, resolutions repository.DecisionRes
 		return nil, err
 	}
 	return resolution, nil
+}
+
+func resolutionsForTicketsByOwnerCommand(ctx context.Context, hub events.Hub, items []*decisionmodel.Ticket) (map[common.TicketID]*decisionmodel.Resolution, error) {
+	ret := make(map[common.TicketID]*decisionmodel.Resolution, len(items))
+	for _, item := range items {
+		if item == nil || item.State != common.DecisionTicketStateResolved {
+			continue
+		}
+		resolution, err := resolutionForTicketByOwnerCommand(ctx, hub, item)
+		if err != nil {
+			return nil, err
+		}
+		if resolution != nil {
+			ret[item.ID] = resolution
+		}
+	}
+	return ret, nil
+}
+
+func decisionResponseItems(response events.Envelope) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {
+	ticket, ok := response.Payload[events.PayloadKeyTicket].(*decisionmodel.Ticket)
+	if !ok || ticket == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	resolution, ok := response.Payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
+	if !ok || resolution == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	return ticket, resolution, nil
 }
 
 func mapDecision(item *decisionmodel.Ticket, resolution *decisionmodel.Resolution, autoGovernance *AutoGovernanceSummary) Decision {

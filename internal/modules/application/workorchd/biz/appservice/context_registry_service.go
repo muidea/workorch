@@ -5,14 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
-	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -190,26 +185,18 @@ func CreateSoulWithSession(ctx context.Context, session *RuntimeSession, cmd Cre
 		return Soul{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.SoulService == nil || exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return Soul{}, common.ErrInvalidArgument
 	}
-	if err := exports.Services.SoulService.CreateSoul(ctx, soulmodule.CreateSoulCommand{
-		SoulID:                      common.SoulID(cmd.ID),
-		Name:                        cmd.Name,
-		Description:                 cmd.Description,
-		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
-		SoulMD:                      cmd.SoulMD,
-		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
-		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
-		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
-		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
-		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
-	}); err != nil {
-		return Soul{}, err
-	}
-	item, err := exports.Repositories.Souls.Get(ctx, common.SoulID(cmd.ID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSoulCommandCreate, "soul", cmd.ID, map[string]any{
+		events.PayloadKeySoul: soulModelFromCommand(cmd),
+	})
 	if err != nil {
 		return Soul{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeySoul].(*soulmodel.Soul)
+	if !ok {
+		return Soul{}, common.ErrInvalidArgument
 	}
 	return mapSoul(item), nil
 }
@@ -228,7 +215,7 @@ func UpdateSoulWithSession(ctx context.Context, session *RuntimeSession, soulID 
 		return Soul{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.SoulService == nil || exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return Soul{}, common.ErrInvalidArgument
 	}
 	soulID = strings.TrimSpace(soulID)
@@ -239,23 +226,15 @@ func UpdateSoulWithSession(ctx context.Context, session *RuntimeSession, soulID 
 		return Soul{}, common.ErrInvalidArgument
 	}
 	cmd.ID = soulID
-	if err := exports.Services.SoulService.UpdateSoul(ctx, soulmodule.UpdateSoulCommand{
-		SoulID:                      common.SoulID(cmd.ID),
-		Name:                        cmd.Name,
-		Description:                 cmd.Description,
-		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
-		SoulMD:                      cmd.SoulMD,
-		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
-		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
-		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
-		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
-		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
-	}); err != nil {
-		return Soul{}, err
-	}
-	item, err := exports.Repositories.Souls.Get(ctx, common.SoulID(cmd.ID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSoulCommandUpdate, "soul", cmd.ID, map[string]any{
+		events.PayloadKeySoul: soulModelFromCommand(cmd),
+	})
 	if err != nil {
 		return Soul{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeySoul].(*soulmodel.Soul)
+	if !ok {
+		return Soul{}, common.ErrInvalidArgument
 	}
 	return mapSoul(item), nil
 }
@@ -274,14 +253,16 @@ func DeleteSoulWithSession(ctx context.Context, session *RuntimeSession, soulID 
 		return err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.SoulService == nil || exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	soulID = strings.TrimSpace(soulID)
 	if soulID == "" {
 		return common.ErrInvalidArgument
 	}
-	return exports.Services.SoulService.DeleteSoul(ctx, common.SoulID(soulID))
+	return publishContextRegistryCommand(ctx, exports.Infrastructure.EventHub, events.TopicSoulCommandDelete, "soul", soulID, map[string]any{
+		events.PayloadKeySoulID: soulID,
+	})
 }
 
 func DeleteSoulWithBackend(ctx context.Context, backend string, dataRoot string, soulID string) error {
@@ -298,12 +279,18 @@ func ReadSoulWithSession(ctx context.Context, session *RuntimeSession, soulID st
 		return Soul{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return Soul{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Repositories.Souls.Get(ctx, common.SoulID(soulID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSoulCommandGet, "soul", soulID, map[string]any{
+		events.PayloadKeySoulID: soulID,
+	})
 	if err != nil {
 		return Soul{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeySoul].(*soulmodel.Soul)
+	if !ok {
+		return Soul{}, common.ErrInvalidArgument
 	}
 	return mapSoul(item), nil
 }
@@ -322,12 +309,16 @@ func ListSoulsWithSession(ctx context.Context, session *RuntimeSession) (ret []S
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Repositories.Souls.List(ctx)
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSoulCommandList, "soul", "all", nil)
 	if err != nil {
 		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeySouls].([]*soulmodel.Soul)
+	if !ok {
+		return nil, common.ErrInvalidArgument
 	}
 	ret = make([]Soul, 0, len(items))
 	for _, item := range items {
@@ -350,27 +341,18 @@ func CreateSkillWithSession(ctx context.Context, session *RuntimeSession, cmd Cr
 		return Skill{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.SkillService == nil || exports.Repositories.Skills == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return Skill{}, common.ErrInvalidArgument
 	}
-	if err := exports.Services.SkillService.CreateSkill(ctx, skillmodule.CreateSkillCommand{
-		SkillID:                common.SkillID(cmd.ID),
-		Name:                   cmd.Name,
-		Version:                cmd.Version,
-		Description:            cmd.Description,
-		TriggerRules:           cloneStrings(cmd.TriggerRules),
-		Instruction:            cmd.Instruction,
-		ReferenceRefs:          cloneStrings(cmd.ReferenceRefs),
-		RequiredToolKinds:      cloneStrings(cmd.RequiredToolKinds),
-		RequiredMCPServerRefs:  cloneStrings(cmd.RequiredMCPServerRefs),
-		RequiredCapabilityRefs: cloneStrings(cmd.RequiredCapabilityRefs),
-		Constraints:            cloneStrings(cmd.Constraints),
-	}); err != nil {
-		return Skill{}, err
-	}
-	item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(cmd.ID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSkillCommandCreate, "skill", cmd.ID, map[string]any{
+		events.PayloadKeySkill: skillModelFromCommand(cmd),
+	})
 	if err != nil {
 		return Skill{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeySkill].(*skillmodel.Skill)
+	if !ok {
+		return Skill{}, common.ErrInvalidArgument
 	}
 	return mapSkill(item), nil
 }
@@ -389,15 +371,21 @@ func ReadSkillWithSession(ctx context.Context, session *RuntimeSession, skillID 
 		return Skill{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Skills == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return Skill{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Repositories.Skills.Get(ctx, common.SkillID(skillID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSkillCommandGet, "skill", skillID, map[string]any{
+		events.PayloadKeySkillID: skillID,
+	})
 	if err != nil {
 		if !errors.Is(err, common.ErrNotFound) {
 			return Skill{}, err
 		}
 		return readSkillHubSkill(ctx, session, skillID, firstSkillQuery(query))
+	}
+	item, ok := response.Payload[events.PayloadKeySkill].(*skillmodel.Skill)
+	if !ok {
+		return Skill{}, common.ErrInvalidArgument
 	}
 	return mapSkill(item), nil
 }
@@ -416,12 +404,16 @@ func ListSkillsWithSession(ctx context.Context, session *RuntimeSession, query .
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Skills == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Repositories.Skills.List(ctx)
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicSkillCommandList, "skill", "all", nil)
 	if err != nil {
 		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeySkills].([]*skillmodel.Skill)
+	if !ok {
+		return nil, common.ErrInvalidArgument
 	}
 	ret = make([]Skill, 0, len(items))
 	for _, item := range items {
@@ -467,10 +459,10 @@ func listSkillHubWorkspaceSkillsForWorkspace(ctx context.Context, session *Runti
 	if err != nil {
 		return nil, err
 	}
-	if exports.Repositories.Workspaces == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	workspace, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)))
+	workspace, err := readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	if err != nil {
 		return nil, err
 	}
@@ -535,30 +527,18 @@ func CreateMCPServerWithSession(ctx context.Context, session *RuntimeSession, cm
 		return MCPServer{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil || exports.Repositories.MCPServers == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPServer{}, common.ErrInvalidArgument
 	}
-	if err := exports.Services.MCPService.CreateServer(ctx, mcpmodule.CreateServerCommand{
-		ServerID:              common.MCPServerID(cmd.ID),
-		Name:                  cmd.Name,
-		Transport:             cmd.Transport,
-		Endpoint:              cmd.Endpoint,
-		Command:               cmd.Command,
-		Args:                  cloneStrings(cmd.Args),
-		Env:                   cloneStringMap(cmd.Env),
-		Enabled:               cmd.Enabled,
-		AllowedTools:          cloneStrings(cmd.AllowedTools),
-		AllowedResources:      cloneStrings(cmd.AllowedResources),
-		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
-		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
-		SessionPolicy:         cmd.SessionPolicy,
-		TimeoutMillis:         cmd.TimeoutMillis,
-	}); err != nil {
-		return MCPServer{}, err
-	}
-	item, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(cmd.ID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, map[string]any{
+		events.PayloadKeyServer: mcpServerModelFromCommand(cmd),
+	})
 	if err != nil {
 		return MCPServer{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
+	if !ok {
+		return MCPServer{}, common.ErrInvalidArgument
 	}
 	return mapMCPServer(item), nil
 }
@@ -577,7 +557,7 @@ func UpdateMCPServerWithSession(ctx context.Context, session *RuntimeSession, se
 		return MCPServer{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil || exports.Repositories.MCPServers == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPServer{}, common.ErrInvalidArgument
 	}
 	cmd.ID = strings.TrimSpace(cmd.ID)
@@ -591,33 +571,36 @@ func UpdateMCPServerWithSession(ctx context.Context, session *RuntimeSession, se
 	cmd.ID = serverID
 	env := cloneStringMap(cmd.Env)
 	if cmd.Env == nil {
-		existing, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(serverID))
+		existing, err := getMCPServerByCommand(ctx, exports.Infrastructure.EventHub, serverID)
 		if err != nil {
 			return MCPServer{}, err
 		}
 		env = cloneStringMap(existing.Env)
 	}
-	if err := exports.Services.MCPService.UpdateServer(ctx, mcpmodule.UpdateServerCommand{
-		ServerID:              common.MCPServerID(cmd.ID),
-		Name:                  cmd.Name,
-		Transport:             cmd.Transport,
-		Endpoint:              cmd.Endpoint,
-		Command:               cmd.Command,
-		Args:                  cloneStrings(cmd.Args),
-		Env:                   env,
-		Enabled:               cmd.Enabled,
-		AllowedTools:          cloneStrings(cmd.AllowedTools),
-		AllowedResources:      cloneStrings(cmd.AllowedResources),
-		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
-		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
-		SessionPolicy:         cmd.SessionPolicy,
-		TimeoutMillis:         cmd.TimeoutMillis,
-	}); err != nil {
-		return MCPServer{}, err
-	}
-	item, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(cmd.ID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, map[string]any{
+		events.PayloadKeyServer: mcpServerModelFromCommand(UpdateMCPServerCommand{
+			ID:                    cmd.ID,
+			Name:                  cmd.Name,
+			Transport:             cmd.Transport,
+			Endpoint:              cmd.Endpoint,
+			Command:               cmd.Command,
+			Args:                  cloneStrings(cmd.Args),
+			Env:                   env,
+			Enabled:               cmd.Enabled,
+			AllowedTools:          cloneStrings(cmd.AllowedTools),
+			AllowedResources:      cloneStrings(cmd.AllowedResources),
+			AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
+			DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+			SessionPolicy:         cmd.SessionPolicy,
+			TimeoutMillis:         cmd.TimeoutMillis,
+		}),
+	})
 	if err != nil {
 		return MCPServer{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
+	if !ok {
+		return MCPServer{}, common.ErrInvalidArgument
 	}
 	return mapMCPServer(item), nil
 }
@@ -636,10 +619,10 @@ func ReadMCPServerWithSession(ctx context.Context, session *RuntimeSession, serv
 		return MCPServer{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.MCPServers == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPServer{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Repositories.MCPServers.Get(ctx, common.MCPServerID(serverID))
+	item, err := getMCPServerByCommand(ctx, exports.Infrastructure.EventHub, serverID)
 	if err != nil {
 		return MCPServer{}, err
 	}
@@ -660,12 +643,16 @@ func ListMCPServersWithSession(ctx context.Context, session *RuntimeSession) (re
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.MCPServers == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Repositories.MCPServers.List(ctx)
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandListServers, "mcp_server", "all", nil)
 	if err != nil {
 		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeyServers].([]*mcpmodel.Server)
+	if !ok {
+		return nil, common.ErrInvalidArgument
 	}
 	ret = make([]MCPServer, 0, len(items))
 	for _, item := range items {
@@ -748,12 +735,18 @@ func CreateMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession
 		return MCPCapability{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPCapability{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Services.MCPService.CreateCapability(ctx, mcpCapabilityCommand(cmd))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, map[string]any{
+		events.PayloadKeyCapability: mcpCapabilityModelFromCommand(cmd),
+	})
 	if err != nil {
 		return MCPCapability{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
+	if !ok {
+		return MCPCapability{}, common.ErrInvalidArgument
 	}
 	return mapMCPCapability(item), nil
 }
@@ -772,13 +765,19 @@ func UpdateMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession
 		return MCPCapability{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPCapability{}, common.ErrInvalidArgument
 	}
 	cmd.ID = capabilityID
-	item, err := exports.Services.MCPService.UpdateCapability(ctx, mcpCapabilityCommand(cmd))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, map[string]any{
+		events.PayloadKeyCapability: mcpCapabilityModelFromCommand(cmd),
+	})
 	if err != nil {
 		return MCPCapability{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
+	if !ok {
+		return MCPCapability{}, common.ErrInvalidArgument
 	}
 	return mapMCPCapability(item), nil
 }
@@ -797,12 +796,18 @@ func ReadMCPCapabilityWithSession(ctx context.Context, session *RuntimeSession, 
 		return MCPCapability{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MCPCapability{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Services.MCPService.GetCapability(ctx, common.MCPCapabilityID(capabilityID))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, map[string]any{
+		events.PayloadKeyCapabilityID: capabilityID,
+	})
 	if err != nil {
 		return MCPCapability{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
+	if !ok {
+		return MCPCapability{}, common.ErrInvalidArgument
 	}
 	return mapMCPCapability(item), nil
 }
@@ -821,12 +826,18 @@ func ListMCPCapabilitiesWithSession(ctx context.Context, session *RuntimeSession
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MCPService == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Services.MCPService.ListCapabilities(ctx, mcpCapabilityQuery(query))
+	response, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMCPCommandListCapabilities, "mcp_capability", "all", map[string]any{
+		events.PayloadKeyCapabilityQuery: mcpCapabilityQueryPayload(query),
+	})
 	if err != nil {
 		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeyCapabilities].([]*mcpmodel.Capability)
+	if !ok {
+		return nil, common.ErrInvalidArgument
 	}
 	ret = make([]MCPCapability, 0, len(items))
 	for _, item := range items {
@@ -849,37 +860,22 @@ func CreateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, w
 		return MemoryItem{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MemoryService == nil || exports.Repositories.MemoryItems == nil || exports.Repositories.Workspaces == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MemoryItem{}, common.ErrInvalidArgument
 	}
-	if _, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID)); err != nil {
+	if _, err := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicWorkspaceCommandGet, "workspace", workspaceID, map[string]any{
+		events.PayloadKeyWorkspaceID: workspaceID,
+	}); err != nil {
 		return MemoryItem{}, err
 	}
 	memoryID := cmd.MemoryID
 	if memoryID == "" {
 		memoryID = generateContextID("memory")
 	}
-	if err := exports.Services.MemoryService.CreateMemoryItem(ctx, memorymodule.CreateMemoryItemCommand{
-		MemoryID:            common.MemoryID(memoryID),
-		WorkspaceID:         common.WorkspaceID(workspaceID),
-		RunID:               common.RunID(cmd.RunID),
-		SourceType:          cmd.SourceType,
-		SourceRef:           cmd.SourceRef,
-		MemoryType:          cmd.MemoryType,
-		Content:             cmd.Content,
-		Summary:             cmd.Summary,
-		Tags:                cloneStrings(cmd.Tags),
-		Importance:          cmd.Importance,
-		Confidence:          cmd.Confidence,
-		Visibility:          cmd.Visibility,
-		EmbeddingProviderID: cmd.EmbeddingProviderID,
-		EmbeddingModel:      cmd.EmbeddingModel,
-		EmbeddingText:       cmd.EmbeddingText,
-		Vector:              cloneFloats(cmd.Vector),
-	}); err != nil {
+	if err := publishMemoryItemCommand(ctx, exports.Infrastructure.EventHub, events.TopicMemoryCommandCreate, memoryItemFromCommand(memoryID, workspaceID, cmd)); err != nil {
 		return MemoryItem{}, err
 	}
-	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	item, err := getMemoryItemByCommand(ctx, exports.Infrastructure.EventHub, memoryID)
 	if err != nil {
 		return MemoryItem{}, err
 	}
@@ -903,14 +899,14 @@ func ReadMemoryItemWithSession(ctx context.Context, session *RuntimeSession, mem
 		return MemoryItem{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.MemoryItems == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MemoryItem{}, common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
 	if memoryID == "" {
 		return MemoryItem{}, common.ErrInvalidArgument
 	}
-	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	item, err := getMemoryItemByCommand(ctx, exports.Infrastructure.EventHub, memoryID)
 	if err != nil {
 		return MemoryItem{}, err
 	}
@@ -931,7 +927,7 @@ func UpdateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, m
 		return MemoryItem{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MemoryService == nil || exports.Repositories.MemoryItems == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return MemoryItem{}, common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
@@ -941,32 +937,15 @@ func UpdateMemoryItemWithSession(ctx context.Context, session *RuntimeSession, m
 	if strings.TrimSpace(cmd.MemoryID) != "" && strings.TrimSpace(cmd.MemoryID) != memoryID {
 		return MemoryItem{}, common.ErrInvalidArgument
 	}
-	existing, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	existing, err := getMemoryItemByCommand(ctx, exports.Infrastructure.EventHub, memoryID)
 	if err != nil {
 		return MemoryItem{}, err
 	}
 	merged := mergeMemoryUpdateCommand(existing, cmd)
-	if err := exports.Services.MemoryService.UpdateMemoryItem(ctx, memorymodule.UpdateMemoryItemCommand{
-		MemoryID:            common.MemoryID(memoryID),
-		WorkspaceID:         existing.WorkspaceID,
-		RunID:               common.RunID(merged.RunID),
-		SourceType:          merged.SourceType,
-		SourceRef:           merged.SourceRef,
-		MemoryType:          merged.MemoryType,
-		Content:             merged.Content,
-		Summary:             merged.Summary,
-		Tags:                cloneStrings(merged.Tags),
-		Importance:          merged.Importance,
-		Confidence:          merged.Confidence,
-		Visibility:          merged.Visibility,
-		EmbeddingProviderID: merged.EmbeddingProviderID,
-		EmbeddingModel:      merged.EmbeddingModel,
-		EmbeddingText:       merged.EmbeddingText,
-		Vector:              cloneFloats(merged.Vector),
-	}); err != nil {
+	if err := publishMemoryItemCommand(ctx, exports.Infrastructure.EventHub, events.TopicMemoryCommandUpdate, memoryItemFromMergedCommand(memoryID, existing.WorkspaceID, merged)); err != nil {
 		return MemoryItem{}, err
 	}
-	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	item, err := getMemoryItemByCommand(ctx, exports.Infrastructure.EventHub, memoryID)
 	if err != nil {
 		return MemoryItem{}, err
 	}
@@ -990,18 +969,20 @@ func DeleteMemoryItemWithSession(ctx context.Context, session *RuntimeSession, m
 		return err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MemoryService == nil || exports.Repositories.MemoryItems == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	memoryID = strings.TrimSpace(memoryID)
 	if memoryID == "" {
 		return common.ErrInvalidArgument
 	}
-	item, err := exports.Repositories.MemoryItems.Get(ctx, common.MemoryID(memoryID))
+	item, err := getMemoryItemByCommand(ctx, exports.Infrastructure.EventHub, memoryID)
 	if err != nil {
 		return err
 	}
-	if err := exports.Services.MemoryService.DeleteMemoryItem(ctx, common.MemoryID(memoryID)); err != nil {
+	if err := publishContextRegistryCommand(ctx, exports.Infrastructure.EventHub, events.TopicMemoryCommandDelete, "memory", memoryID, map[string]any{
+		events.PayloadKeyMemoryID: memoryID,
+	}); err != nil {
 		return err
 	}
 	return publishMemoryEvent(ctx, events.TopicMemoryDeleted, item)
@@ -1021,17 +1002,28 @@ func ListMemoryByWorkspaceWithSession(ctx context.Context, session *RuntimeSessi
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.MemoryItems == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	var items []*memorymodel.MemoryItem
 	if query != "" {
-		items, err = exports.Repositories.MemoryItems.Search(ctx, repository.MemorySearchQuery{
+		items, err = searchMemoryByCommand(ctx, exports.Infrastructure.EventHub, repository.MemorySearchQuery{
 			WorkspaceID: common.WorkspaceID(workspaceID),
 			Query:       query,
 		})
 	} else {
-		items, err = exports.Repositories.MemoryItems.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+		response, responseErr := publishContextRegistryCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicMemoryCommandListByWorkspace, "workspace", workspaceID, map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+		})
+		if responseErr != nil {
+			err = responseErr
+		} else {
+			var ok bool
+			items, ok = response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
+			if !ok {
+				err = common.ErrInvalidArgument
+			}
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -1057,13 +1049,13 @@ func SearchMemoryWithSession(ctx context.Context, session *RuntimeSession, query
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Services.MemoryService == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	if strings.TrimSpace(query.WorkspaceID) == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Services.MemoryService.SearchMemory(ctx, repository.MemorySearchQuery{
+	items, err := searchMemoryByCommand(ctx, exports.Infrastructure.EventHub, repository.MemorySearchQuery{
 		WorkspaceID: common.WorkspaceID(strings.TrimSpace(query.WorkspaceID)),
 		Query:       strings.TrimSpace(query.Query),
 		Tags:        cloneStrings(query.Tags),
@@ -1260,8 +1252,97 @@ func mapMCPCapability(item *mcpmodel.Capability) MCPCapability {
 	}
 }
 
-func mcpCapabilityCommand(cmd MCPCapability) mcpservice.CreateCapabilityCommand {
-	return mcpservice.CreateCapabilityCommand{
+func getMCPServerByCommand(ctx context.Context, hub events.Hub, serverID string) (*mcpmodel.Server, error) {
+	response, err := publishContextRegistryCommandWithResponse(ctx, hub, events.TopicMCPCommandGetServer, "mcp_server", serverID, map[string]any{
+		events.PayloadKeyServerID: serverID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyServer].(*mcpmodel.Server)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func publishContextRegistryCommand(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, payload map[string]any) error {
+	_, err := publishContextRegistryCommandWithResponse(ctx, hub, topic, subjectType, subjectID, payload)
+	return err
+}
+
+func publishContextRegistryCommandWithResponse(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, payload map[string]any) (events.Envelope, error) {
+	if hub == nil || topic == "" {
+		return events.Envelope{}, common.ErrInvalidArgument
+	}
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:        topic,
+		SourceModule: "application/workorchd/context-registry",
+		SubjectType:  subjectType,
+		SubjectID:    subjectID,
+		Payload:      payload,
+	})
+	if response, ok := events.ResponseEnvelope(err); ok {
+		return response, nil
+	}
+	if err != nil {
+		return events.Envelope{}, err
+	}
+	return events.Envelope{}, common.ErrInvalidArgument
+}
+
+func soulModelFromCommand(cmd Soul) *soulmodel.Soul {
+	return &soulmodel.Soul{
+		ID:                          common.SoulID(cmd.ID),
+		Name:                        cmd.Name,
+		Description:                 cmd.Description,
+		BusinessDomains:             cloneStrings(cmd.BusinessDomains),
+		SoulMD:                      cmd.SoulMD,
+		AllowedSkillRefs:            cloneStrings(cmd.AllowedSkillRefs),
+		AllowedMCPServerRefs:        cloneStrings(cmd.AllowedMCPServerRefs),
+		AllowedCapabilityRefs:       cloneStrings(cmd.AllowedCapabilityRefs),
+		AllowedCapabilityCategories: cloneStrings(cmd.AllowedCapabilityCategories),
+		AllowedToolKinds:            cloneStrings(cmd.AllowedToolKinds),
+	}
+}
+
+func skillModelFromCommand(cmd Skill) *skillmodel.Skill {
+	return &skillmodel.Skill{
+		ID:                     common.SkillID(cmd.ID),
+		Name:                   cmd.Name,
+		Version:                cmd.Version,
+		Description:            cmd.Description,
+		TriggerRules:           cloneStrings(cmd.TriggerRules),
+		Instruction:            cmd.Instruction,
+		ReferenceRefs:          cloneStrings(cmd.ReferenceRefs),
+		RequiredToolKinds:      cloneStrings(cmd.RequiredToolKinds),
+		RequiredMCPServerRefs:  cloneStrings(cmd.RequiredMCPServerRefs),
+		RequiredCapabilityRefs: cloneStrings(cmd.RequiredCapabilityRefs),
+		Constraints:            cloneStrings(cmd.Constraints),
+	}
+}
+
+func mcpServerModelFromCommand(cmd MCPServer) *mcpmodel.Server {
+	return &mcpmodel.Server{
+		ID:                    common.MCPServerID(cmd.ID),
+		Name:                  cmd.Name,
+		Transport:             cmd.Transport,
+		Endpoint:              cmd.Endpoint,
+		Command:               cmd.Command,
+		Args:                  cloneStrings(cmd.Args),
+		Env:                   cloneStringMap(cmd.Env),
+		Enabled:               cmd.Enabled,
+		AllowedTools:          cloneStrings(cmd.AllowedTools),
+		AllowedResources:      cloneStrings(cmd.AllowedResources),
+		AllowedPrompts:        cloneStrings(cmd.AllowedPrompts),
+		DefaultApprovalPolicy: cmd.DefaultApprovalPolicy,
+		SessionPolicy:         cmd.SessionPolicy,
+		TimeoutMillis:         cmd.TimeoutMillis,
+	}
+}
+
+func mcpCapabilityModelFromCommand(cmd MCPCapability) *mcpmodel.Capability {
+	return &mcpmodel.Capability{
 		ID:             common.MCPCapabilityID(cmd.ID),
 		ServerID:       common.MCPServerID(cmd.ServerID),
 		Kind:           cmd.Kind,
@@ -1283,16 +1364,30 @@ func mcpCapabilityCommand(cmd MCPCapability) mcpservice.CreateCapabilityCommand 
 	}
 }
 
-func mcpCapabilityQuery(query MCPCapabilityQuery) mcpservice.CapabilityQuery {
-	return mcpservice.CapabilityQuery{
-		ServerID:  common.MCPServerID(strings.TrimSpace(query.ServerID)),
-		Kind:      strings.TrimSpace(query.Kind),
-		Category:  strings.TrimSpace(query.Category),
-		Stage:     strings.TrimSpace(query.Stage),
-		RiskLevel: strings.TrimSpace(query.RiskLevel),
-		Enabled:   query.Enabled,
-		Query:     strings.TrimSpace(query.Query),
+func mcpCapabilityQueryPayload(query MCPCapabilityQuery) map[string]any {
+	ret := map[string]any{}
+	if value := strings.TrimSpace(query.ServerID); value != "" {
+		ret[events.PayloadKeyServerID] = value
 	}
+	if value := strings.TrimSpace(query.Kind); value != "" {
+		ret[events.PayloadKeyKind] = value
+	}
+	if value := strings.TrimSpace(query.Category); value != "" {
+		ret[events.PayloadKeyCategory] = value
+	}
+	if value := strings.TrimSpace(query.Stage); value != "" {
+		ret[events.PayloadKeyStage] = value
+	}
+	if value := strings.TrimSpace(query.RiskLevel); value != "" {
+		ret[events.PayloadKeyRisk] = value
+	}
+	if query.Enabled != nil {
+		ret[events.PayloadKeyEnabled] = *query.Enabled
+	}
+	if value := strings.TrimSpace(query.Query); value != "" {
+		ret[events.PayloadKeyQuery] = value
+	}
+	return ret
 }
 
 func mapMemoryItem(item *memorymodel.MemoryItem) MemoryItem {
@@ -1319,6 +1414,85 @@ func mapMemoryItem(item *memorymodel.MemoryItem) MemoryItem {
 		VectorDimension:     len(item.Vector),
 		VectorScore:         item.VectorScore,
 	}
+}
+
+func memoryItemFromCommand(memoryID string, workspaceID string, cmd CreateMemoryItemCommand) *memorymodel.MemoryItem {
+	return &memorymodel.MemoryItem{
+		ID:                  common.MemoryID(memoryID),
+		WorkspaceID:         common.WorkspaceID(workspaceID),
+		RunID:               common.RunID(cmd.RunID),
+		SourceType:          cmd.SourceType,
+		SourceRef:           cmd.SourceRef,
+		MemoryType:          cmd.MemoryType,
+		Content:             cmd.Content,
+		Summary:             cmd.Summary,
+		Tags:                cloneStrings(cmd.Tags),
+		Importance:          cmd.Importance,
+		Confidence:          cmd.Confidence,
+		Visibility:          cmd.Visibility,
+		EmbeddingProviderID: cmd.EmbeddingProviderID,
+		EmbeddingModel:      cmd.EmbeddingModel,
+		EmbeddingText:       cmd.EmbeddingText,
+		Vector:              cloneFloats(cmd.Vector),
+	}
+}
+
+func memoryItemFromMergedCommand(memoryID string, workspaceID common.WorkspaceID, cmd UpdateMemoryItemCommand) *memorymodel.MemoryItem {
+	return &memorymodel.MemoryItem{
+		ID:                  common.MemoryID(memoryID),
+		WorkspaceID:         workspaceID,
+		RunID:               common.RunID(cmd.RunID),
+		SourceType:          cmd.SourceType,
+		SourceRef:           cmd.SourceRef,
+		MemoryType:          cmd.MemoryType,
+		Content:             cmd.Content,
+		Summary:             cmd.Summary,
+		Tags:                cloneStrings(cmd.Tags),
+		Importance:          cmd.Importance,
+		Confidence:          cmd.Confidence,
+		Visibility:          cmd.Visibility,
+		EmbeddingProviderID: cmd.EmbeddingProviderID,
+		EmbeddingModel:      cmd.EmbeddingModel,
+		EmbeddingText:       cmd.EmbeddingText,
+		Vector:              cloneFloats(cmd.Vector),
+	}
+}
+
+func publishMemoryItemCommand(ctx context.Context, hub events.Hub, topic string, item *memorymodel.MemoryItem) error {
+	if item == nil {
+		return common.ErrInvalidArgument
+	}
+	return publishContextRegistryCommand(ctx, hub, topic, "memory", string(item.ID), map[string]any{
+		events.PayloadKeyMemoryItem: item,
+	})
+}
+
+func getMemoryItemByCommand(ctx context.Context, hub events.Hub, memoryID string) (*memorymodel.MemoryItem, error) {
+	response, err := publishContextRegistryCommandWithResponse(ctx, hub, events.TopicMemoryCommandGet, "memory", memoryID, map[string]any{
+		events.PayloadKeyMemoryID: memoryID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyMemoryItem].(*memorymodel.MemoryItem)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func searchMemoryByCommand(ctx context.Context, hub events.Hub, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
+	response, err := publishContextRegistryCommandWithResponse(ctx, hub, events.TopicMemoryCommandSearch, "memory", "search", map[string]any{
+		events.PayloadKeyMemorySearchQuery: query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return items, nil
 }
 
 func generateContextID(prefix string) string {

@@ -12,11 +12,16 @@ import (
 )
 
 type Service struct {
-	items repository.MemoryItemRepository
+	items  repository.MemoryItemRepository
+	traces repository.MemoryRecallTraceRepository
 }
 
 func NewService(items repository.MemoryItemRepository) *Service {
 	return &Service{items: items}
+}
+
+func NewServiceWithRecallTraces(items repository.MemoryItemRepository, traces repository.MemoryRecallTraceRepository) *Service {
+	return &Service{items: items, traces: traces}
 }
 
 func (s *Service) CreateMemoryItem(ctx context.Context, cmd memoryservice.CreateMemoryItemCommand) error {
@@ -59,6 +64,34 @@ func (s *Service) SearchMemory(ctx context.Context, query repository.MemorySearc
 		return nil, common.ErrInvalidArgument
 	}
 	return s.items.Search(ctx, query)
+}
+
+func (s *Service) UpsertMemoryRecallTrace(ctx context.Context, trace *memorymodel.MemoryRecallTrace) error {
+	if s == nil || s.traces == nil || trace == nil || trace.ID == "" || trace.WorkspaceID == "" || trace.RunID == "" {
+		return common.ErrInvalidArgument
+	}
+	return s.traces.Upsert(ctx, trace)
+}
+
+func (s *Service) GetMemoryRecallTrace(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+	if s == nil || s.traces == nil || id == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return s.traces.Get(ctx, id)
+}
+
+func (s *Service) ListMemoryRecallTraces(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
+	if s == nil || s.traces == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return s.traces.List(ctx, query)
+}
+
+func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryRecallTraceID) error {
+	if s == nil || s.traces == nil || id == "" {
+		return common.ErrInvalidArgument
+	}
+	return s.traces.Delete(ctx, id)
 }
 
 func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {

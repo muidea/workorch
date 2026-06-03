@@ -13,6 +13,8 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -1035,6 +1037,104 @@ func TestRuntimeOrchestrator_CompleteRunRejectsNonRunningState(t *testing.T) {
 				t.Fatalf("run mutated after conflict: got=%+v want=%+v", *got, *tc.run)
 			}
 		})
+	}
+}
+
+func TestRuntimeOrchestrator_CompleteRunRequiresAcceptedResultForDoDGatedRun(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{output: map[string]any{"status": "ok"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-complete-result-gate")
+	runID := common.RunID("run-complete-result-gate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:          workspaceID,
+		Title:       "ws",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod-complete-result-gate",
+		State:           common.RunStateValidating,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.CompleteRun(ctx, runID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("complete without accepted result err = %v, want conflict", err)
+	}
+	got, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run after rejected complete: %v", err)
+	}
+	if got.State != common.RunStateValidating {
+		t.Fatalf("run state = %q, want validating after rejected complete", got.State)
+	}
+
+	if err := resultRepo.Create(ctx, &resultmodel.Result{
+		ID:          "run-complete-result-gate/result/dod-assessment",
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		DoDID:       "dod-complete-result-gate",
+		State:       common.ResultStateAccepted,
+		Summary:     "accepted result exists but is not a formal DoD assessment",
+	}); err != nil {
+		t.Fatalf("seed weak accepted result: %v", err)
+	}
+	if err := orch.CompleteRun(ctx, runID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("complete with weak accepted result err = %v, want conflict", err)
+	}
+	if err := resultRepo.Update(ctx, &resultmodel.Result{
+		ID:           "run-complete-result-gate/result/dod-assessment",
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		DoDID:        "dod-complete-result-gate",
+		State:        common.ResultStateAccepted,
+		Summary:      "formal DoD assessment accepted",
+		SourceType:   resultcommon.SourceTypeDoDAssessment,
+		SourceRef:    "run-complete-result-gate/step-1",
+		EvidenceRefs: []string{"run-complete-result-gate/step-1/validation/runtime-step"},
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: true,
+			Summary:   "formal DoD assessment accepted",
+			Items: []resultmodel.DoDAssessmentItem{{
+				Item:         "stdio MCP tool call completes",
+				State:        "satisfied",
+				EvidenceRefs: []string{"run-complete-result-gate/step-1/validation/runtime-step"},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("upgrade formal accepted result: %v", err)
+	}
+	if err := orch.CompleteRun(ctx, runID); err != nil {
+		t.Fatalf("complete with formal accepted result: %v", err)
+	}
+	got, err = runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get completed run: %v", err)
+	}
+	if got.State != common.RunStateCompleted {
+		t.Fatalf("run state = %q, want completed", got.State)
 	}
 }
 

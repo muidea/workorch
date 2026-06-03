@@ -8,30 +8,12 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type RuntimeDependencies struct {
-	Snapshot RuntimeSnapshotDependencies
+	Snapshot SnapshotReadRuntime
 	Actions  RuntimeActionDependencies
-}
-
-type RuntimeSnapshotDependencies struct {
-	Workspaces         repository.WorkspaceRepository
-	Goals              repository.GoalRepository
-	DoDs               repository.DoDRepository
-	Results            repository.ResultRepository
-	Artifacts          repository.ArtifactRepository
-	EventRecords       repository.EventRecordRepository
-	Runs               repository.RunRepository
-	Steps              repository.StepRepository
-	ToolCalls          repository.ToolCallRepository
-	Patches            repository.PatchRepository
-	ValidationResults  repository.ValidationResultRepository
-	RuntimeCheckpoints repository.RuntimeCheckpointRepository
-	Tickets            repository.DecisionTicketRepository
-	Resolutions        repository.DecisionResolutionRepository
-	Approvals          repository.ApprovalRepository
 }
 
 type RuntimeActionDependencies struct {
@@ -42,7 +24,7 @@ type RuntimeActionDependencies struct {
 }
 
 type runtimeAdapter struct {
-	snapshot RuntimeSnapshotDependencies
+	snapshot SnapshotReadRuntime
 	actions  RuntimeActionDependencies
 }
 
@@ -57,10 +39,10 @@ func (r *runtimeAdapter) GetWorkspaceByID(ctx context.Context, workspaceID commo
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Workspaces); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Workspaces.Get(ctx, workspaceID)
+	return r.snapshot.GetWorkspaceByID(ctx, workspaceID)
 }
 
 func (r *runtimeAdapter) EnsureWorkspace(ctx context.Context, workspaceID common.WorkspaceID, title string) error {
@@ -77,10 +59,10 @@ func (r *runtimeAdapter) GetRun(ctx context.Context, runID common.RunID) (*runmo
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Runs); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Runs.Get(ctx, runID)
+	return r.snapshot.GetRun(ctx, runID)
 }
 
 func (r *runtimeAdapter) EnsureRun(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {
@@ -137,10 +119,10 @@ func (r *runtimeAdapter) GetStep(ctx context.Context, stepID common.StepID) (*ru
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Steps); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Steps.Get(ctx, stepID)
+	return r.snapshot.GetStep(ctx, stepID)
 }
 
 func (r *runtimeAdapter) EnsureTicket(
@@ -164,20 +146,20 @@ func (r *runtimeAdapter) GetTicket(ctx context.Context, ticketID common.TicketID
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Tickets); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Tickets.Get(ctx, ticketID)
+	return r.snapshot.GetTicket(ctx, ticketID)
 }
 
 func (r *runtimeAdapter) GetResolutionByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Resolutions); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Resolutions.GetByTicketID(ctx, ticketID)
+	return r.snapshot.GetResolutionByTicketID(ctx, ticketID)
 }
 
 func (r *runtimeAdapter) EnsureResolvedTicket(
@@ -217,10 +199,10 @@ func (r *runtimeAdapter) GetApproval(ctx context.Context, approvalID common.Appr
 	if r == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := validateRequiredDependencies(r.snapshot.Approvals); err != nil {
+	if err := validateRequiredDependencies(r.snapshot); err != nil {
 		return nil, err
 	}
-	return r.snapshot.Approvals.Get(ctx, approvalID)
+	return r.snapshot.GetApproval(ctx, approvalID)
 }
 
 func (r *runtimeAdapter) EnsureApprovalApproved(ctx context.Context, approvalID common.ApprovalID) error {
@@ -241,4 +223,39 @@ func (r *runtimeAdapter) EnsureApprovalRejected(ctx context.Context, approvalID 
 		return err
 	}
 	return r.actions.Approval.EnsureApprovalRejected(ctx, approvalID)
+}
+
+type eventHubSnapshotReadPort struct {
+	hub events.Hub
+}
+
+func newEventHubSnapshotReadPort(hub events.Hub) SnapshotReadRuntime {
+	if hub == nil {
+		return nil
+	}
+	return eventHubSnapshotReadPort{hub: hub}
+}
+
+func (p eventHubSnapshotReadPort) GetWorkspaceByID(ctx context.Context, workspaceID common.WorkspaceID) (*workspacemodel.Workspace, error) {
+	return readWorkspaceByOwnerCommand(ctx, p.hub, workspaceID)
+}
+
+func (p eventHubSnapshotReadPort) GetRun(ctx context.Context, runID common.RunID) (*runmodel.Run, error) {
+	return readRunByOwnerCommand(ctx, p.hub, runID)
+}
+
+func (p eventHubSnapshotReadPort) GetStep(ctx context.Context, stepID common.StepID) (*runmodel.Step, error) {
+	return readStepByOwnerCommand(ctx, p.hub, stepID)
+}
+
+func (p eventHubSnapshotReadPort) GetTicket(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Ticket, error) {
+	return readDecisionTicketByOwnerCommand(ctx, p.hub, ticketID)
+}
+
+func (p eventHubSnapshotReadPort) GetResolutionByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
+	return readDecisionResolutionByTicketOwnerCommand(ctx, p.hub, ticketID)
+}
+
+func (p eventHubSnapshotReadPort) GetApproval(ctx context.Context, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
+	return readApprovalByOwnerCommand(ctx, p.hub, approvalID)
 }

@@ -12,44 +12,34 @@ import (
 )
 
 func init() {
-	pluginmodule.Register(newPlugin())
+	pluginmodule.Register(New())
 }
 
-type plugin struct {
-	module *Module
-}
+func (m *Module) Weight() int { return 110 }
 
-func newPlugin() *plugin {
-	return &plugin{}
-}
-
-func (p *plugin) ID() string { return ModuleID }
-
-func (p *plugin) Weight() int { return 110 }
-
-func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	_, err := workorchRuntime()
-	if err != nil {
+func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+	if _, err := workorchRuntime(); err != nil {
 		return err
 	}
-	p.module = New()
-	return nil
-}
-
-func (p *plugin) Run(_ context.Context) *cd.Error {
-	if p == nil || p.module == nil {
-		return cd.NewError(cd.IllegalParam, "workorch cli module is not configured")
-	}
-	if err := p.module.Run(); err != nil {
+	if err := m.Configure(); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	return nil
 }
 
-func (p *plugin) Teardown(ctx context.Context) {
-	if p != nil && p.module != nil {
-		_ = p.module.Teardown(ctx)
-		p.module = nil
+func (m *Module) Run(_ context.Context) *cd.Error {
+	if m == nil {
+		return cd.NewError(cd.IllegalParam, "workorch cli module is not configured")
+	}
+	if err := m.Start(); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	return nil
+}
+
+func (m *Module) Teardown(ctx context.Context) {
+	if m != nil {
+		_ = m.Stop(ctx)
 	}
 }
 

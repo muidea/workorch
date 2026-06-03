@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time"
 
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type Goal struct {
@@ -30,7 +29,7 @@ type DoD struct {
 }
 
 func DefineGoalWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, text string) (ret Goal, err error) {
-	service, repo, eventRecords, err := goalDependenciesFromSession(session)
+	eventRecords, hub, err := goalDependenciesFromSession(session)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -44,13 +43,13 @@ func DefineGoalWithSession(ctx context.Context, session *RuntimeSession, workspa
 	if text == "" {
 		return Goal{}, common.ErrInvalidArgument
 	}
-	existing, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+	existing, err := listGoalsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return Goal{}, err
 	}
 	existing = orderedWorkspaceGoals(ctx, eventRecords, common.WorkspaceID(workspaceID), existing)
 	if len(existing) > 0 {
-		updatedItem, err := consolidateWorkspaceGoal(ctx, service, repo, common.WorkspaceID(workspaceID), existing, text)
+		updatedItem, err := consolidateWorkspaceGoal(ctx, hub, common.WorkspaceID(workspaceID), existing, text)
 		if err != nil {
 			return Goal{}, err
 		}
@@ -58,19 +57,20 @@ func DefineGoalWithSession(ctx context.Context, session *RuntimeSession, workspa
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		id := common.GoalID(generateBusinessID("goal"))
-		if err := service.DefineGoal(ctx, workspacemodule.DefineGoalCommand{
-			GoalID:      id,
-			WorkspaceID: common.WorkspaceID(workspaceID),
-			Text:        text,
-		}); err != nil {
+		response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandDefineGoal, "goal", string(id), common.WorkspaceID(workspaceID), "", map[string]any{
+			events.PayloadKeyGoalID:      string(id),
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyText:        text,
+		})
+		if err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
 			return Goal{}, err
 		}
-		item, err := repo.Get(ctx, id)
-		if err != nil {
-			return Goal{}, err
+		item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
+		if !ok || item == nil {
+			return Goal{}, common.ErrInvalidArgument
 		}
 		return mapGoal(item), nil
 	}
@@ -94,7 +94,7 @@ func DefineGoalFromEnv(ctx context.Context, workspaceID string, text string) (Go
 }
 
 func UpdateGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string, text string) (ret Goal, err error) {
-	service, repo, _, err := goalDependenciesFromSession(session)
+	_, hub, err := goalDependenciesFromSession(session)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -108,15 +108,16 @@ func UpdateGoalWithSession(ctx context.Context, session *RuntimeSession, goalID 
 	if text == "" {
 		return Goal{}, common.ErrInvalidArgument
 	}
-	if err := service.UpdateGoal(ctx, workspacemodule.UpdateGoalCommand{
-		GoalID: common.GoalID(goalID),
-		Text:   text,
-	}); err != nil {
-		return Goal{}, err
-	}
-	item, err := repo.Get(ctx, common.GoalID(goalID))
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateGoal, "goal", goalID, "", "", map[string]any{
+		events.PayloadKeyGoalID: goalID,
+		events.PayloadKeyText:   text,
+	})
 	if err != nil {
 		return Goal{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
+	if !ok || item == nil {
+		return Goal{}, common.ErrInvalidArgument
 	}
 	return mapGoal(item), nil
 }
@@ -138,13 +139,13 @@ func UpdateGoalFromEnv(ctx context.Context, goalID string, text string) (Goal, e
 }
 
 func ReadGoalWithSession(ctx context.Context, session *RuntimeSession, goalID string) (ret Goal, err error) {
-	_, repo, _, err := goalDependenciesFromSession(session)
+	_, hub, err := goalDependenciesFromSession(session)
 	if err != nil {
 		return Goal{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.GoalID(goalID))
+	item, err := readGoalByOwnerCommand(ctx, hub, common.GoalID(goalID))
 	if err != nil {
 		return Goal{}, err
 	}
@@ -160,19 +161,19 @@ func ReadGoalWithBackend(ctx context.Context, backend string, dataRoot string, g
 }
 
 func ListGoalsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []Goal, err error) {
-	service, repo, eventRecords, err := goalDependenciesFromSession(session)
+	eventRecords, hub, err := goalDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+	items, err := listGoalsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return nil, err
 	}
 	items = orderedWorkspaceGoals(ctx, eventRecords, common.WorkspaceID(workspaceID), items)
 	if len(items) > 1 {
-		item, err := consolidateWorkspaceGoal(ctx, service, repo, common.WorkspaceID(workspaceID), items, "")
+		item, err := consolidateWorkspaceGoal(ctx, hub, common.WorkspaceID(workspaceID), items, "")
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +195,7 @@ func ListGoalsWithBackend(ctx context.Context, backend string, dataRoot string, 
 }
 
 func DefineDoDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, items []string) (ret DoD, err error) {
-	service, repo, eventRecords, err := dodDependenciesFromSession(session)
+	eventRecords, hub, err := dodDependenciesFromSession(session)
 	if err != nil {
 		return DoD{}, err
 	}
@@ -204,13 +205,13 @@ func DefineDoDWithSession(ctx context.Context, session *RuntimeSession, workspac
 	if len(items) == 0 {
 		return DoD{}, common.ErrInvalidArgument
 	}
-	existing, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+	existing, err := listDoDsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return DoD{}, err
 	}
 	existing = orderedWorkspaceDoDs(ctx, eventRecords, common.WorkspaceID(workspaceID), existing)
 	if len(existing) > 0 {
-		updatedItem, err := consolidateWorkspaceDoD(ctx, service, repo, common.WorkspaceID(workspaceID), existing, items)
+		updatedItem, err := consolidateWorkspaceDoD(ctx, hub, common.WorkspaceID(workspaceID), existing, items)
 		if err != nil {
 			return DoD{}, err
 		}
@@ -218,19 +219,20 @@ func DefineDoDWithSession(ctx context.Context, session *RuntimeSession, workspac
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		id := common.DoDID(generateBusinessID("dod"))
-		if err := service.DefineDoD(ctx, workspacemodule.DefineDoDCommand{
-			DoDID:       id,
-			WorkspaceID: common.WorkspaceID(workspaceID),
-			Items:       items,
-		}); err != nil {
+		response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandDefineDoD, "dod", string(id), common.WorkspaceID(workspaceID), "", map[string]any{
+			events.PayloadKeyDoDID:       string(id),
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyItems:       append([]string(nil), items...),
+		})
+		if err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
 			return DoD{}, err
 		}
-		item, err := repo.Get(ctx, id)
-		if err != nil {
-			return DoD{}, err
+		item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
+		if !ok || item == nil {
+			return DoD{}, common.ErrInvalidArgument
 		}
 		return mapDoD(item), nil
 	}
@@ -254,7 +256,7 @@ func DefineDoDFromEnv(ctx context.Context, workspaceID string, items []string) (
 }
 
 func UpdateDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string, items []string) (ret DoD, err error) {
-	service, repo, _, err := dodDependenciesFromSession(session)
+	_, hub, err := dodDependenciesFromSession(session)
 	if err != nil {
 		return DoD{}, err
 	}
@@ -264,15 +266,16 @@ func UpdateDoDWithSession(ctx context.Context, session *RuntimeSession, dodID st
 	if dodID == "" || len(items) == 0 {
 		return DoD{}, common.ErrInvalidArgument
 	}
-	if err := service.UpdateDoD(ctx, workspacemodule.UpdateDoDCommand{
-		DoDID: common.DoDID(dodID),
-		Items: items,
-	}); err != nil {
-		return DoD{}, err
-	}
-	item, err := repo.Get(ctx, common.DoDID(dodID))
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateDoD, "dod", dodID, "", "", map[string]any{
+		events.PayloadKeyDoDID: dodID,
+		events.PayloadKeyItems: append([]string(nil), items...),
+	})
 	if err != nil {
 		return DoD{}, err
+	}
+	item, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
+	if !ok || item == nil {
+		return DoD{}, common.ErrInvalidArgument
 	}
 	return mapDoD(item), nil
 }
@@ -294,13 +297,13 @@ func UpdateDoDFromEnv(ctx context.Context, dodID string, items []string) (DoD, e
 }
 
 func ReadDoDWithSession(ctx context.Context, session *RuntimeSession, dodID string) (ret DoD, err error) {
-	_, repo, _, err := dodDependenciesFromSession(session)
+	_, hub, err := dodDependenciesFromSession(session)
 	if err != nil {
 		return DoD{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.DoDID(dodID))
+	item, err := readDoDByOwnerCommand(ctx, hub, common.DoDID(dodID))
 	if err != nil {
 		return DoD{}, err
 	}
@@ -316,19 +319,19 @@ func ReadDoDWithBackend(ctx context.Context, backend string, dataRoot string, do
 }
 
 func ListDoDsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []DoD, err error) {
-	service, repo, eventRecords, err := dodDependenciesFromSession(session)
+	eventRecords, hub, err := dodDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.ListByWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+	items, err := listDoDsByWorkspaceOwnerCommand(ctx, hub, common.WorkspaceID(workspaceID))
 	if err != nil {
 		return nil, err
 	}
 	items = orderedWorkspaceDoDs(ctx, eventRecords, common.WorkspaceID(workspaceID), items)
 	if len(items) > 1 {
-		item, err := consolidateWorkspaceDoD(ctx, service, repo, common.WorkspaceID(workspaceID), items, nil)
+		item, err := consolidateWorkspaceDoD(ctx, hub, common.WorkspaceID(workspaceID), items, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -349,26 +352,26 @@ func ListDoDsWithBackend(ctx context.Context, backend string, dataRoot string, w
 	return ListDoDsWithSession(ctx, session, workspaceID)
 }
 
-func goalDependenciesFromSession(session *RuntimeSession) (workspacemodule.Service, repository.GoalRepository, repository.EventRecordRepository, error) {
+func goalDependenciesFromSession(session *RuntimeSession) (readModelEventRecordReader, events.Hub, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	if exports.Services.WorkspaceService == nil || exports.Repositories.Goals == nil {
-		return nil, nil, nil, common.ErrInvalidArgument
+	if exports.Infrastructure.EventHub == nil {
+		return nil, nil, common.ErrInvalidArgument
 	}
-	return exports.Services.WorkspaceService, exports.Repositories.Goals, exports.Repositories.EventRecords, nil
+	return eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}, exports.Infrastructure.EventHub, nil
 }
 
-func dodDependenciesFromSession(session *RuntimeSession) (workspacemodule.Service, repository.DoDRepository, repository.EventRecordRepository, error) {
+func dodDependenciesFromSession(session *RuntimeSession) (readModelEventRecordReader, events.Hub, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	if exports.Services.WorkspaceService == nil || exports.Repositories.DoDs == nil {
-		return nil, nil, nil, common.ErrInvalidArgument
+	if exports.Infrastructure.EventHub == nil {
+		return nil, nil, common.ErrInvalidArgument
 	}
-	return exports.Services.WorkspaceService, exports.Repositories.DoDs, exports.Repositories.EventRecords, nil
+	return eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}, exports.Infrastructure.EventHub, nil
 }
 
 func mapGoal(item *workspacemodel.Goal) Goal {
@@ -530,8 +533,7 @@ func formatStructuredGoalMarkdown(lines []string) string {
 
 func consolidateWorkspaceGoal(
 	ctx context.Context,
-	service workspacemodule.Service,
-	repo repository.GoalRepository,
+	hub events.Hub,
 	workspaceID common.WorkspaceID,
 	existing []*workspacemodel.Goal,
 	appended string,
@@ -544,21 +546,28 @@ func consolidateWorkspaceGoal(
 	if merged == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := service.UpdateGoal(ctx, workspacemodule.UpdateGoalCommand{
-		GoalID: canonical.ID,
-		Text:   merged,
-	}); err != nil {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateGoal, "goal", string(canonical.ID), workspaceID, "", map[string]any{
+		events.PayloadKeyGoalID: string(canonical.ID),
+		events.PayloadKeyText:   merged,
+	})
+	if err != nil {
 		return nil, err
+	}
+	updated, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
+	if !ok || updated == nil {
+		return nil, common.ErrInvalidArgument
 	}
 	for _, item := range existing {
 		if item == nil || item.ID == canonical.ID || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if err := repo.Delete(ctx, item.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+		if err := publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandDeleteGoal, "goal", string(item.ID), workspaceID, "", map[string]any{
+			events.PayloadKeyGoalID: string(item.ID),
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return nil, err
 		}
 	}
-	return repo.Get(ctx, canonical.ID)
+	return updated, nil
 }
 
 func normalizeDoDItems(items []string) []string {
@@ -592,8 +601,7 @@ func mergedDoDItems(existing []*workspacemodel.DoD, appended []string) []string 
 
 func consolidateWorkspaceDoD(
 	ctx context.Context,
-	service workspacemodule.Service,
-	repo repository.DoDRepository,
+	hub events.Hub,
 	workspaceID common.WorkspaceID,
 	existing []*workspacemodel.DoD,
 	appended []string,
@@ -606,21 +614,28 @@ func consolidateWorkspaceDoD(
 	if len(merged) == 0 {
 		return nil, common.ErrInvalidArgument
 	}
-	if err := service.UpdateDoD(ctx, workspacemodule.UpdateDoDCommand{
-		DoDID: canonical.ID,
-		Items: merged,
-	}); err != nil {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateDoD, "dod", string(canonical.ID), workspaceID, "", map[string]any{
+		events.PayloadKeyDoDID: string(canonical.ID),
+		events.PayloadKeyItems: append([]string(nil), merged...),
+	})
+	if err != nil {
 		return nil, err
+	}
+	updated, ok := response.Payload[events.PayloadKeyDoD].(*workspacemodel.DoD)
+	if !ok || updated == nil {
+		return nil, common.ErrInvalidArgument
 	}
 	for _, item := range existing {
 		if item == nil || item.ID == canonical.ID || item.WorkspaceID != workspaceID {
 			continue
 		}
-		if err := repo.Delete(ctx, item.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+		if err := publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandDeleteDoD, "dod", string(item.ID), workspaceID, "", map[string]any{
+			events.PayloadKeyDoDID: string(item.ID),
+		}); err != nil && !errors.Is(err, common.ErrNotFound) {
 			return nil, err
 		}
 	}
-	return repo.Get(ctx, canonical.ID)
+	return updated, nil
 }
 
 func generateBusinessID(prefix string) string {

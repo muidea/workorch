@@ -1,6 +1,7 @@
 package appservice
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,7 +9,16 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -45,27 +55,116 @@ func canonicalReadModelStepKind(kind string) string {
 }
 
 type readModelDependencies struct {
-	workspaces            repository.WorkspaceRepository
-	goals                 repository.GoalRepository
-	dods                  repository.DoDRepository
-	runs                  repository.RunRepository
-	steps                 repository.StepRepository
-	results               repository.ResultRepository
-	artifacts             repository.ArtifactRepository
-	artifactContinuations repository.ArtifactContinuationRepository
-	eventRecords          repository.EventRecordRepository
-	memoryRecalls         repository.MemoryRecallTraceRepository
-	toolCalls             repository.ToolCallRepository
-	mcpCapabilities       repository.MCPCapabilityRepository
-	patches               repository.PatchRepository
-	validations           repository.ValidationResultRepository
-	checkpoints           repository.RuntimeCheckpointRepository
-	autoGovernanceTraces  repository.AutoGovernanceTraceRepository
-	tickets               repository.DecisionTicketRepository
-	resolutions           repository.DecisionResolutionRepository
-	approvals             repository.ApprovalRepository
+	workspaces            readModelWorkspaceReader
+	goals                 readModelGoalReader
+	dods                  readModelDoDReader
+	runs                  readModelRunReader
+	steps                 readModelStepReader
+	results               readModelResultReader
+	artifacts             readModelArtifactReader
+	artifactContinuations readModelArtifactContinuationReader
+	eventRecords          readModelEventRecordReader
+	memoryRecalls         readModelMemoryRecallTraceReader
+	toolCalls             readModelToolCallReader
+	mcpCapabilities       readModelMCPCapabilityReader
+	patches               readModelPatchReader
+	validations           readModelValidationResultReader
+	checkpoints           readModelRuntimeCheckpointReader
+	autoGovernanceTraces  readModelAutoGovernanceTraceReader
+	tickets               readModelDecisionTicketReader
+	resolutions           readModelDecisionResolutionReader
+	approvals             readModelApprovalReader
+	eventHub              events.Hub
 	published             []events.WorkorchEvent
 	loadConfig            func() (workorchconfig.Config, error)
+}
+
+type readModelWorkspaceReader interface {
+	Get(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error)
+	List(context.Context) ([]*workspacemodel.Workspace, error)
+}
+
+type readModelGoalReader interface {
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error)
+}
+
+type readModelDoDReader interface {
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error)
+}
+
+type readModelRunReader interface {
+	Get(context.Context, common.RunID) (*runmodel.Run, error)
+	List(context.Context) ([]*runmodel.Run, error)
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*runmodel.Run, error)
+}
+
+type readModelResultReader interface {
+	ListByWorkspace(context.Context, common.WorkspaceID) ([]*resultmodel.Result, error)
+	ListByRun(context.Context, common.RunID) ([]*resultmodel.Result, error)
+}
+
+type readModelStepReader interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.Step, error)
+}
+
+type readModelRuntimeCheckpointReader interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.RuntimeCheckpoint, error)
+}
+
+type readModelArtifactReader interface {
+	ListByWorkspace(context.Context, common.WorkspaceID) ([]*resultmodel.Artifact, error)
+	ListByRun(context.Context, common.RunID) ([]*resultmodel.Artifact, error)
+	ListByResult(context.Context, common.ResultID) ([]*resultmodel.Artifact, error)
+}
+
+type readModelArtifactContinuationReader interface {
+	ListByRun(context.Context, common.RunID) ([]*orchestratormodel.ArtifactContinuation, error)
+}
+
+type readModelEventRecordReader interface {
+	List(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error)
+}
+
+type readModelMemoryRecallTraceReader interface {
+	List(context.Context, repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error)
+}
+
+type readModelToolCallReader interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.ToolCall, error)
+}
+
+type readModelPatchReader interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.Patch, error)
+}
+
+type readModelValidationResultReader interface {
+	ListByRun(context.Context, common.RunID) ([]*runmodel.ValidationResult, error)
+}
+
+type readModelMCPCapabilityReader interface {
+	List(context.Context) ([]*mcpmodel.Capability, error)
+}
+
+type readModelAutoGovernanceTraceReader interface {
+	List(context.Context, repository.AutoGovernanceTraceQuery) ([]*governancemodel.AutoGovernanceTrace, error)
+}
+
+type readModelDecisionTicketReader interface {
+	Get(context.Context, common.TicketID) (*decisionmodel.Ticket, error)
+	List(context.Context) ([]*decisionmodel.Ticket, error)
+	ListByRunID(context.Context, common.RunID) ([]*decisionmodel.Ticket, error)
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*decisionmodel.Ticket, error)
+}
+
+type readModelDecisionResolutionReader interface {
+	GetByTicketID(context.Context, common.TicketID) (*decisionmodel.Resolution, error)
+}
+
+type readModelApprovalReader interface {
+	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
+	List(context.Context) ([]*approvalmodel.Approval, error)
+	ListByRunID(context.Context, common.RunID) ([]*approvalmodel.Approval, error)
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*approvalmodel.Approval, error)
 }
 
 func readModelDependenciesFromSession(session *RuntimeSession) (readModelDependencies, error) {
@@ -73,22 +172,7 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	if err != nil {
 		return readModelDependencies{}, err
 	}
-	if exports.Repositories.Workspaces == nil ||
-		exports.Repositories.Runs == nil ||
-		exports.Repositories.Steps == nil ||
-		exports.Repositories.Results == nil ||
-		exports.Repositories.Artifacts == nil ||
-		exports.Repositories.ArtifactContinuations == nil ||
-		exports.Repositories.EventRecords == nil ||
-		exports.Repositories.MemoryRecallTraces == nil ||
-		exports.Repositories.ToolCalls == nil ||
-		exports.Repositories.MCPCapabilities == nil ||
-		exports.Repositories.Patches == nil ||
-		exports.Repositories.ValidationResults == nil ||
-		exports.Repositories.RuntimeCheckpoints == nil ||
-		exports.Repositories.Tickets == nil ||
-		exports.Repositories.Resolutions == nil ||
-		exports.Repositories.Approvals == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return readModelDependencies{}, common.ErrInvalidArgument
 	}
 
@@ -98,25 +182,26 @@ func readModelDependenciesFromSession(session *RuntimeSession) (readModelDepende
 	}
 
 	return readModelDependencies{
-		workspaces:            exports.Repositories.Workspaces,
-		goals:                 exports.Repositories.Goals,
-		dods:                  exports.Repositories.DoDs,
-		runs:                  exports.Repositories.Runs,
-		steps:                 exports.Repositories.Steps,
-		results:               exports.Repositories.Results,
-		artifacts:             exports.Repositories.Artifacts,
-		artifactContinuations: exports.Repositories.ArtifactContinuations,
-		eventRecords:          exports.Repositories.EventRecords,
-		memoryRecalls:         exports.Repositories.MemoryRecallTraces,
-		toolCalls:             exports.Repositories.ToolCalls,
-		mcpCapabilities:       exports.Repositories.MCPCapabilities,
-		patches:               exports.Repositories.Patches,
-		validations:           exports.Repositories.ValidationResults,
-		checkpoints:           exports.Repositories.RuntimeCheckpoints,
-		autoGovernanceTraces:  exports.Repositories.AutoGovernanceTraces,
-		tickets:               exports.Repositories.Tickets,
-		resolutions:           exports.Repositories.Resolutions,
-		approvals:             exports.Repositories.Approvals,
+		workspaces:            eventHubReadModelWorkspaceReader{hub: exports.Infrastructure.EventHub},
+		goals:                 eventHubReadModelGoalReader{hub: exports.Infrastructure.EventHub},
+		dods:                  eventHubReadModelDoDReader{hub: exports.Infrastructure.EventHub},
+		runs:                  eventHubReadModelRunReader{hub: exports.Infrastructure.EventHub},
+		steps:                 eventHubReadModelStepReader{hub: exports.Infrastructure.EventHub},
+		results:               eventHubReadModelResultReader{hub: exports.Infrastructure.EventHub},
+		artifacts:             eventHubReadModelArtifactReader{hub: exports.Infrastructure.EventHub},
+		artifactContinuations: eventHubReadModelArtifactContinuationReader{hub: exports.Infrastructure.EventHub},
+		eventRecords:          eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub},
+		memoryRecalls:         eventHubReadModelMemoryRecallTraceReader{hub: exports.Infrastructure.EventHub},
+		toolCalls:             eventHubReadModelToolCallReader{hub: exports.Infrastructure.EventHub},
+		mcpCapabilities:       eventHubReadModelMCPCapabilityReader{hub: exports.Infrastructure.EventHub},
+		patches:               eventHubReadModelPatchReader{hub: exports.Infrastructure.EventHub},
+		validations:           eventHubReadModelValidationResultReader{hub: exports.Infrastructure.EventHub},
+		checkpoints:           eventHubReadModelRuntimeCheckpointReader{hub: exports.Infrastructure.EventHub},
+		autoGovernanceTraces:  eventHubReadModelAutoGovernanceTraceReader{hub: exports.Infrastructure.EventHub},
+		tickets:               eventHubReadModelDecisionTicketReader{hub: exports.Infrastructure.EventHub},
+		resolutions:           eventHubReadModelDecisionResolutionReader{hub: exports.Infrastructure.EventHub},
+		approvals:             eventHubReadModelApprovalReader{hub: exports.Infrastructure.EventHub},
+		eventHub:              exports.Infrastructure.EventHub,
 		published:             published,
 		loadConfig:            configLoaderFromExports(exports),
 	}, nil

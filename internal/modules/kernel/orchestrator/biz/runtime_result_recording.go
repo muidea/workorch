@@ -394,6 +394,49 @@ func (r *resultSubsystem) rejectedRunResultSummary(ctx context.Context, runID co
 	return "", false
 }
 
+func (r *resultSubsystem) hasAcceptedCompletionResult(ctx context.Context, run *runModel.Run) bool {
+	if r == nil || r.evidence.Results == nil || run == nil || run.ID == "" {
+		return false
+	}
+	results, err := r.evidence.Results.ListByRun(ctx, run.ID)
+	if err != nil {
+		return false
+	}
+	for _, result := range results {
+		if acceptedCompletionResultMatchesRun(result, run) {
+			return true
+		}
+	}
+	return false
+}
+
+func acceptedCompletionResultMatchesRun(result *resultmodel.Result, run *runModel.Run) bool {
+	if result == nil || run == nil {
+		return false
+	}
+	if result.State != common.ResultStateAccepted ||
+		result.SourceType != resultcommon.SourceTypeDoDAssessment ||
+		result.WorkspaceID != run.WorkspaceID ||
+		result.RunID != run.ID {
+		return false
+	}
+	if run.GoalID != "" && result.GoalID != run.GoalID {
+		return false
+	}
+	if run.DoDID != "" && result.DoDID != run.DoDID {
+		return false
+	}
+	if !result.DoDAssessment.Satisfied || strings.TrimSpace(result.Summary) == "" {
+		return false
+	}
+	for _, ref := range result.EvidenceRefs {
+		if strings.TrimSpace(ref) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *resultSubsystem) rejectedResultSupersededByRecovery(ctx context.Context, runID common.RunID, result *resultmodel.Result) bool {
 	if r == nil || r.steps == nil || result == nil || runID == "" {
 		return false

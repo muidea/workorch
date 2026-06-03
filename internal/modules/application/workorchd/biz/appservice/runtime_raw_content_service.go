@@ -56,10 +56,10 @@ func ReadRuntimeRawContentWithSession(ctx context.Context, session *RuntimeSessi
 			Content:     content,
 		}, nil
 	case "runtime-checkpoints":
-		if exports.Repositories.RuntimeCheckpoints == nil {
+		if exports.Infrastructure.EventHub == nil {
 			return RuntimeRawContent{}, common.ErrNotFound
 		}
-		item, err := exports.Repositories.RuntimeCheckpoints.Get(ctx, common.CheckpointID(parsed.ItemPath))
+		item, err := readRuntimeCheckpointByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.CheckpointID(parsed.ItemPath))
 		if err != nil {
 			return RuntimeRawContent{}, err
 		}
@@ -72,10 +72,10 @@ func ReadRuntimeRawContentWithSession(ctx context.Context, session *RuntimeSessi
 		}
 		return RuntimeRawContent{Ref: parsed.Ref, FileName: parsed.FileName, ContentType: runtimeRawContentType(parsed.FileName), Content: content}, nil
 	case "results":
-		if exports.Repositories.Results == nil {
+		if exports.Infrastructure.EventHub == nil {
 			return RuntimeRawContent{}, common.ErrNotFound
 		}
-		item, err := exports.Repositories.Results.Get(ctx, common.ResultID(parsed.ItemPath))
+		item, err := readResultByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.ResultID(parsed.ItemPath))
 		if err != nil {
 			return RuntimeRawContent{}, err
 		}

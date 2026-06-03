@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	magictask "github.com/muidea/magicCommon/task"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -37,41 +38,73 @@ type ResolveDecisionFunc func(context.Context, common.TicketID, string, map[stri
 type ResolveApprovalFunc func(context.Context, common.ApprovalID) error
 type ResumeRunFunc func(context.Context, common.RunID) error
 
+type TicketReader interface {
+	Get(context.Context, common.TicketID) (*decisionmodel.Ticket, error)
+}
+
+type ResolutionReader interface {
+	GetByTicketID(context.Context, common.TicketID) (*decisionmodel.Resolution, error)
+}
+
+type ApprovalReader interface {
+	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
+}
+
+type RunReader interface {
+	Get(context.Context, common.RunID) (*runmodel.Run, error)
+	List(context.Context) ([]*runmodel.Run, error)
+}
+
+type WorkspaceDefinitionReader interface {
+	GetGoal(context.Context, common.GoalID) (*workspace.Goal, error)
+	GetDoD(context.Context, common.DoDID) (*workspace.DoD, error)
+}
+
+type MemoryReader interface {
+	ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*memorymodel.MemoryItem, error)
+}
+
 type Dependencies struct {
-	Tickets              repository.DecisionTicketRepository
-	Resolutions          repository.DecisionResolutionRepository
-	Approvals            repository.ApprovalRepository
-	Runs                 repository.RunRepository
-	Goals                repository.GoalRepository
-	DoDs                 repository.DoDRepository
-	MemoryItems          repository.MemoryItemRepository
+	Tickets              TicketReader
+	Resolutions          ResolutionReader
+	Approvals            ApprovalReader
+	Runs                 RunReader
+	WorkspaceDefinitions WorkspaceDefinitionReader
+	MemoryItems          MemoryReader
 	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
 	EventHub             events.Hub
 	ResolveDecision      ResolveDecisionFunc
 	ResolveApproval      ResolveApprovalFunc
 	ResumeRun            ResumeRunFunc
 	LoadConfig           func() (workorchconfig.Config, error)
+	BackgroundRoutine    magictask.BackgroundRoutine
 }
 
 type Service struct {
-	tickets         repository.DecisionTicketRepository
-	resolutions     repository.DecisionResolutionRepository
-	approvals       repository.ApprovalRepository
-	runs            repository.RunRepository
-	goals           repository.GoalRepository
-	dods            repository.DoDRepository
-	memoryItems     repository.MemoryItemRepository
+	tickets         TicketReader
+	resolutions     ResolutionReader
+	approvals       ApprovalReader
+	runs            RunReader
+	workspaceDefs   WorkspaceDefinitionReader
+	memoryItems     MemoryReader
 	traces          repository.AutoGovernanceTraceRepository
 	eventHub        events.Hub
 	resolve         ResolveDecisionFunc
 	resolveApproval ResolveApprovalFunc
 	resume          ResumeRunFunc
 	loadConfig      func() (workorchconfig.Config, error)
+	background      magictask.BackgroundRoutine
 	mu              sync.Mutex
 	unsubscribes    []func()
+	workCtx         context.Context
+	workCancel      context.CancelFunc
+	workQueue       chan governanceWork
+	workDone        chan struct{}
 	reconcileCancel context.CancelFunc
 	reconcileDone   chan struct{}
 }
+
+type governanceWork func(context.Context)
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
@@ -79,8 +112,7 @@ func NewService(deps Dependencies) *Service {
 		resolutions:     deps.Resolutions,
 		approvals:       deps.Approvals,
 		runs:            deps.Runs,
-		goals:           deps.Goals,
-		dods:            deps.DoDs,
+		workspaceDefs:   deps.WorkspaceDefinitions,
 		memoryItems:     deps.MemoryItems,
 		traces:          deps.AutoGovernanceTraces,
 		eventHub:        deps.EventHub,
@@ -88,11 +120,12 @@ func NewService(deps Dependencies) *Service {
 		resolveApproval: deps.ResolveApproval,
 		resume:          deps.ResumeRun,
 		loadConfig:      deps.LoadConfig,
+		background:      deps.BackgroundRoutine,
 	}
 }
 
 func (s *Service) Start() error {
-	if s == nil || s.eventHub == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.goals == nil || s.dods == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
+	if s == nil || s.eventHub == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil || s.resume == nil {
 		return common.ErrInvalidArgument
 	}
 	if s.loadConfig == nil {
@@ -103,20 +136,54 @@ func (s *Service) Start() error {
 	if len(s.unsubscribes) > 0 {
 		return nil
 	}
+	workCtx, workCancel := context.WithCancel(context.Background())
+	workQueue := make(chan governanceWork, 256)
+	workDone := make(chan struct{})
+	s.workCtx = workCtx
+	s.workCancel = workCancel
+	s.workQueue = workQueue
+	s.workDone = workDone
+	if err := s.startGovernanceWorker(workCtx, workQueue, workDone); err != nil {
+		s.workCtx = nil
+		s.workCancel = nil
+		s.workQueue = nil
+		s.workDone = nil
+		workCancel()
+		return err
+	}
 	unsubTicket := s.eventHub.Subscribe(events.TopicTicketCreated, func(ctx context.Context, envelope events.Envelope) error {
-		s.processTicketCreated(ctx, envelope)
+		s.enqueueGovernanceWork(func(workCtx context.Context) {
+			s.processTicketCreated(workCtx, envelope)
+		})
 		return nil
 	})
 	unsubApproval := s.eventHub.Subscribe(events.TopicApprovalCreated, func(ctx context.Context, envelope events.Envelope) error {
-		s.processApprovalCreated(ctx, envelope)
+		s.enqueueGovernanceWork(func(workCtx context.Context) {
+			s.processApprovalCreated(workCtx, envelope)
+		})
 		return nil
 	})
 	unsubRunState := s.eventHub.Subscribe(events.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
-		s.processRunStateChanged(ctx, envelope)
+		s.enqueueGovernanceWork(func(workCtx context.Context) {
+			s.processRunStateChanged(workCtx, envelope)
+		})
 		return nil
 	})
 	s.unsubscribes = []func(){unsubTicket, unsubApproval, unsubRunState}
-	s.scheduleBlockedRunReconciliationLocked()
+	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
+		for _, unsub := range s.unsubscribes {
+			if unsub != nil {
+				unsub()
+			}
+		}
+		s.unsubscribes = nil
+		s.workCtx = nil
+		s.workCancel = nil
+		s.workQueue = nil
+		s.workDone = nil
+		workCancel()
+		return err
+	}
 	return nil
 }
 
@@ -130,8 +197,14 @@ func (s *Service) Stop() {
 	s.unsubscribes = nil
 	cancel := s.reconcileCancel
 	done := s.reconcileDone
+	workCancel := s.workCancel
+	workDone := s.workDone
 	s.reconcileCancel = nil
 	s.reconcileDone = nil
+	s.workCtx = nil
+	s.workCancel = nil
+	s.workQueue = nil
+	s.workDone = nil
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -142,24 +215,82 @@ func (s *Service) Stop() {
 		case <-time.After(2 * time.Second):
 		}
 	}
+	if workCancel != nil {
+		workCancel()
+	}
+	if workDone != nil {
+		select {
+		case <-workDone:
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
-func (s *Service) scheduleBlockedRunReconciliationLocked() {
+func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
+	if s.background != nil {
+		return s.background.AsyncFunction(func() {
+			s.runWorkLoop(ctx, queue, done)
+		})
+	}
+	go s.runWorkLoop(ctx, queue, done)
+	return nil
+}
+
+func (s *Service) runWorkLoop(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) {
+	defer close(done)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case work := <-queue:
+			if work != nil {
+				work(ctx)
+			}
+		}
+	}
+}
+
+func (s *Service) enqueueGovernanceWork(work governanceWork) {
+	if s == nil || work == nil {
+		return
+	}
+	s.mu.Lock()
+	ctx := s.workCtx
+	queue := s.workQueue
+	s.mu.Unlock()
+	if ctx == nil || queue == nil {
+		return
+	}
+	select {
+	case queue <- work:
+	case <-ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	s.reconcileCancel = cancel
 	s.reconcileDone = done
-	go func() {
+	reconcile := func() {
 		defer close(done)
 		timer := time.NewTimer(500 * time.Millisecond)
 		defer timer.Stop()
 		select {
 		case <-timer.C:
-			s.reconcileBlockedRuns(ctx)
+			s.enqueueGovernanceWork(func(workCtx context.Context) {
+				s.reconcileBlockedRuns(workCtx)
+			})
 		case <-ctx.Done():
 			return
 		}
-	}()
+	}
+	if s.background != nil {
+		return s.background.AsyncFunction(reconcile)
+	}
+	go reconcile()
+	return nil
 }
 
 func (s *Service) processTicketCreated(ctx context.Context, envelope events.Envelope) {
@@ -236,6 +367,9 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	for key, value := range eval.resolutionPayload {
 		payload[key] = value
 	}
+	payload[events.PayloadKeyWorkspaceID] = string(ticket.WorkspaceID)
+	payload[events.PayloadKeyRunID] = string(ticket.RunID)
+	payload[events.PayloadKeyStepID] = string(ticket.StepID)
 	semantic := governancecommon.NormalizeDecisionResolution("", payload)
 	payload["governanceSemantic"] = map[string]any{
 		"resolutionType": semantic.ResolutionType,
@@ -246,7 +380,8 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		"inferred":       semantic.Inferred,
 		"version":        "v1",
 	}
-	if err := s.resolve(ctx, ticket.ID, semantic.ResolutionType, payload); err != nil {
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID)
+	if err := s.resolve(scopedCtx, ticket.ID, semantic.ResolutionType, payload); err != nil {
 		trace.Status = "blocked"
 		trace.Action = "escalate"
 		trace.PolicyBlocked = "resolve_failed"
@@ -266,7 +401,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoResolved, trace, "")
 
-	_ = s.resume(ctx, ticket.RunID)
+	_ = s.resume(scopedCtx, ticket.RunID)
 }
 
 func (s *Service) processApprovalCreated(ctx context.Context, envelope events.Envelope) {
@@ -334,7 +469,8 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 		return
 	}
 
-	if err := s.resolveApproval(ctx, approval.ID); err != nil {
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
+	if err := s.resolveApproval(scopedCtx, approval.ID); err != nil {
 		trace.Status = "blocked"
 		trace.Action = "escalate"
 		trace.PolicyBlocked = "resolve_failed"
@@ -355,7 +491,7 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	_ = s.traces.Upsert(ctx, trace)
 	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoResolved, trace, "")
 
-	_ = s.resume(ctx, approval.RunID)
+	_ = s.resume(scopedCtx, approval.RunID)
 }
 
 func (s *Service) processRunStateChanged(ctx context.Context, envelope events.Envelope) {
@@ -383,7 +519,7 @@ func (s *Service) processRunStateChanged(ctx context.Context, envelope events.En
 		if !strings.EqualFold(source, "auto_governance") {
 			return
 		}
-		_ = s.resume(ctx, ticket.RunID)
+		_ = s.resume(common.ContextWithRuntimeWorkspaceID(ctx, ticket.WorkspaceID), ticket.RunID)
 		return
 	}
 	if data.State == common.RunStateBlockedOnApproval && data.BlockingApprovalID != "" {
@@ -401,7 +537,7 @@ func (s *Service) processRunStateChanged(ctx context.Context, envelope events.En
 		if !s.hasAutoResolvedTrace(ctx, approval.RunID, "approval", string(approval.ID)) {
 			return
 		}
-		_ = s.resume(ctx, approval.RunID)
+		_ = s.resume(common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID), approval.RunID)
 	}
 }
 
@@ -1797,13 +1933,13 @@ func (s *Service) loadGoalAndDoD(ctx context.Context, goalID common.GoalID, dodI
 	var goal *workspace.Goal
 	var dod *workspace.DoD
 	if goalID != "" {
-		item, err := s.goals.Get(ctx, goalID)
+		item, err := s.workspaceDefs.GetGoal(ctx, goalID)
 		if err == nil {
 			goal = item
 		}
 	}
 	if dodID != "" {
-		item, err := s.dods.Get(ctx, dodID)
+		item, err := s.workspaceDefs.GetDoD(ctx, dodID)
 		if err == nil {
 			dod = item
 		}

@@ -22,11 +22,12 @@ func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports,
 	if err != nil {
 		return nil, SoulRouting{}, nil, err
 	}
-	if exports.Repositories.Souls == nil {
-		if strings.TrimSpace(cmd.SoulID) != "" || workspace.DefaultSoulID != "" || systemDefaultSoulID != "" || len(workspace.SoulBindings) > 0 || len(runStageBindings) > 0 {
+	requiresSoulLookup := strings.TrimSpace(cmd.SoulID) != "" || workspace.DefaultSoulID != "" || systemDefaultSoulID != "" || len(workspace.SoulBindings) > 0 || len(runStageBindings) > 0
+	if exports.Infrastructure.EventHub == nil {
+		if requiresSoulLookup {
 			return nil, SoulRouting{}, nil, common.ErrInvalidArgument
 		}
-		return nil, unboundSoulRouting("soul repository is not configured"), nil, nil
+		return nil, unboundSoulRouting("soul event hub is not configured"), nil, nil
 	}
 
 	souls := map[common.SoulID]*soulmodel.Soul{}
@@ -37,7 +38,7 @@ func resolveWorkspaceSoulRouting(ctx context.Context, exports bootstrap.Exports,
 		if item, ok := souls[id]; ok {
 			return item, nil
 		}
-		item, err := exports.Repositories.Souls.Get(ctx, id)
+		item, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, id)
 		if err != nil {
 			return nil, err
 		}

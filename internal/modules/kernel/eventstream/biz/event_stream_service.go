@@ -56,6 +56,27 @@ func (s *Service) ListEvents(ctx context.Context, query repository.EventRecordQu
 	return s.repo.List(ctx, query)
 }
 
+func (s *Service) PurgeWorkspaceEvents(ctx context.Context, workspaceID common.WorkspaceID) (int, error) {
+	if s == nil || s.repo == nil || workspaceID == "" {
+		return 0, common.ErrInvalidArgument
+	}
+	items, err := s.repo.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := s.repo.Delete(ctx, item.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 func eventRecordFromEnvelope(envelope events.Envelope) *eventstreammodel.EventRecord {
 	return &eventstreammodel.EventRecord{
 		ID:             common.EventRecordID(envelope.ID),

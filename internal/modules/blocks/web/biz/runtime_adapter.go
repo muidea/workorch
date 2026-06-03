@@ -19,10 +19,11 @@ import (
 	"time"
 
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
+	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
+	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 const (
@@ -42,26 +43,17 @@ const (
 	approvalContextURL   = "url"
 )
 
-type ProviderConfig struct {
-	ID                string
-	Provider          string
-	SearchEndpoint    string
-	FetchEndpoint     string
-	APIKey            string
-	Headers           map[string]string
-	Timeout           time.Duration
-	MaxResults        int
-	MaxFetchBytes     int64
-	MaxRedirects      int
-	AllowDomains      []string
-	DenyDomains       []string
-	Disabled          bool
-	Unavailable       bool
-	UnavailableReason string
-}
-
+type ProviderConfig = webmodels.ProviderConfig
 type ProviderConfigLoader func() (string, map[string]ProviderConfig, error)
 type ProviderConfigRevision func() uint64
+
+type ApprovalGetter interface {
+	Get(context.Context, common.ApprovalID) (*approvalmodel.Approval, error)
+}
+
+type ScopedApprovalGetter interface {
+	GetForRun(context.Context, common.ApprovalID, common.RunID) (*approvalmodel.Approval, error)
+}
 
 type providerRuntimeCache struct {
 	ready             bool
@@ -75,7 +67,7 @@ type RuntimeAdapter struct {
 	providers         map[string]ProviderConfig
 	configLoader      ProviderConfigLoader
 	configRevision    ProviderConfigRevision
-	approvals         repository.ApprovalRepository
+	approvals         ApprovalGetter
 	client            *http.Client
 	resolver          *net.Resolver
 	cacheMu           sync.RWMutex
@@ -112,7 +104,7 @@ type policyDecision struct {
 	Reasons  []string
 }
 
-func NewRuntimeAdapter(defaultProviderID string, providers map[string]ProviderConfig, approvals repository.ApprovalRepository) *RuntimeAdapter {
+func NewRuntimeAdapter(defaultProviderID string, providers map[string]ProviderConfig, approvals ApprovalGetter) *RuntimeAdapter {
 	defaultProviderID = strings.TrimSpace(defaultProviderID)
 	if defaultProviderID == "" {
 		defaultProviderID = defaultProviderIDFromProviders(providers)
@@ -126,7 +118,7 @@ func NewRuntimeAdapter(defaultProviderID string, providers map[string]ProviderCo
 	}
 }
 
-func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision, approvals repository.ApprovalRepository) *RuntimeAdapter {
+func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, revision ProviderConfigRevision, approvals ApprovalGetter) *RuntimeAdapter {
 	return &RuntimeAdapter{
 		defaultProviderID: defaultProviderID,
 		configLoader:      loader,
@@ -137,7 +129,7 @@ func NewRuntimeAdapterFromConfigLoaderWithRevision(loader ProviderConfigLoader, 
 	}
 }
 
-func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]ProviderConfig, approvals repository.ApprovalRepository, client *http.Client) *RuntimeAdapter {
+func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[string]ProviderConfig, approvals ApprovalGetter, client *http.Client) *RuntimeAdapter {
 	adapter := NewRuntimeAdapter(defaultProviderID, providers, approvals)
 	if client != nil {
 		adapter.client = client
@@ -146,45 +138,7 @@ func NewRuntimeAdapterWithHTTPClient(defaultProviderID string, providers map[str
 }
 
 func LoadProviderConfigs(defaultProviderID string, valuesByID map[string]map[string]string) (string, map[string]ProviderConfig, error) {
-	providers := map[string]ProviderConfig{}
-	for id, values := range valuesByID {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		provider := ProviderConfig{
-			ID:             id,
-			Provider:       strings.TrimSpace(values["provider"]),
-			SearchEndpoint: strings.TrimSpace(values["searchEndpoint"]),
-			FetchEndpoint:  strings.TrimSpace(values["fetchEndpoint"]),
-			APIKey:         strings.TrimSpace(values["apiKey"]),
-			Headers:        headersFromValues(values),
-			Timeout:        durationValue(values["timeout"], defaultTimeout),
-			MaxResults:     boundedIntValue(values["maxResults"], defaultMaxResults, systemMaxResults),
-			MaxFetchBytes:  boundedInt64Value(values["maxFetchBytes"], defaultMaxFetchBytes, systemMaxFetchBytes),
-			MaxRedirects:   boundedIntValue(values["maxRedirects"], defaultMaxRedirects, systemMaxRedirects),
-			AllowDomains:   splitCSV(values["allowDomains"]),
-			DenyDomains:    splitCSV(values["denyDomains"]),
-			Disabled:       boolValue(values["disabled"]),
-		}
-		if provider.Provider == "" {
-			provider.Provider = webcommon.ProviderHTTP
-		}
-		if provider.Provider != webcommon.ProviderHTTP {
-			provider.Unavailable = true
-			provider.UnavailableReason = "unsupported web search provider " + provider.Provider
-		}
-		if provider.Disabled {
-			provider.Unavailable = true
-			provider.UnavailableReason = "web search provider is disabled"
-		}
-		if provider.SearchEndpoint == "" {
-			provider.Unavailable = true
-			provider.UnavailableReason = "web search provider searchEndpoint is not configured"
-		}
-		providers[id] = provider
-	}
-	return strings.TrimSpace(defaultProviderID), normalizeProviders(providers), nil
+	return webproviderconfig.LoadProviderConfigs(defaultProviderID, valuesByID)
 }
 
 func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
@@ -664,7 +618,7 @@ func (a *RuntimeAdapter) validateApproval(ctx context.Context, approvalID common
 	if a.approvals == nil {
 		return fmt.Errorf("approval repository is not configured")
 	}
-	item, err := a.approvals.Get(ctx, approvalID)
+	item, err := a.getApproval(ctx, approvalID, runID)
 	if err != nil {
 		return err
 	}
@@ -681,6 +635,16 @@ func (a *RuntimeAdapter) validateApproval(ctx context.Context, approvalID common
 		return fmt.Errorf("approval context mismatch")
 	}
 	return nil
+}
+
+func (a *RuntimeAdapter) getApproval(ctx context.Context, approvalID common.ApprovalID, runID common.RunID) (*approvalmodel.Approval, error) {
+	if a == nil || a.approvals == nil {
+		return nil, fmt.Errorf("approval repository is not configured")
+	}
+	if scoped, ok := a.approvals.(ScopedApprovalGetter); ok {
+		return scoped.GetForRun(ctx, approvalID, runID)
+	}
+	return a.approvals.Get(ctx, approvalID)
 }
 
 func approvalContextMatches(item *approvalmodel.Approval, providerID string, contextKey string, contextValue string, policy policyDecision) bool {

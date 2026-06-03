@@ -427,166 +427,24 @@ type governanceRunResumeRef struct {
 }
 
 func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int) {
-	refs := make([]governanceRunResumeRef, 0, len(runIDs))
-	for _, runID := range runIDs {
-		refs = append(refs, governanceRunResumeRef{RunID: runID})
+	if s == nil || s.runContinuations == nil {
+		return
 	}
-	s.scheduleGovernanceRunResumeRefs(refs, priority)
+	s.runContinuations.scheduleGovernanceRunResumes(runIDs, priority)
 }
 
 func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {
-	refs = uniqueGovernanceRunResumeRefs(refs)
-	for _, ref := range refs {
-		ref := ref
-		key := governanceRunResumeKey(ref)
-		if !s.markGovernanceResumeStarted(key) {
-			slog.Debug("workorch governance resume already scheduled", "workspaceID", ref.WorkspaceID, "runID", ref.RunID)
-			continue
-		}
-		if !s.scheduleBackground("governance_run_resume", func(context.Context) {
-			defer s.clearGovernanceResumeStarted(key)
-			var resumedRun appservice.Run
-			defer func() {
-				if resumedRun.ID != "" {
-					s.notifyRunStatusChangedForRun(resumedRun)
-					return
-				}
-				s.notifyRunStatusChanged()
-			}()
-			ctx := appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
-			s.metrics.runResumeRequests.Add(1)
-			release, err := s.acquireRunSlotWithPriority(ctx, priority)
-			if err != nil {
-				s.metrics.runCanceled.Add(1)
-				slog.Warn("workorch governance resume queue failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
-				return
-			}
-			defer release()
-			if ref.WorkspaceID != "" {
-				ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(ref.WorkspaceID))
-			}
-			item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, ref.RunID)
-			if err != nil {
-				slog.Warn("workorch governance resume failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
-				return
-			}
-			s.metrics.observeRunOutcome(item)
-			if item.State == string(common.RunStateSuperseded) {
-				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
-			}
-			resumedRun = item
-		}) {
-			s.clearGovernanceResumeStarted(key)
-		}
-	}
-}
-
-func (s *serverState) markGovernanceResumeStarted(runID string) bool {
-	if s == nil {
-		return false
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return false
-	}
-	s.governanceResumeMu.Lock()
-	defer s.governanceResumeMu.Unlock()
-	if s.governanceResumeStarted == nil {
-		s.governanceResumeStarted = map[string]struct{}{}
-	}
-	if _, ok := s.governanceResumeStarted[runID]; ok {
-		return false
-	}
-	s.governanceResumeStarted[runID] = struct{}{}
-	return true
-}
-
-func (s *serverState) clearGovernanceResumeStarted(runID string) {
-	if s == nil {
+	if s == nil || s.runContinuations == nil {
 		return
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return
-	}
-	s.governanceResumeMu.Lock()
-	defer s.governanceResumeMu.Unlock()
-	delete(s.governanceResumeStarted, runID)
+	s.runContinuations.scheduleGovernanceRunResumeRefs(refs, priority)
 }
 
 func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {
-	if s == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
+	if s == nil || s.runContinuations == nil {
 		return
 	}
-	if !s.runHasResolvedReplanDecision(ctx, workspaceID, runID) {
-		return
-	}
-	if s.workspaceHasReplanSuccessor(ctx, workspaceID, runID) {
-		return
-	}
-	key := workspaceID + "/" + runID
-	s.replanContinuationMu.Lock()
-	if s.replanContinuationStarted == nil {
-		s.replanContinuationStarted = map[string]struct{}{}
-	}
-	if _, ok := s.replanContinuationStarted[key]; ok {
-		s.replanContinuationMu.Unlock()
-		return
-	}
-	s.replanContinuationStarted[key] = struct{}{}
-	s.replanContinuationMu.Unlock()
-
-	if !s.scheduleBackground("replan_continuation", func(context.Context) {
-		runCtx := appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
-		release, err := s.acquireRunSlotWithPriority(runCtx, priority)
-		if err != nil {
-			s.clearReplanContinuationStarted(key)
-			s.metrics.runCanceled.Add(1)
-			slog.Warn("workorch replan continuation queue failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-			return
-		}
-		defer release()
-		activation, err := s.activateWorkspace(runCtx, s.config.Backend, s.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
-		if err != nil {
-			s.clearReplanContinuationStarted(key)
-			slog.Warn("workorch replan continuation activation failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-			s.notifyRunStatusChanged()
-			return
-		}
-		s.metrics.observeRunOutcome(activation.Run)
-		s.notifyRunStatusChangedForRun(activation.Run)
-	}) {
-		s.clearReplanContinuationStarted(key)
-	}
-}
-
-func (s *serverState) clearReplanContinuationStarted(key string) {
-	if s == nil || strings.TrimSpace(key) == "" {
-		return
-	}
-	s.replanContinuationMu.Lock()
-	defer s.replanContinuationMu.Unlock()
-	delete(s.replanContinuationStarted, key)
-}
-
-func (s *serverState) workspaceHasReplanSuccessor(ctx context.Context, workspaceID string, runID string) bool {
-	if s == nil || s.listRuns == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
-		return false
-	}
-	items, err := s.listRuns(ctx, s.config.Backend, s.config.DataRoot, workspaceID)
-	if err != nil {
-		slog.Warn("workorch replan continuation successor scan failed", "workspaceID", workspaceID, "runID", runID, "err", err)
-		return false
-	}
-	for _, item := range items {
-		if item.WorkspaceID != workspaceID || item.ID == runID {
-			continue
-		}
-		if runIsReplanSuccessorOf(item, runID) {
-			return true
-		}
-	}
-	return false
+	s.runContinuations.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, priority)
 }
 
 func runIsReplanSuccessorOf(item appservice.Run, predecessorRunID string) bool {

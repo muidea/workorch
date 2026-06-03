@@ -1,12 +1,12 @@
 package bootstrap
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
 type repositorySet struct {
@@ -37,7 +37,7 @@ type repositorySet struct {
 }
 
 func buildRepositories(backend string, dataRoot string) repositorySet {
-	backend = NormalizeRepositoryBackend(backend)
+	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
 		return repositorySet{
@@ -67,8 +67,8 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 			approval:             memory.NewApprovalRepository(),
 		}
 	case "file":
-		dataRoot = ResolveRepositoryDataRoot(backend, dataRoot)
-		workspaceScopedRepos := NewWorkspaceScopedFileRepositorySet(dataRoot)
+		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
+		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 		return repositorySet{
 			soul:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			workspaceTemplate:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
@@ -98,22 +98,4 @@ func buildRepositories(backend string, dataRoot string) repositorySet {
 	default:
 		panic("unsupported repository backend: " + backend)
 	}
-}
-
-func ResolveRepositoryDataRoot(backend string, dataRoot string) string {
-	backend = NormalizeRepositoryBackend(backend)
-	if backend != "file" {
-		return ""
-	}
-	if dataRoot == "" {
-		return filepath.Join(os.TempDir(), "workorch-data")
-	}
-	return dataRoot
-}
-
-func NormalizeRepositoryBackend(backend string) string {
-	if backend == "" {
-		return "file"
-	}
-	return backend
 }

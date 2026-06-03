@@ -122,10 +122,10 @@ func listSkillsForSelection(ctx context.Context, session *RuntimeSession, query 
 	if err != nil {
 		return nil, err
 	}
-	if exports.Repositories.Skills == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	items, err := exports.Repositories.Skills.List(ctx)
+	items, err := listSkillsByOwnerCommand(ctx, exports.Infrastructure.EventHub)
 	if err != nil {
 		return nil, err
 	}

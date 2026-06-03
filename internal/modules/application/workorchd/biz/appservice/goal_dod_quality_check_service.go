@@ -47,7 +47,7 @@ func CheckGoalDoDQualityWithSession(ctx context.Context, session *RuntimeSession
 	if err != nil {
 		return GoalDoDQualityCheck{}, err
 	}
-	if exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return GoalDoDQualityCheck{}, common.ErrInvalidArgument
 	}
 	defer session.CloseOnReturn(ctx, &err)
@@ -59,11 +59,59 @@ func CheckGoalDoDQualityWithSession(ctx context.Context, session *RuntimeSession
 
 	goalID := common.GoalID(strings.TrimSpace(cmd.GoalID))
 	dodID := common.DoDID(strings.TrimSpace(cmd.DoDID))
-	goalText, resolvedGoalID, err := resolveGoalForQualityCheck(ctx, exports.Repositories.Goals, workspaceID, goalID, cmd.GoalText)
+	goalText, resolvedGoalID, err := resolveGoalForQualityCheck(
+		ctx,
+		func(ctx context.Context, id common.GoalID) (string, common.GoalID, error) {
+			item, err := readGoalByOwnerCommand(ctx, exports.Infrastructure.EventHub, id)
+			if err != nil {
+				return "", "", err
+			}
+			return strings.TrimSpace(item.Text), item.ID, nil
+		},
+		func(ctx context.Context, workspaceID common.WorkspaceID) (string, common.GoalID, error) {
+			item, err := selectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+				return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, nil, workspaceID, "")
+			if err != nil {
+				return "", "", err
+			}
+			if item == nil {
+				return "", "", nil
+			}
+			return strings.TrimSpace(item.Text), item.ID, nil
+		},
+		workspaceID,
+		goalID,
+		cmd.GoalText,
+	)
 	if err != nil {
 		return GoalDoDQualityCheck{}, err
 	}
-	dodItems, resolvedDoDID, err := resolveDoDForQualityCheck(ctx, exports.Repositories.DoDs, workspaceID, dodID, cmd.DoDItems)
+	dodItems, resolvedDoDID, err := resolveDoDForQualityCheck(
+		ctx,
+		func(ctx context.Context, id common.DoDID) ([]string, common.DoDID, error) {
+			item, err := readDoDByOwnerCommand(ctx, exports.Infrastructure.EventHub, id)
+			if err != nil {
+				return nil, "", err
+			}
+			return normalizeDoDItems(item.Items), item.ID, nil
+		},
+		func(ctx context.Context, workspaceID common.WorkspaceID) ([]string, common.DoDID, error) {
+			item, err := selectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+				return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, nil, workspaceID, "")
+			if err != nil {
+				return nil, "", err
+			}
+			if item == nil {
+				return nil, "", nil
+			}
+			return normalizeDoDItems(item.Items), item.ID, nil
+		},
+		workspaceID,
+		dodID,
+		cmd.DoDItems,
+	)
 	if err != nil {
 		return GoalDoDQualityCheck{}, err
 	}
@@ -90,10 +138,8 @@ func CheckGoalDoDQualityFromEnv(ctx context.Context, cmd GoalDoDQualityCheckComm
 
 func resolveGoalForQualityCheck(
 	ctx context.Context,
-	repo interface {
-		Get(context.Context, common.GoalID) (*workspacemodel.Goal, error)
-		ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspacemodel.Goal, error)
-	},
+	readByID func(context.Context, common.GoalID) (string, common.GoalID, error),
+	readLatest func(context.Context, common.WorkspaceID) (string, common.GoalID, error),
 	workspaceID common.WorkspaceID,
 	requestedID common.GoalID,
 	text string,
@@ -103,34 +149,32 @@ func resolveGoalForQualityCheck(
 		return text, requestedID, nil
 	}
 	if requestedID != "" {
-		item, err := repo.Get(ctx, requestedID)
+		text, id, err := readByID(ctx, requestedID)
 		if err != nil {
 			return "", "", err
 		}
-		if item == nil {
+		if id == "" {
 			return "", "", common.ErrNotFound
 		}
-		return strings.TrimSpace(item.Text), item.ID, nil
+		return strings.TrimSpace(text), id, nil
 	}
-	item, err := selectWorkspaceExecutionGoal(ctx, repo.ListByWorkspaceID, nil, workspaceID, "")
+	text, id, err := readLatest(ctx, workspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) {
 			return "", "", nil
 		}
 		return "", "", err
 	}
-	if item == nil {
+	if id == "" {
 		return "", "", nil
 	}
-	return strings.TrimSpace(item.Text), item.ID, nil
+	return strings.TrimSpace(text), id, nil
 }
 
 func resolveDoDForQualityCheck(
 	ctx context.Context,
-	repo interface {
-		Get(context.Context, common.DoDID) (*workspacemodel.DoD, error)
-		ListByWorkspaceID(context.Context, common.WorkspaceID) ([]*workspacemodel.DoD, error)
-	},
+	readByID func(context.Context, common.DoDID) ([]string, common.DoDID, error),
+	readLatest func(context.Context, common.WorkspaceID) ([]string, common.DoDID, error),
 	workspaceID common.WorkspaceID,
 	requestedID common.DoDID,
 	items []string,
@@ -140,26 +184,26 @@ func resolveDoDForQualityCheck(
 		return items, requestedID, nil
 	}
 	if requestedID != "" {
-		item, err := repo.Get(ctx, requestedID)
+		items, id, err := readByID(ctx, requestedID)
 		if err != nil {
 			return nil, "", err
 		}
-		if item == nil {
+		if id == "" {
 			return nil, "", common.ErrNotFound
 		}
-		return normalizeDoDItems(item.Items), item.ID, nil
+		return normalizeDoDItems(items), id, nil
 	}
-	item, err := selectWorkspaceExecutionDoD(ctx, repo.ListByWorkspaceID, nil, workspaceID, "")
+	items, id, err := readLatest(ctx, workspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) {
 			return nil, "", nil
 		}
 		return nil, "", err
 	}
-	if item == nil {
+	if id == "" {
 		return nil, "", nil
 	}
-	return normalizeDoDItems(item.Items), item.ID, nil
+	return normalizeDoDItems(items), id, nil
 }
 
 func evaluateGoalDoDQuality(

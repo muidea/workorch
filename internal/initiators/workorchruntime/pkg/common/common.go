@@ -1,18 +1,7 @@
 package common
 
 import (
-	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
-	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
-	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
-	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
-	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
-	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
-	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
-	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
-	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
-	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
-	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -49,39 +38,5 @@ type RepositorySet struct {
 type Helper interface {
 	Repositories() RepositorySet
 	EventHub() events.Hub
-	RuntimePolicy() orchestratorbiz.RuntimePolicy
-	FileRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetFileRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	ShellRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetShellRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	GitRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetGitRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	SSHRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetSSHRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	WebRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetWebRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	MCPRuntimeAdapter() orchestratorbiz.RuntimeAdapter
-	SetMCPRuntimeAdapter(orchestratorbiz.RuntimeAdapter)
-	LLMRuntimeAdapter() *llmbiz.RuntimeAdapter
-	SetLLMRuntimeAdapter(*llmbiz.RuntimeAdapter)
-	SoulService() soulservice.Service
-	SetSoulService(soulservice.Service)
-	MemoryService() memoryservice.Service
-	SetMemoryService(memoryservice.Service)
-	SkillService() skillservice.Service
-	SetSkillService(skillservice.Service)
-	MCPService() mcpservice.Service
-	SetMCPService(mcpservice.Service)
-	EventStreamService() eventstreamservice.Service
-	SetEventStreamService(eventstreamservice.Service)
-	WorkspaceService() workspaceservice.Service
-	SetWorkspaceService(workspaceservice.Service)
-	DecisionService() decisionservice.Service
-	SetDecisionService(decisionservice.Service)
-	ApprovalService() approvalservice.Service
-	SetApprovalService(approvalservice.Service)
-	OrchestratorService() orchestratorservice.Service
-	SetOrchestratorService(orchestratorservice.Service)
-	RunService() runservice.Service
-	SetRunService(runservice.Service)
+	RuntimePolicy() orchestratormodel.RuntimePolicy
 }

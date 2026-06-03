@@ -33,32 +33,14 @@ import (
 )
 
 type countingStepRepository struct {
-	base           repository.StepRepository
+	base           readModelStepReader
 	listByRunCalls int
-}
-
-func (r *countingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
-	return r.base.Create(ctx, item)
-}
-
-func (r *countingStepRepository) Get(ctx context.Context, id common.StepID) (*runmodel.Step, error) {
-	return r.base.Get(ctx, id)
 }
 
 func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
 	r.listByRunCalls++
 	return r.base.ListByRun(ctx, runID)
 }
-
-func (r *countingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
-	return r.base.Update(ctx, item)
-}
-
-func (r *countingStepRepository) Delete(ctx context.Context, id common.StepID) error {
-	return r.base.Delete(ctx, id)
-}
-
-var _ repository.StepRepository = (*countingStepRepository)(nil)
 
 func TestProjectStepOutputKeepsMCPStructuredEvidence(t *testing.T) {
 	output := projectStepOutput("mcp/tool_call", map[string]any{
@@ -251,16 +233,12 @@ func (r *countingMCPCapabilityRepository) Update(ctx context.Context, item *mcpm
 var _ repository.MCPCapabilityRepository = (*countingMCPCapabilityRepository)(nil)
 
 type blockingDecisionResolutionRepository struct {
-	base    repository.DecisionResolutionRepository
+	base    readModelDecisionResolutionReader
 	needed  int
 	started chan common.TicketID
 	release chan struct{}
 	mu      sync.Mutex
 	current int
-}
-
-func (r *blockingDecisionResolutionRepository) Create(ctx context.Context, item *decisionmodel.Resolution) error {
-	return r.base.Create(ctx, item)
 }
 
 func (r *blockingDecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
@@ -281,12 +259,6 @@ func (r *blockingDecisionResolutionRepository) GetByTicketID(ctx context.Context
 	}
 	return r.base.GetByTicketID(ctx, ticketID)
 }
-
-func (r *blockingDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
-	return r.base.DeleteByTicketID(ctx, ticketID)
-}
-
-var _ repository.DecisionResolutionRepository = (*blockingDecisionResolutionRepository)(nil)
 
 func TestReadRunSnapshotWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := ReadRunSnapshotWithSession(context.Background(), nil, "run-1"); !errors.Is(err, common.ErrInvalidArgument) {

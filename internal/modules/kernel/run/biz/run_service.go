@@ -9,6 +9,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
+	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -34,14 +35,30 @@ type LoadedRunExecutionContextPatchOrchestrator interface {
 	ResumeLoadedRunWithExecutionContextPatch(context.Context, *runModel.Run, map[string]any) error
 }
 
+type WorkspaceReader interface {
+	Get(context.Context, common.WorkspaceID) (*workspaceModel.Workspace, error)
+}
+
+type workspaceRepositoryReader struct {
+	repository.WorkspaceRepository
+}
+
 type Service struct {
 	runs         repository.RunRepository
-	workspaces   repository.WorkspaceRepository
+	workspaces   WorkspaceReader
 	orchestrator Orchestrator
 	eventHub     events.Hub
 }
 
 func NewService(runs repository.RunRepository, workspaces repository.WorkspaceRepository, orchestrator Orchestrator, eventHub events.Hub) *Service {
+	var reader WorkspaceReader
+	if workspaces != nil {
+		reader = workspaceRepositoryReader{WorkspaceRepository: workspaces}
+	}
+	return NewServiceWithWorkspaceReader(runs, reader, orchestrator, eventHub)
+}
+
+func NewServiceWithWorkspaceReader(runs repository.RunRepository, workspaces WorkspaceReader, orchestrator Orchestrator, eventHub events.Hub) *Service {
 	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, eventHub: eventHub}
 }
 
@@ -180,6 +197,9 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 		if cmd.LoadedRun.ID != cmd.RunID {
 			return common.ErrConflict
 		}
+		if cmd.WorkspaceID != "" && cmd.LoadedRun.WorkspaceID != cmd.WorkspaceID {
+			return common.ErrNotFound
+		}
 		if patcher, ok := s.orchestrator.(LoadedRunExecutionContextPatchOrchestrator); ok {
 			return patcher.ResumeLoadedRunWithExecutionContextPatch(ctx, cmd.LoadedRun, cloneExecutionContext(cmd.ExecutionContextPatch))
 		}
@@ -187,6 +207,9 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 		loaded, err := s.runs.Get(ctx, cmd.RunID)
 		if err != nil {
 			return err
+		}
+		if cmd.WorkspaceID != "" && loaded.WorkspaceID != cmd.WorkspaceID {
+			return common.ErrNotFound
 		}
 		if loaded.State == common.RunStateRunning {
 			return common.ErrConflict
@@ -214,6 +237,9 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCom
 	r, err := s.runs.Get(ctx, cmd.RunID)
 	if err != nil {
 		return err
+	}
+	if cmd.WorkspaceID != "" && r.WorkspaceID != cmd.WorkspaceID {
+		return common.ErrNotFound
 	}
 	if isTerminalRunState(r.State) {
 		return nil

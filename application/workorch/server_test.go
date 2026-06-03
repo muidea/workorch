@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
 type workorchWorkspaceResponse struct {
@@ -741,7 +741,7 @@ func seedBlockedDecisionRunForProcess(t *testing.T, dataRoot string, workspaceID
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
 	stepID := common.StepID(runID + "/decision")
 	ctx := context.Background()
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	runRepo := runScopedRepos.Runs
 	stepRepo := runScopedRepos.Steps
 	ticketRepo := runScopedRepos.Tickets
@@ -786,7 +786,7 @@ func seedBlockedApprovalRunForProcess(t *testing.T, dataRoot string, workspaceID
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
 	stepID := common.StepID(runID + "/approval")
 	ctx := context.Background()
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	runRepo := runScopedRepos.Runs
 	stepRepo := runScopedRepos.Steps
 	approvalRepo := runScopedRepos.Approvals

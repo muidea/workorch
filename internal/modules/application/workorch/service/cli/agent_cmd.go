@@ -25,7 +25,8 @@ func init() {
 
 func runAgent(cmd *cobra.Command, args []string) error {
 	goalText := strings.Join(args, " ")
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	wsID := defaultWorkspaceID
 	if wsID == "" {
 		created, err := mustBackend().Workspace().Create(ctx, backend.CreateWorkspaceRequest{
@@ -42,8 +43,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	a := agent.NewWithBackend(mustBackend())
 	defer a.Close()
 
+	runErr := make(chan error, 1)
 	go func() {
-		_ = a.RunWithBackend(ctx, wsID, goalText)
+		runErr <- a.RunWithBackend(ctx, wsID, goalText)
 	}()
 
 	for evt := range a.Events() {
@@ -112,7 +114,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
-	return nil
+	return <-runErr
 }
 
 func truncateForID(s string) string {

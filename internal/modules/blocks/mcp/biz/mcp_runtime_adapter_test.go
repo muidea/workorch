@@ -15,6 +15,7 @@ import (
 	kernelmcp "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -824,7 +825,11 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 func newMCPService(t *testing.T, cmd kernelmcp.CreateServerCommand) kernelmcp.Service {
 	t.Helper()
 	module := kernelmcp.New()
-	if err := module.Setup(kernelmcp.Dependencies{Servers: memory.NewMCPServerRepository(), Capabilities: memory.NewMCPCapabilityRepository()}); err != nil {
+	if err := module.Configure(kernelmcp.Dependencies{
+		Servers:      memory.NewMCPServerRepository(),
+		Capabilities: memory.NewMCPCapabilityRepository(),
+		EventHub:     events.NewMemoryHub(),
+	}); err != nil {
 		t.Fatalf("setup mcp module: %v", err)
 	}
 	if err := module.Service().CreateServer(context.Background(), cmd); err != nil {

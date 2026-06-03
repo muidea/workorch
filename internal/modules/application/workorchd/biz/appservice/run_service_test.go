@@ -11,11 +11,10 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
@@ -1062,24 +1061,33 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 
 func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
-	if err := session.Bootstrap.Exports().Services.WorkspaceService.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          "ws-run-failure",
-		Title:                "run failure workspace",
-		DeliverableDirectory: "workspaces/ws-run-failure",
-	}); err != nil {
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	if err := actions.EnsureWorkspace(ctx, "ws-run-failure", "run failure workspace"); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := session.Bootstrap.Exports().Services.RunService.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:       "run-failure",
-		WorkspaceID: "ws-run-failure",
-	}); err != nil {
+	if err := actions.EnsureRun(ctx, "run-failure", "ws-run-failure"); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := session.Bootstrap.Exports().Services.RunService.FailRun(ctx, runmodule.FailRunCommand{
-		RunID:  "run-failure",
-		Reason: "manual fail",
+	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicOrchestratorCommandFailRun,
+		SourceModule: "workorchd/appservice/run-service-test",
+		SubjectType:  "run",
+		SubjectID:    "run-failure",
+		RunID:        "run-failure",
+		Payload: map[string]any{
+			events.PayloadKeyRunID:         "run-failure",
+			events.PayloadKeyFailureReason: "manual fail",
+		},
 	}); err != nil {
-		t.Fatalf("fail run: %v", err)
+		if _, ok := events.ResponseEnvelope(err); !ok {
+			t.Fatalf("fail run: %v", err)
+		}
+	} else {
+		t.Fatalf("fail run returned no response")
 	}
 
 	item, err := ReadRunWithSession(ctx, session, "run-failure")

@@ -20,17 +20,20 @@ import (
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type RuntimeAdapter struct {
-	service mcpservice.Service
+	service serverGetter
 	client  *http.Client
 
 	sessionMu sync.Mutex
 	sessions  map[string]*stdioSession
+}
+
+type serverGetter interface {
+	GetServer(context.Context, common.MCPServerID) (*mcpmodel.Server, error)
 }
 
 const (
@@ -85,11 +88,11 @@ type limitedBuffer struct {
 	limit int
 }
 
-func NewRuntimeAdapter(service mcpservice.Service) *RuntimeAdapter {
+func NewRuntimeAdapter(service serverGetter) *RuntimeAdapter {
 	return NewRuntimeAdapterWithHTTPClient(service, http.DefaultClient)
 }
 
-func NewRuntimeAdapterWithHTTPClient(service mcpservice.Service, client *http.Client) *RuntimeAdapter {
+func NewRuntimeAdapterWithHTTPClient(service serverGetter, client *http.Client) *RuntimeAdapter {
 	if client == nil {
 		client = http.DefaultClient
 	}

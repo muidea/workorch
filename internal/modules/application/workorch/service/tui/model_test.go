@@ -299,6 +299,9 @@ func TestModelPlainInputWithActiveRunQueuesOperatorInput(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
+	if be.lastGetWorkspace != "ws-1" || be.lastResumeWorkspace != "ws-1" {
+		t.Fatalf("run get/resume workspace scope = %q/%q, want ws-1/ws-1", be.lastGetWorkspace, be.lastResumeWorkspace)
+	}
 	if len(be.resumePatches) != 1 {
 		t.Fatalf("resumePatches = %v, want one operator input patch", be.resumePatches)
 	}
@@ -393,6 +396,9 @@ func TestModelRunContinueIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	}
 	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
 		t.Fatalf("resumes = %v, want current workspace run to be resumed", be.resumes)
+	}
+	if be.lastGetWorkspace != "ws-2" || be.lastListWorkspace != "ws-2" || be.lastResumeWorkspace != "ws-2" {
+		t.Fatalf("run get/list/resume workspace scope = %q/%q/%q, want ws-2/ws-2/ws-2", be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
 	if len(be.activations) != 0 || msg.Run.WorkspaceID != "ws-2" {
 		t.Fatalf("activation/run = %d/%+v, want resumed run for ws-2", len(be.activations), msg.Run)
@@ -3253,12 +3259,15 @@ func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, p
 
 type recordingBE struct {
 	*fakeBE
-	runState          common.RunState
-	goals             []string
-	activations       []backend.ActivateRunRequest
-	resumes           []common.RunID
-	resumePatches     []map[string]any
-	lastListWorkspace common.WorkspaceID
+	runState            common.RunState
+	goals               []string
+	activations         []backend.ActivateRunRequest
+	resumes             []common.RunID
+	resumePatches       []map[string]any
+	lastGetWorkspace    common.WorkspaceID
+	lastListWorkspace   common.WorkspaceID
+	lastResumeWorkspace common.WorkspaceID
+	lastStatusWorkspace common.WorkspaceID
 }
 
 func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
@@ -3318,6 +3327,7 @@ func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, re
 }
 func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumes = append(f.parent.resumes, id)
+	f.parent.lastResumeWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
 	if len(executionContextPatch) > 0 {
 		f.parent.resumePatches = append(f.parent.resumePatches, executionContextPatch[0])
 	}
@@ -3328,6 +3338,7 @@ func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionCon
 	return &backend.RunInfo{ID: id, WorkspaceID: workspaceID, State: common.RunStateRunning}, nil
 }
 func (f *recordingRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
+	f.parent.lastGetWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
 	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
 }
 func (f *recordingRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
@@ -3335,6 +3346,7 @@ func (f *recordingRun) List(ctx context.Context, wsID common.WorkspaceID) ([]bac
 	return []backend.RunInfo{{ID: "run-continue", WorkspaceID: wsID, State: f.parent.runState}}, nil
 }
 func (f *recordingRun) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
+	f.parent.lastStatusWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
 	return &backend.RunStatusInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
 }
 

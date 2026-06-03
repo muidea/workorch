@@ -541,6 +541,18 @@ func TestRuntimeAdapterReportsRepairFailure(t *testing.T) {
 }
 
 func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`
+[runtime.git]
+enabled = true
+writeEnabled = true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_ = workorchconfig.Close()
+	t.Setenv(workorchconfig.EnvConfigDir, configDir)
+	t.Cleanup(func() { _ = workorchconfig.Close() })
+
 	provider := &staticProvider{payload: []byte(`{
 		"thoughtSummary":"need to validate with go test",
 		"completionState":"continue",

@@ -70,6 +70,39 @@ func TestServiceCreateAndListServer(t *testing.T) {
 	}
 }
 
+func TestServiceDerivesBuiltinAcceptanceCapabilityMetadata(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())
+
+	serverID := common.MCPServerID("mcp-acceptance")
+	if err := service.CreateServer(ctx, mcpservice.CreateServerCommand{
+		ServerID:         serverID,
+		Name:             "acceptance server",
+		Transport:        "stdio",
+		Enabled:          true,
+		AllowedResources: []string{"workspace://acceptance"},
+		AllowedPrompts:   []string{"workorch.acceptance"},
+	}); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	resources, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindResource, Query: "验收资料"})
+	if err != nil {
+		t.Fatalf("list resource capabilities: %v", err)
+	}
+	if len(resources) != 1 || resources[0].DisplayName != "工作空间验收资料" || resources[0].URI != "workspace://acceptance" {
+		t.Fatalf("resource capabilities = %+v, want acceptance resource metadata", resources)
+	}
+
+	prompts, err := service.ListCapabilities(ctx, mcpservice.CapabilityQuery{ServerID: serverID, Kind: mcpmodel.CapabilityKindPrompt, Query: "验收提示词"})
+	if err != nil {
+		t.Fatalf("list prompt capabilities: %v", err)
+	}
+	if len(prompts) != 1 || prompts[0].DisplayName != "验收提示词" {
+		t.Fatalf("prompt capabilities = %+v, want acceptance prompt metadata", prompts)
+	}
+}
+
 func TestServiceRejectsInvalidServer(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(backend.NewMCPServerRepository(), backend.NewMCPCapabilityRepository())

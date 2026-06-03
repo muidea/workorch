@@ -19,6 +19,9 @@ func (o *RuntimeOrchestrator) CompleteRun(ctx context.Context, runID common.RunI
 	if r.State != common.RunStateRunning && r.State != common.RunStateValidating {
 		return common.ErrConflict
 	}
+	if requiresDoDAssessmentCompletionGate(r) && !o.resultManager().hasAcceptedCompletionResult(ctx, r) {
+		return common.ErrConflict
+	}
 	r.State = common.RunStateCompleted
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""

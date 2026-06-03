@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
+	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -15,22 +16,32 @@ import (
 // eventHubBackend extends the local backend with EventHub-driven progress
 // subscriptions, replacing fixed-interval polling with reactive events.
 type eventHubBackend struct {
-	*localBackend
 	eventHub events.Hub
 	evtImpl  *eventHubEventsBackend
-	unsubCmd func()
 }
 
 // NewEventHub creates a Backend using EventHub for progress events.
-func NewEventHub(session *appservice.RuntimeSession, eventHub events.Hub) Backend {
-	local := NewLocal(session).(*localBackend)
+func NewEventHub(eventHub events.Hub) Backend {
 	b := &eventHubBackend{
-		localBackend: local,
-		eventHub:     eventHub,
+		eventHub: eventHub,
 	}
 	b.evtImpl = &eventHubEventsBackend{parent: b}
-	b.registerCommandDispatcher()
 	return b
+}
+
+// NewEmbeddedEventHub creates an EventHub-backed backend from the active
+// framework runtime initiator. CLI commands are handled by the workorchd module.
+func NewEmbeddedEventHub() (Backend, func(context.Context) error, error) {
+	var helper runtimecommon.Helper
+	runtime, err := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get workorch runtime initiator: %w", err)
+	}
+	eventHub := runtime.EventHub()
+	if eventHub == nil {
+		return nil, nil, common.ErrInvalidArgument
+	}
+	return NewEventHub(eventHub), func(context.Context) error { return nil }, nil
 }
 
 func (b *eventHubBackend) Workspace() WorkspaceBackend { return &eventHubWorkspaceBackend{parent: b} }
@@ -48,245 +59,6 @@ func (b *eventHubBackend) Config() ConfigBackend       { return &eventHubConfigB
 
 // Events overrides the stub to provide EventHub-driven subscriptions.
 func (b *eventHubBackend) Events() EventsBackend { return b.evtImpl }
-
-func (b *eventHubBackend) registerCommandDispatcher() {
-	if b == nil || b.eventHub == nil {
-		return
-	}
-	b.unsubCmd = b.eventHub.Subscribe(events.TopicCLICommand, func(ctx context.Context, envelope events.Envelope) error {
-		cmd, ok := events.DecodeCLICommandPayload(envelope.Payload)
-		if !ok {
-			return common.ErrInvalidArgument
-		}
-		result := b.dispatchCommand(ctx, cmd)
-		resultEnvelope := events.Envelope{
-			Topic:        events.TopicCLIResult,
-			SourceModule: "workorch-cli-dispatcher",
-			SubjectType:  cmd.SubjectType,
-			SubjectID:    cmd.SubjectID,
-			WorkspaceID:  string(cmd.WorkspaceID),
-			RunID:        string(cmd.RunID),
-			Payload:      events.CLIResultPayloadMap(result),
-		}
-		if asyncHub, ok := b.eventHub.(events.AsyncHub); ok {
-			_ = asyncHub.PublishAsync(context.Background(), resultEnvelope)
-		} else {
-			go func() {
-				_ = b.eventHub.Publish(context.Background(), resultEnvelope)
-			}()
-		}
-		return events.Response(resultEnvelope)
-	})
-}
-
-func (b *eventHubBackend) dispatchCommand(ctx context.Context, cmd events.CLICommandPayload) events.CLIResultPayload {
-	result := events.CLIResultPayload{
-		CorrelationID: cmd.CorrelationID,
-		CommandID:     cmd.CommandID,
-		OccurredAt:    time.Now().UTC(),
-		WorkspaceID:   cmd.WorkspaceID,
-		RunID:         cmd.RunID,
-	}
-	resource, resources, err := b.handleCommand(appservice.ContextWithEventHub(ctx, b.eventHub), cmd)
-	if err != nil {
-		result.OK = false
-		result.Error = err.Error()
-		return result
-	}
-	result.OK = true
-	result.Resource = resource
-	result.Resources = resources
-	return result
-}
-
-func (b *eventHubBackend) handleCommand(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
-	if cmd.WorkspaceID != "" {
-		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
-	}
-	switch cmd.Command {
-	case events.CommandWorkspaceCreate:
-		ws, err := b.localBackend.ws.Create(ctx, CreateWorkspaceRequest{
-			Title:                stringValue(cmd.Payload, "title"),
-			Description:          stringValue(cmd.Payload, "description"),
-			DeliverableDirectory: stringValue(cmd.Payload, "deliverableDirectory"),
-			TemplateID:           stringValue(cmd.Payload, "templateId"),
-		})
-		return resourceMap(ws), nil, err
-	case events.CommandWorkspaceGet:
-		ws, err := b.localBackend.ws.Get(ctx, common.WorkspaceID(cmd.SubjectID))
-		return resourceMap(ws), nil, err
-	case events.CommandWorkspaceList:
-		items, err := b.localBackend.ws.List(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandWorkspaceSnapshot:
-		snapshot, err := b.localBackend.ws.Snapshot(ctx, common.WorkspaceID(cmd.SubjectID))
-		return resourceMap(snapshot), nil, err
-	case events.CommandWorkspaceDelete:
-		err := b.localBackend.ws.Delete(ctx, common.WorkspaceID(cmd.SubjectID), boolValue(cmd.Payload, "purge"))
-		return nil, nil, err
-	case events.CommandGoalDefine:
-		item, err := b.localBackend.goal.Define(ctx, cmd.WorkspaceID, stringValue(cmd.Payload, "text"))
-		return resourceMap(item), nil, err
-	case events.CommandGoalList:
-		items, err := b.localBackend.goal.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandGoalGet:
-		item, err := b.localBackend.goal.Get(ctx, common.GoalID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandGoalUpdate:
-		item, err := b.localBackend.goal.Update(ctx, common.GoalID(cmd.SubjectID), stringValue(cmd.Payload, "text"))
-		return resourceMap(item), nil, err
-	case events.CommandDoDDefine:
-		item, err := b.localBackend.dod.Define(ctx, cmd.WorkspaceID, stringSliceValue(cmd.Payload, "items"))
-		return resourceMap(item), nil, err
-	case events.CommandDoDList:
-		items, err := b.localBackend.dod.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandDoDGet:
-		item, err := b.localBackend.dod.Get(ctx, common.DoDID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandDoDUpdate:
-		item, err := b.localBackend.dod.Update(ctx, common.DoDID(cmd.SubjectID), stringSliceValue(cmd.Payload, "items"))
-		return resourceMap(item), nil, err
-	case events.CommandRunActivate:
-		item, err := b.localBackend.run.Activate(ctx, cmd.WorkspaceID, ActivateRunRequest{
-			GoalID:                common.GoalID(stringValue(cmd.Payload, "goalId")),
-			DoDID:                 common.DoDID(stringValue(cmd.Payload, "doDId")),
-			DialogLanguage:        stringValue(cmd.Payload, "dialogLanguage"),
-			SoulID:                common.SoulID(stringValue(cmd.Payload, "soulId")),
-			SkillIDs:              skillIDsValue(cmd.Payload, "skillIds"),
-			MCPServerIDs:          mcpServerIDsValue(cmd.Payload, "mcpServerIds"),
-			Priority:              intValue(cmd.Payload, "priority"),
-			ExecutionContextPatch: mapValue(cmd.Payload, "executionContextPatch"),
-		})
-		return resourceMap(item), nil, err
-	case events.CommandRunResume:
-		var patch map[string]any
-		if rawPatch, ok := cmd.Payload["executionContextPatch"].(map[string]any); ok {
-			patch = rawPatch
-		}
-		item, err := b.localBackend.run.Resume(ctx, common.RunID(cmd.SubjectID), patch)
-		return resourceMap(item), nil, err
-	case events.CommandRunGet:
-		item, err := b.localBackend.run.Get(ctx, common.RunID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandRunList:
-		items, err := b.localBackend.run.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandRunStatus:
-		item, err := b.localBackend.run.Status(ctx, common.RunID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandDecisionResolve:
-		item, err := b.localBackend.dec.Resolve(ctx, ResolveDecisionRequest{
-			TicketID:       common.TicketID(cmd.SubjectID),
-			ResolutionType: stringValue(cmd.Payload, "resolutionType"),
-			Payload:        mapValue(cmd.Payload, "payload"),
-		})
-		return resourceMap(item), nil, err
-	case events.CommandDecisionList:
-		items, err := b.localBackend.dec.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandDecisionGet:
-		item, err := b.localBackend.dec.Get(ctx, common.TicketID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandDecisionBatch:
-		items, err := b.localBackend.dec.BatchResolve(ctx, ticketIDsValue(cmd.Payload, "ticketIds"), stringValue(cmd.Payload, "resolutionType"), mapValue(cmd.Payload, "payload"))
-		return nil, resourceMaps(items), err
-	case events.CommandApprovalApprove:
-		item, err := b.localBackend.appr.Approve(ctx, common.ApprovalID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandApprovalReject:
-		item, err := b.localBackend.appr.Reject(ctx, common.ApprovalID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandApprovalList:
-		items, err := b.localBackend.appr.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandApprovalGet:
-		item, err := b.localBackend.appr.Get(ctx, common.ApprovalID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandApprovalBatch:
-		items, err := b.localBackend.appr.BatchResolve(ctx, approvalIDsValue(cmd.Payload, "approvalIds"), stringValue(cmd.Payload, "action"))
-		return nil, resourceMaps(items), err
-	case events.CommandSoulCreate:
-		item, err := b.localBackend.soul.Create(ctx, decodeOrZero[SoulInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandSoulGet:
-		item, err := b.localBackend.soul.Get(ctx, common.SoulID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandSoulList:
-		items, err := b.localBackend.soul.List(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandSoulUpdate:
-		item, err := b.localBackend.soul.Update(ctx, common.SoulID(cmd.SubjectID), decodeOrZero[SoulInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandSoulDelete:
-		err := b.localBackend.soul.Delete(ctx, common.SoulID(cmd.SubjectID))
-		return nil, nil, err
-	case events.CommandSkillCreate:
-		item, err := b.localBackend.skill.Create(ctx, decodeOrZero[SkillInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandSkillGet:
-		item, err := b.localBackend.skill.Get(ctx, common.SkillID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandSkillList:
-		items, err := b.localBackend.skill.List(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandMCPServerCreate:
-		item, err := b.localBackend.mcp.CreateServer(ctx, decodeOrZero[MCPServerInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandMCPServerGet:
-		item, err := b.localBackend.mcp.GetServer(ctx, common.MCPServerID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandMCPServerList:
-		items, err := b.localBackend.mcp.ListServers(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandMCPServerUpdate:
-		item, err := b.localBackend.mcp.UpdateServer(ctx, common.MCPServerID(cmd.SubjectID), decodeOrZero[MCPServerInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandMCPCapabilityList:
-		items, err := b.localBackend.mcp.ListCapabilities(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandMemoryCreate:
-		item, err := b.localBackend.mem.Create(ctx, cmd.WorkspaceID, decodeOrZero[MemoryItemInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandMemoryGet:
-		item, err := b.localBackend.mem.Get(ctx, common.MemoryID(cmd.SubjectID))
-		return resourceMap(item), nil, err
-	case events.CommandMemoryUpdate:
-		item, err := b.localBackend.mem.Update(ctx, common.MemoryID(cmd.SubjectID), decodeOrZero[MemoryItemInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandMemoryDelete:
-		err := b.localBackend.mem.Delete(ctx, common.MemoryID(cmd.SubjectID))
-		return nil, nil, err
-	case events.CommandMemoryList:
-		items, err := b.localBackend.mem.List(ctx, cmd.WorkspaceID)
-		return nil, resourceMaps(items), err
-	case events.CommandMemorySearch:
-		req := decodeOrZero[MemorySearchRequest](cmd.Payload)
-		items, err := b.localBackend.mem.Search(ctx, cmd.WorkspaceID, *req)
-		return nil, resourceMaps(items), err
-	case events.CommandTemplateCreate:
-		item, err := b.localBackend.tmpl.Create(ctx, decodeOrZero[TemplateInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandTemplateGet:
-		item, err := b.localBackend.tmpl.Get(ctx, cmd.SubjectID)
-		return resourceMap(item), nil, err
-	case events.CommandTemplateList:
-		items, err := b.localBackend.tmpl.List(ctx)
-		return nil, resourceMaps(items), err
-	case events.CommandTemplateUpdate:
-		item, err := b.localBackend.tmpl.Update(ctx, cmd.SubjectID, decodeOrZero[TemplateInfo](cmd.Payload))
-		return resourceMap(item), nil, err
-	case events.CommandTemplateDelete:
-		err := b.localBackend.tmpl.Delete(ctx, cmd.SubjectID)
-		return nil, nil, err
-	case events.CommandConfigurationGet:
-		item, err := b.localBackend.cfg.Get(ctx)
-		return resourceMap(item), nil, err
-	default:
-		return nil, nil, fmt.Errorf("unsupported CLI command %q", cmd.Command)
-	}
-}
 
 func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID common.WorkspaceID, runID common.RunID, subjectType string, subjectID string, payload map[string]any) (events.CLIResultPayload, error) {
 	if b == nil || b.eventHub == nil {

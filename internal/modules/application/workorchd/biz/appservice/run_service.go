@@ -11,7 +11,6 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -34,7 +33,7 @@ type Run struct {
 }
 
 func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, runID string, goalID string, dodID string) (ret Run, err error) {
-	service, repo, err := runDependenciesFromSession(session)
+	hub, err := runDependenciesFromSession(session)
 	if err != nil {
 		return Run{}, err
 	}
@@ -66,18 +65,28 @@ func CreateRunWithSession(ctx context.Context, session *RuntimeSession, workspac
 	}
 
 	id := common.RunID(runID)
-	if err := service.CreateRun(ctx, runmodule.CreateRunCommand{
-		RunID:            id,
-		WorkspaceID:      common.WorkspaceID(workspaceID),
-		GoalID:           common.GoalID(goalID),
-		DoDID:            common.DoDID(dodID),
-		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
-		ExecutionContext: executionContext,
+	wsID := common.WorkspaceID(workspaceID)
+	if err := publishOwnerCommand(ctx, hub, events.TopicRunCommandCreate, "run", string(id), wsID, id, map[string]any{
+		events.PayloadKeyRun: &runmodel.Run{
+			ID:               id,
+			WorkspaceID:      wsID,
+			GoalID:           common.GoalID(goalID),
+			DoDID:            common.DoDID(dodID),
+			InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+			ExecutionContext: executionContext,
+			State:            common.RunStateCreated,
+		},
+		events.PayloadKeyRunID:            string(id),
+		events.PayloadKeyWorkspaceID:      string(wsID),
+		events.PayloadKeyGoalID:           string(common.GoalID(goalID)),
+		events.PayloadKeyDoDID:            string(common.DoDID(dodID)),
+		events.PayloadKeyKind:             llmcommon.StepKindWorkspaceExecution,
+		events.PayloadKeyExecutionContext: executionContext,
 	}); err != nil {
 		return Run{}, err
 	}
 
-	item, err := getRunFromRepository(ctx, repo, id)
+	item, err := readRunByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -101,14 +110,14 @@ func CreateRunFromEnv(ctx context.Context, workspaceID string, runID string, goa
 }
 
 func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
-	service, repo, err := runDependenciesFromSession(session)
+	hub, err := runDependenciesFromSession(session)
 	if err != nil {
 		return Run{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.RunID(runID)
-	loadedRun, err := getRunFromRepository(ctx, repo, id)
+	loadedRun, err := readRunByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -116,11 +125,13 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 	if err := attachCompressedContextToRun(ctx, session, id); err != nil {
 		return Run{}, err
 	}
-	if err := service.EnsureStarted(ctx, runmodule.StartRunCommand{RunID: id}); err != nil {
+	if err := publishOwnerCommand(ctx, hub, events.TopicRunCommandStart, "run", string(id), loadedRun.WorkspaceID, id, map[string]any{
+		events.PayloadKeyRunID: string(id),
+	}); err != nil {
 		return Run{}, err
 	}
 
-	item, err := getRunFromRepository(ctx, repo, id)
+	item, err := readRunByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -144,7 +155,7 @@ func StartRunFromEnv(ctx context.Context, runID string) (Run, error) {
 }
 
 func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID string, executionContextPatch ...map[string]any) (ret Run, err error) {
-	service, repo, err := runDependenciesFromSession(session)
+	hub, err := runDependenciesFromSession(session)
 	if err != nil {
 		return Run{}, err
 	}
@@ -164,11 +175,15 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 			patch[key] = value
 		}
 	}
-	if err := service.ResumeRun(ctx, runmodule.ResumeRunCommand{RunID: id, LoadedRun: loadedRun, ExecutionContextPatch: patch}); err != nil {
+	if err := publishOwnerCommand(ctx, hub, events.TopicOrchestratorCommandResumeRun, "run", string(id), loadedRun.WorkspaceID, id, map[string]any{
+		events.PayloadKeyRunID:                 string(id),
+		events.PayloadKeyRun:                   loadedRun,
+		events.PayloadKeyExecutionContextPatch: patch,
+	}); err != nil {
 		return Run{}, err
 	}
 
-	item, err := getRunFromRepository(ctx, repo, id)
+	item, err := readRunByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Run{}, err
 	}
@@ -192,13 +207,13 @@ func ResumeRunFromEnv(ctx context.Context, runID string) (Run, error) {
 }
 
 func ReadRunWithSession(ctx context.Context, session *RuntimeSession, runID string) (ret Run, err error) {
-	_, repo, err := runDependenciesFromSession(session)
+	hub, err := runDependenciesFromSession(session)
 	if err != nil {
 		return Run{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := getRunFromRepository(ctx, repo, common.RunID(runID))
+	item, err := readRunByOwnerCommand(ctx, hub, common.RunID(runID))
 	if err != nil {
 		return Run{}, err
 	}
@@ -222,13 +237,13 @@ func ReadRunFromEnv(ctx context.Context, runID string) (Run, error) {
 }
 
 func ListRunsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret []Run, err error) {
-	_, repo, err := runDependenciesFromSession(session)
+	hub, err := runDependenciesFromSession(session)
 	if err != nil {
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	items, err := repo.List(ctx)
+	items, err := listRunsByOwnerCommand(ctx, hub)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +279,7 @@ func attachCompressedContextToRun(ctx context.Context, session *RuntimeSession, 
 		return err
 	}
 	ctx = contextWithConfigLoader(ctx, deps.loadConfig)
-	item, err := getRunFromRepository(ctx, deps.runs, runID)
+	item, err := getRunFromReadModelReader(ctx, deps.runs, runID)
 	if err != nil {
 		return err
 	}
@@ -278,7 +293,7 @@ func compressedContextPatchForRun(ctx context.Context, session *RuntimeSession, 
 		return nil, nil, err
 	}
 	ctx = contextWithConfigLoader(ctx, deps.loadConfig)
-	item, err := getRunFromRepository(ctx, deps.runs, runID)
+	item, err := getRunFromReadModelReader(ctx, deps.runs, runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -309,9 +324,10 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 	if err != nil {
 		return nil, err
 	}
-	if exports.Repositories.Workspaces == nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	eventRecords := eventHubReadModelEventRecordReader{hub: exports.Infrastructure.EventHub}
 	var (
 		workspace *workspacemodel.Workspace
 		goal      *workspacemodel.Goal
@@ -320,17 +336,21 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 	if err := activationContextReadTasks(
 		func() error {
 			var err error
-			workspace, err = exports.Repositories.Workspaces.Get(ctx, item.WorkspaceID)
+			workspace, err = readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, item.WorkspaceID)
 			return err
 		},
 		func() error {
 			var err error
-			goal, err = selectWorkspaceExecutionGoal(ctx, exports.Repositories.Goals.ListByWorkspaceID, exports.Repositories.EventRecords, item.WorkspaceID, item.GoalID)
+			goal, err = selectWorkspaceExecutionGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+				return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, eventRecords, item.WorkspaceID, item.GoalID)
 			return err
 		},
 		func() error {
 			var err error
-			dod, err = selectWorkspaceExecutionDoD(ctx, exports.Repositories.DoDs.ListByWorkspaceID, exports.Repositories.EventRecords, item.WorkspaceID, item.DoDID)
+			dod, err = selectWorkspaceExecutionDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+				return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+			}, eventRecords, item.WorkspaceID, item.DoDID)
 			return err
 		},
 	); err != nil {
@@ -339,16 +359,20 @@ func workspaceDefinitionContextPatchForRun(ctx context.Context, session *Runtime
 	if workspace == nil || goal == nil || dod == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, exports.Repositories.Goals, exports.Repositories.EventRecords, workspace.ID, goal)
+	effectiveGoal, workspaceGoals, err := effectiveWorkspaceGoal(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+		return listGoalsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspace.ID, goal)
 	if err != nil {
 		return nil, err
 	}
-	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, exports.Repositories.DoDs, exports.Repositories.EventRecords, workspace.ID, dod)
+	effectiveDoD, workspaceDoDs, err := effectiveWorkspaceDoD(ctx, func(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
+		return listDoDsByWorkspaceOwnerCommand(ctx, exports.Infrastructure.EventHub, workspaceID)
+	}, eventRecords, workspace.ID, dod)
 	if err != nil {
 		return nil, err
 	}
-	goalRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicGoalDefined)
-	doDRevisions := workspaceDefinitionRevisionContexts(ctx, exports.Repositories.EventRecords, workspace.ID, events.TopicDoDDefined)
+	goalRevisions := workspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicGoalDefined)
+	doDRevisions := workspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicDoDDefined)
 	patch := map[string]any{
 		"goalId": string(effectiveGoal.ID),
 		"goal":   goalContext(effectiveGoal),
@@ -442,11 +466,14 @@ func recordRecoveryMemoryRecallTrace(ctx context.Context, session *RuntimeSessio
 	if len(sourceTraceIDs) > 0 {
 		trace.Reason += ": " + strings.Join(compactUniqueStrings(sourceTraceIDs), ", ")
 	}
-	if err := deps.memoryRecalls.Upsert(ctx, trace); err != nil {
+	exports, err := session.Exports()
+	if err != nil {
 		return err
 	}
-	exports, err := session.Exports()
-	if err != nil || exports.Infrastructure.EventHub == nil {
+	if exports.Infrastructure.EventHub == nil {
+		return nil
+	}
+	if err := publishMemoryRecallTraceUpsert(ctx, exports.Infrastructure.EventHub, trace); err != nil {
 		return err
 	}
 	return exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
@@ -532,7 +559,9 @@ func attachCompressedContextToLoadedRun(ctx context.Context, deps readModelDepen
 	}
 	executionContext["compressedContext"] = compressed
 	item.ExecutionContext = executionContext
-	return deps.runs.Update(ctx, item)
+	return publishOwnerCommand(ctx, deps.eventHub, events.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+		events.PayloadKeyRun: item,
+	})
 }
 
 func compressedContextForLoadedRun(ctx context.Context, deps readModelDependencies, item *runmodel.Run) (map[string]any, error) {
@@ -694,15 +723,15 @@ func compressedContextMap(input CompressedContext) map[string]any {
 	return ret
 }
 
-func runDependenciesFromSession(session *RuntimeSession) (runmodule.Service, repository.RunRepository, error) {
+func runDependenciesFromSession(session *RuntimeSession) (events.Hub, error) {
 	exports, err := session.Exports()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if exports.Services.RunService == nil || exports.Repositories.Runs == nil {
-		return nil, nil, common.ErrInvalidArgument
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
 	}
-	return exports.Services.RunService, exports.Repositories.Runs, nil
+	return exports.Infrastructure.EventHub, nil
 }
 
 func validateRunDefinitions(ctx context.Context, session *RuntimeSession, workspaceID string, goalID string, dodID string) error {
@@ -716,7 +745,7 @@ func validateRunDefinitions(ctx context.Context, session *RuntimeSession, worksp
 	if err != nil {
 		return err
 	}
-	if exports.Repositories.Workspaces == nil || exports.Repositories.Goals == nil || exports.Repositories.DoDs == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
 	var (
@@ -730,15 +759,15 @@ func validateRunDefinitions(ctx context.Context, session *RuntimeSession, worksp
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		_, wsErr = exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspaceID))
+		_, wsErr = readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.WorkspaceID(workspaceID))
 	}()
 	go func() {
 		defer wg.Done()
-		goal, goalErr = exports.Repositories.Goals.Get(ctx, common.GoalID(goalID))
+		goal, goalErr = readGoalByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.GoalID(goalID))
 	}()
 	go func() {
 		defer wg.Done()
-		dod, dodErr = exports.Repositories.DoDs.Get(ctx, common.DoDID(dodID))
+		dod, dodErr = readDoDByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.DoDID(dodID))
 	}()
 	wg.Wait()
 	if wsErr != nil {

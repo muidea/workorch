@@ -31,7 +31,7 @@ func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession
 		return ArtifactContent{}, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Artifacts == nil || !strings.EqualFold(session.RepositoryBackend(), "file") || strings.TrimSpace(session.RepositoryDataDir()) == "" {
+	if exports.Infrastructure.EventHub == nil || !strings.EqualFold(session.RepositoryBackend(), "file") || strings.TrimSpace(session.RepositoryDataDir()) == "" {
 		return ArtifactContent{}, common.ErrNotFound
 	}
 	ref, err := parseArtifactContentURI(artifactURI)
@@ -40,7 +40,7 @@ func readArtifactContentWithSession(ctx context.Context, session *RuntimeSession
 	}
 	artifact := findArtifactDTOByURI(cachedArtifacts, ref)
 	if artifact == nil {
-		artifacts, err := exports.Repositories.Artifacts.ListByRun(ctx, ref.RunID)
+		artifacts, err := listArtifactsByRunOwnerCommand(ctx, exports.Infrastructure.EventHub, ref.RunID)
 		if err != nil {
 			return ArtifactContent{}, err
 		}

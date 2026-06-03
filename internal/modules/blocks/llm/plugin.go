@@ -12,50 +12,36 @@ import (
 )
 
 func init() {
-	pluginmodule.Register(newPlugin())
+	pluginmodule.Register(New())
 }
 
-type plugin struct {
-	module *Module
-}
+func (m *Module) Weight() int { return 16 }
 
-func newPlugin() *plugin {
-	return &plugin{}
-}
-
-func (p *plugin) ID() string { return ModuleID }
-
-func (p *plugin) Weight() int { return 16 }
-
-func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	runtime, err := workorchRuntime()
 	if err != nil {
 		return err
 	}
-	p.module = New()
-	if setupErr := p.module.Setup(); setupErr != nil {
+	if setupErr := m.Configure(Dependencies{EventHub: runtime.EventHub()}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
-	runtime.SetLLMRuntimeAdapter(p.module.RuntimeAdapter())
 	return nil
 }
 
-func (p *plugin) Run(_ context.Context) *cd.Error {
-	if p == nil || p.module == nil {
+func (m *Module) Run(_ context.Context) *cd.Error {
+	if m == nil {
 		return cd.NewError(cd.IllegalParam, "llm module is not configured")
 	}
-	if err := p.module.Run(); err != nil {
+	if err := m.Start(); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	return nil
 }
 
-func (p *plugin) Teardown(ctx context.Context) {
-	if p == nil || p.module == nil {
-		return
+func (m *Module) Teardown(ctx context.Context) {
+	if m != nil {
+		_ = m.Stop(ctx)
 	}
-	_ = p.module.Teardown(ctx)
-	p.module = nil
 }
 
 func workorchRuntime() (runtimecommon.Helper, *cd.Error) {

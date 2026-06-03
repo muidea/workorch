@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const stuckRunningRunFailureReason = "stuck running run recovered: no active execution, blocker, or continuation checkpoint"
@@ -23,28 +22,22 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 		return nil, err
 	}
 	defer session.CloseOnReturn(ctx, &err)
-	if exports.Repositories.Runs == nil ||
-		exports.Repositories.Steps == nil ||
-		exports.Repositories.RuntimeCheckpoints == nil ||
-		exports.Repositories.Workspaces == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if exports.Services.RunService == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	if err := recoverTerminalActiveWorkspacePointers(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs); err != nil {
+	if err := recoverTerminalActiveWorkspacePointers(ctx, exports.Infrastructure.EventHub); err != nil {
 		return nil, err
 	}
 
-	runs, err := exports.Repositories.Runs.List(ctx)
+	runs, err := listRunsByOwnerCommand(ctx, exports.Infrastructure.EventHub)
 	if err != nil {
 		return nil, err
 	}
 	for _, item := range runs {
-		if recoveredStep, changed, err := recoverOrphanDispatchedStep(ctx, session, exports.Repositories.Runs, exports.Repositories.Steps, item); err != nil {
+		if recoveredStep, changed, err := recoverOrphanDispatchedStep(ctx, session, exports.Infrastructure.EventHub, item); err != nil {
 			return nil, err
 		} else if changed {
-			recovered, err := getRunFromRepository(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), exports.Repositories.Runs, item.ID)
+			recovered, err := readRunByOwnerCommand(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), exports.Infrastructure.EventHub, item.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -53,10 +46,10 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 			ret = append(ret, runView)
 			continue
 		}
-		if !isStuckRunningRunCandidate(ctx, exports.Repositories.RuntimeCheckpoints, item) {
+		if !isStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, item) {
 			continue
 		}
-		failed, err := failStuckRunningRun(ctx, exports.Repositories.Workspaces, exports.Repositories.Runs, exports.Services.RunService, item)
+		failed, err := failStuckRunningRun(ctx, exports.Infrastructure.EventHub, item)
 		if err != nil {
 			return nil, err
 		}
@@ -65,10 +58,9 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 	return ret, nil
 }
 
-func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, runs repository.RunRepository, steps stepLister, item *runmodel.Run) (*runmodel.Step, bool, error) {
+func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, hub events.Hub, item *runmodel.Run) (*runmodel.Step, bool, error) {
 	if session == nil ||
-		runs == nil ||
-		steps == nil ||
+		hub == nil ||
 		item == nil ||
 		!isRecoverableRunningRun(item) {
 		return nil, false, nil
@@ -77,7 +69,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, current.WorkspaceID)
 	var recovered *runmodel.Step
 	for attempt := 0; attempt < maxOrphanDispatchedStepRecoveryIterations; attempt++ {
-		terminal, err := orphanDispatchedTerminalStep(ctx, steps, current)
+		terminal, err := orphanDispatchedTerminalStep(ctx, hub, current)
 		if err != nil {
 			return nil, false, err
 		}
@@ -86,7 +78,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 		}
 		previousTerminalID := terminal.ID
 		if _, err := ResumeRunWithSession(ctx, session.Borrow(), string(current.ID)); err != nil {
-			latest, latestErr := getRunFromRepository(ctx, runs, current.ID)
+			latest, latestErr := readRunByOwnerCommand(ctx, hub, current.ID)
 			if latestErr != nil {
 				return nil, false, latestErr
 			}
@@ -94,7 +86,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 			if !errors.Is(err, common.ErrConflict) {
 				return nil, false, err
 			}
-			nextTerminal, terminalErr := orphanDispatchedTerminalStep(ctx, steps, current)
+			nextTerminal, terminalErr := orphanDispatchedTerminalStep(ctx, hub, current)
 			if terminalErr != nil {
 				return nil, false, terminalErr
 			}
@@ -108,7 +100,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 			continue
 		}
 		recovered = terminal
-		latest, err := getRunFromRepository(ctx, runs, current.ID)
+		latest, err := readRunByOwnerCommand(ctx, hub, current.ID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -116,7 +108,7 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 		if !isRecoverableRunningRun(current) {
 			return recovered, true, nil
 		}
-		nextTerminal, err := orphanDispatchedTerminalStep(ctx, steps, current)
+		nextTerminal, err := orphanDispatchedTerminalStep(ctx, hub, current)
 		if err != nil {
 			return nil, false, err
 		}
@@ -131,11 +123,11 @@ func recoverOrphanDispatchedStep(ctx context.Context, session *RuntimeSession, r
 	return recovered, true, fmt.Errorf("%w: orphan dispatched step recovery exceeded %d iterations", common.ErrConflict, maxOrphanDispatchedStepRecoveryIterations)
 }
 
-func orphanDispatchedTerminalStep(ctx context.Context, steps stepLister, item *runmodel.Run) (*runmodel.Step, error) {
-	if steps == nil || !isRecoverableRunningRun(item) {
+func orphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+	if hub == nil || !isRecoverableRunningRun(item) {
 		return nil, nil
 	}
-	runSteps, err := steps.ListByRun(ctx, item.ID)
+	runSteps, err := listStepsByRunOwnerCommand(ctx, hub, item.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +145,11 @@ func isRecoverableRunningRun(item *runmodel.Run) bool {
 		item.BlockingApprovalID == ""
 }
 
-func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces workspaceListerUpdater, runs repository.RunRepository) error {
-	if workspaces == nil || runs == nil {
+func recoverTerminalActiveWorkspacePointers(ctx context.Context, hub events.Hub) error {
+	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	items, err := workspaces.List(ctx)
+	items, err := listWorkspacesByOwnerCommand(ctx, hub)
 	if err != nil {
 		return err
 	}
@@ -166,7 +158,7 @@ func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces work
 			continue
 		}
 		runCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspace.ID)
-		activeRun, err := getRunFromRepository(runCtx, runs, workspace.ActiveRunID)
+		activeRun, err := readRunByOwnerCommand(runCtx, hub, workspace.ActiveRunID)
 		if err != nil {
 			if !errors.Is(err, common.ErrNotFound) {
 				return err
@@ -175,7 +167,7 @@ func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces work
 			if isActiveWorkspaceStateForRecovery(workspace.State) {
 				workspace.State = common.WorkspaceStateActive
 			}
-			if err := workspaces.Update(ctx, workspace); err != nil {
+			if err := updateWorkspaceByEventHub(ctx, hub, workspace); err != nil {
 				return err
 			}
 			continue
@@ -185,26 +177,29 @@ func recoverTerminalActiveWorkspacePointers(ctx context.Context, workspaces work
 		}
 		workspace.ActiveRunID = ""
 		workspace.State = recoveredWorkspaceStateForTerminalRun(activeRun.State)
-		if err := workspaces.Update(ctx, workspace); err != nil {
+		if err := updateWorkspaceByEventHub(ctx, hub, workspace); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func failStuckRunningRun(ctx context.Context, workspaces workspaceGetterUpdater, runs repository.RunRepository, runService runmodule.Service, item *runmodel.Run) (*runmodel.Run, error) {
-	if workspaces == nil || runs == nil || runService == nil || item == nil {
+func failStuckRunningRun(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Run, error) {
+	if hub == nil || item == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	runCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
-	if err := runService.FailRun(runCtx, runmodule.FailRunCommand{RunID: item.ID, Reason: stuckRunningRunFailureReason}); err != nil {
+	if err := publishOwnerCommand(runCtx, hub, events.TopicRunCommandFail, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+		events.PayloadKeyRunID:         string(item.ID),
+		events.PayloadKeyFailureReason: stuckRunningRunFailureReason,
+	}); err != nil {
 		return nil, err
 	}
-	failed, err := getRunFromRepository(runCtx, runs, item.ID)
+	failed, err := readRunByOwnerCommand(runCtx, hub, item.ID)
 	if err != nil {
 		return nil, err
 	}
-	workspace, err := workspaces.Get(ctx, failed.WorkspaceID)
+	workspace, err := readWorkspaceByOwnerCommand(ctx, hub, failed.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			return failed, nil
@@ -216,7 +211,7 @@ func failStuckRunningRun(ctx context.Context, workspaces workspaceGetterUpdater,
 	}
 	workspace.ActiveRunID = ""
 	workspace.State = recoveredWorkspaceStateForTerminalRun(failed.State)
-	return failed, workspaces.Update(ctx, workspace)
+	return failed, updateWorkspaceByEventHub(ctx, hub, workspace)
 }
 
 func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Run, error) {
@@ -227,32 +222,23 @@ func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dat
 	return RecoverStuckRunningRunsWithSession(ctx, session)
 }
 
-func isStuckRunningRunCandidate(ctx context.Context, checkpoints checkpointLister, item *runmodel.Run) bool {
+func isStuckRunningRunCandidate(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
 	if item == nil ||
 		item.State != common.RunStateRunning ||
 		item.BlockingTicketID != "" ||
 		item.BlockingApprovalID != "" {
 		return false
 	}
-	return !hasContinuationCheckpoint(ctx, checkpoints, item.ID)
+	return !hasContinuationCheckpoint(ctx, hub, item.ID)
 }
 
-type checkpointLister interface {
-	ListByRun(context.Context, common.RunID) ([]*runmodel.RuntimeCheckpoint, error)
-}
-
-type stepLister interface {
-	ListByRun(context.Context, common.RunID) ([]*runmodel.Step, error)
-}
-
-type workspaceListerUpdater interface {
-	List(context.Context) ([]*workspacemodel.Workspace, error)
-	Update(context.Context, *workspacemodel.Workspace) error
-}
-
-type workspaceGetterUpdater interface {
-	Get(context.Context, common.WorkspaceID) (*workspacemodel.Workspace, error)
-	Update(context.Context, *workspacemodel.Workspace) error
+func updateWorkspaceByEventHub(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) error {
+	if hub == nil || workspace == nil || workspace.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandUpdate, "workspace", string(workspace.ID), workspace.ID, "", map[string]any{
+		events.PayloadKeyWorkspace: workspace,
+	})
 }
 
 func recoveredWorkspaceStateForTerminalRun(state common.RunState) common.WorkspaceState {
@@ -275,11 +261,11 @@ func isActiveWorkspaceStateForRecovery(state common.WorkspaceState) bool {
 	}
 }
 
-func hasContinuationCheckpoint(ctx context.Context, checkpoints checkpointLister, runID common.RunID) bool {
-	if checkpoints == nil || runID == "" {
+func hasContinuationCheckpoint(ctx context.Context, hub events.Hub, runID common.RunID) bool {
+	if hub == nil || runID == "" {
 		return false
 	}
-	items, err := checkpoints.ListByRun(ctx, runID)
+	items, err := listRuntimeCheckpointsByRunOwnerCommand(ctx, hub, runID)
 	if err != nil || len(items) == 0 {
 		return false
 	}

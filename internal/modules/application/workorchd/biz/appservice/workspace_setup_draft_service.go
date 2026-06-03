@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/doditems"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const workspaceSetupDraftSchemaName = "workorch.workspaceSetupDraft.v1"
@@ -71,7 +70,7 @@ type WorkspaceSetupDraftGenerator interface {
 }
 
 type defaultWorkspaceSetupDraftGenerator struct {
-	loadConfig func() (workorchconfig.Config, error)
+	eventHub events.Hub
 }
 
 func GenerateWorkspaceSetupDraftWithBackend(ctx context.Context, backend string, dataRoot string, cmd WorkspaceSetupDraftGenerationCommand) (WorkspaceSetupDraft, error) {
@@ -84,7 +83,11 @@ func GenerateWorkspaceSetupDraftWithBackend(ctx context.Context, backend string,
 
 func GenerateWorkspaceSetupDraftWithSession(ctx context.Context, session *RuntimeSession, cmd WorkspaceSetupDraftGenerationCommand, generator WorkspaceSetupDraftGenerator) (ret WorkspaceSetupDraft, err error) {
 	if generator == nil {
-		generator = defaultWorkspaceSetupDraftGenerator{loadConfig: session.ConfigLoader()}
+		exports, err := session.Exports()
+		if err != nil {
+			return WorkspaceSetupDraft{}, err
+		}
+		generator = defaultWorkspaceSetupDraftGenerator{eventHub: exports.Infrastructure.EventHub}
 	}
 	request, err := BuildWorkspaceSetupDraftGenerationRequest(ctx, session, cmd)
 	if err != nil {
@@ -128,7 +131,7 @@ func BuildWorkspaceSetupDraftGenerationRequest(ctx context.Context, session *Run
 		template = workspaceTemplateFromRepository(item)
 	}
 	souls := []WorkspaceSetupDraftSoul{}
-	if exports.Repositories.Souls != nil {
+	if exports.Infrastructure.EventHub != nil {
 		ids := map[string]struct{}{}
 		if template.DefaultSoulID != "" {
 			ids[template.DefaultSoulID] = struct{}{}
@@ -140,7 +143,7 @@ func BuildWorkspaceSetupDraftGenerationRequest(ctx context.Context, session *Run
 			}
 		}
 		for soulID := range ids {
-			item, err := exports.Repositories.Souls.Get(ctx, common.SoulID(soulID))
+			item, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.SoulID(soulID))
 			if err == nil {
 				souls = append(souls, workspaceSetupDraftSoulFromRepository(item))
 			}
@@ -208,49 +211,41 @@ func WorkspaceSetupDraftRevisionBaseline(draft WorkspaceSetupDraft) WorkspaceSet
 }
 
 func (g defaultWorkspaceSetupDraftGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, request WorkspaceSetupDraftGenerationRequest) (WorkspaceSetupDraft, error) {
-	loadConfig := g.loadConfig
-	if loadConfig == nil {
-		loadConfig = func() (workorchconfig.Config, error) {
-			return workorchconfig.Config{}, nil
-		}
-	}
-	cfg, err := loadConfig()
-	if err != nil {
-		return WorkspaceSetupDraft{}, err
-	}
-	defaultProviderID, configs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
-	if err != nil {
-		return WorkspaceSetupDraft{}, err
-	}
-	runtime, providerID, err := selectWorkspaceSetupDraftProvider(defaultProviderID, configs)
-	if err != nil {
-		return WorkspaceSetupDraft{}, err
-	}
-	provider := llmbiz.NewProviderFromConfig(runtime)
-	if provider == nil {
-		return WorkspaceSetupDraft{}, fmt.Errorf("%w: llm provider client is not configured", common.ErrInvalidArgument)
+	if g.eventHub == nil {
+		return WorkspaceSetupDraft{}, common.ErrInvalidArgument
 	}
 	payload := map[string]any{
 		"instructions": workspaceSetupDraftInstructions(),
 		"request":      request,
 		"outputSchema": workspaceSetupDraftOutputSchema(),
 	}
-	completion, err := provider.Complete(ctx, llmmodels.ProviderRequest{
-		Kind:           "workspace/setup_draft",
-		Schema:         workspaceSetupDraftSchemaName,
-		Model:          runtime.Model,
-		DialogLanguage: request.DialogLanguage,
-		Input:          payload,
-		TraceRefs: map[string]string{
-			"providerId": providerID,
-			"templateId": request.Template.ID,
+	err := g.eventHub.Publish(ctx, events.Envelope{
+		Topic:        events.TopicLLMCommandCompleteProvider,
+		SourceModule: "application/workorchd/appservice",
+		SubjectType:  "workspace_setup_draft",
+		Payload: map[string]any{
+			events.PayloadKeyProviderRequest: llmmodels.ProviderRequest{
+				Kind:           "workspace/setup_draft",
+				Schema:         workspaceSetupDraftSchemaName,
+				DialogLanguage: request.DialogLanguage,
+				Input:          payload,
+				TraceRefs: map[string]string{
+					"templateId": request.Template.ID,
+				},
+			},
 		},
-		Config: llmbiz.RedactedProviderConfig(runtime),
 	})
+	if response, ok := events.ResponseEnvelope(err); ok {
+		completion, ok := response.Payload[events.PayloadKeyProviderCompletion].(llmmodels.ProviderCompletionResult)
+		if !ok {
+			return WorkspaceSetupDraft{}, common.ErrInvalidArgument
+		}
+		return ParseWorkspaceSetupDraftCompletion(completion.Payload)
+	}
 	if err != nil {
 		return WorkspaceSetupDraft{}, err
 	}
-	return ParseWorkspaceSetupDraftCompletion(completion.Payload)
+	return WorkspaceSetupDraft{}, common.ErrNotFound
 }
 
 func ParseWorkspaceSetupDraftCompletion(payload []byte) (WorkspaceSetupDraft, error) {
@@ -270,25 +265,6 @@ func ParseWorkspaceSetupDraftCompletion(payload []byte) (WorkspaceSetupDraft, er
 		return NormalizeWorkspaceSetupDraft(envelope.WorkspaceSetupDraft), nil
 	}
 	return parseWorkspaceSetupDraftCompletionAliases(payload)
-}
-
-func selectWorkspaceSetupDraftProvider(defaultProviderID string, configs map[string]llmmodels.ProviderConfig) (llmmodels.ProviderConfig, string, error) {
-	defaultProviderID = strings.TrimSpace(defaultProviderID)
-	if defaultProviderID != "" {
-		if cfg, ok := configs[defaultProviderID]; ok {
-			if cfg.Unavailable {
-				return llmmodels.ProviderConfig{}, "", fmt.Errorf("%w: %s", common.ErrInvalidArgument, cfg.UnavailableReason)
-			}
-			return cfg, defaultProviderID, nil
-		}
-	}
-	for id, cfg := range configs {
-		if cfg.Unavailable {
-			continue
-		}
-		return cfg, id, nil
-	}
-	return llmmodels.ProviderConfig{}, "", fmt.Errorf("%w: no available llm provider for workspace setup draft", common.ErrInvalidArgument)
 }
 
 func workspaceSetupDraftInstructions() []string {

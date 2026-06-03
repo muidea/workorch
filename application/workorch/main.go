@@ -8,11 +8,10 @@ import (
 	"syscall"
 
 	"github.com/muidea/workorch/internal/modules/application/workorch/app"
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
-	"github.com/muidea/workorch/internal/pkg/common"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/application/workorch"
+	_ "github.com/muidea/workorch/internal/modules/application/workorchd"
 	_ "github.com/muidea/workorch/internal/modules/blocks/file"
 	_ "github.com/muidea/workorch/internal/modules/blocks/git"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -27,6 +26,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
 	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	_ "github.com/muidea/workorch/internal/modules/kernel/result"
 	_ "github.com/muidea/workorch/internal/modules/kernel/run"
 	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
 	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
@@ -43,12 +43,4 @@ func main() {
 	}); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func resolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir string, cliConfigPath string) backend.WorkspaceInfo {
-	return app.ResolveDefaultWorkspace(ctx, be, workingDir, cliConfigPath)
-}
-
-func backendWorkspaceID(id string) common.WorkspaceID {
-	return common.WorkspaceID(id)
 }

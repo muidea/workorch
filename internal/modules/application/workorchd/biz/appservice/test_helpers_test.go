@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
+	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
@@ -63,6 +63,41 @@ disabled = false
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 }
 
+func publishAppserviceTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
+	err := hub.Publish(ctx, envelope)
+	if _, ok := events.ResponseEnvelope(err); ok {
+		return nil
+	}
+	return err
+}
+
+func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.CreateServerCommand) error {
+	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicMCPCommandCreateServer,
+		SourceModule: "workorchd/appservice/test",
+		SubjectType:  "mcp_server",
+		SubjectID:    string(cmd.ServerID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand:  cmd,
+			events.PayloadKeyServerID: string(cmd.ServerID),
+		},
+	})
+}
+
+func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.UpdateCapabilityCommand) error {
+	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicMCPCommandUpdateCapability,
+		SourceModule: "workorchd/appservice/test",
+		SubjectType:  "mcp_capability",
+		SubjectID:    string(cmd.ID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand:      cmd,
+			events.PayloadKeyCapabilityID: string(cmd.ID),
+			events.PayloadKeyServerID:     string(cmd.ServerID),
+		},
+	})
+}
+
 func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
 	t.Helper()
 
@@ -73,11 +108,9 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
+	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
 	ensureTestWorkspace(t, ctx, session, workspaceID)
-	if err := exports.Services.RunService.CreateRun(ctx, runservice.CreateRunCommand{
-		RunID:       common.RunID(runID),
-		WorkspaceID: common.WorkspaceID(workspaceID),
-	}); err != nil {
+	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
@@ -89,22 +122,28 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create decision step: %v", err)
 	}
-	if err := exports.Services.DecisionService.CreateTicket(ctx, decisionservice.CreateTicketCommand{
-		TicketID:     ticketID,
-		WorkspaceID:  common.WorkspaceID(workspaceID),
-		RunID:        common.RunID(runID),
-		StepID:       stepID,
-		Reason:       "test decision gate",
-		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
-		Question:     "provide test decision input",
-		Context:      map[string]any{"requiredFields": []any{"input"}},
+	if err := publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicDecisionCommandEnsureTicket,
+		SourceModule: "workorchd/appservice/test",
+		SubjectType:  "decision_ticket",
+		SubjectID:    string(ticketID),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		StepID:       string(stepID),
+		Payload: map[string]any{
+			events.PayloadKeyBlockingTicketID: string(ticketID),
+			events.PayloadKeyWorkspaceID:      workspaceID,
+			events.PayloadKeyRunID:            runID,
+			events.PayloadKeyStepID:           string(stepID),
+			events.PayloadKeyReason:           "test decision gate",
+			events.PayloadKeyKind:             decisioncommon.ResolutionTypeProvideMissingInfo,
+			events.PayloadKeyQuery:            "provide test decision input",
+			events.PayloadKeyContext:          map[string]any{"requiredFields": []any{"input"}},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if err := exports.Services.RunService.BlockOnDecision(ctx, runservice.BlockOnDecisionCommand{
-		RunID:    common.RunID(runID),
-		TicketID: ticketID,
-	}); err != nil {
+	if err := actions.EnsureRunBlockedOnDecision(ctx, common.RunID(runID), ticketID); err != nil {
 		t.Fatalf("BlockOnDecision: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))
@@ -124,11 +163,9 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
+	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
 	ensureTestWorkspace(t, ctx, session, workspaceID)
-	if err := exports.Services.RunService.CreateRun(ctx, runservice.CreateRunCommand{
-		RunID:       common.RunID(runID),
-		WorkspaceID: common.WorkspaceID(workspaceID),
-	}); err != nil {
+	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
@@ -140,19 +177,10 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	}); err != nil {
 		t.Fatalf("Create approval step: %v", err)
 	}
-	if err := exports.Services.ApprovalService.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
-		ApprovalID:  approvalID,
-		WorkspaceID: common.WorkspaceID(workspaceID),
-		RunID:       common.RunID(runID),
-		StepID:      stepID,
-		Reason:      "test approval gate",
-	}); err != nil {
+	if err := actions.EnsureApproval(ctx, approvalID, common.WorkspaceID(workspaceID), common.RunID(runID), stepID, "test approval gate"); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
-	if err := exports.Services.RunService.BlockOnApproval(ctx, runservice.BlockOnApprovalCommand{
-		RunID:      common.RunID(runID),
-		ApprovalID: approvalID,
-	}); err != nil {
+	if err := actions.EnsureRunBlockedOnApproval(ctx, common.RunID(runID), approvalID); err != nil {
 		t.Fatalf("BlockOnApproval: %v", err)
 	}
 	item, err := exports.Repositories.Runs.Get(ctx, common.RunID(runID))

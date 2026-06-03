@@ -19,64 +19,43 @@ import (
 )
 
 func init() {
-	pluginmodule.Register(newPlugin())
+	pluginmodule.Register(New())
 }
 
-type plugin struct {
-	module *Module
-}
+func (m *Module) Weight() int { return 30 }
 
-func newPlugin() *plugin {
-	return &plugin{}
-}
-
-func (p *plugin) ID() string { return ModuleID }
-
-func (p *plugin) Weight() int { return 30 }
-
-func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
 	runtime, err := workorchRuntime()
 	if err != nil {
 		return err
 	}
 	repos := runtime.Repositories()
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
-	if runtime.FileRuntimeAdapter() != nil {
-		for _, stepKind := range []string{filecommon.StepKindList, filecommon.StepKindRead, filecommon.StepKindEdit} {
-			if err := runtimeRegistry.Register(stepKind, runtime.FileRuntimeAdapter()); err != nil {
-				return cd.NewError(cd.Unexpected, err.Error())
-			}
-		}
-	}
-	if runtime.ShellRuntimeAdapter() != nil {
-		if err := runtimeRegistry.Register("shell/command", runtime.ShellRuntimeAdapter()); err != nil {
+	eventAdapter := NewEventRuntimeAdapter(runtime.EventHub())
+	for _, stepKind := range []string{filecommon.StepKindList, filecommon.StepKindRead, filecommon.StepKindEdit} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}
-	if runtime.GitRuntimeAdapter() != nil {
-		for _, stepKind := range []string{gitcommon.StepKindRead, gitcommon.StepKindWrite} {
-			if err := runtimeRegistry.Register(stepKind, runtime.GitRuntimeAdapter()); err != nil {
-				return cd.NewError(cd.Unexpected, err.Error())
-			}
-		}
+	if err := runtimeRegistry.Register("shell/command", eventAdapter); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
 	}
-	if runtime.SSHRuntimeAdapter() != nil {
-		if err := runtimeRegistry.Register(sshcommon.StepKindCommand, runtime.SSHRuntimeAdapter()); err != nil {
+	for _, stepKind := range []string{gitcommon.StepKindRead, gitcommon.StepKindWrite} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}
-	if runtime.WebRuntimeAdapter() != nil {
-		for _, stepKind := range []string{webcommon.StepKindSearch, webcommon.StepKindFetch} {
-			if err := runtimeRegistry.Register(stepKind, runtime.WebRuntimeAdapter()); err != nil {
-				return cd.NewError(cd.Unexpected, err.Error())
-			}
+	if err := runtimeRegistry.Register(sshcommon.StepKindCommand, eventAdapter); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	for _, stepKind := range []string{webcommon.StepKindSearch, webcommon.StepKindFetch} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}
-	if runtime.MCPRuntimeAdapter() != nil {
-		for _, stepKind := range []string{mcpcommon.StepKindToolCall, mcpcommon.StepKindResourceRead, mcpcommon.StepKindPromptGet} {
-			if err := runtimeRegistry.Register(stepKind, runtime.MCPRuntimeAdapter()); err != nil {
-				return cd.NewError(cd.Unexpected, err.Error())
-			}
+	for _, stepKind := range []string{mcpcommon.StepKindToolCall, mcpcommon.StepKindResourceRead, mcpcommon.StepKindPromptGet} {
+		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
+			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}
 	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
@@ -88,62 +67,39 @@ func (p *plugin) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
-	if runtime.LLMRuntimeAdapter() != nil {
-		if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, runtime.LLMRuntimeAdapter()); err != nil {
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
+	if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, eventAdapter); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
 	}
-	p.module = New()
-	if setupErr := p.module.Setup(Dependencies{
+	if setupErr := m.Configure(Dependencies{
 		Runtime:               runtimeRegistry,
-		Runs:                  repos.Runs,
 		Steps:                 repos.Steps,
-		Workspaces:            repos.Workspaces,
-		Tickets:               repos.Tickets,
-		Resolutions:           repos.Resolutions,
-		Approvals:             repos.Approvals,
-		Results:               repos.Results,
-		Artifacts:             repos.Artifacts,
 		ToolCalls:             repos.ToolCalls,
 		Patches:               repos.Patches,
 		ValidationResults:     repos.ValidationResults,
 		RuntimeCheckpoints:    repos.RuntimeCheckpoints,
 		ArtifactContinuations: repos.ArtifactContinuations,
-		MemoryItems:           repos.MemoryItems,
-		MemoryRecallTraces:    repos.MemoryRecallTraces,
-		AutoGovernanceTraces:  repos.AutoGovernanceTraces,
 		RuntimePolicy:         runtime.RuntimePolicy(),
 		EventHub:              runtime.EventHub(),
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
-	runtime.SetOrchestratorService(p.module.Service())
 	return nil
 }
 
-func (p *plugin) Run(_ context.Context) *cd.Error {
-	if p == nil || p.module == nil {
+func (m *Module) Run(_ context.Context) *cd.Error {
+	if m == nil {
 		return cd.NewError(cd.IllegalParam, "orchestrator module is not configured")
 	}
-	if err := p.module.Run(); err != nil {
+	if err := m.Start(); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	return nil
 }
 
-func (p *plugin) Teardown(ctx context.Context) {
-	if p == nil || p.module == nil {
-		return
+func (m *Module) Teardown(ctx context.Context) {
+	if m != nil {
+		_ = m.Stop(ctx)
 	}
-	_ = p.module.Teardown(ctx)
-	p.module = nil
-}
-
-func (p *plugin) Service() Service {
-	if p == nil || p.module == nil {
-		return nil
-	}
-	return p.module.Service()
 }
 
 func workorchRuntime() (runtimecommon.Helper, *cd.Error) {

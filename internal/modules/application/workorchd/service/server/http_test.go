@@ -27,12 +27,9 @@ import (
 	engine "github.com/muidea/magicEngine/http"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	appbootstrap "github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
-	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
@@ -42,6 +39,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -50,6 +48,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
 	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
+	_ "github.com/muidea/workorch/internal/modules/kernel/result"
 	_ "github.com/muidea/workorch/internal/modules/kernel/run"
 	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
 	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
@@ -66,6 +65,14 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("condition was not met within %v", timeout)
+}
+
+func publishHTTPTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
+	err := hub.Publish(ctx, envelope)
+	if _, ok := events.ResponseEnvelope(err); ok {
+		return nil
+	}
+	return err
 }
 
 func readSSELines(body io.Reader) (<-chan string, <-chan error) {
@@ -116,6 +123,30 @@ func readSSEEnvelope(t *testing.T, lines <-chan string, readErr <-chan error) (s
 			t.Fatalf("stream closed before event: %v", err)
 		case <-deadline:
 			t.Fatal("timed out waiting for streamed event")
+		}
+	}
+}
+
+func waitWorkspaceCreatedSSE(t *testing.T, lines <-chan string, readErr <-chan error, title string) events.Envelope {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line := <-lines:
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			var envelope events.Envelope
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
+				t.Fatalf("decode stream data %q: %v", line, err)
+			}
+			if envelope.Topic == events.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == title {
+				return envelope
+			}
+		case err := <-readErr:
+			t.Fatalf("stream closed before workspace-created event: %v", err)
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed workspace-created event")
 		}
 	}
 }
@@ -286,6 +317,12 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	}
 	if err := pluginmodule.Setup(context.Background(), hub, routine); err != nil {
 		t.Fatalf("setup runtime modules: %v", err)
+	}
+	if err := plugininitiator.Run(context.Background()); err != nil {
+		t.Fatalf("run runtime initiator: %v", err)
+	}
+	if err := pluginmodule.Run(context.Background()); err != nil {
+		t.Fatalf("run runtime modules: %v", err)
 	}
 
 	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
@@ -1212,26 +1249,9 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 		t.Fatalf("create status = %d, want 201", createResp.StatusCode)
 	}
 
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case line := <-lines:
-			if !strings.HasPrefix(line, "data:") {
-				continue
-			}
-			var envelope events.Envelope
-			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
-				t.Fatalf("decode stream data %q: %v", line, err)
-			}
-			if envelope.Topic != events.TopicWorkspaceCreated || envelope.WorkspaceID == "" || envelope.Payload[events.PayloadKeyTitle] != "streamed workspace" {
-				t.Fatalf("stream envelope = %+v, want workspace-created event for created workspace", envelope)
-			}
-			return
-		case err := <-readErr:
-			t.Fatalf("stream closed before created event: %v", err)
-		case <-deadline:
-			t.Fatal("timed out waiting for streamed workspace-created event")
-		}
+	envelope := waitWorkspaceCreatedSSE(t, lines, readErr, "streamed workspace")
+	if envelope.WorkspaceID == "" {
+		t.Fatalf("stream envelope = %+v, want workspace-created event for created workspace", envelope)
 	}
 }
 
@@ -2691,7 +2711,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	stepID := common.StepID("run-evidence-http/step-1")
 	toolCallID := common.ToolCallID("tool-call-evidence-http")
 
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := runScopedRepos.Workspaces.Create(ctx, &workspacemodel.Workspace{
 		ID:    workspaceID,
 		Title: "run evidence http",
@@ -3138,7 +3158,7 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 
 	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
 	ctx := context.Background()
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	workspaceRepo := runScopedRepos.Workspaces
 	if err := runScopedRepos.Runs.Create(ctx, &runmodel.Run{
 		ID:          "run-workspace-snapshot-http-completed",
@@ -3704,9 +3724,9 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 		t.Fatalf("first replan continuation activation was not attempted")
 	}
 	waitForCondition(t, time.Second, func() bool {
-		state.replanContinuationMu.Lock()
-		defer state.replanContinuationMu.Unlock()
-		_, ok := state.replanContinuationStarted[workspaceID+"/"+runID]
+		state.runContinuations.replanMu.Lock()
+		defer state.runContinuations.replanMu.Unlock()
+		_, ok := state.runContinuations.replanStarted[workspaceID+"/"+runID]
 		return !ok
 	})
 
@@ -3930,14 +3950,14 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 
 	close(release)
 	waitForCondition(t, time.Second, func() bool {
-		state.governanceResumeMu.Lock()
-		_, stillMarked := state.governanceResumeStarted["run-duplicate-resume"]
-		state.governanceResumeMu.Unlock()
+		state.runContinuations.governanceMu.Lock()
+		_, stillMarked := state.runContinuations.governanceStarted["run-duplicate-resume"]
+		state.runContinuations.governanceMu.Unlock()
 		return calls.Load() == 1 && state.metrics.runQueueWaiting.Load() == 0 && !stillMarked
 	})
-	state.governanceResumeMu.Lock()
-	_, stillMarked := state.governanceResumeStarted["run-duplicate-resume"]
-	state.governanceResumeMu.Unlock()
+	state.runContinuations.governanceMu.Lock()
+	_, stillMarked := state.runContinuations.governanceStarted["run-duplicate-resume"]
+	state.runContinuations.governanceMu.Unlock()
 	if stillMarked {
 		t.Fatalf("governance resume mark was not cleared after completion")
 	}
@@ -4036,9 +4056,9 @@ func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *t
 		t.Fatalf("first recovered replan continuation activation was not attempted")
 	}
 	waitForCondition(t, time.Second, func() bool {
-		state.replanContinuationMu.Lock()
-		defer state.replanContinuationMu.Unlock()
-		_, ok := state.replanContinuationStarted[workspaceID+"/"+runID]
+		state.runContinuations.replanMu.Lock()
+		defer state.runContinuations.replanMu.Unlock()
+		_, ok := state.runContinuations.replanStarted[workspaceID+"/"+runID]
 		return !ok
 	})
 
@@ -4521,7 +4541,7 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	ticketID := common.TicketID("ticket-" + runID + "-decision")
 	stepID := common.StepID(runID + "/decision")
 	ctx := context.Background()
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	runRepo := runScopedRepos.Runs
 	stepRepo := runScopedRepos.Steps
 	ticketRepo := runScopedRepos.Tickets
@@ -4588,7 +4608,7 @@ func seedBlockedApprovalRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	approvalID := common.ApprovalID("approval-" + runID + "-approval")
 	stepID := common.StepID(runID + "/approval")
 	ctx := context.Background()
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	runRepo := runScopedRepos.Runs
 	stepRepo := runScopedRepos.Steps
 	approvalRepo := runScopedRepos.Approvals
@@ -4649,7 +4669,7 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 		DeliverableDirectory: "workspaces/" + runID,
 		State:                common.WorkspaceStateActive,
 	}
-	runScopedRepos := appbootstrap.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
 	if err := runScopedRepos.Workspaces.Create(ctx, workspace); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -4791,10 +4811,20 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		resolutionType = decisioncommon.ResolutionTypeRejectCurrentPath
 		resolutionID += "-reject"
 	}
-	if err := session.Bootstrap.Exports().Services.DecisionService.EnsureResolvedTicket(ctx, decisionmodule.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID(resolutionID),
-		TicketID:     common.TicketID(ticketID),
-		Type:         resolutionType,
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicDecisionCommandEnsureResolved,
+		SourceModule: "workorchd/server/http-test",
+		SubjectType:  "decision_ticket",
+		SubjectID:    ticketID,
+		Payload: map[string]any{
+			events.PayloadKeyResolutionID:     resolutionID,
+			events.PayloadKeyBlockingTicketID: ticketID,
+			events.PayloadKeyType:             resolutionType,
+		},
 	}); err != nil {
 		t.Fatalf("EnsureResolvedTicket: %v", err)
 	}
@@ -4830,15 +4860,24 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 		}
 	}()
 
-	cmd := approvalmodule.ResolveApprovalCommand{ApprovalID: common.ApprovalID(approvalID)}
-	if reject {
-		if err := session.Bootstrap.Exports().Services.ApprovalService.EnsureRejected(ctx, cmd); err != nil {
-			t.Fatalf("EnsureRejected: %v", err)
-		}
-		return
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
 	}
-	if err := session.Bootstrap.Exports().Services.ApprovalService.EnsureApproved(ctx, cmd); err != nil {
-		t.Fatalf("EnsureApproved: %v", err)
+	topic := events.TopicApprovalCommandEnsureApproved
+	if reject {
+		topic = events.TopicApprovalCommandEnsureRejected
+	}
+	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        topic,
+		SourceModule: "workorchd/server/http-test",
+		SubjectType:  "approval",
+		SubjectID:    approvalID,
+		Payload: map[string]any{
+			events.PayloadKeyApprovalID: approvalID,
+		},
+	}); err != nil {
+		t.Fatalf("resolve approval: %v", err)
 	}
 }
 

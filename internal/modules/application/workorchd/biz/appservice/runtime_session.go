@@ -12,6 +12,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchrepo"
+	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 type RuntimeSession struct {
@@ -95,9 +97,9 @@ func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSess
 }
 
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
-	runtimePolicy := bootstrap.RuntimePolicyFromConfig(workorchconfig.Config{})
+	runtimePolicy := workorchruntimepolicy.FromConfig(workorchconfig.Config{})
 	if cfg, err := workorchconfig.Current(); err == nil {
-		runtimePolicy = bootstrap.RuntimePolicyFromConfig(cfg)
+		runtimePolicy = workorchruntimepolicy.FromConfig(cfg)
 	}
 	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
 		return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
@@ -119,7 +121,7 @@ func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
 		return bootstrap.NewWithBackendAndRuntimePolicy(
 			cfg.Repository.Backend,
 			cfg.Repository.DataDir,
-			bootstrap.RuntimePolicyFromConfig(cfg),
+			workorchruntimepolicy.FromConfig(cfg),
 		)
 	})
 	if err != nil {
@@ -228,7 +230,7 @@ func (s *RuntimeSession) setRepositoryConfig(backend string, dataRoot string) {
 	if s.repositoryBackend == "" {
 		s.repositoryBackend = "memory"
 	}
-	s.repositoryDataDir = bootstrap.ResolveRepositoryDataRoot(s.repositoryBackend, strings.TrimSpace(dataRoot))
+	s.repositoryDataDir = workorchrepo.ResolveRepositoryDataRoot(s.repositoryBackend, strings.TrimSpace(dataRoot))
 }
 
 func (s *RuntimeSession) RepositoryBackend() string {
@@ -276,17 +278,6 @@ func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {
 			Tickets:               repos.Tickets,
 			Resolutions:           repos.Resolutions,
 			Approvals:             repos.Approvals,
-		},
-		Services: bootstrap.ServiceExports{
-			WorkspaceService:   runtime.WorkspaceService(),
-			SoulService:        runtime.SoulService(),
-			MemoryService:      runtime.MemoryService(),
-			SkillService:       runtime.SkillService(),
-			MCPService:         runtime.MCPService(),
-			EventStreamService: runtime.EventStreamService(),
-			DecisionService:    runtime.DecisionService(),
-			ApprovalService:    runtime.ApprovalService(),
-			RunService:         runtime.RunService(),
 		},
 		Infrastructure: bootstrap.InfrastructureExports{
 			EventHub:   runtime.EventHub(),

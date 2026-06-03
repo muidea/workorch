@@ -5,12 +5,12 @@ import (
 	"sort"
 	"strings"
 
-	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
+	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
+	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -249,13 +249,13 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 	if err != nil {
 		return ServiceConfiguration{}, err
 	}
-	defaultProviderID, providerConfigs, err := llmbiz.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
+	defaultProviderID, providerConfigs, err := llmproviderconfig.LoadProviderConfigs(cfg.LLM.DefaultProvider, cfg.LLMProviderValueSets())
 	if err != nil {
 		return ServiceConfiguration{}, err
 	}
 	providers := make([]LLMProviderConfiguration, 0, len(providerConfigs))
 	for id, providerConfig := range providerConfigs {
-		redacted := llmbiz.RedactedProviderConfig(providerConfig)
+		redacted := llmproviderconfig.RedactedProviderConfig(providerConfig)
 		rawProvider := cfg.LLM.Providers[id]
 		providers = append(providers, LLMProviderConfiguration{
 			ID:                redacted.ID,
@@ -283,7 +283,7 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		}
 		return providers[i].ID < providers[j].ID
 	})
-	defaultWebProviderID, webProviderConfigs, err := webbiz.LoadProviderConfigs(cfg.WebSearch.DefaultProvider, cfg.WebSearchProviderValueSets())
+	defaultWebProviderID, webProviderConfigs, err := webproviderconfig.LoadProviderConfigs(cfg.WebSearch.DefaultProvider, cfg.WebSearchProviderValueSets())
 	if err != nil {
 		return ServiceConfiguration{}, err
 	}
@@ -332,8 +332,8 @@ func ReadServiceConfiguration() (ServiceConfiguration, error) {
 		},
 		Runtime: RuntimeConfiguration{
 			DefaultSoulID:            strings.TrimSpace(cfg.Runtime.DefaultSoulID),
-			MaxRuntimeRepairAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
-			MaxProviderRetryAttempts: orchestratorbiz.NormalizeRuntimePolicy(orchestratorbiz.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
+			MaxRuntimeRepairAttempts: orchestratormodel.NormalizeRuntimePolicy(orchestratormodel.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
+			MaxProviderRetryAttempts: orchestratormodel.NormalizeRuntimePolicy(orchestratormodel.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
 			ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
 			LLMOutput:                runtimeLLMOutputConfiguration(cfg.Runtime.LLMOutput),
 		},
@@ -571,7 +571,7 @@ func UpdateWebSearchConfiguration(cmd UpdateWebSearchConfigurationCommand) (Serv
 	if _, ok := providers[defaultProviderID]; !ok {
 		return ServiceConfiguration{}, fmt.Errorf("%w: defaultProviderId must reference a Web Search provider", common.ErrInvalidArgument)
 	}
-	if _, loaded, err := webbiz.LoadProviderConfigs(defaultProviderID, workorchconfig.Config{
+	if _, loaded, err := webproviderconfig.LoadProviderConfigs(defaultProviderID, workorchconfig.Config{
 		WebSearch: workorchconfig.WebSearchConfig{
 			DefaultProvider: defaultProviderID,
 			Providers:       providers,
@@ -600,7 +600,7 @@ func loadUpdatedProviderConfig(providerID string, provider workorchconfig.LLMPro
 			},
 		},
 	}.LLMProviderValueSets()[providerID]
-	return llmbiz.LoadProviderConfig(providerID, values)
+	return llmproviderconfig.LoadProviderConfig(providerID, values)
 }
 
 func providerSupportsOperation(provider workorchconfig.LLMProviderConfig, operation string) bool {

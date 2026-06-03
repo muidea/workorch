@@ -13,12 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -56,11 +59,10 @@ func CreateWorkspaceWithSession(ctx context.Context, session *RuntimeSession, ti
 }
 
 func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *RuntimeSession, cmd CreateWorkspaceCommand) (ret Workspace, err error) {
-	service, repo, err := workspaceDependenciesFromSession(session)
+	hub, err := workspaceDependenciesFromSession(session)
 	if err != nil {
 		return Workspace{}, err
 	}
-	defer session.CloseOnReturn(ctx, &err)
 
 	for attempt := 0; attempt < 8; attempt++ {
 		id := generateWorkspaceID()
@@ -71,12 +73,12 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 		if err := ensureWorkspaceDirectoryLayout(layout); err != nil {
 			return Workspace{}, err
 		}
-		if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-			WorkspaceID:          id,
-			Title:                cmd.Title,
-			Description:          cmd.Description,
-			DeliverableDirectory: layout.DeliverableDirectory,
-			InternalDirectory:    layout.InternalDirectory,
+		if err := publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
+			events.PayloadKeyWorkspaceID:          string(id),
+			events.PayloadKeyTitle:                cmd.Title,
+			events.PayloadKeyDescription:          cmd.Description,
+			events.PayloadKeyDeliverableDirectory: layout.DeliverableDirectory,
+			events.PayloadKeyInternalDirectory:    layout.InternalDirectory,
 		}); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
@@ -84,11 +86,11 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 			return Workspace{}, err
 		}
 
-		item, err := repo.Get(ctx, id)
+		item, err := readWorkspaceByOwnerCommand(ctx, hub, id)
 		if err != nil {
 			return Workspace{}, err
 		}
-		item, err = applyWorkspaceTemplateOnCreate(ctx, session, repo, item, cmd.TemplateID)
+		item, err = applyWorkspaceTemplateOnCreate(ctx, session, item, cmd.TemplateID)
 		if err != nil {
 			return Workspace{}, err
 		}
@@ -98,11 +100,10 @@ func CreateWorkspaceWithTemplateWithSession(ctx context.Context, session *Runtim
 }
 
 func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
-	service, repo, err := workspaceDependenciesFromSession(session)
+	hub, err := workspaceDependenciesFromSession(session)
 	if err != nil {
 		return Workspace{}, err
 	}
-	defer session.CloseOnReturn(ctx, &err)
 
 	id := common.WorkspaceID(workspaceID)
 	layout, err := resolveWorkspaceDirectoryLayout(session, id, deliverableDirectory)
@@ -112,17 +113,17 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	if err := ensureWorkspaceDirectoryLayout(layout); err != nil {
 		return Workspace{}, err
 	}
-	if err := service.CreateWorkspace(ctx, workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          id,
-		Title:                title,
-		Description:          description,
-		DeliverableDirectory: layout.DeliverableDirectory,
-		InternalDirectory:    layout.InternalDirectory,
+	if err := publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
+		events.PayloadKeyWorkspaceID:          string(id),
+		events.PayloadKeyTitle:                title,
+		events.PayloadKeyDescription:          description,
+		events.PayloadKeyDeliverableDirectory: layout.DeliverableDirectory,
+		events.PayloadKeyInternalDirectory:    layout.InternalDirectory,
 	}); err != nil {
 		return Workspace{}, err
 	}
 
-	item, err := repo.Get(ctx, id)
+	item, err := readWorkspaceByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -145,13 +146,17 @@ func CreateWorkspaceWithTemplateWithBackend(ctx context.Context, backend string,
 	return CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
 }
 
-func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession, workspaces repository.WorkspaceRepository, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
+func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession, item *workspacemodel.Workspace, templateID string) (*workspacemodel.Workspace, error) {
 	templateID = strings.TrimSpace(templateID)
 	if templateID == "" {
 		return item, nil
 	}
-	if workspaces == nil || item == nil {
+	if item == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		return nil, err
 	}
 	templateRepo, err := workspaceTemplateRepositoryFromSession(session)
 	if err != nil {
@@ -183,10 +188,22 @@ func applyWorkspaceTemplateOnCreate(ctx context.Context, session *RuntimeSession
 	if err := ensureWorkspaceManagedConfigs(item.InternalDirectory, item.ContextHints); err != nil {
 		return nil, err
 	}
-	if err := workspaces.Update(ctx, item); err != nil {
+	if err := publishOwnerCommand(ctx, exports.Infrastructure.EventHub, events.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, "", map[string]any{
+		events.PayloadKeyWorkspace: item,
+	}); err != nil {
 		return nil, err
 	}
-	return workspaces.Get(ctx, item.ID)
+	response, err := publishOwnerCommandWithResponse(ctx, exports.Infrastructure.EventHub, events.TopicWorkspaceCommandGet, "workspace", string(item.ID), item.ID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(item.ID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	updated, ok := response.Payload[events.PayloadKeyWorkspace].(*workspacemodel.Workspace)
+	if !ok || updated == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return updated, nil
 }
 
 func workspaceTemplateRequestsGitInit(contextHints map[string]any) bool {
@@ -361,14 +378,16 @@ func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataR
 	if err != nil {
 		return Workspace{}, err
 	}
+	defer session.CloseOnReturn(ctx, &err)
 	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, deliverableDirectory)
 }
 
-func CreateWorkspaceFromEnv(ctx context.Context, title string, description string, deliverableDirectory string) (Workspace, error) {
+func CreateWorkspaceFromEnv(ctx context.Context, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
 	session, err := NewRuntimeSessionFromEnv()
 	if err != nil {
 		return Workspace{}, err
 	}
+	defer session.CloseOnReturn(ctx, &err)
 	return CreateWorkspaceWithSession(ctx, session, title, description, deliverableDirectory)
 }
 
@@ -464,11 +483,7 @@ type DeleteWorkspaceCommand struct {
 }
 
 func DeleteWorkspaceWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, cmd DeleteWorkspaceCommand) (err error) {
-	service, repo, err := workspaceDependenciesFromSession(session)
-	if err != nil {
-		return err
-	}
-	exports, err := session.Exports()
+	hub, err := workspaceDependenciesFromSession(session)
 	if err != nil {
 		return err
 	}
@@ -478,22 +493,26 @@ func DeleteWorkspaceWithSession(ctx context.Context, session *RuntimeSession, wo
 	if id == "" {
 		return common.ErrInvalidArgument
 	}
-	workspace, err := repo.Get(ctx, id)
+	workspace, err := readWorkspaceByOwnerCommand(ctx, hub, id)
 	if err != nil {
 		return err
 	}
 	if cmd.Purge {
-		if err := purgeWorkspaceRecords(ctx, exports.Repositories, id); err != nil {
+		if err := purgeWorkspaceRecordsWithEventHub(ctx, hub, id); err != nil {
 			return err
 		}
 	}
-	if err := service.DeleteWorkspace(ctx, id); err != nil {
+	if err := publishOwnerCommand(ctx, hub, events.TopicWorkspaceCommandDelete, "workspace", string(id), id, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(id),
+	}); err != nil {
 		return err
 	}
 	if !cmd.Purge {
 		return nil
 	}
-	if err := purgeWorkspaceEventRecords(ctx, exports.Repositories, id); err != nil {
+	if err := publishOwnerCommand(ctx, hub, events.TopicEventStreamCommandPurgeWorkspace, "workspace", string(id), id, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(id),
+	}); err != nil {
 		return err
 	}
 	return purgeWorkspaceDirectories(session, id, workspace.DeliverableDirectory, workspace.InternalDirectory)
@@ -515,224 +534,229 @@ func DeleteWorkspaceFromEnv(ctx context.Context, workspaceID string, cmd DeleteW
 	return DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
 }
 
-func workspaceDependenciesFromSession(session *RuntimeSession) (workspacemodule.Service, repository.WorkspaceRepository, error) {
+func workspaceDependenciesFromSession(session *RuntimeSession) (events.Hub, error) {
 	exports, err := session.Exports()
-	if err != nil {
-		return nil, nil, err
-	}
-	if exports.Services.WorkspaceService == nil || exports.Repositories.Workspaces == nil {
-		return nil, nil, common.ErrInvalidArgument
-	}
-	return exports.Services.WorkspaceService, exports.Repositories.Workspaces, nil
-}
-
-func purgeWorkspaceRecords(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) error {
-	if repos.Goals != nil {
-		items, err := repos.Goals.ListByWorkspaceID(ctx, workspaceID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.Goals.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.DoDs != nil {
-		items, err := repos.DoDs.ListByWorkspaceID(ctx, workspaceID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.DoDs.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.MemoryItems != nil {
-		items, err := repos.MemoryItems.ListByWorkspaceID(ctx, workspaceID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.MemoryItems.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	runIDs, err := workspaceRunIDs(ctx, repos, workspaceID)
-	if err != nil {
-		return err
-	}
-	for _, runID := range runIDs {
-		if err := purgeRunRecords(ctx, repos, runID); err != nil {
-			return err
-		}
-	}
-	if repos.Tickets != nil {
-		tickets, err := repos.Tickets.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, item := range tickets {
-			if item.WorkspaceID != workspaceID {
-				continue
-			}
-			if repos.Resolutions != nil {
-				if err := ignoreNotFound(repos.Resolutions.DeleteByTicketID(ctx, item.ID)); err != nil {
-					return err
-				}
-			}
-			if err := ignoreNotFound(repos.Tickets.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.Approvals != nil {
-		items, err := repos.Approvals.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if item.WorkspaceID != workspaceID {
-				continue
-			}
-			if err := ignoreNotFound(repos.Approvals.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.Results != nil {
-		items, err := repos.Results.ListByWorkspace(ctx, workspaceID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.Results.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.Artifacts != nil {
-		items, err := repos.Artifacts.ListByWorkspace(ctx, workspaceID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.Artifacts.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.EventRecords != nil {
-		if err := purgeWorkspaceEventRecords(ctx, repos, workspaceID); err != nil {
-			return err
-		}
-	}
-	for _, runID := range runIDs {
-		if repos.Runs == nil {
-			continue
-		}
-		if err := ignoreNotFound(repos.Runs.Delete(ctx, runID)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func purgeWorkspaceEventRecords(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) error {
-	if repos.EventRecords == nil {
-		return nil
-	}
-	items, err := repos.EventRecords.List(ctx, repository.EventRecordQuery{WorkspaceID: workspaceID})
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		if item.WorkspaceID != workspaceID {
-			continue
-		}
-		if err := ignoreNotFound(repos.EventRecords.Delete(ctx, item.ID)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func workspaceRunIDs(ctx context.Context, repos bootstrap.RepositoryExports, workspaceID common.WorkspaceID) ([]common.RunID, error) {
-	if repos.Runs == nil {
-		return nil, nil
-	}
-	runs, err := repos.Runs.List(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if exports.Infrastructure.EventHub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return exports.Infrastructure.EventHub, nil
+}
+
+func purgeWorkspaceRecordsWithEventHub(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+	if hub == nil || workspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	runIDs, err := workspaceRunIDsByEventHub(ctx, hub, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, runID := range runIDs {
+		if err := publishOwnerCommand(ctx, hub, events.TopicOrchestratorCommandPurgeRun, "run", string(runID), workspaceID, runID, map[string]any{
+			events.PayloadKeyRunID: string(runID),
+		}); err != nil {
+			return err
+		}
+	}
+	if err := purgeWorkspaceMemoryItems(ctx, hub, workspaceID); err != nil {
+		return err
+	}
+	if err := purgeWorkspaceDecisionTickets(ctx, hub, workspaceID); err != nil {
+		return err
+	}
+	if err := purgeWorkspaceApprovals(ctx, hub, workspaceID); err != nil {
+		return err
+	}
+	if err := purgeWorkspaceResultsAndArtifacts(ctx, hub, workspaceID); err != nil {
+		return err
+	}
+	for _, runID := range runIDs {
+		if err := publishOwnerCommand(ctx, hub, events.TopicRunCommandDelete, "run", string(runID), workspaceID, runID, map[string]any{
+			events.PayloadKeyRunID: string(runID),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func workspaceRunIDsByEventHub(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]common.RunID, error) {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	runs, ok := response.Payload[events.PayloadKeyRuns].([]*runmodel.Run)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
 	ret := make([]common.RunID, 0, len(runs))
 	for _, item := range runs {
-		if item.WorkspaceID == workspaceID {
-			ret = append(ret, item.ID)
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
 		}
+		ret = append(ret, item.ID)
 	}
 	return ret, nil
 }
 
-func purgeRunRecords(ctx context.Context, repos bootstrap.RepositoryExports, runID common.RunID) error {
-	if repos.Steps != nil {
-		items, err := repos.Steps.ListByRun(ctx, runID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.Steps.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
+func purgeWorkspaceMemoryItems(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return err
 	}
-	if repos.ToolCalls != nil {
-		items, err := repos.ToolCalls.ListByRun(ctx, runID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.ToolCalls.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
+	items, ok := response.Payload[events.PayloadKeyMemoryItems].([]*memorymodel.MemoryItem)
+	if !ok {
+		return common.ErrInvalidArgument
 	}
-	if repos.Patches != nil {
-		items, err := repos.Patches.ListByRun(ctx, runID)
-		if err != nil {
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := publishOwnerCommand(ctx, hub, events.TopicMemoryCommandDelete, "memory", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyMemoryID: string(item.ID),
+		}); err != nil {
 			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.Patches.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.ValidationResults != nil {
-		items, err := repos.ValidationResults.ListByRun(ctx, runID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.ValidationResults.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
-		}
-	}
-	if repos.RuntimeCheckpoints != nil {
-		items, err := repos.RuntimeCheckpoints.ListByRun(ctx, runID)
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := ignoreNotFound(repos.RuntimeCheckpoints.Delete(ctx, item.ID)); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
+}
+
+func purgeWorkspaceDecisionTickets(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	items, ok := response.Payload[events.PayloadKeyTickets].([]*decisionmodel.Ticket)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		_ = publishOwnerCommand(ctx, hub, events.TopicDecisionCommandDeleteResolution, "decision_ticket", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyBlockingTicketID: string(item.ID),
+		})
+		if err := publishOwnerCommand(ctx, hub, events.TopicDecisionCommandDeleteTicket, "decision_ticket", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyBlockingTicketID: string(item.ID),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func purgeWorkspaceApprovals(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+	response, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	items, ok := response.Payload[events.PayloadKeyItems].([]*approvalmodel.Approval)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range items {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := publishOwnerCommand(ctx, hub, events.TopicApprovalCommandDelete, "approval", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyApprovalID: string(item.ID),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func purgeWorkspaceResultsAndArtifacts(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) error {
+	artifactResponse, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	artifacts, ok := artifactResponse.Payload[events.PayloadKeyItems].([]*resultmodel.Artifact)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range artifacts {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := publishOwnerCommand(ctx, hub, events.TopicArtifactCommandDelete, "artifact", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyArtifactID: string(item.ID),
+		}); err != nil {
+			return err
+		}
+	}
+	resultResponse, err := publishOwnerCommandWithResponse(ctx, hub, events.TopicResultCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: string(workspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	results, ok := resultResponse.Payload[events.PayloadKeyItems].([]*resultmodel.Result)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	for _, item := range results {
+		if item == nil || item.WorkspaceID != workspaceID {
+			continue
+		}
+		if err := publishOwnerCommand(ctx, hub, events.TopicResultCommandDelete, "result", string(item.ID), workspaceID, item.RunID, map[string]any{
+			events.PayloadKeyResultID: string(item.ID),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func publishOwnerCommand(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) error {
+	_, err := publishOwnerCommandWithResponse(ctx, hub, topic, subjectType, subjectID, workspaceID, runID, payload)
+	return err
+}
+
+func publishMemoryRecallTraceUpsert(ctx context.Context, hub events.Hub, trace *memorymodel.MemoryRecallTrace) error {
+	if trace == nil {
+		return common.ErrInvalidArgument
+	}
+	return publishOwnerCommand(ctx, hub, events.TopicMemoryRecallTraceCommandUpsert, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, map[string]any{
+		events.PayloadKeyMemoryRecallTrace: trace,
+		events.PayloadKeyTraceID:           string(trace.ID),
+	})
+}
+
+func publishOwnerCommandWithResponse(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) (events.Envelope, error) {
+	if hub == nil || topic == "" {
+		return events.Envelope{}, common.ErrInvalidArgument
+	}
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:        topic,
+		SourceModule: "application/workorchd/appservice",
+		SubjectType:  subjectType,
+		SubjectID:    subjectID,
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		Payload:      payload,
+	})
+	if response, ok := events.ResponseEnvelope(err); ok {
+		return response, nil
+	}
+	if err != nil {
+		return events.Envelope{}, err
+	}
+	return events.Envelope{}, common.ErrInvalidArgument
 }
 
 func purgeWorkspaceDirectories(session *RuntimeSession, workspaceID common.WorkspaceID, deliverableDirectory string, internalDirectory string) error {
@@ -796,13 +820,6 @@ func safeWorkspaceRemovalPath(session *RuntimeSession, workspaceID common.Worksp
 		}
 	}
 	return abs, nil
-}
-
-func ignoreNotFound(err error) error {
-	if errors.Is(err, common.ErrNotFound) {
-		return nil
-	}
-	return err
 }
 
 func mapWorkspace(item *workspacemodel.Workspace) Workspace {

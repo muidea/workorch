@@ -14,8 +14,8 @@ func New() *Module { return &Module{} }
 
 func (m *Module) ID() string { return ModuleID }
 
-func (m *Module) Setup() error { return nil }
+func (m *Module) Configure() error { return nil }
 
-func (m *Module) Run() error { return nil }
+func (m *Module) Start() error { return nil }
 
-func (m *Module) Teardown(_ context.Context) error { return nil }
+func (m *Module) Stop(_ context.Context) error { return nil }

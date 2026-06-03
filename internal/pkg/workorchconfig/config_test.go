@@ -178,9 +178,13 @@ maxRepeatedSamePrompt = 1
 	}
 }
 
-func TestGitRuntimeWriteEnabledDefaultsToTrue(t *testing.T) {
-	if !GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
-		t.Fatal("git runtime write should default to enabled")
+func TestGitRuntimeWriteEnabledRequiresExplicitOptIn(t *testing.T) {
+	if GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
+		t.Fatal("git runtime write should require explicit opt-in")
+	}
+	enabled := true
+	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &enabled}) {
+		t.Fatal("git runtime write should respect explicit true")
 	}
 	disabled := false
 	if GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &disabled}) {

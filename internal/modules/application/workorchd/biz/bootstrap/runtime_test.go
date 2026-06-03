@@ -14,6 +14,7 @@ import (
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
+	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
@@ -28,7 +29,6 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -72,18 +72,90 @@ func (a echoRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runtim
 
 func (l testLifecycle) ID() string { return l.id }
 
-func (l testLifecycle) Run() error {
+func (l testLifecycle) Start() error {
 	if l.runSeq != nil {
 		*l.runSeq = append(*l.runSeq, l.id)
 	}
 	return l.runErr
 }
 
-func (l testLifecycle) Teardown(context.Context) error {
+func (l testLifecycle) Stop(context.Context) error {
 	if l.teardownSeq != nil {
 		*l.teardownSeq = append(*l.teardownSeq, l.id)
 	}
 	return l.teardownErr
+}
+
+func publishTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
+	err := hub.Publish(ctx, envelope)
+	if _, ok := events.ResponseEnvelope(err); ok {
+		return nil
+	}
+	return err
+}
+
+func createTestWorkspace(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, title string, internalDirectory string) error {
+	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicWorkspaceCommandCreate,
+		SourceModule: "workorch/bootstrap-test",
+		SubjectType:  "workspace",
+		SubjectID:    string(workspaceID),
+		WorkspaceID:  string(workspaceID),
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:          string(workspaceID),
+			events.PayloadKeyTitle:                title,
+			events.PayloadKeyDeliverableDirectory: "workspaces/" + string(workspaceID),
+			events.PayloadKeyInternalDirectory:    internalDirectory,
+		},
+	})
+}
+
+func createTestRun(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID) error {
+	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicRunCommandEnsure,
+		SourceModule: "workorch/bootstrap-test",
+		SubjectType:  "run",
+		SubjectID:    string(runID),
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: string(workspaceID),
+			events.PayloadKeyRunID:       string(runID),
+		},
+	})
+}
+
+func createTestApproval(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, approvalID common.ApprovalID) error {
+	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicApprovalCommandEnsure,
+		SourceModule: "workorch/bootstrap-test",
+		SubjectType:  "approval",
+		SubjectID:    string(approvalID),
+		WorkspaceID:  string(workspaceID),
+		RunID:        string(runID),
+		StepID:       string(stepID),
+		Payload: map[string]any{
+			events.PayloadKeyApprovalID:  string(approvalID),
+			events.PayloadKeyWorkspaceID: string(workspaceID),
+			events.PayloadKeyRunID:       string(runID),
+			events.PayloadKeyStepID:      string(stepID),
+			events.PayloadKeyReason:      "test approval gate",
+		},
+	})
+}
+
+func blockTestRunOnApproval(ctx context.Context, exports Exports, runID common.RunID, approvalID common.ApprovalID) error {
+	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
+		Topic:        events.TopicOrchestratorCommandBlockApproval,
+		SourceModule: "workorch/bootstrap-test",
+		SubjectType:  "run",
+		SubjectID:    string(runID),
+		RunID:        string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyRunID:              string(runID),
+			events.PayloadKeyBlockingApprovalID: string(approvalID),
+		},
+	})
 }
 
 func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
@@ -93,11 +165,7 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 	}
 	exports := rt.Exports()
 
-	if err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          common.WorkspaceID("ws-bootstrap-memory"),
-		Title:                "bootstrap memory backend",
-		DeliverableDirectory: "workspaces/ws-bootstrap-memory",
-	}); err != nil {
+	if err := createTestWorkspace(context.Background(), exports, "ws-bootstrap-memory", "bootstrap memory backend", ""); err != nil {
 		t.Fatalf("create workspace with memory backend: %v", err)
 	}
 
@@ -111,15 +179,27 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 }
 
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
-	registry, err := buildRuntimeAdapterRegistry(
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
-		echoRuntimeAdapter{},
+	hub := events.NewMemoryHub()
+	executor := runtimeevent.NewExecutor("test/block", hub, echoRuntimeAdapter{},
+		filemodule.StepKindList,
+		filemodule.StepKindRead,
+		filemodule.StepKindEdit,
+		gitmodule.StepKindRead,
+		gitmodule.StepKindWrite,
+		shellmodule.StepKindCommand,
+		sshmodule.StepKindCommand,
+		webmodule.StepKindSearch,
+		webmodule.StepKindFetch,
+		mcpblockmodule.StepKindToolCall,
+		mcpblockmodule.StepKindResourceRead,
+		mcpblockmodule.StepKindPromptGet,
+		llmmodule.StepKindWorkspaceExecution,
 	)
+	if err := executor.Run(); err != nil {
+		t.Fatalf("run echo executor: %v", err)
+	}
+	defer executor.Teardown()
+	registry, err := buildRuntimeAdapterRegistry(hub)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
 	}
@@ -191,17 +271,51 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 	}
 }
 
+func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
+	rt := NewWithBackend("file", t.TempDir())
+	exports := rt.Exports()
+	if err := createTestWorkspace(context.Background(), exports, "ws-command", "command", ""); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := createTestRun(context.Background(), exports, "ws-command", "run-command"); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(context.Background(), &runmodel.Step{
+		ID:     "run-command/approval",
+		RunID:  "run-command",
+		Kind:   "llm/workspace_execution",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_approval"},
+	}); err != nil {
+		t.Fatalf("CreateStep: %v", err)
+	}
+	if err := createTestApproval(context.Background(), exports, "ws-command", "run-command", "run-command/approval", "approval-command"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	if err := blockTestRunOnApproval(context.Background(), exports, "run-command", "approval-command"); err != nil {
+		t.Fatalf("BlockOnApproval: %v", err)
+	}
+	err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
+		Topic: events.TopicOrchestratorCommandBlockApproval,
+		Payload: map[string]any{
+			events.PayloadKeyRunID:              "run-missing",
+			events.PayloadKeyBlockingApprovalID: "approval-missing",
+		},
+	})
+	if err == nil {
+		t.Fatalf("Publish returned nil, want orchestrator handler error for missing run")
+	}
+	if _, ok := events.ResponseEnvelope(err); ok {
+		t.Fatalf("Publish returned response for missing run, want handler error")
+	}
+}
+
 func TestNewWithBackendFilePersistsWorkspaceData(t *testing.T) {
 	dataDir := t.TempDir()
 	rt := NewWithBackend("file", dataDir)
 	exports := rt.Exports()
 
-	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          common.WorkspaceID("ws-bootstrap-file"),
-		Title:                "bootstrap file backend",
-		DeliverableDirectory: "workspaces/ws-bootstrap-file",
-		InternalDirectory:    filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-file"),
-	})
+	err := createTestWorkspace(context.Background(), exports, "ws-bootstrap-file", "bootstrap file backend", filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-file"))
 	if err != nil {
 		t.Fatalf("create workspace with file backend: %v", err)
 	}
@@ -377,10 +491,6 @@ func TestArtifactStorageRepositoryCachesRunArtifactDirectory(t *testing.T) {
 	dataDir := t.TempDir()
 	rt := NewWithBackend("file", dataDir)
 	exports := rt.Exports()
-	artifactRepo, ok := exports.Repositories.Artifacts.(*artifactStorageRepository)
-	if !ok {
-		t.Fatalf("artifact repository = %T, want artifactStorageRepository", exports.Repositories.Artifacts)
-	}
 	for _, item := range []*resultmodel.Artifact{
 		{
 			ID:           common.ArtifactID("run-bootstrap-artifact-cache/artifact/result-summary"),
@@ -403,14 +513,15 @@ func TestArtifactStorageRepositoryCachesRunArtifactDirectory(t *testing.T) {
 			State:        common.ArtifactStateAvailable,
 		},
 	} {
-		if err := artifactRepo.Create(ctx, item); err != nil {
+		if err := exports.Repositories.Artifacts.Create(ctx, item); err != nil {
 			t.Fatalf("create artifact %s: %v", item.ID, err)
 		}
 	}
-	artifactRepo.dirCacheMu.Lock()
-	defer artifactRepo.dirCacheMu.Unlock()
-	if len(artifactRepo.dirCache) != 1 {
-		t.Fatalf("artifact dir cache = %+v, want one cached run artifact directory", artifactRepo.dirCache)
+	artifactDir := filepath.Join(dataDir, "internal", "workspaces", "ws-bootstrap-artifact-cache", "artifacts", "run-bootstrap-artifact-cache")
+	for _, fileName := range []string{"result-summary.txt", "workspace-deliverable-manifest.txt"} {
+		if _, err := os.Stat(filepath.Join(artifactDir, fileName)); err != nil {
+			t.Fatalf("expected stored artifact %s: %v", fileName, err)
+		}
 	}
 }
 
@@ -482,7 +593,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read workspace index: %v", err)
 	}
-	var initialIndex workspaceIndex
+	var initialIndex testWorkspaceIndex
 	if err := json.Unmarshal(indexPayload, &initialIndex); err != nil {
 		t.Fatalf("decode workspace index: %v", err)
 	}
@@ -511,7 +622,7 @@ func TestNewWithBackendFilePartitionsWorkspaceScopedRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read updated workspace index: %v", err)
 	}
-	var updatedIndex workspaceIndex
+	var updatedIndex testWorkspaceIndex
 	if err := json.Unmarshal(indexPayload, &updatedIndex); err != nil {
 		t.Fatalf("decode updated workspace index: %v", err)
 	}
@@ -603,7 +714,7 @@ func assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t *testing.T, workspa
 	if err != nil {
 		t.Fatalf("read workspace soul bindings: %v", err)
 	}
-	var bindings workspaceSoulBindingsFile
+	var bindings testWorkspaceSoulBindingsFile
 	if err := json.Unmarshal(bindingsPayload, &bindings); err != nil {
 		t.Fatalf("decode workspace soul bindings: %v", err)
 	}
@@ -622,7 +733,23 @@ func assertWorkspaceSoulBindingsStoredOutsideWorkspaceJSON(t *testing.T, workspa
 	}
 }
 
-func workspaceIndexContains(index workspaceIndex, workspaceID common.WorkspaceID, state common.WorkspaceState, activeRunID common.RunID) bool {
+type testWorkspaceSoulBindingsFile struct {
+	DefaultSoulID common.SoulID            `json:"defaultSoulId,omitempty"`
+	Bindings      map[string]common.SoulID `json:"bindings,omitempty"`
+}
+
+type testWorkspaceIndex struct {
+	Workspaces []testWorkspaceIndexEntry `json:"workspaces"`
+}
+
+type testWorkspaceIndexEntry struct {
+	WorkspaceID  common.WorkspaceID    `json:"workspaceId"`
+	InternalRoot string                `json:"internalRoot"`
+	State        common.WorkspaceState `json:"state"`
+	ActiveRunID  common.RunID          `json:"activeRunId,omitempty"`
+}
+
+func workspaceIndexContains(index testWorkspaceIndex, workspaceID common.WorkspaceID, state common.WorkspaceState, activeRunID common.RunID) bool {
 	for _, item := range index.Workspaces {
 		if item.WorkspaceID == workspaceID && item.State == state && item.ActiveRunID == activeRunID && item.InternalRoot == filepath.ToSlash(filepath.Join("internal", "workspaces", string(workspaceID))) {
 			return true
@@ -827,12 +954,7 @@ func TestNewWithBackendFileUsesDefaultDataRootWhenUnset(t *testing.T) {
 	rt := NewWithBackend("file", "")
 	exports := rt.Exports()
 
-	err := exports.Services.WorkspaceService.CreateWorkspace(context.Background(), workspacemodule.CreateWorkspaceCommand{
-		WorkspaceID:          common.WorkspaceID("ws-bootstrap-file-default"),
-		Title:                "bootstrap file backend default data root",
-		DeliverableDirectory: "workspaces/ws-bootstrap-file-default",
-		InternalDirectory:    filepath.Join(defaultDataDir, "internal", "workspaces", "ws-bootstrap-file-default"),
-	})
+	err := createTestWorkspace(context.Background(), exports, "ws-bootstrap-file-default", "bootstrap file backend default data root", filepath.Join(defaultDataDir, "internal", "workspaces", "ws-bootstrap-file-default"))
 	if err != nil {
 		t.Fatalf("create workspace with default file backend: %v", err)
 	}
@@ -853,7 +975,7 @@ func TestRuntimeModuleLifecycleRunsAndShutsDownInOrder(t *testing.T) {
 		t.Fatalf("new lifecycle: %v", err)
 	}
 
-	if err := lifecycle.Run(); err != nil {
+	if err := lifecycle.Start(); err != nil {
 		t.Fatalf("run lifecycle: %v", err)
 	}
 	if got, want := runSeq, []string{"first", "second"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
@@ -876,7 +998,7 @@ func TestRuntimeModuleLifecycleReturnsRunAndShutdownErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new lifecycle: %v", err)
 	}
-	if err := runtimeLifecycle.Run(); err == nil || !strings.Contains(err.Error(), errRun.Error()) {
+	if err := runtimeLifecycle.Start(); err == nil || !strings.Contains(err.Error(), errRun.Error()) {
 		t.Fatalf("run err = %v, want %v", err, errRun)
 	}
 

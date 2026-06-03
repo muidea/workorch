@@ -656,10 +656,7 @@ type serverState struct {
 	runStatusNotifyMu               sync.Mutex
 	runStatusNotify                 chan struct{}
 	eventUnsubscribes               []func()
-	replanContinuationMu            sync.Mutex
-	replanContinuationStarted       map[string]struct{}
-	governanceResumeMu              sync.Mutex
-	governanceResumeStarted         map[string]struct{}
+	runContinuations                *runContinuationScheduler
 	runSnapshotCacheMu              sync.Mutex
 	runSnapshotCache                map[string]cachedRunSnapshot
 	runSnapshotInflight             map[string]*runSnapshotInflight
@@ -1074,9 +1071,8 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		backgroundCtx:                   backgroundCtx,
 		backgroundCancel:                backgroundCancel,
 		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
-		replanContinuationStarted:       map[string]struct{}{},
-		governanceResumeStarted:         map[string]struct{}{},
 	}
+	state.runContinuations = newRunContinuationScheduler(state)
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
 	state.registerEventReplayRecorder()
@@ -2034,74 +2030,19 @@ func (s *serverState) scheduleStartupRecovery() {
 	if s == nil {
 		return
 	}
-	s.scheduleBackground("startup_recovery", func(ctx context.Context) {
-		timer := time.NewTimer(500 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			return
-		}
-		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, s.eventHub)); err != nil {
-			slog.Warn("workorch startup run recovery failed", "err", err)
-		}
-	})
+	s.runContinuations.scheduleStartupRecovery()
 }
 
 func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
-	if s == nil {
+	if s == nil || s.runContinuations == nil {
 		return nil
 	}
-	var recovered []appservice.Run
-	var err error
-	if s.sharedSession != nil {
-		err = s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var recoverErr error
-			recovered, recoverErr = appservice.RecoverStuckRunningRunsWithSession(ctx, session)
-			return recoverErr
-		})
-	} else {
-		recovered, err = appservice.RecoverStuckRunningRunsWithBackend(ctx, s.config.Backend, s.config.DataRoot)
-	}
-	if err != nil {
-		return err
-	}
-	if len(recovered) > 0 {
-		runIDs := make([]string, 0, len(recovered))
-		for _, item := range recovered {
-			runIDs = append(runIDs, item.ID)
-		}
-		slog.Warn("workorch recovered stuck running runs", "runIDs", runIDs)
-	}
-	s.recoverReplanContinuations(ctx)
-	return nil
+	return s.runContinuations.recoverStuckRunningRuns(ctx)
 }
 
 func (s *serverState) recoverReplanContinuations(ctx context.Context) {
-	if s == nil || s.listWorkspaces == nil || s.listRuns == nil {
+	if s == nil || s.runContinuations == nil {
 		return
 	}
-	workspaces, err := s.listWorkspaces(ctx, s.config.Backend, s.config.DataRoot)
-	if err != nil {
-		slog.Warn("workorch replan continuation workspace scan failed", "err", err)
-		return
-	}
-	for _, workspace := range workspaces {
-		if strings.TrimSpace(workspace.ID) == "" ||
-			strings.TrimSpace(workspace.ActiveRunID) != "" ||
-			workspace.State != string(common.WorkspaceStateFailed) {
-			continue
-		}
-		runs, err := s.listRuns(ctx, s.config.Backend, s.config.DataRoot, workspace.ID)
-		if err != nil {
-			slog.Warn("workorch replan continuation run scan failed", "workspaceID", workspace.ID, "err", err)
-			continue
-		}
-		for _, run := range runs {
-			if run.WorkspaceID != workspace.ID || run.State != string(common.RunStateSuperseded) {
-				continue
-			}
-			s.scheduleReplanContinuationIfNeeded(ctx, workspace.ID, run.ID, run.Priority)
-		}
-	}
+	s.runContinuations.recoverReplanContinuations(ctx)
 }

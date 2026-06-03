@@ -594,7 +594,7 @@ func GitRuntimeEnabled(cfg GitRuntimeConfig) bool {
 }
 
 func GitRuntimeWriteEnabled(cfg GitRuntimeConfig) bool {
-	return cfg.WriteEnabled == nil || *cfg.WriteEnabled
+	return cfg.WriteEnabled != nil && *cfg.WriteEnabled
 }
 
 func intString(value int) string {

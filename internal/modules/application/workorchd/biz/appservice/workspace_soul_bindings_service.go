@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	soulmodule "github.com/muidea/workorch/internal/modules/kernel/soul"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const (
@@ -58,16 +58,16 @@ type SoulRouting struct {
 }
 
 func ReadWorkspaceSoulBindingsWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret WorkspaceSoulBindings, err error) {
-	_, repo, err := workspaceDependenciesFromSession(session)
+	exports, err := session.Exports()
 	if err != nil {
 		return WorkspaceSoulBindings{}, err
+	}
+	if exports.Infrastructure.EventHub == nil {
+		return WorkspaceSoulBindings{}, common.ErrInvalidArgument
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := repo.Get(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)))
-	if err != nil {
-		return WorkspaceSoulBindings{}, err
-	}
+	item, err := readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	return workspaceSoulBindingsFromModel(item.ID, item.DefaultSoulID, item.SoulBindings), nil
 }
 
@@ -84,12 +84,12 @@ func UpdateWorkspaceSoulBindingsWithSession(ctx context.Context, session *Runtim
 	if err != nil {
 		return WorkspaceSoulBindings{}, err
 	}
-	if exports.Repositories.Workspaces == nil || exports.Repositories.Souls == nil {
+	if exports.Infrastructure.EventHub == nil {
 		return WorkspaceSoulBindings{}, common.ErrInvalidArgument
 	}
 	defer session.CloseOnReturn(ctx, &err)
 
-	item, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)))
+	item, err := readWorkspaceByOwnerCommand(ctx, exports.Infrastructure.EventHub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
 	if err != nil {
 		return WorkspaceSoulBindings{}, err
 	}
@@ -99,7 +99,7 @@ func UpdateWorkspaceSoulBindingsWithSession(ctx context.Context, session *Runtim
 		return WorkspaceSoulBindings{}, err
 	}
 	if defaultSoulID != "" {
-		if _, err := exports.Repositories.Souls.Get(ctx, defaultSoulID); err != nil {
+		if _, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, defaultSoulID); err != nil {
 			return WorkspaceSoulBindings{}, err
 		}
 	}
@@ -107,14 +107,16 @@ func UpdateWorkspaceSoulBindingsWithSession(ctx context.Context, session *Runtim
 		if soulID == "" {
 			continue
 		}
-		if _, err := exports.Repositories.Souls.Get(ctx, soulID); err != nil {
+		if _, err := readSoulByOwnerCommand(ctx, exports.Infrastructure.EventHub, soulID); err != nil {
 			return WorkspaceSoulBindings{}, err
 		}
 	}
 
 	item.DefaultSoulID = defaultSoulID
 	item.SoulBindings = bindings
-	if err := exports.Repositories.Workspaces.Update(ctx, item); err != nil {
+	if err := publishOwnerCommand(ctx, exports.Infrastructure.EventHub, events.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, map[string]any{
+		events.PayloadKeyWorkspace: item,
+	}); err != nil {
 		return WorkspaceSoulBindings{}, err
 	}
 	return workspaceSoulBindingsFromModel(item.ID, item.DefaultSoulID, item.SoulBindings), nil
@@ -182,24 +184,24 @@ func isSoulBindingStage(stage string) bool {
 	return false
 }
 
-func validateSoulCapabilitySelection(ctx context.Context, service soulmodule.Service, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
+func validateSoulCapabilitySelection(ctx context.Context, hub events.Hub, soulID common.SoulID, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
 	if soulID == "" {
 		return nil
 	}
-	if service == nil {
+	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	return service.ValidateCapabilitySelection(ctx, soulmodule.ValidateCapabilitySelectionCommand{
-		SoulID:               soulID,
-		SkillRefs:            skillIDs,
-		MCPServerRefs:        mcpServerIDs,
-		CapabilityRefs:       capabilityIDs,
-		CapabilityCategories: capabilityCategories,
-		ToolKinds:            toolKinds,
+	return publishOwnerCommand(ctx, hub, events.TopicSoulCommandValidateCapability, "soul", string(soulID), "", "", map[string]any{
+		events.PayloadKeySoulID:               string(soulID),
+		events.PayloadKeySkillRefs:            cloneStrings(skillIDs),
+		events.PayloadKeyMCPServerRefs:        cloneStrings(mcpServerIDs),
+		events.PayloadKeyCapabilityRefs:       cloneStrings(capabilityIDs),
+		events.PayloadKeyCapabilityCategories: cloneStrings(capabilityCategories),
+		events.PayloadKeyToolKinds:            cloneStrings(toolKinds),
 	})
 }
 
-func validateSoulRoutingCapabilitySelection(ctx context.Context, service soulmodule.Service, routing SoulRouting, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
+func validateSoulRoutingCapabilitySelection(ctx context.Context, hub events.Hub, routing SoulRouting, skillIDs []string, mcpServerIDs []string, capabilityIDs []string, capabilityCategories []string, toolKinds []string) error {
 	if routing.Status != "resolved" {
 		return nil
 	}
@@ -208,5 +210,5 @@ func validateSoulRoutingCapabilitySelection(ctx context.Context, service soulmod
 	if soulID == "" {
 		soulID = common.SoulID(strings.TrimSpace(routing.EffectiveDefaultSoulID))
 	}
-	return validateSoulCapabilitySelection(ctx, service, soulID, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories, toolKinds)
+	return validateSoulCapabilitySelection(ctx, hub, soulID, skillIDs, mcpServerIDs, capabilityIDs, capabilityCategories, toolKinds)
 }

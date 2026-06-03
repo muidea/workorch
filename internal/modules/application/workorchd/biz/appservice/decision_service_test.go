@@ -14,9 +14,8 @@ import (
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
-	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
-	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -85,22 +84,31 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 
 	tickets := newCountingAppDecisionTicketRepository()
 	resolutions := newCountingAppDecisionResolutionRepository()
+	eventHub := events.NewMemoryHub()
 	decisionModule := decisionmodule.New()
-	if err := decisionModule.Setup(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions}); err != nil {
+	if err := decisionModule.Configure(decisionmodule.Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: eventHub}); err != nil {
 		t.Fatalf("setup decision module: %v", err)
 	}
-	workspaceModule := workspacemodule.New()
-	if err := workspaceModule.Setup(workspacemodule.Dependencies{
-		Workspaces: memory.NewWorkspaceRepository(),
-		Goals:      memory.NewGoalRepository(),
-		DoDs:       memory.NewDoDRepository(),
-	}); err != nil {
-		t.Fatalf("setup workspace module: %v", err)
+	if err := decisionModule.Start(); err != nil {
+		t.Fatalf("run decision module: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := decisionModule.Stop(context.Background()); err != nil {
+			t.Errorf("teardown decision module: %v", err)
+		}
+	})
 	approvalModule := approvalmodule.New()
-	if err := approvalModule.Setup(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository()}); err != nil {
+	if err := approvalModule.Configure(approvalmodule.Dependencies{Approvals: memory.NewApprovalRepository(), EventHub: eventHub}); err != nil {
 		t.Fatalf("setup approval module: %v", err)
 	}
+	if err := approvalModule.Start(); err != nil {
+		t.Fatalf("run approval module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := approvalModule.Stop(context.Background()); err != nil {
+			t.Errorf("teardown approval module: %v", err)
+		}
+	})
 
 	session, err := NewRuntimeSessionFromExports(bootstrap.Exports{
 		Repositories: bootstrap.RepositoryExports{
@@ -121,11 +129,8 @@ func newCountingDecisionRuntimeSession(t *testing.T) (*RuntimeSession, *counting
 			Resolutions:           resolutions,
 			Approvals:             memory.NewApprovalRepository(),
 		},
-		Services: bootstrap.ServiceExports{
-			WorkspaceService: workspaceModule.Service(),
-			RunService:       runservice.New(runservice.Dependencies{}),
-			DecisionService:  decisionModule.Service(),
-			ApprovalService:  approvalModule.Service(),
+		Infrastructure: bootstrap.InfrastructureExports{
+			EventHub: eventHub,
 		},
 	})
 	if err != nil {

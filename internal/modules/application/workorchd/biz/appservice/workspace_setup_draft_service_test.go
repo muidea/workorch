@@ -4,6 +4,9 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type fakeWorkspaceSetupDraftGenerator struct {
@@ -91,6 +94,46 @@ func TestParseWorkspaceSetupDraftCompletionAcceptsCommonAliases(t *testing.T) {
 	}
 	if len(draft.ClarifyingQuestions) != 1 || draft.GenerationSummary != "summary" {
 		t.Fatalf("draft metadata = %+v, want alias metadata", draft)
+	}
+}
+
+func TestDefaultWorkspaceSetupDraftGeneratorUsesLLMCommandEvent(t *testing.T) {
+	hub := events.NewMemoryHub()
+	var seenRequest llmmodels.ProviderRequest
+	unsubscribe := hub.Subscribe(events.TopicLLMCommandCompleteProvider, func(_ context.Context, envelope events.Envelope) error {
+		request, ok := envelope.Payload[events.PayloadKeyProviderRequest].(llmmodels.ProviderRequest)
+		if !ok {
+			t.Fatalf("provider request payload = %#v, want ProviderRequest", envelope.Payload[events.PayloadKeyProviderRequest])
+		}
+		seenRequest = request
+		return events.Response(events.Envelope{
+			Topic:        envelope.Topic + "/response",
+			SourceModule: "blocks/llm",
+			Payload: map[string]any{
+				events.PayloadKeyProviderCompletion: llmmodels.ProviderCompletionResult{
+					Payload: []byte(`{"draft":{"goalText":"Generated goal","doDItems":["Generated DoD"],"confidence":"high"}}`),
+				},
+			},
+		})
+	})
+	defer unsubscribe()
+
+	draft, err := defaultWorkspaceSetupDraftGenerator{eventHub: hub}.GenerateWorkspaceSetupDraft(context.Background(), WorkspaceSetupDraftGenerationRequest{
+		Template:       WorkspaceTemplate{ID: "template-001"},
+		DialogLanguage: "zh-CN",
+		Messages:       []WorkspaceSetupDraftMessage{{Role: "user", Content: "Create a workspace"}},
+	})
+	if err != nil {
+		t.Fatalf("GenerateWorkspaceSetupDraft: %v", err)
+	}
+	if draft.GoalText != "Generated goal" || !reflect.DeepEqual(draft.DoDItems, []string{"Generated DoD"}) {
+		t.Fatalf("draft = %+v, want provider response parsed", draft)
+	}
+	if seenRequest.Kind != "workspace/setup_draft" || seenRequest.Schema != workspaceSetupDraftSchemaName || seenRequest.DialogLanguage != "zh-CN" {
+		t.Fatalf("provider request = %+v, want workspace setup draft request", seenRequest)
+	}
+	if seenRequest.TraceRefs["templateId"] != "template-001" {
+		t.Fatalf("trace refs = %+v, want template id", seenRequest.TraceRefs)
 	}
 }
 

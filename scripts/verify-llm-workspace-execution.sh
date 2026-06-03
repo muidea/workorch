@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
 BASE_URL="${WORKORCH_LLM_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
 MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
@@ -91,7 +92,11 @@ cleanup() {
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
   fi
-  rm -rf "$TMP_DIR"
+  if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+    echo "keeping verification temp dir: $TMP_DIR" >&2
+  else
+    rm -rf "$TMP_DIR"
+  fi
 }
 
 json_path() {
@@ -115,6 +120,26 @@ from urllib.parse import quote
 
 print(quote(sys.argv[1], safe=""))
 PY
+}
+
+resolve_decision_ticket_if_needed() {
+  local ticket_path="$1"
+  local payload="$2"
+  local detail_file="$3"
+  local resolve_file="$4"
+
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$detail_file"
+  if grep '"state": "resolved"' "$detail_file" >/dev/null; then
+    return 0
+  fi
+  if curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
+    -d "$payload" >"$resolve_file"; then
+    grep '"resolutionType": "provide_missing_info"' "$resolve_file" >/dev/null
+    return 0
+  fi
+
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$detail_file"
+  grep '"state": "resolved"' "$detail_file" >/dev/null
 }
 
 start_mock_provider() {
@@ -1015,12 +1040,23 @@ decision_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.
 if [[ "$decision_state" == "blocked_on_decision" ]]; then
   ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
   ticket_path="$(url_encode "$ticket_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status?workspaceId=$workspace_id" | grep '"state": "blocked_on_decision"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$decision_run_id/status?workspaceId=$workspace_id" >"$TMP_DIR/decision-current-status.json"
+  python3 - "$TMP_DIR/decision-current-status.json" <<'PY'
+import json
+import sys
+
+state = (json.load(open(sys.argv[1], encoding="utf-8")).get("status") or {}).get("state")
+raise SystemExit(0 if state in {"blocked_on_decision", "running", "completed"} else 1)
+PY
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" | grep '"decisionKind": "provide_missing_info"' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
-    -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/decision-detail-before-resolve.json"
+  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-detail-before-resolve.json" >/dev/null
+  resolve_decision_ticket_if_needed \
+    "$ticket_path" \
+    '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' \
+    "$TMP_DIR/decision-detail-before-resolve.json" \
+    "$TMP_DIR/decision-resolve.json"
 elif [[ "$decision_state" == "completed" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" >"$TMP_DIR/decision-auto-resolved-list.json"
   ticket_id="$(python3 - "$TMP_DIR/decision-auto-resolved-list.json" <<'PY'
@@ -1068,8 +1104,11 @@ multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "a
 multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.blockingTicketId")"
 multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path?workspaceId=$workspace_id" | grep '"decisionKind": "provide_missing_info"' >/dev/null
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
-  -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' | grep '"resolutionType": "provide_missing_info"' >/dev/null
+resolve_decision_ticket_if_needed \
+  "$multi_gate_ticket_path" \
+  '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' \
+  "$TMP_DIR/multi-gate-decision-detail-before-resolve.json" \
+  "$TMP_DIR/multi-gate-decision-resolve.json"
 wait_run_state "$multi_gate_run_id" "blocked_on_approval" "$TMP_DIR/multi-gate-approval-status.json"
 multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-status.json" "status.blockingApprovalId")"
 multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
@@ -1103,10 +1142,15 @@ if [[ "$schema_run_state" == "blocked_on_decision" ]]; then
   schema_ticket_path="$(url_encode "$schema_ticket_id")"
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/schema-failure-decision.json"
   grep '"recoveryPolicy": "runtime_repair_exhausted_requires_strategy"' "$TMP_DIR/schema-failure-decision.json" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
-    -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","recoveryAction":"terminate"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
-  wait_run_state "$schema_run_id" "failed" "$TMP_DIR/schema-failure-terminated-status.json"
-  schema_run_state="failed"
+  if grep '"state": "resolved"' "$TMP_DIR/schema-failure-decision.json" >/dev/null; then
+    wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-auto-resolved-status.json" "failed" "superseded"
+    schema_run_state="$(json_path "$TMP_DIR/schema-failure-auto-resolved-status.json" "status.state")"
+  else
+    curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
+      -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","recoveryAction":"terminate"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
+    wait_run_state "$schema_run_id" "failed" "$TMP_DIR/schema-failure-terminated-status.json"
+    schema_run_state="failed"
+  fi
 fi
 curl -fsS "$BASE_URL/api/v1/workorch/runs/$schema_run_id/observability?workspaceId=$workspace_id" | grep '"terminal": true' >/dev/null
 if [[ "$schema_run_state" == "superseded" ]]; then

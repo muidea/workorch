@@ -1,36 +1,29 @@
-endpointName = "workorch"
+endpointName = 'workorch'
 
 [server]
-addr = ":8080"
-readHeaderTimeout = "5s"
-readTimeout = "15s"
-writeTimeout = "180s"
-idleTimeout = "60s"
-shutdownTimeout = "5s"
+addr = ':8080'
+readHeaderTimeout = '5s'
+readTimeout = '15s'
+writeTimeout = '180s'
+idleTimeout = '60s'
+shutdownTimeout = '5s'
 maxConcurrentRuns = 1
-defaultDialogLanguage = ""
+defaultDialogLanguage = ''
 
 [repository]
-backend = "file"
-# repository.dataDir is the WorkOrch internal state root.
-# File backend runtime data is stored under:
-#   <dataDir>/internal/workspaces/<workspace-id>/
-# When a workspace is created without an explicit deliverableDirectory,
-# the user-facing project root defaults to the sibling directory:
-#   .workorch-workspaces/<workspace-id>/
-# beside repository.dataDir, not inside the internal state tree.
-dataDir = ".workorch-data"
+backend = 'file'
+dataDir = '.workorch-data'
 
 [runtime]
-defaultSoulId = ""
+defaultSoulId = ''
 maxRuntimeRepairAttempts = 10
 maxProviderRetryAttempts = 10
-shellCommandTimeout = "60s"
+shellCommandTimeout = '60s'
 
 [runtime.git]
 enabled = true
 writeEnabled = true
-defaultTimeout = "30s"
+defaultTimeout = '30s'
 
 [runtime.llmOutput]
 maxPatchContentBytes = 12288
@@ -44,55 +37,70 @@ maxArtifactPlanAttempts = 2
 maxArtifactReplanAttempts = 2
 
 [llm]
-defaultProvider = "local"
-defaultEmbeddingProvider = ""
+defaultProvider = 'local'
+defaultEmbeddingProvider = ''
 
-[llm.modelCapabilities.gpt-codex-1m]
-provider = "compatible"
-modelPattern = "*codex*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.gpt-thinking-256k]
-modelPattern = "*gpt-5.5*thinking*"
-contextWindowTokens = 262144
-
-[llm.modelCapabilities.gpt-instant-128k]
-modelPattern = "*gpt-5.5*instant*"
-contextWindowTokens = 131072
-
-[llm.modelCapabilities.deepseek-v4-1m]
-modelPattern = "*deepseek*v4*"
-contextWindowTokens = 1000000
-
-[llm.modelCapabilities.minimax-m2-7-highspeed-205k]
-provider = "openai"
-modelPattern = "*MiniMax-M2.7-highspeed*"
-contextWindowTokens = 204800
+[llm.modelCapabilities]
+[llm.modelCapabilities.claude-4-5-200k]
+provider = ''
+modelPattern = '*claude*4?5*'
+contextWindowTokens = 200000
 
 [llm.modelCapabilities.claude-4-6-1m]
-modelPattern = "*claude*4?6*"
+provider = ''
+modelPattern = '*claude*4?6*'
 contextWindowTokens = 1000000
 
 [llm.modelCapabilities.claude-4-7-1m]
-modelPattern = "*claude*4?7*"
+provider = ''
+modelPattern = '*claude*4?7*'
 contextWindowTokens = 1000000
 
-[llm.modelCapabilities.claude-4-5-200k]
-modelPattern = "*claude*4?5*"
-contextWindowTokens = 200000
+[llm.modelCapabilities.deepseek-v4-1m]
+provider = ''
+modelPattern = '*deepseek*v4*'
+contextWindowTokens = 1000000
 
+[llm.modelCapabilities.gpt-codex-1m]
+provider = 'compatible'
+modelPattern = '*codex*'
+contextWindowTokens = 1000000
+
+[llm.modelCapabilities.gpt-instant-128k]
+provider = ''
+modelPattern = '*gpt-5.5*instant*'
+contextWindowTokens = 131072
+
+[llm.modelCapabilities.gpt-thinking-256k]
+provider = ''
+modelPattern = '*gpt-5.5*thinking*'
+contextWindowTokens = 262144
+
+[llm.modelCapabilities.minimax-m2-7-highspeed-205k]
+provider = 'openai'
+modelPattern = '*MiniMax-M2.7-highspeed*'
+contextWindowTokens = 204800
+
+[llm.providers]
 [llm.providers.local]
-provider = ""
-baseURL = ""
-apiKey = ""
-model = ""
-timeout = "60s"
+provider = ''
+baseURL = ''
+apiKey = ''
+model = ''
+timeout = '1m0s'
 disabled = false
+chatCompletions = true
+streaming = false
 temperature = 0.0
-maxOutputTokens = 0
-reasoningEffort = ""
-thinkingBudgetTokens = 0
+failoverEnabled = false
+contextWindowTokens = 32768
 
+[webSearch]
+defaultProvider = ''
+
+[webSearch.providers]
+
+[governance]
 [governance.autoTicket]
 enabled = true
 minConfidence = 0.82
@@ -104,7 +112,7 @@ minConfidence = 0.9
 maxPerRun = 3
 allowReadOnly = true
 allowWorkspaceWrite = true
-requireHumanFor = ["secret_access", "external_write", "destructive_operation", "production_operation"]
+requireHumanFor = ['secret_access', 'external_write', 'destructive_operation', 'production_operation']
 
 [governance.budget]
 maxConsecutiveFailures = 2

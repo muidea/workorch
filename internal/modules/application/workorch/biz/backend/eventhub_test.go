@@ -13,17 +13,8 @@ import (
 
 func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	defer session.Close(ctx)
-	exports, err := session.Exports()
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "eventhub workspace",
 		Description:          "created through cli command event",
@@ -36,7 +27,7 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 		t.Fatalf("workspace = %+v, want id", ws)
 	}
 
-	publishedHub, ok := exports.Infrastructure.EventHub.(interface{ Published() []events.Envelope })
+	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
 	if !ok {
 		t.Fatal("event hub does not expose published envelopes")
 	}
@@ -62,17 +53,8 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 
 func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing.T) {
 	ctx := context.Background()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	defer session.Close(ctx)
-	exports, err := session.Exports()
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
+	be, _ := newEventHubBackendWithDispatcher(t, ctx)
 
-	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	done := make(chan error, 1)
 	go func() {
 		_, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
@@ -159,17 +141,8 @@ func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 
 func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	defer session.Close(ctx)
-	exports, err := session.Exports()
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "snapshot workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -187,7 +160,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	if snapshot == nil || snapshot.Workspace.ID != ws.ID {
 		t.Fatalf("snapshot = %+v, want workspace %s", snapshot, ws.ID)
 	}
-	publishedHub, ok := exports.Infrastructure.EventHub.(interface{ Published() []events.Envelope })
+	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
 	if !ok {
 		t.Fatal("event hub does not expose published envelopes")
 	}
@@ -226,17 +199,8 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 
 func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	ctx := context.Background()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	defer session.Close(ctx)
-	exports, err := session.Exports()
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{Title: "definition refresh workspace"})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -256,7 +220,7 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 		t.Fatalf("update dod: %v", err)
 	}
 
-	publishedHub, ok := exports.Infrastructure.EventHub.(interface{ Published() []events.Envelope })
+	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
 	if !ok {
 		t.Fatal("event hub does not expose published envelopes")
 	}
@@ -281,17 +245,8 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 
 func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	ctx := context.Background()
-	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	defer session.Close(ctx)
-	exports, err := session.Exports()
-	if err != nil {
-		t.Fatalf("exports: %v", err)
-	}
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	be := NewEventHub(session, exports.Infrastructure.EventHub)
 	ws, err := be.Workspace().Create(ctx, CreateWorkspaceRequest{
 		Title:                "memory workspace",
 		DeliverableDirectory: "/tmp/memory-workspace",
@@ -355,7 +310,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 		t.Fatalf("list after delete = %+v, want empty", list)
 	}
 
-	publishedHub, ok := exports.Infrastructure.EventHub.(interface{ Published() []events.Envelope })
+	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
 	if !ok {
 		t.Fatal("event hub does not expose published envelopes")
 	}
@@ -373,6 +328,25 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if !sawCreate || !sawUpdate || !sawDelete {
 		t.Fatalf("memory events create=%v update=%v delete=%v, want all", sawCreate, sawUpdate, sawDelete)
 	}
+}
+
+func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backend, events.Hub) {
+	t.Helper()
+	session, err := appservice.NewRuntimeSessionWithBackend("memory", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close(ctx) })
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub)
+	if err := dispatcher.Run(); err != nil {
+		t.Fatalf("run dispatcher: %v", err)
+	}
+	t.Cleanup(dispatcher.Close)
+	return NewEventHub(exports.Infrastructure.EventHub), exports.Infrastructure.EventHub
 }
 
 func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {

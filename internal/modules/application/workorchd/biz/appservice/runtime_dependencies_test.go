@@ -12,38 +12,8 @@ func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
 	exports := session.Bootstrap.Exports()
 	deps := RuntimeDependenciesFromExports(exports)
 
-	if deps.Snapshot.Workspaces != exports.Repositories.Workspaces {
-		t.Fatal("snapshot workspaces repository mismatch")
-	}
-	if deps.Snapshot.Runs != exports.Repositories.Runs {
-		t.Fatal("snapshot runs repository mismatch")
-	}
-	if deps.Snapshot.Steps != exports.Repositories.Steps {
-		t.Fatal("snapshot steps repository mismatch")
-	}
-	if deps.Snapshot.Results != exports.Repositories.Results {
-		t.Fatal("snapshot results repository mismatch")
-	}
-	if deps.Snapshot.Artifacts != exports.Repositories.Artifacts {
-		t.Fatal("snapshot artifacts repository mismatch")
-	}
-	if deps.Snapshot.EventRecords != exports.Repositories.EventRecords {
-		t.Fatal("snapshot event records repository mismatch")
-	}
-	if deps.Snapshot.ToolCalls != exports.Repositories.ToolCalls {
-		t.Fatal("snapshot tool calls repository mismatch")
-	}
-	if deps.Snapshot.Patches != exports.Repositories.Patches {
-		t.Fatal("snapshot patches repository mismatch")
-	}
-	if deps.Snapshot.ValidationResults != exports.Repositories.ValidationResults {
-		t.Fatal("snapshot validation results repository mismatch")
-	}
-	if deps.Snapshot.RuntimeCheckpoints != exports.Repositories.RuntimeCheckpoints {
-		t.Fatal("snapshot runtime checkpoints repository mismatch")
-	}
-	if deps.Snapshot.Resolutions != exports.Repositories.Resolutions {
-		t.Fatal("snapshot resolutions repository mismatch")
+	if deps.Snapshot == nil {
+		t.Fatal("snapshot read port is nil")
 	}
 	if deps.Actions.Workspace == nil {
 		t.Fatal("workspace action port is nil")
@@ -85,14 +55,14 @@ func TestRuntimeDependenciesFromExportsActionPortsDriveModuleServices(t *testing
 		t.Fatalf("ensure approval: %v", err)
 	}
 
-	if _, err := exports.Repositories.Workspaces.Get(ctx, workspaceID); err != nil {
-		t.Fatalf("get workspace from repository: %v", err)
+	if _, err := runtime.GetWorkspaceByID(ctx, workspaceID); err != nil {
+		t.Fatalf("get workspace from runtime snapshot: %v", err)
 	}
-	if _, err := exports.Repositories.Runs.Get(ctx, runID); err != nil {
-		t.Fatalf("get run from repository: %v", err)
+	if _, err := runtime.GetRun(ctx, runID); err != nil {
+		t.Fatalf("get run from runtime snapshot: %v", err)
 	}
-	if _, err := exports.Repositories.Tickets.Get(ctx, ticketID); err != nil {
-		t.Fatalf("get ticket from repository: %v", err)
+	if _, err := runtime.GetTicket(ctx, ticketID); err != nil {
+		t.Fatalf("get ticket from runtime snapshot: %v", err)
 	}
 	if err := runtime.EnsureResolvedTicket(ctx, common.ResolutionID("resolution-runtime-deps-port"), ticketID, "provide_missing_info", map[string]any{"operator": "runtime-deps"}); err != nil {
 		t.Fatalf("ensure resolved ticket: %v", err)
@@ -100,10 +70,7 @@ func TestRuntimeDependenciesFromExportsActionPortsDriveModuleServices(t *testing
 	if _, err := runtime.GetResolutionByTicketID(ctx, ticketID); err != nil {
 		t.Fatalf("get resolution from runtime snapshot: %v", err)
 	}
-	if _, err := exports.Repositories.Resolutions.GetByTicketID(ctx, ticketID); err != nil {
-		t.Fatalf("get resolution from repository: %v", err)
-	}
-	if _, err := exports.Repositories.Approvals.Get(ctx, approvalID); err != nil {
-		t.Fatalf("get approval from repository: %v", err)
+	if _, err := runtime.GetApproval(ctx, approvalID); err != nil {
+		t.Fatalf("get approval from runtime snapshot: %v", err)
 	}
 }

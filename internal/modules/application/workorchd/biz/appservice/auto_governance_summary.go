@@ -2,9 +2,11 @@ package appservice
 
 import (
 	"context"
+	"errors"
 
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -22,20 +24,27 @@ type AutoGovernanceSummary struct {
 	OccurredAt        string   `json:"occurredAt,omitempty"`
 }
 
-func autoGovernanceTraceRepositoryFromSession(session *RuntimeSession) repository.AutoGovernanceTraceRepository {
+func autoGovernanceTraceReaderFromSession(session *RuntimeSession) readModelAutoGovernanceTraceReader {
 	if session == nil {
 		return nil
 	}
 	exports, err := session.Exports()
-	if err != nil {
+	if err != nil || exports.Infrastructure.EventHub == nil {
 		return nil
 	}
-	return exports.Repositories.AutoGovernanceTraces
+	return eventHubReadModelAutoGovernanceTraceReader{hub: exports.Infrastructure.EventHub}
+}
+
+func autoGovernanceTraceReaderFromHub(hub events.Hub) readModelAutoGovernanceTraceReader {
+	if hub == nil {
+		return nil
+	}
+	return eventHubReadModelAutoGovernanceTraceReader{hub: hub}
 }
 
 func latestAutoGovernanceSummary(
 	ctx context.Context,
-	traces repository.AutoGovernanceTraceRepository,
+	traces readModelAutoGovernanceTraceReader,
 	workspaceID common.WorkspaceID,
 	runID common.RunID,
 	itemType string,
@@ -51,7 +60,13 @@ func latestAutoGovernanceSummary(
 		ItemID:      itemID,
 		Limit:       10,
 	})
-	if err != nil || len(list) == 0 {
+	if err != nil {
+		if errors.Is(err, common.ErrInvalidArgument) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(list) == 0 {
 		return nil, err
 	}
 	latest := latestAutoGovernanceTrace(list)
