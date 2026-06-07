@@ -10,12 +10,11 @@ import (
 	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
@@ -25,9 +24,36 @@ func init() {
 }
 
 type Runtime struct {
-	repositories  common.RepositorySet
+	repositories  repositorySet
 	eventHub      workorchevents.Hub
-	runtimePolicy orchestratormodel.RuntimePolicy
+	runtimePolicy workorchruntimepolicy.RuntimePolicy
+}
+
+type repositorySet struct {
+	Souls                 repository.SoulRepository
+	WorkspaceTemplates    repository.WorkspaceTemplateRepository
+	MemoryItems           repository.MemoryItemRepository
+	MemoryRecallTraces    repository.MemoryRecallTraceRepository
+	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
+	Skills                repository.SkillRepository
+	MCPServers            repository.MCPServerRepository
+	MCPCapabilities       repository.MCPCapabilityRepository
+	Results               repository.ResultRepository
+	Artifacts             repository.ArtifactRepository
+	EventRecords          repository.EventRecordRepository
+	Workspaces            repository.WorkspaceRepository
+	Goals                 repository.GoalRepository
+	DoDs                  repository.DoDRepository
+	Runs                  repository.RunRepository
+	Steps                 repository.StepRepository
+	ToolCalls             repository.ToolCallRepository
+	Patches               repository.PatchRepository
+	ValidationResults     repository.ValidationResultRepository
+	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
+	ArtifactContinuations repository.ArtifactContinuationRepository
+	Tickets               repository.DecisionTicketRepository
+	Resolutions           repository.DecisionResolutionRepository
+	Approvals             repository.ApprovalRepository
 }
 
 func New() *Runtime {
@@ -57,22 +83,19 @@ func (r *Runtime) Setup(_ context.Context, eventHub event.Hub, _ task.Background
 	return nil
 }
 
-func (r *Runtime) Run(ctx context.Context) *cd.Error {
-	if err := workorchdefaults.EnsureBuiltinDefaults(ctx, r.repositories.Souls, r.repositories.WorkspaceTemplates, r.repositories.MCPServers, r.repositories.MCPCapabilities); err != nil {
-		return cd.NewError(cd.IllegalParam, "ensure builtin defaults: "+err.Error())
-	}
+func (r *Runtime) Run(_ context.Context) *cd.Error {
 	return nil
 }
 
 func (r *Runtime) Teardown(_ context.Context) {
-	r.repositories = common.RepositorySet{}
+	r.repositories = repositorySet{}
 	r.eventHub = nil
-	r.runtimePolicy = orchestratormodel.RuntimePolicy{}
+	r.runtimePolicy = workorchruntimepolicy.RuntimePolicy{}
 }
 
-func (r *Runtime) Repositories() common.RepositorySet {
+func (r *Runtime) RepositoryProvider() common.RepositoryProvider {
 	if r == nil {
-		return common.RepositorySet{}
+		return nil
 	}
 	return r.repositories
 }
@@ -84,18 +107,103 @@ func (r *Runtime) EventHub() workorchevents.Hub {
 	return r.eventHub
 }
 
-func (r *Runtime) RuntimePolicy() orchestratormodel.RuntimePolicy {
+func (r *Runtime) RuntimePolicy() workorchruntimepolicy.RuntimePolicy {
 	if r == nil {
-		return orchestratormodel.RuntimePolicy{}
+		return workorchruntimepolicy.RuntimePolicy{}
 	}
 	return r.runtimePolicy
 }
 
-func buildRepositories(backend string, dataRoot string) (common.RepositorySet, error) {
+func (r repositorySet) System() common.SystemRepositories {
+	return common.SystemRepositories{
+		Souls:           r.Souls,
+		Templates:       r.WorkspaceTemplates,
+		MCPServers:      r.MCPServers,
+		MCPCapabilities: r.MCPCapabilities,
+	}
+}
+
+func (r repositorySet) Workspace() common.WorkspaceRepositories {
+	return common.WorkspaceRepositories{
+		Workspaces: r.Workspaces,
+		Goals:      r.Goals,
+		DoDs:       r.DoDs,
+		Templates:  r.WorkspaceTemplates,
+	}
+}
+
+func (r repositorySet) Decision() common.DecisionRepositories {
+	return common.DecisionRepositories{
+		Tickets:     r.Tickets,
+		Resolutions: r.Resolutions,
+	}
+}
+
+func (r repositorySet) Approval() common.ApprovalRepositories {
+	return common.ApprovalRepositories{Approvals: r.Approvals}
+}
+
+func (r repositorySet) EventStream() common.EventStreamRepositories {
+	return common.EventStreamRepositories{EventRecords: r.EventRecords}
+}
+
+func (r repositorySet) Governance() common.GovernanceRepositories {
+	return common.GovernanceRepositories{AutoGovernanceTraces: r.AutoGovernanceTraces}
+}
+
+func (r repositorySet) MCP() common.MCPRepositories {
+	return common.MCPRepositories{
+		Servers:      r.MCPServers,
+		Capabilities: r.MCPCapabilities,
+	}
+}
+
+func (r repositorySet) Memory() common.MemoryRepositories {
+	return common.MemoryRepositories{
+		MemoryItems:        r.MemoryItems,
+		MemoryRecallTraces: r.MemoryRecallTraces,
+	}
+}
+
+func (r repositorySet) Orchestrator() common.OrchestratorRepositories {
+	return common.OrchestratorRepositories{
+		Steps:                 r.Steps,
+		ToolCalls:             r.ToolCalls,
+		Patches:               r.Patches,
+		ValidationResults:     r.ValidationResults,
+		RuntimeCheckpoints:    r.RuntimeCheckpoints,
+		ArtifactContinuations: r.ArtifactContinuations,
+	}
+}
+
+func (r repositorySet) Result() common.ResultRepositories {
+	return common.ResultRepositories{
+		Results:   r.Results,
+		Artifacts: r.Artifacts,
+	}
+}
+
+func (r repositorySet) Run() common.RunRepositories {
+	return common.RunRepositories{
+		Runs:        r.Runs,
+		Steps:       r.Steps,
+		Checkpoints: r.RuntimeCheckpoints,
+	}
+}
+
+func (r repositorySet) Skill() common.SkillRepositories {
+	return common.SkillRepositories{Skills: r.Skills}
+}
+
+func (r repositorySet) Soul() common.SoulRepositories {
+	return common.SoulRepositories{Souls: r.Souls}
+}
+
+func buildRepositories(backend string, dataRoot string) (repositorySet, error) {
 	backend = workorchrepo.NormalizeRepositoryBackend(backend)
 	switch backend {
 	case "memory":
-		return common.RepositorySet{
+		return repositorySet{
 			Souls:                 memory.NewSoulRepository(),
 			WorkspaceTemplates:    memory.NewWorkspaceTemplateRepository(),
 			MemoryItems:           memory.NewMemoryItemRepository(),
@@ -124,7 +232,7 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 	case "file":
 		dataRoot = workorchrepo.ResolveRepositoryDataRoot(backend, dataRoot)
 		workspaceScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
-		return common.RepositorySet{
+		return repositorySet{
 			Souls:                 fileRepo.NewSoulRepository(filepath.Join(dataRoot, "system", "souls")),
 			WorkspaceTemplates:    fileRepo.NewWorkspaceTemplateRepository(filepath.Join(dataRoot, "system", "workspace_templates.json")),
 			MemoryItems:           workspaceScopedRepos.MemoryItems,
@@ -151,6 +259,6 @@ func buildRepositories(backend string, dataRoot string) (common.RepositorySet, e
 			Approvals:             workspaceScopedRepos.Approvals,
 		}, nil
 	default:
-		return common.RepositorySet{}, fmt.Errorf("unsupported repository backend: %s", backend)
+		return repositorySet{}, fmt.Errorf("unsupported repository backend: %s", backend)
 	}
 }

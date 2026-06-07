@@ -9,13 +9,13 @@ import (
 
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type stubRuntimeAdapter struct {

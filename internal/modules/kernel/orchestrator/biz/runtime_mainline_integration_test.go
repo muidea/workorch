@@ -20,12 +20,12 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeOrchestrator_StartRunToComplete_Mainline(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -23,8 +24,9 @@ func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing
 	}
 	hub.Subscribe(events.TopicArtifactCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		captured = envelope
-		if got, ok := envelope.Payload[events.PayloadKeyArtifact].(*resultmodel.Artifact); !ok || got != artifact {
-			t.Fatalf("payload artifact = %#v, want original artifact", envelope.Payload[events.PayloadKeyArtifact])
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(resultcontracts.CreateArtifactCommand)
+		if !ok || cmd.Artifact != artifact {
+			t.Fatalf("payload command = %#v, want CreateArtifactCommand with original artifact", envelope.Payload[events.PayloadKeyCommand])
 		}
 		return events.Response(events.Envelope{
 			Topic:        envelope.Topic + "/response",

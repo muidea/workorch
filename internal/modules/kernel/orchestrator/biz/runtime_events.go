@@ -10,12 +10,12 @@ import (
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type eventSubsystem struct {

@@ -5,6 +5,7 @@ import (
 
 	eventstreambiz "github.com/muidea/workorch/internal/modules/kernel/eventstream/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/common"
+	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
 	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -107,7 +108,7 @@ func (m *Module) handlePurgeWorkspaceCommand(ctx context.Context, envelope event
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
-	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	workspaceID := purgeWorkspaceIDFromPayload(envelope.Payload)
 	if workspaceID == "" {
 		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
 	}
@@ -125,6 +126,16 @@ func (m *Module) handlePurgeWorkspaceCommand(ctx context.Context, envelope event
 		StepID:       envelope.StepID,
 		Payload:      map[string]any{events.PayloadKeyDeletedCount: deleted},
 	})
+}
+
+func purgeWorkspaceIDFromPayload(payload map[string]any) common.WorkspaceID {
+	if payload == nil {
+		return ""
+	}
+	if cmd, ok := payload[events.PayloadKeyCommand].(eventstreamcontracts.PurgeWorkspaceCommand); ok {
+		return cmd.WorkspaceID
+	}
+	return common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID))
 }
 
 func stringPayload(payload map[string]any, key string) string {

@@ -13,10 +13,10 @@ import (
 	"testing"
 
 	kernelmcp "github.com/muidea/workorch/internal/modules/kernel/mcp"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterExecutesAllowedHTTPToolCall(t *testing.T) {

@@ -7,10 +7,9 @@ import (
 	"sync"
 	"time"
 
-	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 // eventHubBackend extends the local backend with EventHub-driven progress
@@ -32,8 +31,7 @@ func NewEventHub(eventHub events.Hub) Backend {
 // NewEmbeddedEventHub creates an EventHub-backed backend from the active
 // framework runtime initiator. CLI commands are handled by the workorchd module.
 func NewEmbeddedEventHub() (Backend, func(context.Context) error, error) {
-	var helper runtimecommon.Helper
-	runtime, err := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
+	runtime, err := workorchdeps.ResolveRuntimeHelper("application/workorch embedded backend")
 	if err != nil {
 		return nil, nil, fmt.Errorf("get workorch runtime initiator: %w", err)
 	}

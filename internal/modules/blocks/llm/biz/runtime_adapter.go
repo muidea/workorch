@@ -27,11 +27,11 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const decisionSchemaName = "workorch.llmExecutionDecision.v1"

@@ -1,0 +1,32 @@
+package readmodelprojection
+
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+)
+
+func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []presenter.StepView, currentStep *presenter.StepView) readmodelcore.RunSnapshot {
+	ret := readmodelcore.RunSnapshot{
+		Workspace:             MapWorkspaceWithRunProjection(input.Workspace, input.Run),
+		Run:                   runtimecore.MapRun(input.Run),
+		Step:                  currentStep,
+		Steps:                 stepViews,
+		ToolCalls:             MapToolCalls(input.ToolCalls),
+		Patches:               MapPatches(input.Patches),
+		LLMContextBudgets:     MapLLMContextBudgetTraces(stepViews),
+		LLMUsageTraces:        MapLLMUsageTracesFromEventRecords(MapEventRecords(input.LLMUsageEventRecords), string(input.Run.ID)),
+		ValidationResults:     MapValidationResults(input.Validations),
+		RuntimeCheckpoints:    MapRuntimeCheckpoints(input.Checkpoints),
+		Results:               MapResults(input.Results),
+		Artifacts:             MapArtifacts(input.Artifacts),
+		ArtifactContinuations: MapArtifactContinuations(input.ArtifactContinuations),
+		MemoryRecallTraces:    MapMemoryRecallTraces(input.MemoryRecallTraces),
+		EventRecords:          MapProjectedEventRecords(input.EventRecords),
+		Decisions:             input.Decisions,
+		Approvals:             input.Approvals,
+	}
+	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
+	ret.Outcome = MapRunOutcome(ret)
+	return ret
+}

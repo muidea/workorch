@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func structuredFailureSignalsFromFailureOutput(output map[string]any, execErr error, failureClass string, failureSignature string) map[string]any {

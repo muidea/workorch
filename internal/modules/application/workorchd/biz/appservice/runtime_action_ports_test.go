@@ -5,12 +5,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
+	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
+	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t *testing.T) {
-	port := newEventHubActionPort(nil)
+	port := runtimeports.NewEventHubActionPort(nil)
 	tests := []struct {
 		name string
 		run  func() error
@@ -25,25 +30,25 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 			return port.EnsureApproval(context.Background(), "approval", "ws", "run", "run/manual-approval", "reason")
 		}},
 		{name: "workspace ensure missing id", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureWorkspace(context.Background(), "", "title")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureWorkspace(context.Background(), "", "title")
 		}},
 		{name: "run ensure missing workspace", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureRun(context.Background(), "run", "")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRun(context.Background(), "run", "")
 		}},
 		{name: "run blocked decision", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnDecision(context.Background(), "run", "")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnDecision(context.Background(), "run", "")
 		}},
 		{name: "run blocked approval", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnApproval(context.Background(), "", "approval")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunBlockedOnApproval(context.Background(), "", "approval")
 		}},
 		{name: "run resumed missing id", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureRunResumed(context.Background(), "")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureRunResumed(context.Background(), "")
 		}},
 		{name: "decision resolved missing resolution", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureResolvedTicket(context.Background(), "", "ticket", "provide_missing_info", nil)
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureResolvedTicket(context.Background(), "", "ticket", "provide_missing_info", nil)
 		}},
 		{name: "approval approved missing id", run: func() error {
-			return newEventHubActionPort(events.NewMemoryHub()).EnsureApprovalApproved(context.Background(), "")
+			return runtimeports.NewEventHubActionPort(events.NewMemoryHub()).EnsureApprovalApproved(context.Background(), "")
 		}},
 	}
 
@@ -59,7 +64,7 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	port := newEventHubActionPort(hub)
+	port := runtimeports.NewEventHubActionPort(hub)
 	wantTopics := []string{
 		events.TopicWorkspaceCommandEnsure,
 		events.TopicRunCommandEnsure,
@@ -127,16 +132,48 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 			t.Fatalf("event[%d].SourceModule = %s", idx, published[idx].SourceModule)
 		}
 	}
-	if published[0].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" || published[0].Payload[events.PayloadKeyTitle] != "workspace action port" {
-		t.Fatalf("workspace ensure payload = %#v", published[0].Payload)
+	workspaceCmd, ok := published[0].Payload[events.PayloadKeyCommand].(workspacecontracts.EnsureWorkspaceCommand)
+	if !ok || workspaceCmd.WorkspaceID != "ws-action-port" || workspaceCmd.Title != "workspace action port" {
+		t.Fatalf("workspace ensure command = %#v", published[0].Payload[events.PayloadKeyCommand])
 	}
-	if published[1].Payload[events.PayloadKeyRunID] != "run-action-port" || published[1].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" {
-		t.Fatalf("run ensure payload = %#v", published[1].Payload)
+	runEnsureCmd, ok := published[1].Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand)
+	if !ok || runEnsureCmd.RunID != "run-action-port" || runEnsureCmd.WorkspaceID != "ws-action-port" {
+		t.Fatalf("run ensure command = %#v", published[1].Payload[events.PayloadKeyCommand])
 	}
-	if published[6].Payload[events.PayloadKeyBlockingTicketID] != "ticket-action-port" || published[6].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" || published[6].Payload[events.PayloadKeyRunID] != "run-action-port" {
-		t.Fatalf("decision ensure payload = %#v", published[6].Payload)
+	startCmd, ok := published[2].Payload[events.PayloadKeyCommand].(runcontracts.StartRunCommand)
+	if !ok || startCmd.RunID != "run-action-port" {
+		t.Fatalf("run start command = %#v", published[2].Payload[events.PayloadKeyCommand])
 	}
-	if published[8].Payload[events.PayloadKeyApprovalID] != "approval-action-port" || published[8].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" || published[8].Payload[events.PayloadKeyRunID] != "run-action-port" {
-		t.Fatalf("approval ensure payload = %#v", published[8].Payload)
+	blockDecisionCmd, ok := published[3].Payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
+	if !ok || blockDecisionCmd.RunID != "run-action-port" || blockDecisionCmd.TicketID != "ticket-action-port" {
+		t.Fatalf("block decision command = %#v", published[3].Payload[events.PayloadKeyCommand])
+	}
+	blockApprovalCmd, ok := published[4].Payload[events.PayloadKeyCommand].(runcontracts.BlockOnApprovalCommand)
+	if !ok || blockApprovalCmd.RunID != "run-action-port" || blockApprovalCmd.ApprovalID != "approval-action-port" {
+		t.Fatalf("block approval command = %#v", published[4].Payload[events.PayloadKeyCommand])
+	}
+	resumeCmd, ok := published[5].Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
+	if !ok || resumeCmd.RunID != "run-action-port" {
+		t.Fatalf("run resume command = %#v", published[5].Payload[events.PayloadKeyCommand])
+	}
+	ticketCmd, ok := published[6].Payload[events.PayloadKeyCommand].(decisioncontracts.CreateTicketCommand)
+	if !ok || ticketCmd.TicketID != "ticket-action-port" || ticketCmd.WorkspaceID != "ws-action-port" || ticketCmd.RunID != "run-action-port" {
+		t.Fatalf("decision ensure command = %#v", published[6].Payload[events.PayloadKeyCommand])
+	}
+	resolveCmd, ok := published[7].Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	if !ok || resolveCmd.ResolutionID != "resolution-action-port" || resolveCmd.TicketID != "ticket-action-port" || resolveCmd.Payload["operator"] != "action-port" {
+		t.Fatalf("decision resolve command = %#v", published[7].Payload[events.PayloadKeyCommand])
+	}
+	approvalCmd, ok := published[8].Payload[events.PayloadKeyCommand].(approvalcontracts.CreateApprovalCommand)
+	if !ok || approvalCmd.ApprovalID != "approval-action-port" || approvalCmd.WorkspaceID != "ws-action-port" || approvalCmd.RunID != "run-action-port" {
+		t.Fatalf("approval ensure command = %#v", published[8].Payload[events.PayloadKeyCommand])
+	}
+	approvedCmd, ok := published[9].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	if !ok || approvedCmd.ApprovalID != "approval-action-port" {
+		t.Fatalf("approval approved command = %#v", published[9].Payload[events.PayloadKeyCommand])
+	}
+	rejectedCmd, ok := published[10].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+	if !ok || rejectedCmd.ApprovalID != "approval-action-port" {
+		t.Fatalf("approval rejected command = %#v", published[10].Payload[events.PayloadKeyCommand])
 	}
 }

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestAssembleArtifactContinuationStoresContentInSequenceOrder(t *testing.T) {

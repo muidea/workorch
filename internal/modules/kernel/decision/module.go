@@ -5,6 +5,7 @@ import (
 
 	decisionbiz "github.com/muidea/workorch/internal/modules/kernel/decision/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,8 +16,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = decisionservice.Service
-type CreateTicketCommand = decisionservice.CreateTicketCommand
-type ResolveTicketCommand = decisionservice.ResolveTicketCommand
+type CreateTicketCommand = decisioncontracts.CreateTicketCommand
+type UpdateTicketCommand = decisioncontracts.UpdateTicketCommand
+type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
 
 type Dependencies struct {
 	Tickets     repository.DecisionTicketRepository
@@ -103,16 +105,25 @@ func (m *Module) handleEnsureResolvedCommand(ctx context.Context, envelope event
 	if m == nil || m.servicePtr == nil || m.tickets == nil {
 		return common.ErrInvalidArgument
 	}
-	cmd := decisionservice.ResolveTicketCommand{
-		ResolutionID: common.ResolutionID(stringPayload(envelope.Payload, events.PayloadKeyResolutionID)),
-		TicketID:     common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID)),
-		WorkspaceID:  scopedWorkspaceID(envelope),
-		RunID:        scopedRunID(envelope),
-		StepID:       scopedStepID(envelope),
-		Type:         stringPayload(envelope.Payload, events.PayloadKeyType),
+	cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+	if !ok {
+		cmd = decisioncontracts.ResolveTicketCommand{
+			ResolutionID: common.ResolutionID(stringPayload(envelope.Payload, events.PayloadKeyResolutionID)),
+			TicketID:     common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID)),
+			Type:         stringPayload(envelope.Payload, events.PayloadKeyType),
+		}
+		if payload, _ := envelope.Payload[events.PayloadKeyPayload].(map[string]any); payload != nil {
+			cmd.Payload = payload
+		}
 	}
-	if payload, _ := envelope.Payload[events.PayloadKeyPayload].(map[string]any); payload != nil {
-		cmd.Payload = payload
+	if cmd.WorkspaceID == "" {
+		cmd.WorkspaceID = scopedWorkspaceID(envelope)
+	}
+	if cmd.RunID == "" {
+		cmd.RunID = scopedRunID(envelope)
+	}
+	if cmd.StepID == "" {
+		cmd.StepID = scopedStepID(envelope)
 	}
 	ticket, resolution, err := m.servicePtr.EnsureResolvedTicketAndReturn(ctx, cmd)
 	if err != nil {
@@ -133,13 +144,13 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisionservice.CreateTicketCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.CreateTicketCommand)
 		if !ok {
 			item, err := ticketFromPayload(envelope.Payload)
 			if err != nil {
 				return err
 			}
-			cmd = decisionservice.CreateTicketCommand{
+			cmd = decisioncontracts.CreateTicketCommand{
 				TicketID:     item.ID,
 				WorkspaceID:  item.WorkspaceID,
 				RunID:        item.RunID,
@@ -155,23 +166,18 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		}
 		return decisionCommandResponse(envelope, nil)
 	case events.TopicDecisionCommandCreateTicket:
-		item, err := ticketFromPayload(envelope.Payload)
-		if err != nil {
-			return err
-		}
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateTicket(ctx, decisionservice.CreateTicketCommand{
-			TicketID:     item.ID,
-			WorkspaceID:  item.WorkspaceID,
-			RunID:        item.RunID,
-			StepID:       item.StepID,
-			Reason:       item.Reason,
-			DecisionKind: item.DecisionKind,
-			Question:     item.Question,
-			Context:      item.Context,
-		}); err != nil {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.CreateTicketCommand)
+		if !ok {
+			item, err := ticketFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
+			cmd = ticketCreateCommandFromModel(item)
+		}
+		if err := m.servicePtr.CreateTicket(ctx, cmd); err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
@@ -204,9 +210,15 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyTickets: items})
 	case events.TopicDecisionCommandUpdateTicket:
-		item, err := ticketFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var item *decisionmodel.Ticket
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.UpdateTicketCommand); ok {
+			item = ticketFromUpdateCommand(cmd)
+		} else {
+			var err error
+			item, err = ticketFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
 		}
 		if !ticketMatchesScope(item, envelope) {
 			return common.ErrNotFound
@@ -216,7 +228,7 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		}
 		return decisionCommandResponse(envelope, nil)
 	case events.TopicDecisionCommandDeleteTicket:
-		ticketID := common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID))
+		ticketID := deleteTicketIDFromPayload(envelope.Payload)
 		if err := m.ensureTicketScope(ctx, ticketID, envelope); err != nil {
 			return err
 		}
@@ -227,6 +239,52 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func ticketCreateCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.CreateTicketCommand {
+	if item == nil {
+		return decisioncontracts.CreateTicketCommand{}
+	}
+	return decisioncontracts.CreateTicketCommand{
+		TicketID:     item.ID,
+		WorkspaceID:  item.WorkspaceID,
+		RunID:        item.RunID,
+		StepID:       item.StepID,
+		Reason:       item.Reason,
+		DecisionKind: item.DecisionKind,
+		Question:     item.Question,
+		Context:      cloneMap(item.Context),
+	}
+}
+
+func ticketFromUpdateCommand(cmd decisioncontracts.UpdateTicketCommand) *decisionmodel.Ticket {
+	return &decisionmodel.Ticket{
+		ID:           cmd.TicketID,
+		WorkspaceID:  cmd.WorkspaceID,
+		RunID:        cmd.RunID,
+		StepID:       cmd.StepID,
+		Reason:       cmd.Reason,
+		DecisionKind: cmd.DecisionKind,
+		Question:     cmd.Question,
+		Context:      cloneMap(cmd.Context),
+		State:        cmd.State,
+		CreatedAt:    cmd.CreatedAt,
+		UpdatedAt:    cmd.UpdatedAt,
+	}
+}
+
+func deleteTicketIDFromPayload(payload map[string]any) common.TicketID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(decisioncontracts.DeleteTicketCommand); ok && cmd.TicketID != "" {
+		return cmd.TicketID
+	}
+	return common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID))
+}
+
+func deleteResolutionTicketIDFromPayload(payload map[string]any) common.TicketID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(decisioncontracts.DeleteResolutionCommand); ok && cmd.TicketID != "" {
+		return cmd.TicketID
+	}
+	return common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID))
 }
 
 func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.Envelope) error {
@@ -250,7 +308,7 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyResolution: item})
 	case events.TopicDecisionCommandDeleteResolution:
-		if err := m.resolutions.DeleteByTicketID(ctx, common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID))); err != nil {
+		if err := m.resolutions.DeleteByTicketID(ctx, deleteResolutionTicketIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
@@ -361,6 +419,17 @@ func ticketFromPayload(payload map[string]any) (*decisionmodel.Ticket, error) {
 }
 
 func resolutionFromPayload(payload map[string]any) (*decisionmodel.Resolution, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(decisioncontracts.CreateResolutionCommand); ok {
+		if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		return &decisionmodel.Resolution{
+			ID:       cmd.ResolutionID,
+			TicketID: cmd.TicketID,
+			Type:     cmd.Type,
+			Payload:  cloneMap(cmd.Payload),
+		}, nil
+	}
 	item, ok := payload[events.PayloadKeyResolution].(*decisionmodel.Resolution)
 	if !ok || item == nil {
 		return nil, common.ErrInvalidArgument
@@ -378,6 +447,10 @@ func mapPayload(payload map[string]any, key string) map[string]any {
 	if value == nil {
 		return nil
 	}
+	return cloneMap(value)
+}
+
+func cloneMap(value map[string]any) map[string]any {
 	ret := make(map[string]any, len(value))
 	for key, item := range value {
 		ret[key] = item

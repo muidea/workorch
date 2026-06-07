@@ -3,10 +3,11 @@ package orchestrator
 import (
 	"context"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 type RuntimeAdapter interface {
@@ -83,8 +84,8 @@ const (
 	maxGraphFollowUpExpansionAttempts   = 2
 )
 
-type RuntimePolicy = runtimemodel.RuntimePolicy
-type LLMOutputRuntimePolicy = runtimemodel.LLMOutputRuntimePolicy
+type RuntimePolicy = workorchruntimepolicy.RuntimePolicy
+type LLMOutputRuntimePolicy = workorchruntimepolicy.LLMOutputRuntimePolicy
 
 type RuntimeOrchestrator struct {
 	runtime     RuntimeAdapter
@@ -328,11 +329,11 @@ func (o *RuntimeOrchestrator) decisionResumeManager() *decisionResumeSubsystem {
 }
 
 func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
-	return runtimemodel.NormalizeRuntimePolicy(policy)
+	return workorchruntimepolicy.NormalizeRuntimePolicy(policy)
 }
 
 func NormalizeLLMOutputRuntimePolicy(policy LLMOutputRuntimePolicy) LLMOutputRuntimePolicy {
-	return runtimemodel.NormalizeLLMOutputRuntimePolicy(policy)
+	return workorchruntimepolicy.NormalizeLLMOutputRuntimePolicy(policy)
 }
 
 func llmOutputPolicyValues(policy RuntimePolicy) map[string]any {

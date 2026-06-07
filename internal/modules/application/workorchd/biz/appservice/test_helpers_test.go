@@ -7,6 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
@@ -63,6 +68,46 @@ disabled = false
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 }
 
+func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSession, workspaceID string, title string, description string, deliverableDirectory string) (ret Workspace, err error) {
+	hub, err := session.RequiredEventHub()
+	if err != nil {
+		return Workspace{}, err
+	}
+
+	id := common.WorkspaceID(workspaceID)
+	layout, err := workspacecore.ResolveDirectoryLayout(session.RepositoryBackend(), session.RepositoryDataDir(), string(id), deliverableDirectory)
+	if err != nil {
+		return Workspace{}, err
+	}
+	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
+		return Workspace{}, err
+	}
+	if err := ownercommandports.Publish(ctx, hub, events.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
+		events.PayloadKeyWorkspaceID:          string(id),
+		events.PayloadKeyTitle:                title,
+		events.PayloadKeyDescription:          description,
+		events.PayloadKeyDeliverableDirectory: layout.DeliverableDirectory,
+		events.PayloadKeyInternalDirectory:    layout.InternalDirectory,
+	}); err != nil {
+		return Workspace{}, err
+	}
+
+	item, err := ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, id)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return workspacecore.MapWorkspace(item), nil
+}
+
+func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, title string, description string, deliverableDirectory string) (Workspace, error) {
+	session, err := newRuntimeSessionWithBackend(ctx, backend, dataRoot)
+	if err != nil {
+		return Workspace{}, err
+	}
+	defer session.CloseOnReturn(ctx, &err)
+	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, deliverableDirectory)
+}
+
 func publishAppserviceTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
 	err := hub.Publish(ctx, envelope)
 	if _, ok := events.ResponseEnvelope(err); ok {
@@ -98,6 +143,48 @@ func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.E
 	})
 }
 
+func readModelIntValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		if typed == float64(int(typed)) {
+			return int(typed)
+		}
+	default:
+		return 0
+	}
+	return 0
+}
+
+func readModelStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func readModelStringSliceValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
 func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
 	t.Helper()
 
@@ -108,7 +195,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -150,7 +237,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("Get run: %v", err)
 	}
-	return mapRun(item)
+	return runtimecore.MapRun(item)
 }
 
 func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID string) Run {
@@ -163,7 +250,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("runtime exports: %v", err)
 	}
-	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -187,7 +274,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 	if err != nil {
 		t.Fatalf("Get run: %v", err)
 	}
-	return mapRun(item)
+	return runtimecore.MapRun(item)
 }
 
 func ensureTestWorkspace(t *testing.T, ctx context.Context, session *RuntimeSession, workspaceID string) {

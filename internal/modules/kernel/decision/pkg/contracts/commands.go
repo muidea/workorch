@@ -1,0 +1,53 @@
+package contracts
+
+import "github.com/muidea/workorch/internal/pkg/common"
+
+type CreateTicketCommand struct {
+	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Reason       string
+	DecisionKind string
+	Question     string
+	Context      map[string]any
+}
+
+type UpdateTicketCommand struct {
+	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Reason       string
+	DecisionKind string
+	Question     string
+	Context      map[string]any
+	State        common.DecisionTicketState
+	CreatedAt    string
+	UpdatedAt    string
+}
+
+type ResolveTicketCommand struct {
+	ResolutionID common.ResolutionID
+	TicketID     common.TicketID
+	WorkspaceID  common.WorkspaceID
+	RunID        common.RunID
+	StepID       common.StepID
+	Type         string
+	Payload      map[string]any
+}
+
+type CreateResolutionCommand struct {
+	ResolutionID common.ResolutionID
+	TicketID     common.TicketID
+	Type         string
+	Payload      map[string]any
+}
+
+type DeleteTicketCommand struct {
+	TicketID common.TicketID
+}
+
+type DeleteResolutionCommand struct {
+	TicketID common.TicketID
+}

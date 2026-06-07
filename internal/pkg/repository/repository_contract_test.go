@@ -13,7 +13,6 @@ import (
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
@@ -23,6 +22,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	file "github.com/muidea/workorch/internal/pkg/repository/file"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestWorkspaceRepositoryContract_Memory(t *testing.T) {

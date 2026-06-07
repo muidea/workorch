@@ -16,7 +16,6 @@ import (
 	mcpmodule "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultmodule "github.com/muidea/workorch/internal/modules/kernel/result"
 	runmodule "github.com/muidea/workorch/internal/modules/kernel/run"
 	skillmodule "github.com/muidea/workorch/internal/modules/kernel/skill"
@@ -44,19 +43,19 @@ func NewWithBackend(backend string, dataRoot string) *Runtime {
 	return NewWithBackendAndEventHub(backend, dataRoot, nil)
 }
 
-func NewWithBackendAndRuntimePolicy(backend string, dataRoot string, runtimePolicy orchestratormodel.RuntimePolicy) *Runtime {
+func NewWithBackendAndRuntimePolicy(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy) *Runtime {
 	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, nil)
 }
 
 func NewWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) *Runtime {
-	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, orchestratormodel.RuntimePolicy{}, eventHub)
+	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, workorchruntimepolicy.RuntimePolicy{}, eventHub)
 }
 
-func NewWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy orchestratormodel.RuntimePolicy, eventHub events.Hub) *Runtime {
+func NewWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *Runtime {
 	return newWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
 }
 
-func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy orchestratormodel.RuntimePolicy, eventHub events.Hub) *Runtime {
+func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *Runtime {
 	repos := buildRepositories(backend, dataRoot)
 
 	if eventHub == nil {
@@ -118,6 +117,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		Workspaces: repos.workspace,
 		Goals:      repos.goal,
 		DoDs:       repos.dod,
+		Templates:  repos.workspaceTemplate,
 		EventHub:   eventHub,
 	}))
 

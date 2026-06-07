@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,7 +21,7 @@ func (r decisionEventTicketRepository) Create(ctx context.Context, item *decisio
 		return common.ErrInvalidArgument
 	}
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandCreateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
-		events.PayloadKeyTicket: item,
+		events.PayloadKeyCommand: createTicketCommandFromModel(item),
 	})
 	return err
 }
@@ -83,14 +85,14 @@ func (r decisionEventTicketRepository) Update(ctx context.Context, item *decisio
 		return common.ErrInvalidArgument
 	}
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandUpdateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
-		events.PayloadKeyTicket: item,
+		events.PayloadKeyCommand: updateTicketCommandFromModel(item),
 	})
 	return err
 }
 
 func (r decisionEventTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandDeleteTicket, "decision_ticket", string(id), "", "", "", map[string]any{
-		events.PayloadKeyBlockingTicketID: string(id),
+		events.PayloadKeyCommand: decisioncontracts.DeleteTicketCommand{TicketID: id},
 	})
 	return err
 }
@@ -104,7 +106,7 @@ func (r decisionEventResolutionRepository) Create(ctx context.Context, item *dec
 		return common.ErrInvalidArgument
 	}
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandCreateResolution, "decision_resolution", string(item.ID), "", "", "", map[string]any{
-		events.PayloadKeyResolution: item,
+		events.PayloadKeyCommand: createResolutionCommandFromModel(item),
 	})
 	return err
 }
@@ -125,7 +127,7 @@ func (r decisionEventResolutionRepository) GetByTicketID(ctx context.Context, ti
 
 func (r decisionEventResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandDeleteResolution, "decision_ticket", string(ticketID), "", "", "", map[string]any{
-		events.PayloadKeyBlockingTicketID: string(ticketID),
+		events.PayloadKeyCommand: decisioncontracts.DeleteResolutionCommand{TicketID: ticketID},
 	})
 	return err
 }
@@ -139,7 +141,7 @@ func (r approvalEventRepository) Create(ctx context.Context, item *approvalmodel
 		return common.ErrInvalidArgument
 	}
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandCreate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
-		events.PayloadKeyApproval: item,
+		events.PayloadKeyCommand: createApprovalCommandFromModel(item),
 	})
 	return err
 }
@@ -203,14 +205,14 @@ func (r approvalEventRepository) Update(ctx context.Context, item *approvalmodel
 		return common.ErrInvalidArgument
 	}
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandUpdate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
-		events.PayloadKeyApproval: item,
+		events.PayloadKeyCommand: updateApprovalCommandFromModel(item),
 	})
 	return err
 }
 
 func (r approvalEventRepository) Delete(ctx context.Context, id common.ApprovalID) error {
 	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandDelete, "approval", string(id), "", "", "", map[string]any{
-		events.PayloadKeyApprovalID: string(id),
+		events.PayloadKeyCommand: approvalcontracts.DeleteApprovalCommand{ApprovalID: id},
 	})
 	return err
 }
@@ -236,4 +238,84 @@ func publishGovernanceEventCommand(ctx context.Context, hub events.Hub, topic st
 		return events.Envelope{}, err
 	}
 	return events.Envelope{}, fmt.Errorf("governance event command %s returned no response", topic)
+}
+
+func createTicketCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.CreateTicketCommand {
+	if item == nil {
+		return decisioncontracts.CreateTicketCommand{}
+	}
+	return decisioncontracts.CreateTicketCommand{
+		TicketID:     item.ID,
+		WorkspaceID:  item.WorkspaceID,
+		RunID:        item.RunID,
+		StepID:       item.StepID,
+		Reason:       item.Reason,
+		DecisionKind: item.DecisionKind,
+		Question:     item.Question,
+		Context:      cloneMap(item.Context),
+	}
+}
+
+func updateTicketCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.UpdateTicketCommand {
+	if item == nil {
+		return decisioncontracts.UpdateTicketCommand{}
+	}
+	return decisioncontracts.UpdateTicketCommand{
+		TicketID:     item.ID,
+		WorkspaceID:  item.WorkspaceID,
+		RunID:        item.RunID,
+		StepID:       item.StepID,
+		Reason:       item.Reason,
+		DecisionKind: item.DecisionKind,
+		Question:     item.Question,
+		Context:      cloneMap(item.Context),
+		State:        item.State,
+		CreatedAt:    item.CreatedAt,
+		UpdatedAt:    item.UpdatedAt,
+	}
+}
+
+func createResolutionCommandFromModel(item *decisionmodel.Resolution) decisioncontracts.CreateResolutionCommand {
+	if item == nil {
+		return decisioncontracts.CreateResolutionCommand{}
+	}
+	return decisioncontracts.CreateResolutionCommand{
+		ResolutionID: item.ID,
+		TicketID:     item.TicketID,
+		Type:         item.Type,
+		Payload:      cloneMap(item.Payload),
+	}
+}
+
+func createApprovalCommandFromModel(item *approvalmodel.Approval) approvalcontracts.CreateApprovalCommand {
+	if item == nil {
+		return approvalcontracts.CreateApprovalCommand{}
+	}
+	return approvalcontracts.CreateApprovalCommand{
+		ApprovalID:  item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		Reason:      item.Reason,
+		Action:      item.Action,
+		Context:     cloneMap(item.Context),
+	}
+}
+
+func updateApprovalCommandFromModel(item *approvalmodel.Approval) approvalcontracts.UpdateApprovalCommand {
+	if item == nil {
+		return approvalcontracts.UpdateApprovalCommand{}
+	}
+	return approvalcontracts.UpdateApprovalCommand{
+		ApprovalID:  item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		Reason:      item.Reason,
+		Action:      item.Action,
+		Context:     cloneMap(item.Context),
+		State:       item.State,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
+	}
 }

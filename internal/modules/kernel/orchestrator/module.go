@@ -5,7 +5,9 @@ import (
 
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
+	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -159,11 +161,35 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 	case events.TopicOrchestratorCommandStartRun:
 		err = m.servicePtr.StartRun(ctx, runID)
 	case events.TopicOrchestratorCommandBlockDecision:
-		err = m.servicePtr.BlockOnDecision(ctx, runID, common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID)))
+		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
+		if !ok {
+			cmd = runcontracts.BlockOnDecisionCommand{RunID: runID, TicketID: common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID))}
+		}
+		if cmd.RunID == "" {
+			cmd.RunID = runID
+		}
+		err = m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 	case events.TopicOrchestratorCommandBlockApproval:
-		err = m.servicePtr.BlockOnApproval(ctx, runID, common.ApprovalID(stringPayload(payload, events.PayloadKeyBlockingApprovalID)))
+		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnApprovalCommand)
+		if !ok {
+			cmd = runcontracts.BlockOnApprovalCommand{RunID: runID, ApprovalID: common.ApprovalID(stringPayload(payload, events.PayloadKeyBlockingApprovalID))}
+		}
+		if cmd.RunID == "" {
+			cmd.RunID = runID
+		}
+		err = m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 	case events.TopicOrchestratorCommandResumeRun:
-		if patch, _ := payload[events.PayloadKeyExecutionContextPatch].(map[string]any); len(patch) > 0 {
+		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
+		var patch map[string]any
+		if ok {
+			if cmd.RunID != "" {
+				runID = cmd.RunID
+			}
+			patch = cmd.ExecutionContextPatch
+		} else {
+			patch, _ = payload[events.PayloadKeyExecutionContextPatch].(map[string]any)
+		}
+		if len(patch) > 0 {
 			err = m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
 		} else {
 			err = m.servicePtr.ResumeRun(ctx, runID)
@@ -204,7 +230,7 @@ func (m *Module) handlePurgeRunCommand(ctx context.Context, envelope events.Enve
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
 	}
-	runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
+	runID := purgeRunIDFromPayload(envelope.Payload)
 	if runID == "" {
 		runID = common.RunID(envelope.RunID)
 	}
@@ -227,6 +253,16 @@ func (m *Module) handlePurgeRunCommand(ctx context.Context, envelope events.Enve
 			events.PayloadKeyDeletedCount: deleted,
 		},
 	})
+}
+
+func purgeRunIDFromPayload(payload map[string]any) common.RunID {
+	if payload == nil {
+		return ""
+	}
+	if cmd, ok := payload[events.PayloadKeyCommand].(orchestratorcontracts.PurgeRunCommand); ok {
+		return cmd.RunID
+	}
+	return common.RunID(stringPayload(payload, events.PayloadKeyRunID))
 }
 
 func (m *Module) handleEvidenceReadCommand(ctx context.Context, envelope events.Envelope) error {

@@ -3,23 +3,13 @@ package approval
 import (
 	"context"
 
+	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type CreateApprovalCommand struct {
-	ApprovalID  common.ApprovalID
-	WorkspaceID common.WorkspaceID
-	RunID       common.RunID
-	StepID      common.StepID
-	Reason      string
-	Action      string
-	Context     map[string]any
-}
-
-type ResolveApprovalCommand struct {
-	ApprovalID common.ApprovalID
-}
+type CreateApprovalCommand = approvalcontracts.CreateApprovalCommand
+type ResolveApprovalCommand = approvalcontracts.ResolveApprovalCommand
 
 type Service interface {
 	CreateApproval(context.Context, CreateApprovalCommand) error

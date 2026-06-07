@@ -47,6 +47,14 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	go func() {
 		runErr <- a.RunWithBackend(ctx, wsID, goalText)
 	}()
+	finish := func(preferred error) error {
+		cancel()
+		err := <-runErr
+		if preferred != nil {
+			return preferred
+		}
+		return err
+	}
 
 	for evt := range a.Events() {
 		switch evt.Type {
@@ -79,10 +87,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			var answer string
 			fmt.Scanln(&answer)
 			if err := a.ResolveApproval(ctx, info.ApprovalID, answer == "y" || answer == "Y"); err != nil {
-				return fmt.Errorf("resolve approval: %w", err)
+				return finish(fmt.Errorf("resolve approval: %w", err))
 			}
 			if err := a.ResumeRun(ctx, info.RunID); err != nil {
-				return fmt.Errorf("resume run: %w", err)
+				return finish(fmt.Errorf("resume run: %w", err))
 			}
 
 		case agent.EventRunCompleted:
@@ -101,17 +109,17 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			for _, o := range info.Outputs {
 				fmt.Printf("  %s: %s\n", o.Kind, o.Summary)
 			}
-			return nil
+			return finish(nil)
 
 		case agent.EventRunFailed:
 			if evt.Error != nil {
 				fmt.Printf("\n✗ Run failed: %v\n", evt.Error)
 			}
-			return evt.Error
+			return finish(evt.Error)
 
 		case agent.EventCancelled:
 			fmt.Println("\nInterrupted.")
-			return nil
+			return finish(nil)
 		}
 	}
 	return <-runErr

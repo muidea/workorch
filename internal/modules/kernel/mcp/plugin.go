@@ -5,10 +5,9 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
-	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 func init() {
@@ -18,15 +17,18 @@ func init() {
 func (m *Module) Weight() int { return 28 }
 
 func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	runtime, err := workorchRuntime()
+	repos, err := workorchdeps.ResolveMCPRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
-	repos := runtime.Repositories()
+	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
+	if err != nil {
+		return err
+	}
 	if setupErr := m.Configure(Dependencies{
-		Servers:      repos.MCPServers,
-		Capabilities: repos.MCPCapabilities,
-		EventHub:     runtime.EventHub(),
+		Servers:      repos.Servers,
+		Capabilities: repos.Capabilities,
+		EventHub:     eventHub,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
@@ -47,9 +49,4 @@ func (m *Module) Teardown(ctx context.Context) {
 	if m != nil {
 		_ = m.Stop(ctx)
 	}
-}
-
-func workorchRuntime() (runtimecommon.Helper, *cd.Error) {
-	var helper runtimecommon.Helper
-	return initiator.GetEntity(runtimecommon.InitiatorID, helper)
 }

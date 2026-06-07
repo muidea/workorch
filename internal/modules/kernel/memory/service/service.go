@@ -3,31 +3,14 @@ package memory
 import (
 	"context"
 
+	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
-type CreateMemoryItemCommand struct {
-	MemoryID            common.MemoryID
-	WorkspaceID         common.WorkspaceID
-	RunID               common.RunID
-	SourceType          string
-	SourceRef           string
-	MemoryType          string
-	Content             string
-	Summary             string
-	Tags                []string
-	Importance          int
-	Confidence          int
-	Visibility          string
-	EmbeddingProviderID string
-	EmbeddingModel      string
-	EmbeddingText       string
-	Vector              []float64
-}
-
-type UpdateMemoryItemCommand = CreateMemoryItemCommand
+type CreateMemoryItemCommand = memorycontracts.CreateMemoryItemCommand
+type UpdateMemoryItemCommand = memorycontracts.UpdateMemoryItemCommand
 
 type Service interface {
 	CreateMemoryItem(context.Context, CreateMemoryItemCommand) error

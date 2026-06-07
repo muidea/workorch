@@ -4,13 +4,16 @@ import (
 	"context"
 	"testing"
 
+	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
-	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
@@ -18,13 +21,13 @@ func TestPurgeRunEvidenceDeletesOnlyRequestedRunEvidence(t *testing.T) {
 	workspaceID := common.WorkspaceID("ws-purge-evidence")
 	runID := common.RunID("run-purge-evidence")
 	otherRunID := common.RunID("run-keep-evidence")
-	steps := memory.NewStepRepository()
-	toolCalls := memory.NewToolCallRepository()
-	patches := memory.NewPatchRepository()
-	validations := memory.NewValidationResultRepository()
-	checkpoints := memory.NewRuntimeCheckpointRepository()
-	continuations := memory.NewArtifactContinuationRepository()
-	traces := memory.NewMemoryRecallTraceRepository()
+	steps := memoryrepo.NewStepRepository()
+	toolCalls := memoryrepo.NewToolCallRepository()
+	patches := memoryrepo.NewPatchRepository()
+	validations := memoryrepo.NewValidationResultRepository()
+	checkpoints := memoryrepo.NewRuntimeCheckpointRepository()
+	continuations := memoryrepo.NewArtifactContinuationRepository()
+	traces := memoryrepo.NewMemoryRecallTraceRepository()
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -100,5 +103,72 @@ func assertRunEvidenceCount[T any](t *testing.T, ctx context.Context, repo runEv
 	}
 	if len(items) != want {
 		t.Fatalf("%s evidence count = %d, want %d", runID, len(items), want)
+	}
+}
+
+func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	steps := memoryrepo.NewStepRepository()
+	runID := common.RunID("run-purge-contract")
+	if err := steps.Create(ctx, &runmodel.Step{ID: "step-purge-contract", RunID: runID}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	memoryModule := memorymodule.New()
+	if err := memoryModule.Configure(memorymodule.Dependencies{
+		MemoryItems:        memoryrepo.NewMemoryItemRepository(),
+		MemoryRecallTraces: memoryrepo.NewMemoryRecallTraceRepository(),
+		EventHub:           hub,
+	}); err != nil {
+		t.Fatalf("configure memory module: %v", err)
+	}
+	if err := memoryModule.Start(); err != nil {
+		t.Fatalf("start memory module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := memoryModule.Stop(context.Background()); err != nil {
+			t.Errorf("stop memory module: %v", err)
+		}
+	})
+
+	module := New()
+	if err := module.Configure(Dependencies{
+		Runtime:               NewRuntimeAdapterRegistry(),
+		Steps:                 steps,
+		ToolCalls:             memoryrepo.NewToolCallRepository(),
+		Patches:               memoryrepo.NewPatchRepository(),
+		ValidationResults:     memoryrepo.NewValidationResultRepository(),
+		RuntimeCheckpoints:    memoryrepo.NewRuntimeCheckpointRepository(),
+		ArtifactContinuations: memoryrepo.NewArtifactContinuationRepository(),
+		EventHub:              hub,
+	}); err != nil {
+		t.Fatalf("configure orchestrator module: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("start orchestrator module: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(context.Background()); err != nil {
+			t.Errorf("stop orchestrator module: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicOrchestratorCommandPurgeRun,
+		SubjectType: "run",
+		SubjectID:   string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand: orchestratorcontracts.PurgeRunCommand{RunID: runID},
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("purge err = %v, want response", err)
+	}
+	items, err := steps.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("steps after purge = %d, want 0", len(items))
 	}
 }

@@ -1,0 +1,64 @@
+package governanceports
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+)
+
+func BatchResolveDecisionViews(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, cmd appmodelcore.BatchResolveDecisionCommand, scope common.WorkspaceID) ([]readmodelcore.Decision, error) {
+	semantic := governancecommon.NormalizeDecisionResolution(cmd.ResolutionType, cmd.ResolutionPayload)
+	resolutionType := semantic.ResolutionType
+	if !decisioncommon.IsSupportedResolutionType(resolutionType) || len(cmd.TicketIDs) == 0 {
+		return nil, common.ErrInvalidArgument
+	}
+	payload := governancecore.WithDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
+	seen := make(map[string]struct{}, len(cmd.TicketIDs))
+	for _, ticketID := range cmd.TicketIDs {
+		if ticketID == "" {
+			return nil, common.ErrInvalidArgument
+		}
+		if _, ok := seen[ticketID]; ok {
+			return nil, common.ErrInvalidArgument
+		}
+		seen[ticketID] = struct{}{}
+	}
+	type ticketRead struct {
+		item *decisionmodel.Ticket
+		err  error
+	}
+	reads := make([]ticketRead, len(cmd.TicketIDs))
+	for i, ticketID := range cmd.TicketIDs {
+		reads[i].item, reads[i].err = ReadDecisionTicket(ctx, hub, common.TicketID(ticketID))
+	}
+	for _, r := range reads {
+		if r.err != nil {
+			return nil, r.err
+		}
+		if _, _, err := prepareDecisionResolution(r.item, resolutionType, payload, scope); err != nil {
+			return nil, err
+		}
+	}
+
+	ret := make([]readmodelcore.Decision, 0, len(cmd.TicketIDs))
+	for _, r := range reads {
+		item, resolution, err := resolveDecisionTicket(ctx, hub, r.item, resolutionType, governancecore.CloneDecisionPayload(payload), scope)
+		if err != nil {
+			return nil, err
+		}
+		autoGovernance, autoErr := governancecore.LatestAutoGovernanceSummary(ctx, traces, item.WorkspaceID, item.RunID, "ticket", string(item.ID))
+		if autoErr != nil {
+			return nil, autoErr
+		}
+		ret = append(ret, readmodelprojection.MapDecision(item, resolution, autoGovernance))
+	}
+	return ret, nil
+}

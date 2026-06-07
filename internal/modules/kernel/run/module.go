@@ -5,6 +5,7 @@ import (
 
 	runbiz "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
+	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -16,16 +17,17 @@ const ModuleID = modulecommon.ModuleID
 
 type Service = runservice.Service
 type Orchestrator = runbiz.Orchestrator
-type CreateRunCommand = runservice.CreateRunCommand
-type StartRunCommand = runservice.StartRunCommand
-type ResumeRunCommand = runservice.ResumeRunCommand
-type BlockOnDecisionCommand = runservice.BlockOnDecisionCommand
-type BlockOnApprovalCommand = runservice.BlockOnApprovalCommand
-type ValidateRunCommand = runservice.ValidateRunCommand
-type CompleteRunCommand = runservice.CompleteRunCommand
-type CancelRunCommand = runservice.CancelRunCommand
-type SupersedeRunCommand = runservice.SupersedeRunCommand
-type FailRunCommand = runservice.FailRunCommand
+type CreateRunCommand = runcontracts.CreateRunCommand
+type StartRunCommand = runcontracts.StartRunCommand
+type ResumeRunCommand = runcontracts.ResumeRunCommand
+type UpdateRunCommand = runcontracts.UpdateRunCommand
+type BlockOnDecisionCommand = runcontracts.BlockOnDecisionCommand
+type BlockOnApprovalCommand = runcontracts.BlockOnApprovalCommand
+type ValidateRunCommand = runcontracts.ValidateRunCommand
+type CompleteRunCommand = runcontracts.CompleteRunCommand
+type CancelRunCommand = runcontracts.CancelRunCommand
+type SupersedeRunCommand = runcontracts.SupersedeRunCommand
+type FailRunCommand = runcontracts.FailRunCommand
 
 type Dependencies struct {
 	Runs         repository.RunRepository
@@ -139,18 +141,23 @@ func (m *Module) handleEnsureResumedCommand(ctx context.Context, envelope events
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
-	runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
-	if runID == "" {
-		runID = common.RunID(envelope.RunID)
+	cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
+	if !ok {
+		cmd = runcontracts.ResumeRunCommand{
+			RunID:       common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
+			WorkspaceID: common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
+		}
 	}
-	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-	if workspaceID == "" {
-		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	if cmd.RunID == "" {
+		cmd.RunID = common.RunID(envelope.RunID)
 	}
-	if err := m.servicePtr.EnsureResumed(ctx, runservice.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID}); err != nil {
+	if cmd.WorkspaceID == "" {
+		cmd.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	if err := m.servicePtr.EnsureResumed(ctx, cmd); err != nil {
 		return err
 	}
-	return events.Response(events.Envelope{Topic: envelope.Topic + "/response", SourceModule: ModuleID, SubjectType: envelope.SubjectType, SubjectID: envelope.SubjectID, WorkspaceID: envelope.WorkspaceID, RunID: string(runID), StepID: envelope.StepID})
+	return events.Response(events.Envelope{Topic: envelope.Topic + "/response", SourceModule: ModuleID, SubjectType: envelope.SubjectType, SubjectID: envelope.SubjectID, WorkspaceID: envelope.WorkspaceID, RunID: string(cmd.RunID), StepID: envelope.StepID})
 }
 
 func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Envelope) error {
@@ -159,9 +166,9 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 	}
 	switch envelope.Topic {
 	case events.TopicRunCommandEnsure:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runservice.CreateRunCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand)
 		if !ok {
-			cmd = runservice.CreateRunCommand{
+			cmd = runcontracts.CreateRunCommand{
 				RunID:       common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
 				WorkspaceID: common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
 			}
@@ -177,7 +184,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		}
 		return runCommandResponse(envelope, nil)
 	case events.TopicRunCommandCreate:
-		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runservice.CreateRunCommand); ok {
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand); ok {
 			if err := m.servicePtr.CreateRun(ctx, cmd); err != nil {
 				return err
 			}
@@ -276,45 +283,48 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyCheckpoints: items})
 	case events.TopicRunCommandUpdate:
-		item, err := runFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var item *runmodel.Run
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.UpdateRunCommand); ok {
+			item = runFromUpdateCommand(cmd)
+		} else {
+			var err error
+			item, err = runFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
 		}
 		if err := m.runs.Update(ctx, item); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
 	case events.TopicRunCommandDelete:
-		runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
-		if runID == "" {
-			runID = common.RunID(envelope.RunID)
-		}
+		runID := deleteRunIDFromPayload(envelope.Payload, envelope.RunID)
 		if err := m.runs.Delete(ctx, runID); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
 	case events.TopicRunCommandStart:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runservice.StartRunCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.StartRunCommand)
 		if !ok {
-			cmd = runservice.StartRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
+			cmd = runcontracts.StartRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
 		}
 		if err := m.servicePtr.EnsureStarted(ctx, cmd); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
 	case events.TopicRunCommandSupersede:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runservice.SupersedeRunCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.SupersedeRunCommand)
 		if !ok {
-			cmd = runservice.SupersedeRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
+			cmd = runcontracts.SupersedeRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
 		}
 		if err := m.servicePtr.SupersedeRun(ctx, cmd); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
 	case events.TopicRunCommandFail:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runservice.FailRunCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.FailRunCommand)
 		if !ok {
-			cmd = runservice.FailRunCommand{
+			cmd = runcontracts.FailRunCommand{
 				RunID:  common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
 				Reason: stringPayload(envelope.Payload, events.PayloadKeyFailureReason),
 			}
@@ -336,9 +346,37 @@ func runFromPayload(payload map[string]any) (*runmodel.Run, error) {
 	return item, nil
 }
 
-func createRunCommandFromPayload(payload map[string]any) (runservice.CreateRunCommand, error) {
+func runFromUpdateCommand(cmd runcontracts.UpdateRunCommand) *runmodel.Run {
+	return &runmodel.Run{
+		ID:                 cmd.RunID,
+		WorkspaceID:        cmd.WorkspaceID,
+		GoalID:             cmd.GoalID,
+		DoDID:              cmd.DoDID,
+		DefinitionRevision: cmd.DefinitionRevision,
+		InitialStepKind:    cmd.InitialStepKind,
+		ExecutionContext:   cloneMap(cmd.ExecutionContext),
+		State:              cmd.State,
+		Priority:           cmd.Priority,
+		BlockingTicketID:   cmd.BlockingTicketID,
+		BlockingApprovalID: cmd.BlockingApprovalID,
+		FailureReason:      cmd.FailureReason,
+	}
+}
+
+func deleteRunIDFromPayload(payload map[string]any, envelopeRunID string) common.RunID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.DeleteRunCommand); ok && cmd.RunID != "" {
+		return cmd.RunID
+	}
+	id := common.RunID(stringPayload(payload, events.PayloadKeyRunID))
+	if id != "" {
+		return id
+	}
+	return common.RunID(envelopeRunID)
+}
+
+func createRunCommandFromPayload(payload map[string]any) (runcontracts.CreateRunCommand, error) {
 	if item, err := runFromPayload(payload); err == nil {
-		return runservice.CreateRunCommand{
+		return runcontracts.CreateRunCommand{
 			RunID:              item.ID,
 			WorkspaceID:        item.WorkspaceID,
 			GoalID:             item.GoalID,
@@ -349,7 +387,7 @@ func createRunCommandFromPayload(payload map[string]any) (runservice.CreateRunCo
 			Priority:           item.Priority,
 		}, nil
 	}
-	cmd := runservice.CreateRunCommand{
+	cmd := runcontracts.CreateRunCommand{
 		RunID:              common.RunID(stringPayload(payload, events.PayloadKeyRunID)),
 		WorkspaceID:        common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID)),
 		GoalID:             common.GoalID(stringPayload(payload, events.PayloadKeyGoalID)),
@@ -362,7 +400,7 @@ func createRunCommandFromPayload(payload map[string]any) (runservice.CreateRunCo
 		cmd.Priority = priority
 	}
 	if cmd.RunID == "" || cmd.WorkspaceID == "" {
-		return runservice.CreateRunCommand{}, common.ErrInvalidArgument
+		return runcontracts.CreateRunCommand{}, common.ErrInvalidArgument
 	}
 	return cmd, nil
 }

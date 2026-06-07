@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strings"
 
+	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
-	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -20,7 +20,7 @@ func NewService(servers repository.MCPServerRepository, capabilities repository.
 	return &Service{servers: servers, capabilities: capabilities}
 }
 
-func (s *Service) CreateServer(ctx context.Context, cmd mcpservice.CreateServerCommand) error {
+func (s *Service) CreateServer(ctx context.Context, cmd mcpcontracts.CreateServerCommand) error {
 	if err := validateServerCommand(cmd); err != nil {
 		return err
 	}
@@ -31,7 +31,7 @@ func (s *Service) CreateServer(ctx context.Context, cmd mcpservice.CreateServerC
 	return s.ensureDefaultCapabilities(ctx, server)
 }
 
-func (s *Service) UpdateServer(ctx context.Context, cmd mcpservice.UpdateServerCommand) error {
+func (s *Service) UpdateServer(ctx context.Context, cmd mcpcontracts.UpdateServerCommand) error {
 	if err := validateServerCommand(cmd); err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (s *Service) ListServers(ctx context.Context) ([]*mcpmodel.Server, error) {
 	return s.servers.List(ctx)
 }
 
-func (s *Service) CreateCapability(ctx context.Context, cmd mcpservice.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) CreateCapability(ctx context.Context, cmd mcpcontracts.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
 	capability, err := s.capabilityFromCommand(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (s *Service) CreateCapability(ctx context.Context, cmd mcpservice.CreateCap
 	return s.capabilities.Get(ctx, capability.ID)
 }
 
-func (s *Service) UpdateCapability(ctx context.Context, cmd mcpservice.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) UpdateCapability(ctx context.Context, cmd mcpcontracts.UpdateCapabilityCommand) (*mcpmodel.Capability, error) {
 	capability, err := s.capabilityFromCommand(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (s *Service) GetCapability(ctx context.Context, id common.MCPCapabilityID) 
 	return s.capabilities.Get(ctx, id)
 }
 
-func (s *Service) ListCapabilities(ctx context.Context, query mcpservice.CapabilityQuery) ([]*mcpmodel.Capability, error) {
+func (s *Service) ListCapabilities(ctx context.Context, query mcpcontracts.CapabilityQuery) ([]*mcpmodel.Capability, error) {
 	items, err := s.capabilities.List(ctx)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (s *Service) ListCapabilities(ctx context.Context, query mcpservice.Capabil
 	return ret, nil
 }
 
-func validateServerCommand(cmd mcpservice.CreateServerCommand) error {
+func validateServerCommand(cmd mcpcontracts.CreateServerCommand) error {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Name) == "" || strings.TrimSpace(cmd.Transport) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -115,7 +115,7 @@ func validateServerCommand(cmd mcpservice.CreateServerCommand) error {
 	return nil
 }
 
-func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpservice.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
+func (s *Service) capabilityFromCommand(ctx context.Context, cmd mcpcontracts.CreateCapabilityCommand) (*mcpmodel.Capability, error) {
 	if cmd.ServerID == "" || strings.TrimSpace(cmd.Kind) == "" || strings.TrimSpace(cmd.Name) == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -257,7 +257,7 @@ func defaultCapabilityDisplayName(kind string, name string) string {
 	}
 }
 
-func matchesCapabilityQuery(item *mcpmodel.Capability, query mcpservice.CapabilityQuery) bool {
+func matchesCapabilityQuery(item *mcpmodel.Capability, query mcpcontracts.CapabilityQuery) bool {
 	if query.ServerID != "" && item.ServerID != query.ServerID {
 		return false
 	}
@@ -313,7 +313,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func serverFromCommand(cmd mcpservice.CreateServerCommand) *mcpmodel.Server {
+func serverFromCommand(cmd mcpcontracts.CreateServerCommand) *mcpmodel.Server {
 	return &mcpmodel.Server{
 		ID:                    cmd.ServerID,
 		Name:                  cmd.Name,

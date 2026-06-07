@@ -5,6 +5,7 @@ import (
 
 	memorybiz "github.com/muidea/workorch/internal/modules/kernel/memory/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,8 +16,8 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = memoryservice.Service
-type CreateMemoryItemCommand = memoryservice.CreateMemoryItemCommand
-type UpdateMemoryItemCommand = memoryservice.UpdateMemoryItemCommand
+type CreateMemoryItemCommand = memorycontracts.CreateMemoryItemCommand
+type UpdateMemoryItemCommand = memorycontracts.UpdateMemoryItemCommand
 
 type Dependencies struct {
 	MemoryItems        repository.MemoryItemRepository
@@ -102,11 +103,17 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 	}
 	switch envelope.Topic {
 	case events.TopicMemoryCommandCreate:
-		item, err := memoryItemFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var cmd memorycontracts.CreateMemoryItemCommand
+		if payloadCommand, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.CreateMemoryItemCommand); ok {
+			cmd = payloadCommand
+		} else {
+			item, err := memoryItemFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
+			cmd = memoryCommandFromItem(item)
 		}
-		if err := m.servicePtr.CreateMemoryItem(ctx, memoryCommandFromItem(item)); err != nil {
+		if err := m.servicePtr.CreateMemoryItem(ctx, cmd); err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
@@ -133,16 +140,22 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryItems: items})
 	case events.TopicMemoryCommandUpdate:
-		item, err := memoryItemFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var cmd memorycontracts.UpdateMemoryItemCommand
+		if payloadCommand, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.UpdateMemoryItemCommand); ok {
+			cmd = payloadCommand
+		} else {
+			item, err := memoryItemFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
+			cmd = memoryCommandFromItem(item)
 		}
-		if err := m.servicePtr.UpdateMemoryItem(ctx, memoryCommandFromItem(item)); err != nil {
+		if err := m.servicePtr.UpdateMemoryItem(ctx, cmd); err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
 	case events.TopicMemoryCommandDelete:
-		if err := m.servicePtr.DeleteMemoryItem(ctx, common.MemoryID(stringPayload(envelope.Payload, events.PayloadKeyMemoryID))); err != nil {
+		if err := m.servicePtr.DeleteMemoryItem(ctx, deleteMemoryIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
@@ -182,7 +195,7 @@ func (m *Module) handleMemoryRecallTraceCommand(ctx context.Context, envelope ev
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryRecallTraces: items})
 	case events.TopicMemoryRecallTraceCommandDelete:
-		if err := m.servicePtr.DeleteMemoryRecallTrace(ctx, common.MemoryRecallTraceID(stringPayload(envelope.Payload, events.PayloadKeyTraceID))); err != nil {
+		if err := m.servicePtr.DeleteMemoryRecallTrace(ctx, deleteMemoryRecallTraceIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
@@ -200,6 +213,9 @@ func memoryItemFromPayload(payload map[string]any) (*memorymodel.MemoryItem, err
 }
 
 func memoryRecallTraceFromPayload(payload map[string]any) (*memorymodel.MemoryRecallTrace, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(memorycontracts.UpsertMemoryRecallTraceCommand); ok {
+		return memoryRecallTraceFromCommand(cmd)
+	}
 	trace, ok := payload[events.PayloadKeyMemoryRecallTrace].(*memorymodel.MemoryRecallTrace)
 	if !ok || trace == nil {
 		return nil, common.ErrInvalidArgument
@@ -207,11 +223,86 @@ func memoryRecallTraceFromPayload(payload map[string]any) (*memorymodel.MemoryRe
 	return trace, nil
 }
 
-func memoryCommandFromItem(item *memorymodel.MemoryItem) memoryservice.CreateMemoryItemCommand {
-	if item == nil {
-		return memoryservice.CreateMemoryItemCommand{}
+func memoryRecallTraceFromCommand(cmd memorycontracts.UpsertMemoryRecallTraceCommand) (*memorymodel.MemoryRecallTrace, error) {
+	if cmd.TraceID == "" {
+		return nil, common.ErrInvalidArgument
 	}
-	return memoryservice.CreateMemoryItemCommand{
+	return &memorymodel.MemoryRecallTrace{
+		ID:                     cmd.TraceID,
+		WorkspaceID:            cmd.WorkspaceID,
+		RunID:                  cmd.RunID,
+		StepID:                 cmd.StepID,
+		GraphNodeID:            cmd.GraphNodeID,
+		Stage:                  cmd.Stage,
+		Source:                 cmd.Source,
+		Policy:                 cmd.Policy,
+		Status:                 cmd.Status,
+		ProviderID:             cmd.ProviderID,
+		Operation:              cmd.Operation,
+		QueryTextPreview:       cmd.QueryTextPreview,
+		QueryTextSha256:        cmd.QueryTextSha256,
+		MinScore:               cmd.MinScore,
+		Limit:                  cmd.Limit,
+		EmbeddingModel:         cmd.EmbeddingModel,
+		VectorDimension:        cmd.VectorDimension,
+		RefreshSource:          cmd.RefreshSource,
+		SelectionPolicyVersion: cmd.SelectionPolicyVersion,
+		CandidateMemoryIDs:     append([]common.MemoryID(nil), cmd.CandidateMemoryIDs...),
+		SelectedMemoryIDs:      append([]common.MemoryID(nil), cmd.SelectedMemoryIDs...),
+		ExcludedMemoryIDs:      append([]common.MemoryID(nil), cmd.ExcludedMemoryIDs...),
+		TypeQuota:              cloneStringIntMap(cmd.TypeQuota),
+		SelectionScores:        memoryRecallSelectionScoresFromCommand(cmd.SelectionScores),
+		RetrievedMemoryIDs:     append([]common.MemoryID(nil), cmd.RetrievedMemoryIDs...),
+		RetrievedMemoryHits:    memoryRecallHitsFromCommand(cmd.RetrievedMemoryHits),
+		Reason:                 cmd.Reason,
+		OccurredAt:             cmd.OccurredAt,
+		EvidenceRef:            cmd.EvidenceRef,
+	}, nil
+}
+
+func memoryRecallSelectionScoresFromCommand(items []memorycontracts.MemoryRecallSelectionScoreCommand) []memorymodel.MemoryRecallSelectionScore {
+	if items == nil {
+		return nil
+	}
+	ret := make([]memorymodel.MemoryRecallSelectionScore, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, memorymodel.MemoryRecallSelectionScore{
+			ID:     item.ID,
+			Score:  item.Score,
+			Reason: item.Reason,
+		})
+	}
+	return ret
+}
+
+func memoryRecallHitsFromCommand(items []memorycontracts.MemoryRecallHitCommand) []memorymodel.MemoryRecallHit {
+	if items == nil {
+		return nil
+	}
+	ret := make([]memorymodel.MemoryRecallHit, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, memorymodel.MemoryRecallHit{
+			ID:              item.ID,
+			Summary:         item.Summary,
+			VectorScore:     item.VectorScore,
+			VectorDimension: item.VectorDimension,
+		})
+	}
+	return ret
+}
+
+func deleteMemoryRecallTraceIDFromPayload(payload map[string]any) common.MemoryRecallTraceID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(memorycontracts.DeleteMemoryRecallTraceCommand); ok && cmd.TraceID != "" {
+		return cmd.TraceID
+	}
+	return common.MemoryRecallTraceID(stringPayload(payload, events.PayloadKeyTraceID))
+}
+
+func memoryCommandFromItem(item *memorymodel.MemoryItem) memorycontracts.CreateMemoryItemCommand {
+	if item == nil {
+		return memorycontracts.CreateMemoryItemCommand{}
+	}
+	return memorycontracts.CreateMemoryItemCommand{
 		MemoryID:            item.ID,
 		WorkspaceID:         item.WorkspaceID,
 		RunID:               item.RunID,
@@ -229,6 +320,24 @@ func memoryCommandFromItem(item *memorymodel.MemoryItem) memoryservice.CreateMem
 		EmbeddingText:       item.EmbeddingText,
 		Vector:              append([]float64(nil), item.Vector...),
 	}
+}
+
+func cloneStringIntMap(input map[string]int) map[string]int {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]int, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func deleteMemoryIDFromPayload(payload map[string]any) common.MemoryID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(memorycontracts.DeleteMemoryItemCommand); ok && cmd.MemoryID != "" {
+		return cmd.MemoryID
+	}
+	return common.MemoryID(stringPayload(payload, events.PayloadKeyMemoryID))
 }
 
 func stringPayload(payload map[string]any, key string) string {

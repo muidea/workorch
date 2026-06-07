@@ -5,6 +5,7 @@ import (
 
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/common"
+	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,8 +16,8 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = mcpservice.Service
-type CreateServerCommand = mcpservice.CreateServerCommand
-type UpdateServerCommand = mcpservice.UpdateServerCommand
+type CreateServerCommand = mcpcontracts.CreateServerCommand
+type UpdateServerCommand = mcpcontracts.UpdateServerCommand
 
 type Dependencies struct {
 	Servers      repository.MCPServerRepository
@@ -98,7 +99,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 	}
 	switch envelope.Topic {
 	case events.TopicMCPCommandCreateServer:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpservice.CreateServerCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateServerCommand)
 		if !ok {
 			var err error
 			cmd, err = serverCommandFromPayload(envelope.Payload)
@@ -127,7 +128,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServers: servers})
 	case events.TopicMCPCommandUpdateServer:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpservice.UpdateServerCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.UpdateServerCommand)
 		if !ok {
 			var err error
 			cmd, err = serverCommandFromPayload(envelope.Payload)
@@ -144,7 +145,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServer: server})
 	case events.TopicMCPCommandCreateCapability:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpservice.CreateCapabilityCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateCapabilityCommand)
 		if !ok {
 			var err error
 			cmd, err = capabilityCommandFromPayload(envelope.Payload)
@@ -171,7 +172,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyCapabilities: items})
 	case events.TopicMCPCommandUpdateCapability:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpservice.UpdateCapabilityCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.UpdateCapabilityCommand)
 		if !ok {
 			var err error
 			cmd, err = capabilityCommandFromPayload(envelope.Payload)
@@ -268,10 +269,10 @@ func boolPtrPayload(payload map[string]any, key string) *bool {
 	return &value
 }
 
-func serverCommandFromPayload(payload map[string]any) (mcpservice.CreateServerCommand, error) {
+func serverCommandFromPayload(payload map[string]any) (mcpcontracts.CreateServerCommand, error) {
 	item, ok := payload[events.PayloadKeyServer].(*mcpmodel.Server)
 	if ok && item != nil {
-		return mcpservice.CreateServerCommand{
+		return mcpcontracts.CreateServerCommand{
 			ServerID:              item.ID,
 			Name:                  item.Name,
 			Transport:             item.Transport,
@@ -290,9 +291,9 @@ func serverCommandFromPayload(payload map[string]any) (mcpservice.CreateServerCo
 	}
 	id := common.MCPServerID(stringPayload(payload, events.PayloadKeyServerID))
 	if id == "" {
-		return mcpservice.CreateServerCommand{}, common.ErrInvalidArgument
+		return mcpcontracts.CreateServerCommand{}, common.ErrInvalidArgument
 	}
-	return mcpservice.CreateServerCommand{
+	return mcpcontracts.CreateServerCommand{
 		ServerID:              id,
 		Name:                  stringPayload(payload, events.PayloadKeyName),
 		Transport:             stringPayload(payload, events.PayloadKeyKind),
@@ -309,12 +310,12 @@ func serverCommandFromPayload(payload map[string]any) (mcpservice.CreateServerCo
 	}, nil
 }
 
-func capabilityCommandFromPayload(payload map[string]any) (mcpservice.CreateCapabilityCommand, error) {
+func capabilityCommandFromPayload(payload map[string]any) (mcpcontracts.CreateCapabilityCommand, error) {
 	item, ok := payload[events.PayloadKeyCapability].(*mcpmodel.Capability)
 	if !ok || item == nil {
-		return mcpservice.CreateCapabilityCommand{}, common.ErrInvalidArgument
+		return mcpcontracts.CreateCapabilityCommand{}, common.ErrInvalidArgument
 	}
-	return mcpservice.CreateCapabilityCommand{
+	return mcpcontracts.CreateCapabilityCommand{
 		ID:             item.ID,
 		ServerID:       item.ServerID,
 		Kind:           item.Kind,
@@ -336,15 +337,15 @@ func capabilityCommandFromPayload(payload map[string]any) (mcpservice.CreateCapa
 	}, nil
 }
 
-func capabilityQueryFromPayload(payload map[string]any) mcpservice.CapabilityQuery {
-	if typed, ok := payload[events.PayloadKeyCapabilityQuery].(mcpservice.CapabilityQuery); ok {
+func capabilityQueryFromPayload(payload map[string]any) mcpcontracts.CapabilityQuery {
+	if typed, ok := payload[events.PayloadKeyCapabilityQuery].(mcpcontracts.CapabilityQuery); ok {
 		return typed
 	}
 	nested, _ := payload[events.PayloadKeyCapabilityQuery].(map[string]any)
 	if nested == nil {
 		nested = payload
 	}
-	return mcpservice.CapabilityQuery{
+	return mcpcontracts.CapabilityQuery{
 		ServerID:  common.MCPServerID(stringPayload(nested, events.PayloadKeyServerID)),
 		Kind:      stringPayload(nested, events.PayloadKeyKind),
 		Category:  stringPayload(nested, events.PayloadKeyCategory),

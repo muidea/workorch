@@ -5,10 +5,8 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
-	"github.com/muidea/magicCommon/framework/plugin/initiator"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	"github.com/muidea/magicCommon/task"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -16,6 +14,7 @@ import (
 	sshcommon "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
+	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 )
 
 func init() {
@@ -25,13 +24,20 @@ func init() {
 func (m *Module) Weight() int { return 30 }
 
 func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	runtime, err := workorchRuntime()
+	repos, err := workorchdeps.ResolveOrchestratorRepositories(ModuleID)
 	if err != nil {
 		return err
 	}
-	repos := runtime.Repositories()
+	eventHub, err := workorchdeps.ResolveEventHub(ModuleID)
+	if err != nil {
+		return err
+	}
+	runtimePolicy, err := workorchdeps.ResolveRuntimePolicy(ModuleID)
+	if err != nil {
+		return err
+	}
 	runtimeRegistry := orchestratorbiz.NewRuntimeAdapterRegistry()
-	eventAdapter := NewEventRuntimeAdapter(runtime.EventHub())
+	eventAdapter := NewEventRuntimeAdapter(eventHub)
 	for _, stepKind := range []string{filecommon.StepKindList, filecommon.StepKindRead, filecommon.StepKindEdit} {
 		if err := runtimeRegistry.Register(stepKind, eventAdapter); err != nil {
 			return cd.NewError(cd.Unexpected, err.Error())
@@ -78,8 +84,8 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 		ValidationResults:     repos.ValidationResults,
 		RuntimeCheckpoints:    repos.RuntimeCheckpoints,
 		ArtifactContinuations: repos.ArtifactContinuations,
-		RuntimePolicy:         runtime.RuntimePolicy(),
-		EventHub:              runtime.EventHub(),
+		RuntimePolicy:         runtimePolicy,
+		EventHub:              eventHub,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}
@@ -100,9 +106,4 @@ func (m *Module) Teardown(ctx context.Context) {
 	if m != nil {
 		_ = m.Stop(ctx)
 	}
-}
-
-func workorchRuntime() (runtimecommon.Helper, *cd.Error) {
-	var helper runtimecommon.Helper
-	return initiator.GetEntity(runtimecommon.InitiatorID, helper)
 }

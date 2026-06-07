@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -134,7 +135,7 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 		WorkspaceID: string(result.WorkspaceID),
 		RunID:       string(result.RunID),
 		Payload: map[string]any{
-			events.PayloadKeyResult: result,
+			events.PayloadKeyCommand: resultcontracts.CreateResultCommand{Result: result},
 		},
 	})
 	if _, ok := events.ResponseEnvelope(err); !ok {
@@ -143,7 +144,7 @@ func TestModuleHandlesResultCommandsOverEventHub(t *testing.T) {
 	err = hub.Publish(ctx, events.Envelope{
 		Topic: events.TopicResultCommandListByRun,
 		Payload: map[string]any{
-			events.PayloadKeyRunID: string(result.RunID),
+			events.PayloadKeyCommand: resultcontracts.ListResultsByRunCommand{RunID: result.RunID},
 		},
 	})
 	response, ok := events.ResponseEnvelope(err)

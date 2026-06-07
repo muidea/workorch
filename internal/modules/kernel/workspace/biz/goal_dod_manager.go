@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -28,7 +28,7 @@ func NewGoalDoDManager(workspaces repository.WorkspaceRepository, goals reposito
 	return &GoalDoDManager{workspaces: workspaces, goals: goals, dods: dods, eventHub: eventHub}
 }
 
-func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservice.CreateWorkspaceCommand) error {
+func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspacecontracts.CreateWorkspaceCommand) error {
 	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -47,7 +47,7 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspaceservi
 	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceCreated, workspace)
 }
 
-func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservice.EnsureWorkspaceCommand) error {
+func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspacecontracts.EnsureWorkspaceCommand) error {
 	if cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Title) == "" || strings.TrimSpace(cmd.DeliverableDirectory) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -55,7 +55,7 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspaceservi
 	workspace, err := m.workspaces.Get(ctx, cmd.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-			return m.CreateWorkspace(ctx, workspaceservice.CreateWorkspaceCommand{
+			return m.CreateWorkspace(ctx, workspacecontracts.CreateWorkspaceCommand{
 				WorkspaceID:          cmd.WorkspaceID,
 				Title:                cmd.Title,
 				Description:          cmd.Description,
@@ -138,7 +138,7 @@ func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.Workspac
 	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceDeleted, workspace)
 }
 
-func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.DefineGoalCommand) error {
+func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.DefineGoalCommand) error {
 	if cmd.GoalID == "" || cmd.WorkspaceID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -163,7 +163,7 @@ func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspaceservice.De
 	return m.publishGoalEvent(ctx, goal)
 }
 
-func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.UpdateGoalCommand) error {
+func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspacecontracts.UpdateGoalCommand) error {
 	if cmd.GoalID == "" || strings.TrimSpace(cmd.Text) == "" {
 		return common.ErrInvalidArgument
 	}
@@ -190,7 +190,7 @@ func (m *GoalDoDManager) UpdateGoal(ctx context.Context, cmd workspaceservice.Up
 	return m.publishGoalEvent(ctx, goal)
 }
 
-func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.DefineDoDCommand) error {
+func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspacecontracts.DefineDoDCommand) error {
 	if cmd.DoDID == "" || cmd.WorkspaceID == "" || len(cmd.Items) == 0 {
 		return common.ErrInvalidArgument
 	}
@@ -221,7 +221,7 @@ func (m *GoalDoDManager) DefineDoD(ctx context.Context, cmd workspaceservice.Def
 	return m.publishDoDEvent(ctx, dod)
 }
 
-func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspaceservice.UpdateDoDCommand) error {
+func (m *GoalDoDManager) UpdateDoD(ctx context.Context, cmd workspacecontracts.UpdateDoDCommand) error {
 	if cmd.DoDID == "" || len(cmd.Items) == 0 {
 		return common.ErrInvalidArgument
 	}

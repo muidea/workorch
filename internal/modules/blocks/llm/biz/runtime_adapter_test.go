@@ -18,9 +18,9 @@ import (
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type staticProvider struct {

@@ -4,13 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
+func TestEventHubDependenciesMapGroupedCapabilities(t *testing.T) {
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
-	deps := RuntimeDependenciesFromExports(exports)
+	hub := session.Bootstrap.Exports().Infrastructure.EventHub
+	deps := runtimeports.NewEventHubDependencies(hub)
 
 	if deps.Snapshot == nil {
 		t.Fatal("snapshot read port is nil")
@@ -29,11 +31,11 @@ func TestRuntimeDependenciesFromExportsMapsGroupedCapabilities(t *testing.T) {
 	}
 }
 
-func TestRuntimeDependenciesFromExportsActionPortsDriveModuleServices(t *testing.T) {
+func TestEventHubDependenciesActionPortsDriveModuleServices(t *testing.T) {
 	session, _ := newTestRuntimeSession(t, "memory", "")
-	exports := session.Bootstrap.Exports()
-	deps := RuntimeDependenciesFromExports(exports)
-	runtime := NewRuntimeAdapter(deps)
+	hub := session.Bootstrap.Exports().Infrastructure.EventHub
+	deps := runtimeports.NewEventHubDependencies(hub)
+	runtime := runtimecore.NewAdapter(deps)
 	ctx := context.Background()
 
 	workspaceID := common.WorkspaceID("ws-runtime-deps-port")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -36,7 +37,7 @@ func (h *testHub) Subscribe(topic string, handler events.Handler) func() {
 
 func TestManagedRuntimePublishedWorkorchEventsUsesCollectorRatherThanHubPublishedMethod(t *testing.T) {
 	hub := newTestHub()
-	runtime := NewManagedRuntime(NewRuntimeAdapter(RuntimeDependencies{}), hub)
+	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), hub)
 	defer runtime.Close()
 
 	if err := hub.Publish(context.Background(), events.Envelope{
@@ -64,7 +65,7 @@ func TestManagedRuntimePublishedWorkorchEventsUsesCollectorRatherThanHubPublishe
 
 func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
 	hub := newTestHub()
-	runtime := NewManagedRuntime(NewRuntimeAdapter(RuntimeDependencies{}), hub)
+	runtime := runtimecore.NewManagedRuntime(runtimecore.NewAdapter(runtimecore.Dependencies{}), hub)
 
 	runtime.Close()
 
@@ -84,14 +85,14 @@ func TestManagedRuntimeCloseStopsFurtherCollection(t *testing.T) {
 }
 
 func TestNewManagedRuntimeReturnsNilWhenRuntimeMissing(t *testing.T) {
-	if runtime := NewManagedRuntime(nil, newTestHub()); runtime != nil {
+	if runtime := runtimecore.NewManagedRuntime(nil, newTestHub()); runtime != nil {
 		t.Fatalf("runtime = %#v, want nil", runtime)
 	}
 }
 
 func TestRuntimeAdapterReturnsInvalidArgumentWhenDependenciesMissing(t *testing.T) {
 	ctx := context.Background()
-	runtime := NewRuntimeAdapter(RuntimeDependencies{})
+	runtime := runtimecore.NewAdapter(runtimecore.Dependencies{})
 
 	tests := []struct {
 		name string
@@ -130,7 +131,7 @@ func TestRuntimeAdapterReturnsInvalidArgumentWhenDependenciesMissing(t *testing.
 }
 
 func TestRuntimeAdapterNilReceiverReturnsInvalidArgument(t *testing.T) {
-	var runtime *runtimeAdapter
+	var runtime *runtimecore.Adapter
 
 	if _, err := runtime.GetRun(context.Background(), "run"); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("get run err = %v, want invalid argument", err)

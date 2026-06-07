@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapter_ExecuteRuntimeStepRunsCommandInWorkspaceDirectory(t *testing.T) {

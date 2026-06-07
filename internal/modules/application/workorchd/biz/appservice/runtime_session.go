@@ -2,286 +2,82 @@ package appservice
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 
-	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
-	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
-type RuntimeSession struct {
-	Bootstrap         *bootstrap.Runtime
-	Runtime           *ManagedRuntime
-	exports           bootstrap.Exports
-	borrowed          bool
-	repositoryBackend string
-	repositoryDataDir string
-}
+type RuntimeSession = runtimecore.Session
 
 func NewRuntimeSession(bootstrapRuntime *bootstrap.Runtime) *RuntimeSession {
-	if bootstrapRuntime == nil {
-		return &RuntimeSession{}
-	}
-	return &RuntimeSession{
-		Bootstrap: bootstrapRuntime,
-		Runtime:   NewRuntimeFromBootstrap(bootstrapRuntime),
-	}
+	return runtimecore.NewSession(bootstrapRuntime, runtimeports.NewManagedRuntimeFromEventHub)
 }
 
 func NewRuntimeSessionFromExports(exports bootstrap.Exports) (*RuntimeSession, error) {
-	if !hasWorkorchRuntimeExports(exports) {
-		return nil, common.ErrInvalidArgument
-	}
-	return &RuntimeSession{
-		Runtime:  NewRuntimeFromExports(exports),
-		exports:  exports,
-		borrowed: true,
-	}, nil
+	return runtimecore.NewSessionFromExports(exports, runtimeports.NewManagedRuntimeFromEventHub)
 }
 
 func NewRuntimeSessionFromInitiator() (*RuntimeSession, error) {
-	var helper runtimecommon.Helper
-	runtime, err := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
-	if err != nil {
-		return nil, err
-	}
-	session, sessionErr := NewRuntimeSessionFromExports(exportsFromRuntimeHelper(runtime))
-	if sessionErr != nil {
-		return nil, sessionErr
-	}
-	if cfg, err := workorchconfig.Current(); err == nil {
-		session.setRepositoryConfig(cfg.Repository.Backend, cfg.Repository.DataDir)
-	}
-	return session, nil
-}
-
-func (s *RuntimeSession) Borrow() *RuntimeSession {
-	if s == nil {
-		return &RuntimeSession{borrowed: true}
-	}
-	if s.Bootstrap == nil {
-		return &RuntimeSession{
-			Runtime:           NewRuntimeFromExports(s.exports),
-			exports:           s.exports,
-			borrowed:          true,
-			repositoryBackend: s.repositoryBackend,
-			repositoryDataDir: s.repositoryDataDir,
-		}
-	}
-	return &RuntimeSession{
-		Bootstrap:         s.Bootstrap,
-		Runtime:           NewRuntimeFromBootstrap(s.Bootstrap),
-		borrowed:          true,
-		repositoryBackend: s.repositoryBackend,
-		repositoryDataDir: s.repositoryDataDir,
-	}
+	return runtimecore.NewSessionFromInitiator(
+		workorchconfig.Current,
+		exportsFromInitiator,
+		runtimeports.NewManagedRuntimeFromEventHub,
+	)
 }
 
 func NewRuntimeSessionWithBackend(backend string, dataRoot string) (*RuntimeSession, error) {
-	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
+	return runtimecore.NewSessionWithBackend(backend, dataRoot, runtimeports.NewManagedRuntimeFromEventHub, func() *bootstrap.Runtime {
 		return bootstrap.NewWithBackend(backend, dataRoot)
 	})
-	if err != nil {
-		return nil, err
-	}
-	session := NewRuntimeSession(bootstrapRuntime)
-	session.setRepositoryConfig(backend, dataRoot)
-	return session, nil
 }
 
 func NewRuntimeSessionWithBackendAndEventHub(backend string, dataRoot string, eventHub events.Hub) (*RuntimeSession, error) {
-	runtimePolicy := workorchruntimepolicy.FromConfig(workorchconfig.Config{})
-	if cfg, err := workorchconfig.Current(); err == nil {
-		runtimePolicy = workorchruntimepolicy.FromConfig(cfg)
-	}
-	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
-		return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
-	})
-	if err != nil {
-		return nil, err
-	}
-	session := NewRuntimeSession(bootstrapRuntime)
-	session.setRepositoryConfig(backend, dataRoot)
-	return session, nil
+	return runtimecore.NewSessionWithBackendAndEventHub(
+		backend,
+		dataRoot,
+		eventHub,
+		workorchconfig.Current,
+		runtimeports.NewManagedRuntimeFromEventHub,
+		func(runtimePolicy workorchruntimepolicy.RuntimePolicy, eventHub events.Hub) *bootstrap.Runtime {
+			return bootstrap.NewWithBackendRuntimePolicyAndEventHub(backend, dataRoot, runtimePolicy, eventHub)
+		},
+	)
 }
 
 func NewRuntimeSessionFromEnv() (*RuntimeSession, error) {
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return nil, err
-	}
-	bootstrapRuntime, err := buildBootstrapRuntime(func() *bootstrap.Runtime {
-		return bootstrap.NewWithBackendAndRuntimePolicy(
-			cfg.Repository.Backend,
-			cfg.Repository.DataDir,
-			workorchruntimepolicy.FromConfig(cfg),
-		)
-	})
-	if err != nil {
-		return nil, err
-	}
-	session := NewRuntimeSession(bootstrapRuntime)
-	session.setRepositoryConfig(cfg.Repository.Backend, cfg.Repository.DataDir)
-	return session, nil
+	return runtimecore.NewSessionFromEnv(
+		workorchconfig.Current,
+		runtimeports.NewManagedRuntimeFromEventHub,
+		func(cfg workorchconfig.Config) *bootstrap.Runtime {
+			return bootstrap.NewWithBackendAndRuntimePolicy(
+				cfg.Repository.Backend,
+				cfg.Repository.DataDir,
+				workorchruntimepolicy.FromConfig(cfg),
+			)
+		},
+	)
 }
-
-func (s *RuntimeSession) Close(ctx context.Context) error {
-	if s == nil {
-		return nil
-	}
-	if s.Runtime != nil {
-		s.Runtime.Close()
-		s.Runtime = nil
-	}
-	if s.Bootstrap == nil {
-		if s.borrowed {
-			s.exports = bootstrap.Exports{}
-		}
-		return nil
-	}
-	if s.borrowed {
-		s.Bootstrap = nil
-		return nil
-	}
-	err := s.Bootstrap.Shutdown(ctx)
-	s.Bootstrap = nil
-	return err
-}
-
-func (s *RuntimeSession) CloseOnReturn(ctx context.Context, errp *error) {
-	if errp == nil {
-		return
-	}
-	*errp = errors.Join(*errp, s.Close(ctx))
-}
-
-func (s *RuntimeSession) Exports() (bootstrap.Exports, error) {
-	if s == nil {
-		return bootstrap.Exports{}, common.ErrInvalidArgument
-	}
-	if s.Bootstrap == nil {
-		if !hasWorkorchRuntimeExports(s.exports) {
-			return bootstrap.Exports{}, common.ErrInvalidArgument
-		}
-		return s.exports, nil
-	}
-	return s.Bootstrap.Exports(), nil
-}
-
-func (s *RuntimeSession) ConfigLoader() func() (workorchconfig.Config, error) {
-	exports, err := s.Exports()
-	if err != nil {
-		return nil
-	}
-	return configLoaderFromExports(exports)
-}
-
-func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstrap.Runtime, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			message := fmt.Sprint(recovered)
-			if strings.HasPrefix(message, "unsupported repository backend: ") {
-				err = fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
-				runtime = nil
-				return
-			}
-			panic(recovered)
-		}
-	}()
-	return factory(), nil
-}
-
-type eventHubContextKey struct{}
 
 func ContextWithEventHub(ctx context.Context, eventHub events.Hub) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if eventHub == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, eventHubContextKey{}, eventHub)
+	return runtimecore.ContextWithEventHub(ctx, eventHub)
 }
 
 func EventHubFromContext(ctx context.Context) events.Hub {
-	if ctx == nil {
-		return nil
-	}
-	eventHub, _ := ctx.Value(eventHubContextKey{}).(events.Hub)
-	return eventHub
+	return runtimecore.EventHubFromContext(ctx)
 }
 
 func newRuntimeSessionWithBackend(ctx context.Context, backend string, dataRoot string) (*RuntimeSession, error) {
 	return NewRuntimeSessionWithBackendAndEventHub(backend, dataRoot, EventHubFromContext(ctx))
 }
 
-func (s *RuntimeSession) setRepositoryConfig(backend string, dataRoot string) {
-	if s == nil {
-		return
-	}
-	s.repositoryBackend = strings.TrimSpace(backend)
-	if s.repositoryBackend == "" {
-		s.repositoryBackend = "memory"
-	}
-	s.repositoryDataDir = workorchrepo.ResolveRepositoryDataRoot(s.repositoryBackend, strings.TrimSpace(dataRoot))
+func exportsFromInitiator() (bootstrap.Exports, error) {
+	return bootstrap.ExportsFromInitiator("application/workorchd runtime session")
 }
 
-func (s *RuntimeSession) RepositoryBackend() string {
-	if s == nil {
-		return ""
-	}
-	return s.repositoryBackend
-}
-
-func (s *RuntimeSession) RepositoryDataDir() string {
-	if s == nil {
-		return ""
-	}
-	return s.repositoryDataDir
-}
-
-func exportsFromRuntimeHelper(runtime runtimecommon.Helper) bootstrap.Exports {
-	if runtime == nil {
-		return bootstrap.Exports{}
-	}
-	repos := runtime.Repositories()
-	return bootstrap.Exports{
-		Repositories: bootstrap.RepositoryExports{
-			Souls:                 repos.Souls,
-			WorkspaceTemplates:    repos.WorkspaceTemplates,
-			MemoryItems:           repos.MemoryItems,
-			MemoryRecallTraces:    repos.MemoryRecallTraces,
-			AutoGovernanceTraces:  repos.AutoGovernanceTraces,
-			Skills:                repos.Skills,
-			MCPServers:            repos.MCPServers,
-			MCPCapabilities:       repos.MCPCapabilities,
-			Workspaces:            repos.Workspaces,
-			Goals:                 repos.Goals,
-			DoDs:                  repos.DoDs,
-			Results:               repos.Results,
-			Artifacts:             repos.Artifacts,
-			ArtifactContinuations: repos.ArtifactContinuations,
-			EventRecords:          repos.EventRecords,
-			Runs:                  repos.Runs,
-			Steps:                 repos.Steps,
-			ToolCalls:             repos.ToolCalls,
-			Patches:               repos.Patches,
-			ValidationResults:     repos.ValidationResults,
-			RuntimeCheckpoints:    repos.RuntimeCheckpoints,
-			Tickets:               repos.Tickets,
-			Resolutions:           repos.Resolutions,
-			Approvals:             repos.Approvals,
-		},
-		Infrastructure: bootstrap.InfrastructureExports{
-			EventHub:   runtime.EventHub(),
-			LoadConfig: workorchconfig.Current,
-		},
-	}
+func buildBootstrapRuntime(factory func() *bootstrap.Runtime) (runtime *bootstrap.Runtime, err error) {
+	return runtimecore.BuildBootstrapRuntime(factory)
 }

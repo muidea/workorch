@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeRepairBaseInputProjectsFailedStepContract(t *testing.T) {

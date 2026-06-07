@@ -3,46 +3,16 @@ package workspace
 import (
 	"context"
 
+	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type CreateWorkspaceCommand struct {
-	WorkspaceID          common.WorkspaceID
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	InternalDirectory    string
-}
-
-type EnsureWorkspaceCommand struct {
-	WorkspaceID          common.WorkspaceID
-	Title                string
-	Description          string
-	DeliverableDirectory string
-	InternalDirectory    string
-}
-
-type DefineGoalCommand struct {
-	GoalID      common.GoalID
-	WorkspaceID common.WorkspaceID
-	Text        string
-}
-
-type UpdateGoalCommand struct {
-	GoalID common.GoalID
-	Text   string
-}
-
-type DefineDoDCommand struct {
-	DoDID       common.DoDID
-	WorkspaceID common.WorkspaceID
-	Items       []string
-}
-
-type UpdateDoDCommand struct {
-	DoDID common.DoDID
-	Items []string
-}
+type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
+type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
+type DefineGoalCommand = workspacecontracts.DefineGoalCommand
+type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
+type DefineDoDCommand = workspacecontracts.DefineDoDCommand
+type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
 
 type Service interface {
 	CreateWorkspace(context.Context, CreateWorkspaceCommand) error

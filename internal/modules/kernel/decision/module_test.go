@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -205,5 +206,52 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 	if _, err := tickets.Get(ctx, ticketID); err != nil {
 		t.Fatalf("ticket should remain after wrong-scope delete: %v", err)
+	}
+}
+
+func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	resolutions := memory.NewDecisionResolutionRepository()
+	module := New()
+	if err := module.Configure(Dependencies{
+		Tickets:     memory.NewDecisionTicketRepository(),
+		Resolutions: resolutions,
+		EventHub:    hub,
+	}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	ticketID := common.TicketID("ticket-resolution-contract")
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       events.TopicDecisionCommandCreateResolution,
+		SubjectType: "decision_resolution",
+		SubjectID:   "resolution-contract",
+		Payload: map[string]any{
+			events.PayloadKeyCommand: decisioncontracts.CreateResolutionCommand{
+				ResolutionID: "resolution-contract",
+				TicketID:     ticketID,
+				Type:         "provide_missing_info",
+				Payload:      map[string]any{"answer": "ok"},
+			},
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("create resolution err = %v, want response", err)
+	}
+	item, err := resolutions.GetByTicketID(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get resolution: %v", err)
+	}
+	if item.ID != "resolution-contract" || item.Type != "provide_missing_info" || item.Payload["answer"] != "ok" {
+		t.Fatalf("resolution = %+v, want command fields", item)
 	}
 }

@@ -9,13 +9,13 @@ import (
 	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type countingRunRepository struct {

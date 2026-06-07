@@ -1,0 +1,38 @@
+package runports
+
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+)
+
+func workspaceDefinitionContextPatchFromDefinitions(effectiveGoal *workspacemodel.Goal, workspaceGoals []map[string]any, goalRevisions []map[string]any, effectiveDoD *workspacemodel.DoD, workspaceDoDs []map[string]any, doDRevisions []map[string]any) map[string]any {
+	if effectiveGoal == nil || effectiveDoD == nil {
+		return nil
+	}
+	patch := map[string]any{
+		"goalId": string(effectiveGoal.ID),
+		"goal":   activationcore.GoalContext(effectiveGoal),
+		"doDId":  string(effectiveDoD.ID),
+		"dod":    activationcore.DoDContext(effectiveDoD),
+		"definitionRevision": map[string]any{
+			"policy":          "workspace_goal_dod_cumulative",
+			"effectiveGoalId": string(effectiveGoal.ID),
+			"effectiveDoDId":  string(effectiveDoD.ID),
+			"goalIds":         runtimecore.ContextIDs(workspaceGoals, "id"),
+			"doDIds":          runtimecore.ContextIDs(workspaceDoDs, "id"),
+		},
+	}
+	if len(workspaceGoals) > 0 {
+		patch["goals"] = workspaceGoals
+		patch["goalDefinitionPolicy"] = "workspace_goals_are_cumulative_latest_refines_previous"
+	}
+	if len(workspaceDoDs) > 0 {
+		patch["dods"] = workspaceDoDs
+		patch["doDDefinitionPolicy"] = "workspace_dods_are_cumulative_latest_refines_previous"
+	}
+	if impact := activationcore.DefinitionChangeImpactFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions); len(impact) > 0 {
+		patch["definitionChangeImpact"] = impact
+	}
+	return patch
+}

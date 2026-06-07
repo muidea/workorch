@@ -3,25 +3,13 @@ package skill
 import (
 	"context"
 
+	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type CreateSkillCommand struct {
-	SkillID                common.SkillID
-	Name                   string
-	Version                string
-	Description            string
-	TriggerRules           []string
-	Instruction            string
-	ReferenceRefs          []string
-	RequiredToolKinds      []string
-	RequiredMCPServerRefs  []string
-	RequiredCapabilityRefs []string
-	Constraints            []string
-}
-
-type UpdateSkillCommand = CreateSkillCommand
+type CreateSkillCommand = skillcontracts.CreateSkillCommand
+type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 
 type Service interface {
 	CreateSkill(context.Context, CreateSkillCommand) error

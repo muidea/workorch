@@ -15,6 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/skillselectcore"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -166,16 +174,40 @@ func workspaceGovernanceHistory(
 			"decisionKind":      ticket.DecisionKind,
 			"reason":            ticket.Reason,
 			"question":          ticket.Question,
-			"ticketContext":     compactActivationFailureContext(ticket.Context),
+			"ticketContext":     activationcore.CompactFailureContext(ticket.Context),
 			"resolutionId":      string(resolution.ID),
 			"resolutionType":    resolution.Type,
-			"resolutionPayload": compactActivationDecisionPayload(resolution.Payload),
+			"resolutionPayload": activationcore.CompactDecisionPayload(resolution.Payload),
 		}))
 		if len(ret) >= limit {
 			break
 		}
 	}
 	return ret
+}
+
+func buildWorkspaceExecutionContextWithDefinitions(ctx context.Context, session *RuntimeSession, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD, cmd ActivateWorkspaceExecutionCommand) (map[string]any, error) {
+	hub, err := session.RequiredEventHub()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := configcore.LoadFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return activationports.BuildWorkspaceExecutionContext(ctx, activationports.WorkspaceExecutionContextRequest{
+		Hub:                   hub,
+		Workspace:             workspace,
+		Goal:                  goal,
+		DoD:                   dod,
+		Command:               cmd,
+		SystemDefaultSoulID:   common.SoulID(strings.TrimSpace(cfg.Runtime.DefaultSoulID)),
+		DefaultDialogLanguage: localizationcore.DefaultDialogLanguageFromContext(ctx),
+		DefaultEmbeddingProviderLoader: func(context.Context) (string, error) {
+			return cfg.LLM.DefaultEmbeddingProvider, nil
+		},
+		SkillHubCatalog: skillHubCatalogForEventHub(hub),
+	})
 }
 
 type countingRunRepository struct {
@@ -197,7 +229,7 @@ func (s *countingRunService) CreateRun(ctx context.Context, cmd runmodule.Create
 		GoalID:           cmd.GoalID,
 		DoDID:            cmd.DoDID,
 		InitialStepKind:  cmd.InitialStepKind,
-		ExecutionContext: cloneContextMap(cmd.ExecutionContext),
+		ExecutionContext: runtimecore.CloneContextMap(cmd.ExecutionContext),
 		Priority:         cmd.Priority,
 	})
 	return s.Service.CreateRun(ctx, cmd)
@@ -211,7 +243,7 @@ func (r *countingRunRepository) Create(ctx context.Context, item *runmodel.Run) 
 			GoalID:             item.GoalID,
 			DoDID:              item.DoDID,
 			InitialStepKind:    item.InitialStepKind,
-			ExecutionContext:   cloneContextMap(item.ExecutionContext),
+			ExecutionContext:   runtimecore.CloneContextMap(item.ExecutionContext),
 			State:              item.State,
 			Priority:           item.Priority,
 			BlockingTicketID:   item.BlockingTicketID,
@@ -557,14 +589,14 @@ func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Hand
 
 func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
 	hub := events.NewMemoryHub()
-	err := publishActivationRunCommand(context.Background(), hub, events.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
+	err := activationports.PublishRunCommand(context.Background(), hub, events.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
 		events.PayloadKeyRunID: "run-activation",
 	})
 	if err == nil {
-		t.Fatal("publishActivationRunCommand returned nil, want missing response error")
+		t.Fatal("activationports.PublishRunCommand returned nil, want missing response error")
 	}
 	if !strings.Contains(err.Error(), "returned no response") {
-		t.Fatalf("publishActivationRunCommand error = %v, want missing response error", err)
+		t.Fatalf("activationports.PublishRunCommand error = %v, want missing response error", err)
 	}
 }
 
@@ -785,13 +817,13 @@ func TestActivationObservableRunState(t *testing.T) {
 		common.RunStateCancelled,
 		common.RunStateSuperseded,
 	} {
-		if !isActivationObservableRunState(state) {
-			t.Fatalf("isActivationObservableRunState(%s) = false, want true", state)
+		if !activationcore.IsObservableRunState(state) {
+			t.Fatalf("IsObservableRunState(%s) = false, want true", state)
 		}
 	}
 	for _, state := range []common.RunState{"", common.RunStateCreated} {
-		if isActivationObservableRunState(state) {
-			t.Fatalf("isActivationObservableRunState(%s) = true, want false", state)
+		if activationcore.IsObservableRunState(state) {
+			t.Fatalf("IsObservableRunState(%s) = true, want false", state)
 		}
 	}
 }
@@ -808,7 +840,7 @@ func TestActivationSnapshotDoesNotProjectCreatedRunAsActive(t *testing.T) {
 		State:       common.RunStateCreated,
 	}
 
-	snapshot := activationSnapshot(workspace, run, nil, nil)
+	snapshot := readmodelprojection.ActivationSnapshot(workspace, run, nil, nil)
 	if snapshot.Workspace.State != string(common.WorkspaceStateFailed) || snapshot.Workspace.ActiveRunID != "" {
 		t.Fatalf("snapshot workspace = %+v, want persisted failed workspace without created active run projection", snapshot.Workspace)
 	}
@@ -1055,10 +1087,10 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if goalChange["effectiveGoalId"] != updatedGoal.ID || doDChange["effectiveDoDId"] != updatedDoD.ID {
 		t.Fatalf("definitionChangeImpact = %+v, want revised effective goal/dod", impact)
 	}
-	if got := stringSliceFromAny(goalChange["allGoalIds"]); len(got) != 1 || got[0] != updatedGoal.ID {
+	if got := runtimecore.StringSliceFromAny(goalChange["allGoalIds"]); len(got) != 1 || got[0] != updatedGoal.ID {
 		t.Fatalf("allGoalIds = %+v, want canonical revised Goal only", got)
 	}
-	if got := stringSliceFromAny(doDChange["allDoDIds"]); len(got) != 1 || got[0] != updatedDoD.ID {
+	if got := runtimecore.StringSliceFromAny(doDChange["allDoDIds"]); len(got) != 1 || got[0] != updatedDoD.ID {
 		t.Fatalf("allDoDIds = %+v, want canonical revised DoD only", got)
 	}
 	if goalChange["changedInPlace"] != true || doDChange["changedInPlace"] != true {
@@ -1354,7 +1386,7 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 		Question:     "Choose recovery strategy",
 		State:        common.DecisionTicketStateResolved,
 		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy:        decisionContextRecoveryPolicyRepairPlan,
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
 			"failureClass":                          "runtime_failed",
 			"failureSignature":                      "class=runtime_failed|kind=llm/workspace_execution|failureTargets=target-a",
 			"failureTargetScope":                    "target-a",
@@ -1486,11 +1518,11 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 		Question:     "Choose recovery strategy",
 		State:        common.DecisionTicketStateResolved,
 		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
-			"failureClass":                   "runtime_failed",
-			"failureSignature":               "class=runtime_failed|kind=llm/workspace_execution|failureTargets=old-target",
-			"failureTargetScope":             "old-target",
-			"failedStepOutput":               map[string]any{"error": "old target failed"},
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
+			"failureClass":       "runtime_failed",
+			"failureSignature":   "class=runtime_failed|kind=llm/workspace_execution|failureTargets=old-target",
+			"failureTargetScope": "old-target",
+			"failedStepOutput":   map[string]any{"error": "old target failed"},
 		},
 	}); err != nil {
 		t.Fatalf("create prior ticket: %v", err)
@@ -1794,9 +1826,9 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
 	}
 
-	selectedGoal, selectedDoD, err := selectWorkspaceExecutionDefinitions(ctx, borrowed, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.EventHub, workspace.ID, "", "")
 	if err != nil {
-		t.Fatalf("selectWorkspaceExecutionDefinitions: %v", err)
+		t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions: %v", err)
 	}
 	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
 		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
@@ -1888,12 +1920,12 @@ func TestActivationContextMergesOperatorInputPatchWithoutOverridingDefinitions(t
 		t.Fatalf("definitionChangeImpact = %+v, want runtime-generated cumulative impact", impact)
 	}
 	goalChange := contextMapFromValue(t, impact["goalChange"])
-	previousGoalIDs := stringSliceFromAny(goalChange["previousGoalIds"])
+	previousGoalIDs := runtimecore.StringSliceFromAny(goalChange["previousGoalIds"])
 	if goalChange["effectiveGoalId"] != string(nextGoal.ID) || !stringSliceContains(previousGoalIDs, string(goal.ID)) {
 		t.Fatalf("goalChange = %+v, want latest goal with previous goal ids", goalChange)
 	}
 	doDChange := contextMapFromValue(t, impact["doDChange"])
-	previousDoDIDs := stringSliceFromAny(doDChange["previousDoDIds"])
+	previousDoDIDs := runtimecore.StringSliceFromAny(doDChange["previousDoDIds"])
 	if doDChange["effectiveDoDId"] != string(nextDoD.ID) || !stringSliceContains(previousDoDIDs, string(dod.ID)) {
 		t.Fatalf("doDChange = %+v, want latest DoD with previous DoD ids", doDChange)
 	}
@@ -1948,14 +1980,9 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 			events.TopicWorkspaceCommandListDoDsByWS:  "dod",
 		},
 	}
-	borrowed, err := NewRuntimeSessionFromExports(exports)
-	if err != nil {
-		t.Fatalf("NewRuntimeSessionFromExports: %v", err)
-	}
-
 	errCh := make(chan error, 1)
 	go func() {
-		selectedGoal, selectedDoD, err := selectWorkspaceExecutionDefinitions(ctx, borrowed, workspace.ID, ActivateWorkspaceExecutionCommand{})
+		selectedGoal, selectedDoD, err := activationports.SelectWorkspaceExecutionDefinitions(ctx, exports.Infrastructure.EventHub, workspace.ID, "", "")
 		if err == nil && (selectedGoal.ID != goal.ID || selectedDoD.ID != dod.ID) {
 			err = errors.New("selected unexpected goal or dod")
 		}
@@ -1968,7 +1995,7 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 		case name := <-started:
 			seen[name] = true
 		case err := <-errCh:
-			t.Fatalf("selectWorkspaceExecutionDefinitions returned before both reads started: %v", err)
+			t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions returned before both reads started: %v", err)
 		case <-ctx.Done():
 			t.Fatalf("started reads = %+v, want goal and dod before release: %v", seen, ctx.Err())
 		}
@@ -1977,10 +2004,10 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("selectWorkspaceExecutionDefinitions: %v", err)
+			t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions: %v", err)
 		}
 	case <-ctx.Done():
-		t.Fatalf("selectWorkspaceExecutionDefinitions did not complete after release: %v", ctx.Err())
+		t.Fatalf("activationports.SelectWorkspaceExecutionDefinitions did not complete after release: %v", ctx.Err())
 	}
 }
 
@@ -2066,11 +2093,19 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
 	var createdRuns []*runmodel.Run
 	unsubscribe := exports.Infrastructure.EventHub.Subscribe(events.TopicRunCommandCreate, func(_ context.Context, envelope events.Envelope) error {
-		item, ok := envelope.Payload[events.PayloadKeyRun].(*runmodel.Run)
-		if ok && item != nil {
-			cloned := *item
-			cloned.ExecutionContext = cloneContextMap(item.ExecutionContext)
-			createdRuns = append(createdRuns, &cloned)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runmodule.CreateRunCommand)
+		if ok {
+			createdRuns = append(createdRuns, &runmodel.Run{
+				ID:                 cmd.RunID,
+				WorkspaceID:        cmd.WorkspaceID,
+				GoalID:             cmd.GoalID,
+				DoDID:              cmd.DoDID,
+				DefinitionRevision: cmd.DefinitionRevision,
+				InitialStepKind:    cmd.InitialStepKind,
+				ExecutionContext:   runtimecore.CloneContextMap(cmd.ExecutionContext),
+				State:              common.RunStateCreated,
+				Priority:           cmd.Priority,
+			})
 		}
 		return nil
 	})
@@ -2106,7 +2141,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 		t.Fatalf("create priority = %d, want activation priority", createdRun.Priority)
 	}
 	if len(countingRuns.createRuns) > 0 {
-		runCompressed := runCompressedContext(t, mapRun(countingRuns.createRuns[0]))
+		runCompressed := runCompressedContext(t, runtimecore.MapRun(countingRuns.createRuns[0]))
 		if runCompressed["runId"] != item.Run.ID || runCompressed["mode"] != "deterministic_recovery_summary" {
 			t.Fatalf("repository create compressedContext = %+v, want created run context", runCompressed)
 		}
@@ -2842,7 +2877,7 @@ func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *
 	if err != nil {
 		t.Fatalf("get workspace #2: %v", err)
 	}
-	contract := workspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspaceModel)
+	contract := activationcore.WorkspaceExecutionContract(ctx, exports.Repositories.WorkspaceTemplates, workspaceModel)
 	if contract["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("executionContract = %+v, want template policy", contract)
 	}
@@ -3411,7 +3446,10 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyMemoryItems: items}})
 	})
 
-	items, evidence, err := selectedMemoryItems(ctx, workspaceID, hub, nil, nil, nil)
+	items, evidence, err := activationports.SelectedMemoryItems(ctx, activationports.MemorySelectionOptions{
+		WorkspaceID: workspaceID,
+		Hub:         hub,
+	})
 	if err != nil {
 		t.Fatalf("selectedMemoryItems: %v", err)
 	}
@@ -3424,7 +3462,7 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 		contextStringSliceContains(evidence["retrievedMemoryIds"], "memory-provider-retry-process") {
 		t.Fatalf("evidence = %+v, want provider retry candidate excluded from retrieval", evidence)
 	}
-	contexts := memoryContexts(items)
+	contexts := activationcore.MemoryContexts(items)
 	if len(contexts) != 1 {
 		t.Fatalf("contexts = %+v, want one context", contexts)
 	}
@@ -3873,7 +3911,7 @@ func assertSoulRoutingBinding(t *testing.T, bindings map[string]any, stage strin
 
 func skillSelectionPolicyAndStatus(value any) (string, string) {
 	switch typed := value.(type) {
-	case skillSelectionEvidence:
+	case skillselectcore.Evidence:
 		return typed.Policy, typed.Status
 	case map[string]any:
 		policy, _ := typed["policy"].(string)

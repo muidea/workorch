@@ -5,6 +5,7 @@ import (
 
 	soulbiz "github.com/muidea/workorch/internal/modules/kernel/soul/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/common"
+	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,9 +16,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = soulservice.Service
-type CreateSoulCommand = soulservice.CreateSoulCommand
-type UpdateSoulCommand = soulservice.UpdateSoulCommand
-type ValidateCapabilitySelectionCommand = soulservice.ValidateCapabilitySelectionCommand
+type CreateSoulCommand = soulcontracts.CreateSoulCommand
+type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
+type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
 
 type Dependencies struct {
 	Souls    repository.SoulRepository
@@ -97,7 +98,7 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 	}
 	switch envelope.Topic {
 	case events.TopicSoulCommandCreate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulservice.CreateSoulCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.CreateSoulCommand)
 		if !ok {
 			var err error
 			cmd, err = soulCommandFromPayload(envelope.Payload)
@@ -126,7 +127,7 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySouls: items})
 	case events.TopicSoulCommandUpdate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulservice.UpdateSoulCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.UpdateSoulCommand)
 		if !ok {
 			var err error
 			cmd, err = soulCommandFromPayload(envelope.Payload)
@@ -143,12 +144,12 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
 	case events.TopicSoulCommandDelete:
-		if err := m.servicePtr.DeleteSoul(ctx, common.SoulID(stringPayload(envelope.Payload, events.PayloadKeySoulID))); err != nil {
+		if err := m.servicePtr.DeleteSoul(ctx, deleteSoulIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return soulCommandResponse(envelope, nil)
 	case events.TopicSoulCommandValidateCapability:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulservice.ValidateCapabilitySelectionCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.ValidateCapabilitySelectionCommand)
 		if !ok {
 			cmd = soulCapabilitySelectionCommandFromPayload(envelope.Payload)
 			if cmd.SoulID == "" {
@@ -202,12 +203,12 @@ func stringSlicePayload(payload map[string]any, key string) []string {
 	}
 }
 
-func soulCommandFromPayload(payload map[string]any) (soulservice.CreateSoulCommand, error) {
+func soulCommandFromPayload(payload map[string]any) (soulcontracts.CreateSoulCommand, error) {
 	item, ok := payload[events.PayloadKeySoul].(*soulmodel.Soul)
 	if !ok || item == nil {
-		return soulservice.CreateSoulCommand{}, common.ErrInvalidArgument
+		return soulcontracts.CreateSoulCommand{}, common.ErrInvalidArgument
 	}
-	return soulservice.CreateSoulCommand{
+	return soulcontracts.CreateSoulCommand{
 		SoulID:                      item.ID,
 		Name:                        item.Name,
 		Description:                 item.Description,
@@ -221,8 +222,15 @@ func soulCommandFromPayload(payload map[string]any) (soulservice.CreateSoulComma
 	}, nil
 }
 
-func soulCapabilitySelectionCommandFromPayload(payload map[string]any) soulservice.ValidateCapabilitySelectionCommand {
-	return soulservice.ValidateCapabilitySelectionCommand{
+func deleteSoulIDFromPayload(payload map[string]any) common.SoulID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(soulcontracts.DeleteSoulCommand); ok && cmd.SoulID != "" {
+		return cmd.SoulID
+	}
+	return common.SoulID(stringPayload(payload, events.PayloadKeySoulID))
+}
+
+func soulCapabilitySelectionCommandFromPayload(payload map[string]any) soulcontracts.ValidateCapabilitySelectionCommand {
+	return soulcontracts.ValidateCapabilitySelectionCommand{
 		SoulID:               common.SoulID(stringPayload(payload, events.PayloadKeySoulID)),
 		SkillRefs:            stringSlicePayload(payload, events.PayloadKeySkillRefs),
 		MCPServerRefs:        stringSlicePayload(payload, events.PayloadKeyMCPServerRefs),

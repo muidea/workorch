@@ -9,6 +9,8 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -160,7 +162,7 @@ func TestRuntimeSessionCloseOnReturnJoinsOperationAndShutdownErrors(t *testing.T
 	errShutdown := errors.New("shutdown failed")
 	session := &RuntimeSession{
 		Bootstrap: &bootstrap.Runtime{},
-		Runtime:   &ManagedRuntime{},
+		Runtime:   &runtimecore.ManagedRuntime{},
 	}
 	setBootstrapRuntimeModules(t, session.Bootstrap, runtimeSessionTestLifecycle{
 		id:          "broken",
@@ -242,7 +244,7 @@ func TestRuntimeSessionFromExportsBorrowsLongLivedRuntime(t *testing.T) {
 	}
 
 	exports := bootstrapRuntime.Exports()
-	if err := newEventHubActionPort(exports.Infrastructure.EventHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
+	if err := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub).EnsureWorkspace(context.Background(), "ws-long-lived-export-session", "long lived export session"); err != nil {
 		t.Fatalf("create workspace after borrowed close: %v", err)
 	}
 	if _, err := exports.Repositories.Workspaces.Get(context.Background(), "ws-long-lived-export-session"); err != nil {
@@ -267,7 +269,7 @@ func TestRuntimeSessionCloseReturnsShutdownErrorAndReleasesState(t *testing.T) {
 	errShutdown := errors.New("shutdown failed")
 	session := &RuntimeSession{
 		Bootstrap: &bootstrap.Runtime{},
-		Runtime:   &ManagedRuntime{},
+		Runtime:   &runtimecore.ManagedRuntime{},
 	}
 	setBootstrapRuntimeModules(t, session.Bootstrap, runtimeSessionTestLifecycle{
 		id:          "broken",
@@ -283,18 +285,6 @@ func TestRuntimeSessionCloseReturnsShutdownErrorAndReleasesState(t *testing.T) {
 	}
 	if session.Runtime != nil {
 		t.Fatal("expected managed runtime to be released after shutdown error")
-	}
-}
-
-func TestNewRuntimeFromBootstrapReturnsNilWhenBootstrapMissing(t *testing.T) {
-	if runtime := NewRuntimeFromBootstrap(nil); runtime != nil {
-		t.Fatalf("runtime = %#v, want nil", runtime)
-	}
-}
-
-func TestNewRuntimeFromExportsReturnsNilWhenRequiredExportsMissing(t *testing.T) {
-	if runtime := NewRuntimeFromExports(bootstrap.Exports{}); runtime != nil {
-		t.Fatalf("runtime = %#v, want nil", runtime)
 	}
 }
 
@@ -344,7 +334,7 @@ func TestRuntimeSessionRunServiceBlockOnApprovalUsesEventCommand(t *testing.T) {
 	}
 	ctx := context.Background()
 	ensureTestWorkspace(t, ctx, session, "ws-session-command")
-	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
 	if err := actions.EnsureRun(ctx, "run-session-command", "ws-session-command"); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

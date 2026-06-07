@@ -1,0 +1,57 @@
+package workorchruntimecontract
+
+import "github.com/muidea/workorch/internal/pkg/common"
+
+type ArtifactContinuation struct {
+	ID                  common.ArtifactContinuationID    `json:"id"`
+	WorkspaceID         common.WorkspaceID               `json:"workspaceId"`
+	RunID               common.RunID                     `json:"runId"`
+	RootStepID          common.StepID                    `json:"rootStepId,omitempty"`
+	CurrentStepID       common.StepID                    `json:"currentStepId,omitempty"`
+	ArtifactID          string                           `json:"artifactId"`
+	TargetRef           string                           `json:"targetRef"`
+	Operation           string                           `json:"operation,omitempty"`
+	OutputMode          string                           `json:"outputMode,omitempty"`
+	CoverageTargets     []string                         `json:"coverageTargets,omitempty"`
+	State               common.ArtifactContinuationState `json:"state"`
+	ExpectedSequence    int                              `json:"expectedSequence,omitempty"`
+	ReceivedSequences   []int                            `json:"receivedSequences,omitempty"`
+	ReceivedChunkHashes map[int]string                   `json:"receivedChunkHashes,omitempty"`
+	FinalReceived       bool                             `json:"finalReceived,omitempty"`
+	BytesWritten        int64                            `json:"bytesWritten,omitempty"`
+	RollingHash         string                           `json:"rollingHash,omitempty"`
+	LastChunkHash       string                           `json:"lastChunkHash,omitempty"`
+	PreviousChunkTail   string                           `json:"previousChunkTail,omitempty"`
+	RetryCounters       map[string]int                   `json:"retryCounters,omitempty"`
+	EvidenceRefs        []string                         `json:"evidenceRefs,omitempty"`
+	CreatedAt           string                           `json:"createdAt,omitempty"`
+	UpdatedAt           string                           `json:"updatedAt,omitempty"`
+	Metadata            map[string]any                   `json:"metadata,omitempty"`
+}
+
+type ArtifactContinuationChunk struct {
+	ContinuationID    common.ArtifactContinuationID `json:"continuationId"`
+	Sequence          int                           `json:"sequence"`
+	ArtifactID        string                        `json:"artifactId"`
+	TargetRef         string                        `json:"targetRef"`
+	ContentHash       string                        `json:"contentHash,omitempty"`
+	Bytes             int64                         `json:"bytes,omitempty"`
+	PreviousChunkTail string                        `json:"previousChunkTail,omitempty"`
+	CurrentChunkTail  string                        `json:"currentChunkTail,omitempty"`
+	LLMCallRefs       []string                      `json:"llmCallRefs,omitempty"`
+	StepRefs          []common.StepID               `json:"stepRefs,omitempty"`
+	Validation        map[string]any                `json:"validation,omitempty"`
+	CreatedAt         string                        `json:"createdAt,omitempty"`
+	Metadata          map[string]any                `json:"metadata,omitempty"`
+}
+
+type ArtifactContinuationAssembledMetadata struct {
+	ContinuationID    common.ArtifactContinuationID `json:"continuationId"`
+	TargetRef         string                        `json:"targetRef"`
+	Bytes             int64                         `json:"bytes,omitempty"`
+	RollingHash       string                        `json:"rollingHash,omitempty"`
+	SourceChunkRefs   []string                      `json:"sourceChunkRefs,omitempty"`
+	ApplyEvidenceRefs []string                      `json:"applyEvidenceRefs,omitempty"`
+	CreatedAt         string                        `json:"createdAt,omitempty"`
+	Metadata          map[string]any                `json:"metadata,omitempty"`
+}

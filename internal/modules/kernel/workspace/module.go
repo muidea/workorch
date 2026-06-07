@@ -5,6 +5,7 @@ import (
 
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -14,18 +15,20 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type CreateWorkspaceCommand = workspaceservice.CreateWorkspaceCommand
-type EnsureWorkspaceCommand = workspaceservice.EnsureWorkspaceCommand
-type DefineGoalCommand = workspaceservice.DefineGoalCommand
-type UpdateGoalCommand = workspaceservice.UpdateGoalCommand
-type DefineDoDCommand = workspaceservice.DefineDoDCommand
-type UpdateDoDCommand = workspaceservice.UpdateDoDCommand
+type CreateWorkspaceCommand = workspacecontracts.CreateWorkspaceCommand
+type EnsureWorkspaceCommand = workspacecontracts.EnsureWorkspaceCommand
+type UpdateWorkspaceCommand = workspacecontracts.UpdateWorkspaceCommand
+type DefineGoalCommand = workspacecontracts.DefineGoalCommand
+type UpdateGoalCommand = workspacecontracts.UpdateGoalCommand
+type DefineDoDCommand = workspacecontracts.DefineDoDCommand
+type UpdateDoDCommand = workspacecontracts.UpdateDoDCommand
 type Service = workspaceservice.Service
 
 type Dependencies struct {
 	Workspaces repository.WorkspaceRepository
 	Goals      repository.GoalRepository
 	DoDs       repository.DoDRepository
+	Templates  repository.WorkspaceTemplateRepository
 	EventHub   events.Hub
 }
 
@@ -35,6 +38,7 @@ type Module struct {
 	workspaces repository.WorkspaceRepository
 	goals      repository.GoalRepository
 	dods       repository.DoDRepository
+	templates  repository.WorkspaceTemplateRepository
 	eventHub   events.Hub
 	unsub      []func()
 }
@@ -44,12 +48,13 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps Dependencies) error {
-	if deps.Workspaces == nil || deps.Goals == nil || deps.DoDs == nil {
+	if deps.Workspaces == nil || deps.Goals == nil || deps.DoDs == nil || deps.Templates == nil {
 		return common.ErrInvalidArgument
 	}
 	m.workspaces = deps.Workspaces
 	m.goals = deps.Goals
 	m.dods = deps.DoDs
+	m.templates = deps.Templates
 	m.eventHub = deps.EventHub
 	m.bizPtr = workspacebiz.NewGoalDoDManager(deps.Workspaces, deps.Goals, deps.DoDs, deps.EventHub)
 	m.servicePtr = workspaceservice.New(workspaceservice.Dependencies{
@@ -89,6 +94,11 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(events.TopicWorkspaceCommandDeleteDoD, m.handleWorkspaceQueryCommand),
 		m.eventHub.Subscribe(events.TopicWorkspaceCommandGetDoD, m.handleWorkspaceQueryCommand),
 		m.eventHub.Subscribe(events.TopicWorkspaceCommandListDoDsByWS, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandCreate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandGet, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandList, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandUpdate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandDelete, m.handleWorkspaceQueryCommand),
 	)
 	return nil
 }
@@ -106,6 +116,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.workspaces = nil
 	m.goals = nil
 	m.dods = nil
+	m.templates = nil
 	m.eventHub = nil
 	return nil
 }
@@ -123,7 +134,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.CreateWorkspaceCommand); ok {
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.CreateWorkspaceCommand); ok {
 			if err := m.servicePtr.CreateWorkspace(ctx, cmd); err != nil {
 				return err
 			}
@@ -135,7 +146,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			if modelErr != nil {
 				return err
 			}
-			cmd = workspaceservice.CreateWorkspaceCommand{
+			cmd = workspacecontracts.CreateWorkspaceCommand{
 				WorkspaceID:          item.ID,
 				Title:                item.Title,
 				Description:          item.Description,
@@ -151,9 +162,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.EnsureWorkspaceCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.EnsureWorkspaceCommand)
 		if !ok {
-			cmd = workspaceservice.EnsureWorkspaceCommand{
+			cmd = workspacecontracts.EnsureWorkspaceCommand{
 				WorkspaceID:          common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
 				Title:                stringPayload(envelope.Payload, events.PayloadKeyTitle),
 				Description:          stringPayload(envelope.Payload, events.PayloadKeyDescription),
@@ -190,9 +201,15 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.workspaces == nil {
 			return common.ErrInvalidArgument
 		}
-		item, err := workspaceFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var item *workspacemodel.Workspace
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateWorkspaceCommand); ok {
+			item = workspaceFromUpdateCommand(cmd)
+		} else {
+			var err error
+			item, err = workspaceFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
 		}
 		if err := m.workspaces.Update(ctx, item); err != nil {
 			return err
@@ -202,10 +219,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		id := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-		if id == "" {
-			id = common.WorkspaceID(envelope.WorkspaceID)
-		}
+		id := deleteWorkspaceIDFromPayload(envelope.Payload, envelope.WorkspaceID)
 		if err := m.servicePtr.DeleteWorkspace(ctx, id); err != nil {
 			return err
 		}
@@ -214,10 +228,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		id := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-		if id == "" {
-			id = common.WorkspaceID(envelope.WorkspaceID)
-		}
+		id := deleteWorkspaceIDFromPayload(envelope.Payload, envelope.WorkspaceID)
 		if err := m.servicePtr.DeleteWorkspace(ctx, id); err != nil {
 			return err
 		}
@@ -226,9 +237,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil || m.goals == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.DefineGoalCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DefineGoalCommand)
 		if !ok {
-			cmd = workspaceservice.DefineGoalCommand{
+			cmd = workspacecontracts.DefineGoalCommand{
 				GoalID:      common.GoalID(stringPayload(envelope.Payload, events.PayloadKeyGoalID)),
 				WorkspaceID: common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
 				Text:        stringPayload(envelope.Payload, events.PayloadKeyText),
@@ -249,9 +260,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil || m.goals == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.UpdateGoalCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateGoalCommand)
 		if !ok {
-			cmd = workspaceservice.UpdateGoalCommand{
+			cmd = workspacecontracts.UpdateGoalCommand{
 				GoalID: common.GoalID(stringPayload(envelope.Payload, events.PayloadKeyGoalID)),
 				Text:   stringPayload(envelope.Payload, events.PayloadKeyText),
 			}
@@ -268,7 +279,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.goals == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := m.goals.Delete(ctx, common.GoalID(stringPayload(envelope.Payload, events.PayloadKeyGoalID))); err != nil {
+		if err := m.goals.Delete(ctx, goalIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
@@ -294,9 +305,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil || m.dods == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.DefineDoDCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DefineDoDCommand)
 		if !ok {
-			cmd = workspaceservice.DefineDoDCommand{
+			cmd = workspacecontracts.DefineDoDCommand{
 				DoDID:       common.DoDID(stringPayload(envelope.Payload, events.PayloadKeyDoDID)),
 				WorkspaceID: common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
 				Items:       stringSlicePayload(envelope.Payload, events.PayloadKeyItems),
@@ -317,9 +328,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.servicePtr == nil || m.dods == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspaceservice.UpdateDoDCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateDoDCommand)
 		if !ok {
-			cmd = workspaceservice.UpdateDoDCommand{
+			cmd = workspacecontracts.UpdateDoDCommand{
 				DoDID: common.DoDID(stringPayload(envelope.Payload, events.PayloadKeyDoDID)),
 				Items: stringSlicePayload(envelope.Payload, events.PayloadKeyItems),
 			}
@@ -336,7 +347,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		if m.dods == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := m.dods.Delete(ctx, common.DoDID(stringPayload(envelope.Payload, events.PayloadKeyDoDID))); err != nil {
+		if err := m.dods.Delete(ctx, dodIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
@@ -358,9 +369,97 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyDoDs: items})
+	case events.TopicWorkspaceTemplateCommandCreate:
+		if m.templates == nil {
+			return common.ErrInvalidArgument
+		}
+		item, err := workspaceTemplateFromPayload(envelope.Payload)
+		if err != nil {
+			return err
+		}
+		if err := m.templates.Create(ctx, item); err != nil {
+			return err
+		}
+		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
+	case events.TopicWorkspaceTemplateCommandGet:
+		if m.templates == nil {
+			return common.ErrInvalidArgument
+		}
+		item, err := m.templates.Get(ctx, stringPayload(envelope.Payload, events.PayloadKeyTemplateID))
+		if err != nil {
+			return err
+		}
+		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
+	case events.TopicWorkspaceTemplateCommandList:
+		if m.templates == nil {
+			return common.ErrInvalidArgument
+		}
+		items, err := m.templates.List(ctx)
+		if err != nil {
+			return err
+		}
+		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplates: items})
+	case events.TopicWorkspaceTemplateCommandUpdate:
+		if m.templates == nil {
+			return common.ErrInvalidArgument
+		}
+		item, err := workspaceTemplateFromPayload(envelope.Payload)
+		if err != nil {
+			return err
+		}
+		if err := m.templates.Update(ctx, item); err != nil {
+			return err
+		}
+		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
+	case events.TopicWorkspaceTemplateCommandDelete:
+		if m.templates == nil {
+			return common.ErrInvalidArgument
+		}
+		if err := m.templates.Delete(ctx, workspaceTemplateIDFromPayload(envelope.Payload)); err != nil {
+			return err
+		}
+		return workspaceCommandResponse(envelope, nil)
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func workspaceTemplateFromPayload(payload map[string]any) (*repository.WorkspaceTemplate, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.CreateWorkspaceTemplateCommand); ok {
+		return workspaceTemplateFromCommand(cmd)
+	}
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.UpdateWorkspaceTemplateCommand); ok {
+		return workspaceTemplateFromCommand(cmd)
+	}
+	item, ok := payload[events.PayloadKeyWorkspaceTemplate].(*repository.WorkspaceTemplate)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func workspaceTemplateFromCommand(cmd workspacecontracts.CreateWorkspaceTemplateCommand) (*repository.WorkspaceTemplate, error) {
+	if cmd.TemplateID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return &repository.WorkspaceTemplate{
+		ID:               cmd.TemplateID,
+		Name:             cmd.Name,
+		Description:      cmd.Description,
+		GoalText:         cmd.GoalText,
+		DoDItems:         append([]string(nil), cmd.DoDItems...),
+		DefaultSoulID:    cmd.DefaultSoulID,
+		SoulBindings:     cloneStringMap(cmd.SoulBindings),
+		ContextHints:     cloneMap(cmd.ContextHints),
+		EvidencePolicies: cloneMapSlice(cmd.EvidencePolicies),
+	}, nil
+}
+
+func workspaceTemplateIDFromPayload(payload map[string]any) string {
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.DeleteWorkspaceTemplateCommand); ok && cmd.TemplateID != "" {
+		return cmd.TemplateID
+	}
+	return stringPayload(payload, events.PayloadKeyTemplateID)
 }
 
 func workspaceFromPayload(payload map[string]any) (*workspacemodel.Workspace, error) {
@@ -371,8 +470,26 @@ func workspaceFromPayload(payload map[string]any) (*workspacemodel.Workspace, er
 	return item, nil
 }
 
-func createWorkspaceCommandFromPayload(payload map[string]any) (workspaceservice.CreateWorkspaceCommand, error) {
-	cmd := workspaceservice.CreateWorkspaceCommand{
+func workspaceFromUpdateCommand(cmd workspacecontracts.UpdateWorkspaceCommand) *workspacemodel.Workspace {
+	return &workspacemodel.Workspace{
+		ID:                   cmd.WorkspaceID,
+		Title:                cmd.Title,
+		Description:          cmd.Description,
+		DeliverableDirectory: cmd.DeliverableDirectory,
+		InternalDirectory:    cmd.InternalDirectory,
+		State:                cmd.State,
+		ActiveRunID:          cmd.ActiveRunID,
+		TemplateID:           cmd.TemplateID,
+		ProfileID:            cmd.ProfileID,
+		DefaultSoulID:        cmd.DefaultSoulID,
+		SoulBindings:         cloneSoulBindingMap(cmd.SoulBindings),
+		ContextHints:         cloneMap(cmd.ContextHints),
+		EvidencePolicies:     cloneMapSlice(cmd.EvidencePolicies),
+	}
+}
+
+func createWorkspaceCommandFromPayload(payload map[string]any) (workspacecontracts.CreateWorkspaceCommand, error) {
+	cmd := workspacecontracts.CreateWorkspaceCommand{
 		WorkspaceID:          common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID)),
 		Title:                stringPayload(payload, events.PayloadKeyTitle),
 		Description:          stringPayload(payload, events.PayloadKeyDescription),
@@ -380,9 +497,78 @@ func createWorkspaceCommandFromPayload(payload map[string]any) (workspaceservice
 		InternalDirectory:    stringPayload(payload, events.PayloadKeyInternalDirectory),
 	}
 	if cmd.WorkspaceID == "" || cmd.Title == "" || cmd.DeliverableDirectory == "" {
-		return workspaceservice.CreateWorkspaceCommand{}, common.ErrInvalidArgument
+		return workspacecontracts.CreateWorkspaceCommand{}, common.ErrInvalidArgument
 	}
 	return cmd, nil
+}
+
+func deleteWorkspaceIDFromPayload(payload map[string]any, envelopeWorkspaceID string) common.WorkspaceID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.DeleteWorkspaceCommand); ok && cmd.WorkspaceID != "" {
+		return cmd.WorkspaceID
+	}
+	id := common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID))
+	if id != "" {
+		return id
+	}
+	return common.WorkspaceID(envelopeWorkspaceID)
+}
+
+func goalIDFromPayload(payload map[string]any) common.GoalID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.DeleteGoalCommand); ok && cmd.GoalID != "" {
+		return cmd.GoalID
+	}
+	return common.GoalID(stringPayload(payload, events.PayloadKeyGoalID))
+}
+
+func dodIDFromPayload(payload map[string]any) common.DoDID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(workspacecontracts.DeleteDoDCommand); ok && cmd.DoDID != "" {
+		return cmd.DoDID
+	}
+	return common.DoDID(stringPayload(payload, events.PayloadKeyDoDID))
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneSoulBindingMap(input map[string]common.SoulID) map[string]common.SoulID {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]common.SoulID, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]string, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
+}
+
+func cloneMapSlice(input []map[string]any) []map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, cloneMap(item))
+	}
+	return ret
 }
 
 func stringPayload(payload map[string]any, key string) string {

@@ -1,0 +1,38 @@
+package activationports
+
+import (
+	"context"
+	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
+)
+
+func WorkspaceExecutionContract(ctx context.Context, hub events.Hub, workspace *workspacemodel.Workspace) map[string]any {
+	if hub == nil {
+		return map[string]any{"stateChangePolicy": "allowed_but_not_required"}
+	}
+	return activationcore.WorkspaceExecutionContract(ctx, workspaceTemplateReader{hub: hub}, workspace)
+}
+
+type workspaceTemplateReader struct {
+	hub events.Hub
+}
+
+func (r workspaceTemplateReader) Get(ctx context.Context, id string) (*repository.WorkspaceTemplate, error) {
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return workspaceports.ReadWorkspaceTemplateRecord(ctx, r.hub, strings.TrimSpace(id))
+}
+
+func (r workspaceTemplateReader) List(ctx context.Context) ([]*repository.WorkspaceTemplate, error) {
+	if r.hub == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return workspaceports.ListWorkspaceTemplateRecords(ctx, r.hub)
+}

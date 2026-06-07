@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
+	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -62,7 +62,7 @@ func NewServiceWithWorkspaceReader(runs repository.RunRepository, workspaces Wor
 	return &Service{runs: runs, workspaces: workspaces, orchestrator: orchestrator, eventHub: eventHub}
 }
 
-func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand) error {
+func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
 	if cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -89,7 +89,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runservice.CreateRunCommand
 	return s.publishRunEvent(ctx, events.TopicRunCreated, run)
 }
 
-func (s *Service) EnsureRun(ctx context.Context, cmd runservice.CreateRunCommand) error {
+func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
 	if cmd.WorkspaceID == "" || cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -155,7 +155,7 @@ func cloneExecutionContext(input map[string]any) map[string]any {
 	return ret
 }
 
-func (s *Service) StartRun(ctx context.Context, cmd runservice.StartRunCommand) error {
+func (s *Service) StartRun(ctx context.Context, cmd runcontracts.StartRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -165,7 +165,7 @@ func (s *Service) StartRun(ctx context.Context, cmd runservice.StartRunCommand) 
 	return s.orchestrator.StartRun(ctx, cmd.RunID)
 }
 
-func (s *Service) EnsureStarted(ctx context.Context, cmd runservice.StartRunCommand) error {
+func (s *Service) EnsureStarted(ctx context.Context, cmd runcontracts.StartRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -186,7 +186,7 @@ func (s *Service) EnsureStarted(ctx context.Context, cmd runservice.StartRunComm
 	return s.StartRun(ctx, cmd)
 }
 
-func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand) error {
+func (s *Service) ResumeRun(ctx context.Context, cmd runcontracts.ResumeRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -226,7 +226,7 @@ func (s *Service) ResumeRun(ctx context.Context, cmd runservice.ResumeRunCommand
 	return s.orchestrator.ResumeRun(ctx, cmd.RunID)
 }
 
-func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCommand) error {
+func (s *Service) EnsureResumed(ctx context.Context, cmd runcontracts.ResumeRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -251,7 +251,7 @@ func (s *Service) EnsureResumed(ctx context.Context, cmd runservice.ResumeRunCom
 	return s.ResumeRun(ctx, cmd)
 }
 
-func (s *Service) BlockOnDecision(ctx context.Context, cmd runservice.BlockOnDecisionCommand) error {
+func (s *Service) BlockOnDecision(ctx context.Context, cmd runcontracts.BlockOnDecisionCommand) error {
 	if cmd.RunID == "" || cmd.TicketID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -261,7 +261,7 @@ func (s *Service) BlockOnDecision(ctx context.Context, cmd runservice.BlockOnDec
 	return s.orchestrator.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
 }
 
-func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runservice.BlockOnDecisionCommand) error {
+func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runcontracts.BlockOnDecisionCommand) error {
 	if cmd.RunID == "" || cmd.TicketID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -288,7 +288,7 @@ func (s *Service) EnsureBlockedOnDecision(ctx context.Context, cmd runservice.Bl
 	return s.BlockOnDecision(ctx, cmd)
 }
 
-func (s *Service) BlockOnApproval(ctx context.Context, cmd runservice.BlockOnApprovalCommand) error {
+func (s *Service) BlockOnApproval(ctx context.Context, cmd runcontracts.BlockOnApprovalCommand) error {
 	if cmd.RunID == "" || cmd.ApprovalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -298,7 +298,7 @@ func (s *Service) BlockOnApproval(ctx context.Context, cmd runservice.BlockOnApp
 	return s.orchestrator.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 }
 
-func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runservice.BlockOnApprovalCommand) error {
+func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runcontracts.BlockOnApprovalCommand) error {
 	if cmd.RunID == "" || cmd.ApprovalID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -325,7 +325,7 @@ func (s *Service) EnsureBlockedOnApproval(ctx context.Context, cmd runservice.Bl
 	return s.BlockOnApproval(ctx, cmd)
 }
 
-func (s *Service) ValidateRun(ctx context.Context, cmd runservice.ValidateRunCommand) error {
+func (s *Service) ValidateRun(ctx context.Context, cmd runcontracts.ValidateRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -348,7 +348,7 @@ func (s *Service) ValidateRun(ctx context.Context, cmd runservice.ValidateRunCom
 	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
-func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCommand) error {
+func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -373,7 +373,7 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runservice.CompleteRunCom
 	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
-func (s *Service) CancelRun(ctx context.Context, cmd runservice.CancelRunCommand) error {
+func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -398,7 +398,7 @@ func (s *Service) CancelRun(ctx context.Context, cmd runservice.CancelRunCommand
 	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
-func (s *Service) SupersedeRun(ctx context.Context, cmd runservice.SupersedeRunCommand) error {
+func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRunCommand) error {
 	if cmd.RunID == "" {
 		return common.ErrInvalidArgument
 	}
@@ -423,7 +423,7 @@ func (s *Service) SupersedeRun(ctx context.Context, cmd runservice.SupersedeRunC
 	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
 }
 
-func (s *Service) FailRun(ctx context.Context, cmd runservice.FailRunCommand) error {
+func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) error {
 	if cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}

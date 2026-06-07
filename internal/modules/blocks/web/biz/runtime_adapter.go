@@ -22,8 +22,8 @@ import (
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (

@@ -350,14 +350,15 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	if runtimeErr != nil {
 		t.Fatalf("get runtime initiator: %v", runtimeErr)
 	}
-	if _, err := runtime.Repositories().Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
+	workspaceRepos := runtime.RepositoryProvider().Workspace()
+	if _, err := workspaceRepos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
 		t.Fatalf("workspace was not persisted in application runtime repositories: %v", err)
 	}
 
 	if err := state.close(ctx); err != nil {
 		t.Fatalf("close server state: %v", err)
 	}
-	if _, err := runtime.Repositories().Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
+	if _, err := workspaceRepos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
 		t.Fatalf("server state close must not teardown application runtime: %v", err)
 	}
 }

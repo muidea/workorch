@@ -1,15 +1,12 @@
 package workorchruntimepolicy
 
-import (
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-)
+import "github.com/muidea/workorch/internal/pkg/workorchconfig"
 
-func FromConfig(cfg workorchconfig.Config) orchestratormodel.RuntimePolicy {
-	return orchestratormodel.RuntimePolicy{
+func FromConfig(cfg workorchconfig.Config) RuntimePolicy {
+	return RuntimePolicy{
 		MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts,
 		MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts,
-		LLMOutput: orchestratormodel.LLMOutputRuntimePolicy{
+		LLMOutput: LLMOutputRuntimePolicy{
 			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
 			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,
 			MaxGraphFileWrites:                 cfg.Runtime.LLMOutput.MaxGraphFileWrites,

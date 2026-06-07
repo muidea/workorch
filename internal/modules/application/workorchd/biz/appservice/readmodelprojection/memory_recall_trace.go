@@ -1,0 +1,40 @@
+package readmodelprojection
+
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+)
+
+func mapMemoryRecallTrace(item *memorymodel.MemoryRecallTrace) readmodelcore.MemoryRecallTrace {
+	return readmodelcore.MemoryRecallTrace{
+		ID:                     string(item.ID),
+		WorkspaceID:            string(item.WorkspaceID),
+		RunID:                  string(item.RunID),
+		StepID:                 string(item.StepID),
+		GraphNodeID:            item.GraphNodeID,
+		Stage:                  item.Stage,
+		Source:                 item.Source,
+		Policy:                 item.Policy,
+		Status:                 item.Status,
+		ProviderID:             item.ProviderID,
+		Operation:              item.Operation,
+		QueryTextPreview:       item.QueryTextPreview,
+		QueryTextSha256:        item.QueryTextSha256,
+		MinScore:               item.MinScore,
+		Limit:                  item.Limit,
+		EmbeddingModel:         item.EmbeddingModel,
+		VectorDimension:        item.VectorDimension,
+		RefreshSource:          item.RefreshSource,
+		SelectionPolicyVersion: item.SelectionPolicyVersion,
+		CandidateMemoryIDs:     memoryIDsToReadModelStrings(item.CandidateMemoryIDs),
+		SelectedMemoryIDs:      memoryIDsToReadModelStrings(item.SelectedMemoryIDs),
+		ExcludedMemoryIDs:      memoryIDsToReadModelStrings(item.ExcludedMemoryIDs),
+		TypeQuota:              cloneReadModelIntMap(item.TypeQuota),
+		SelectionScores:        mapMemoryRecallSelectionScores(item.SelectionScores),
+		RetrievedMemoryIDs:     memoryIDsToReadModelStrings(item.RetrievedMemoryIDs),
+		RetrievedMemoryHits:    mapMemoryRecallHits(item.RetrievedMemoryHits),
+		Reason:                 item.Reason,
+		OccurredAt:             item.OccurredAt,
+		EvidenceRef:            item.EvidenceRef,
+	}
+}

@@ -11,15 +11,14 @@ import (
 	"time"
 
 	"github.com/muidea/magicCommon/framework/application"
-	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/framework/service"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	cliconfig "github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 	"github.com/muidea/workorch/internal/modules/application/workorch/service/cli"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -190,8 +189,7 @@ func waitServer(ctx context.Context) error {
 }
 
 func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
-	var helper runtimecommon.Helper
-	runtime, err := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
+	runtime, err := workorchdeps.ResolveRuntimeHelper("application/workorch server done")
 	if err != nil {
 		return nil, err
 	}

@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type eventRuntimeAdapter struct {

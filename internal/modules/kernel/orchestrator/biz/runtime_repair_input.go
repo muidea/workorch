@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeModel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimeModel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func runtimeRepairFollowUpStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {

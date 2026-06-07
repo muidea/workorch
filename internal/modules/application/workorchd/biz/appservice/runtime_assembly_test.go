@@ -3,19 +3,16 @@ package appservice
 import (
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func TestManagedRuntimeAssemblyFromExportsBuildsRuntimeAndCollector(t *testing.T) {
+func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T) {
 	session, ctx := newTestRuntimeSession(t, "memory", "")
 	exports := session.Bootstrap.Exports()
-	assembly := managedRuntimeAssemblyFromExports(exports)
-	if assembly.runtime == nil {
+	runtime := runtimeports.NewManagedRuntimeFromEventHub(exports.Infrastructure.EventHub)
+	if runtime == nil {
 		t.Fatal("expected runtime")
-	}
-	if assembly.collector == nil {
-		t.Fatal("expected collector")
 	}
 
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
@@ -29,7 +26,7 @@ func TestManagedRuntimeAssemblyFromExportsBuildsRuntimeAndCollector(t *testing.T
 		t.Fatalf("publish event: %v", err)
 	}
 
-	published := assembly.collector.PublishedWorkorchEvents()
+	published := runtime.PublishedWorkorchEvents()
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
@@ -38,12 +35,9 @@ func TestManagedRuntimeAssemblyFromExportsBuildsRuntimeAndCollector(t *testing.T
 	}
 }
 
-func TestManagedRuntimeAssemblyFromExportsReturnsEmptyAssemblyWhenRequiredExportsMissing(t *testing.T) {
-	assembly := managedRuntimeAssemblyFromExports(bootstrap.Exports{})
-	if assembly.runtime != nil {
-		t.Fatalf("runtime = %#v, want nil", assembly.runtime)
-	}
-	if assembly.collector != nil {
-		t.Fatalf("collector = %#v, want nil", assembly.collector)
+func TestManagedRuntimeFromEventHubReturnsNilWhenRequiredHubMissing(t *testing.T) {
+	runtime := runtimeports.NewManagedRuntimeFromEventHub(nil)
+	if runtime != nil {
+		t.Fatalf("runtime = %#v, want nil", runtime)
 	}
 }

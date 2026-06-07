@@ -176,6 +176,7 @@ Last Updated: 2026-06-03
 - Kernel/block/application `plugin.go` files no longer create extra `plugin` wrapper structs. The framework registration path now registers `New()` directly, and the concrete `*Module` implements framework `Setup(ctx,eventHub,bg)`, `Run(ctx)`, and `Teardown(ctx)` while explicit embedded-runtime/test wiring uses `Configure/Start/Stop`.
 - `application/workorch/main.go` now only handles process signal context, `app.Run`, and explicit framework side-effect imports for the entrypoint-selected initiator/modules. Test-only default-workspace wrappers were removed from production `main`, so the entry file no longer imports CLI backend/common packages.
 - `application/workorch` no longer imports the `workorchd` module package to wait for server shutdown. `main` explicitly enables `workorchd` with a side-effect import, while server mode queries `TopicWorkorchDCommandDone` through EventHub; the `workorchd` module subscribes in `Run` and unsubscribes in `Teardown`.
+- `workorchd` no longer keeps a global `defaultModule` singleton or package-level `Done()` helper. The framework registration path uses `pluginmodule.Register(New())`, and server done-channel access remains an EventHub command handled by the module instance.
 - `application/workorch/app` no longer imports `workorchd/biz/appservice` or constructs `RuntimeSession` directly. Embedded interactive mode obtains a `backend.NewEmbeddedEventHub()` backend from the runtime initiator EventHub; appservice/session handling is owned by workorchd.
 - The old appservice-backed `localBackend` has been removed. CLI/TUI embedded operations now use EventHub command/result transport, with the workorchd dispatcher borrowing request-scoped `RuntimeSession` instances per command.
 - The workorchd CLI dispatcher no longer uses an unmanaged goroutine fallback when publishing `/cli/result`. Async-capable hubs still use `PublishAsync`; non-async hubs synchronously publish the result envelope and also return `events.Response`, preserving command/result semantics without introducing untracked background work.
@@ -239,6 +240,8 @@ Last Updated: 2026-06-03
   - `rg -n 'type plugin|newPlugin|pluginmodule\\.Register\\(newPlugin\\(\\)\\)|module \\*Module|p\\.module' internal/modules -g 'plugin.go'` returns no matches after integrating `plugin.go` into concrete module lifecycle implementations.
   - Remaining appservice direct repository writes are limited to application-owned workspace templates, not kernel formal owner state.
 - Latest verification:
+  - `go test ./... -count=1` passed after removing the `workorchd` package-level module singleton and `Done()` helper.
+  - `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` passed against a local file-backend service started by `make run-file` after the latest module registration cleanup. HTTP, workspace template/soul, LLM workspace execution, and MCP stdio workspace execution passed; MCP stdio completed `workspaceId=ws-30f622a59dbb6ce1`, `runId=run-001`, `runState=completed`, `steps=4`, `toolCalls=4`, `validations=4`, `runtimeCheckpoints=11`.
   - `go test ./internal/modules/application/workorchd/biz/bootstrap -count=1` passed after the `plugin.go` integration and embedded runtime lifecycle rename.
   - `go test ./internal/modules/application/workorchd/biz/appservice -count=1` passed after the `plugin.go` integration and embedded runtime lifecycle rename.
   - `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` passed after the `plugin.go` integration and embedded runtime lifecycle rename.
@@ -299,8 +302,8 @@ Last Updated: 2026-06-03
 - Owner layer: Application entry / CLI runtime
 - Expected responsibility: `main` 负责信号上下文、按进程入口启用 framework initiator/modules，并调用 `app.Run`；`app` 负责解析启动模式、配置目录、调用 `application.Startup` / `Run` / `Shutdown`，并在 local interactive/server 模式内复用同一 framework runtime。
 - Current responsibility: 已对齐参考 `magicRunner` 入口：framework side-effect imports 位于 `application/workorch/main.go`，`app` 包不再隐式注册 modules；remote 模式走 remote backend，不启动本地 framework runtime；local 模式统一使用 `service.DefaultService()` 启动已注册 initiator/module。
-- Lifecycle check: `runLocal` 在 `application.Startup` 成功后 defer `shutdownApplication`，再调用 `application.Run`；server 模式等待 `workorchd.Done()` 或进程 context 取消；interactive 模式创建 request-scoped `RuntimeSession` 并 close。
-- EventHub check: `app` 不直接创建独立 EventHub；interactive backend 通过 `RuntimeSession` 获取 framework runtime 中的 EventHub。
+- Lifecycle check: `runLocal` 在 `application.Startup` 成功后 defer `shutdownApplication`，再调用 `application.Run`；server 模式通过 EventHub `TopicWorkorchDCommandDone` 查询 workorchd module 实例的 done channel，或等待进程 context 取消；interactive 模式创建 embedded EventHub backend，并由 workorchd CLI dispatcher 借用 request-scoped `RuntimeSession`。
+- EventHub check: `app` 不直接创建独立 EventHub；interactive backend 通过 runtime initiator 暴露的 framework EventHub 发布 CLI command/result envelope。
 - Background task check: `app` 不直接启动长期任务；长期任务由 framework service/module/initiator 接管。
 - State ownership check: `app` 仅做 workspace 默认选择和 CLI flow 编排，不直接裁决 Run 状态机。
 - Workspace scope check: 默认 workspace 解析只用于 CLI 初始上下文；TUI run continuation / stale run recovery 路径通过 `ContextWithRuntimeWorkspaceID` 将 active workspace 传给 backend `Run.Get` / `Run.List` / `Run.Resume`，backend 再交给 appservice owner command scope guard。

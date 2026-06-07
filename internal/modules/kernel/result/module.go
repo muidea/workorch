@@ -5,6 +5,7 @@ import (
 
 	resultbiz "github.com/muidea/workorch/internal/modules/kernel/result/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
+	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	resultservice "github.com/muidea/workorch/internal/modules/kernel/result/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -109,43 +110,47 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 	}
 	switch envelope.Topic {
 	case events.TopicResultCommandCreate:
-		item, err := resultFromPayload(envelope.Payload)
+		cmd, err := createResultCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
 		}
-		if err := m.servicePtr.CreateResult(ctx, item); err != nil {
+		if err := m.servicePtr.CreateResult(ctx, cmd.Result); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
 	case events.TopicResultCommandGet:
-		item, err := m.servicePtr.GetResult(ctx, common.ResultID(stringPayload(envelope.Payload, events.PayloadKeyResultID)))
+		cmd := getResultCommandFromPayload(envelope.Payload)
+		item, err := m.servicePtr.GetResult(ctx, cmd.ResultID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyResult: item})
 	case events.TopicResultCommandListByWorkspace:
-		items, err := m.servicePtr.ListResultsByWorkspace(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
+		cmd := listResultsByWorkspaceCommandFromPayload(envelope.Payload)
+		items, err := m.servicePtr.ListResultsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicResultCommandListByRun:
-		items, err := m.servicePtr.ListResultsByRun(ctx, common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)))
+		cmd := listResultsByRunCommandFromPayload(envelope.Payload)
+		items, err := m.servicePtr.ListResultsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicResultCommandUpdate:
-		item, err := resultFromPayload(envelope.Payload)
+		cmd, err := updateResultCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
 		}
-		if err := m.servicePtr.UpdateResult(ctx, item); err != nil {
+		if err := m.servicePtr.UpdateResult(ctx, cmd.Result); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
 	case events.TopicResultCommandDelete:
-		if err := m.servicePtr.DeleteResult(ctx, common.ResultID(stringPayload(envelope.Payload, events.PayloadKeyResultID))); err != nil {
+		cmd := deleteResultCommandFromPayload(envelope.Payload)
+		if err := m.servicePtr.DeleteResult(ctx, cmd.ResultID); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
@@ -160,49 +165,54 @@ func (m *Module) handleArtifactCommand(ctx context.Context, envelope events.Enve
 	}
 	switch envelope.Topic {
 	case events.TopicArtifactCommandCreate:
-		item, err := artifactFromPayload(envelope.Payload)
+		cmd, err := createArtifactCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
 		}
-		if err := m.servicePtr.CreateArtifact(ctx, item); err != nil {
+		if err := m.servicePtr.CreateArtifact(ctx, cmd.Artifact); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
 	case events.TopicArtifactCommandGet:
-		item, err := m.servicePtr.GetArtifact(ctx, common.ArtifactID(stringPayload(envelope.Payload, events.PayloadKeyArtifactID)))
+		cmd := getArtifactCommandFromPayload(envelope.Payload)
+		item, err := m.servicePtr.GetArtifact(ctx, cmd.ArtifactID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyArtifact: item})
 	case events.TopicArtifactCommandListByWorkspace:
-		items, err := m.servicePtr.ListArtifactsByWorkspace(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
+		cmd := listArtifactsByWorkspaceCommandFromPayload(envelope.Payload)
+		items, err := m.servicePtr.ListArtifactsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicArtifactCommandListByRun:
-		items, err := m.servicePtr.ListArtifactsByRun(ctx, common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)))
+		cmd := listArtifactsByRunCommandFromPayload(envelope.Payload)
+		items, err := m.servicePtr.ListArtifactsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicArtifactCommandListByResult:
-		items, err := m.servicePtr.ListArtifactsByResult(ctx, common.ResultID(stringPayload(envelope.Payload, events.PayloadKeyResultID)))
+		cmd := listArtifactsByResultCommandFromPayload(envelope.Payload)
+		items, err := m.servicePtr.ListArtifactsByResult(ctx, cmd.ResultID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicArtifactCommandUpdate:
-		item, err := artifactFromPayload(envelope.Payload)
+		cmd, err := updateArtifactCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
 		}
-		if err := m.servicePtr.UpdateArtifact(ctx, item); err != nil {
+		if err := m.servicePtr.UpdateArtifact(ctx, cmd.Artifact); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
 	case events.TopicArtifactCommandDelete:
-		if err := m.servicePtr.DeleteArtifact(ctx, common.ArtifactID(stringPayload(envelope.Payload, events.PayloadKeyArtifactID))); err != nil {
+		cmd := deleteArtifactCommandFromPayload(envelope.Payload)
+		if err := m.servicePtr.DeleteArtifact(ctx, cmd.ArtifactID); err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
@@ -219,12 +229,131 @@ func resultFromPayload(payload map[string]any) (*resultmodel.Result, error) {
 	return item, nil
 }
 
+func createResultCommandFromPayload(payload map[string]any) (resultcontracts.CreateResultCommand, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.CreateResultCommand); ok {
+		if cmd.Result == nil {
+			return resultcontracts.CreateResultCommand{}, common.ErrInvalidArgument
+		}
+		return cmd, nil
+	}
+	item, err := resultFromPayload(payload)
+	if err != nil {
+		return resultcontracts.CreateResultCommand{}, err
+	}
+	return resultcontracts.CreateResultCommand{Result: item}, nil
+}
+
+func getResultCommandFromPayload(payload map[string]any) resultcontracts.GetResultCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.GetResultCommand); ok {
+		return cmd
+	}
+	return resultcontracts.GetResultCommand{ResultID: common.ResultID(stringPayload(payload, events.PayloadKeyResultID))}
+}
+
+func listResultsByWorkspaceCommandFromPayload(payload map[string]any) resultcontracts.ListResultsByWorkspaceCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.ListResultsByWorkspaceCommand); ok {
+		return cmd
+	}
+	return resultcontracts.ListResultsByWorkspaceCommand{WorkspaceID: common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID))}
+}
+
+func listResultsByRunCommandFromPayload(payload map[string]any) resultcontracts.ListResultsByRunCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.ListResultsByRunCommand); ok {
+		return cmd
+	}
+	return resultcontracts.ListResultsByRunCommand{RunID: common.RunID(stringPayload(payload, events.PayloadKeyRunID))}
+}
+
+func updateResultCommandFromPayload(payload map[string]any) (resultcontracts.UpdateResultCommand, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.UpdateResultCommand); ok {
+		if cmd.Result == nil {
+			return resultcontracts.UpdateResultCommand{}, common.ErrInvalidArgument
+		}
+		return cmd, nil
+	}
+	item, err := resultFromPayload(payload)
+	if err != nil {
+		return resultcontracts.UpdateResultCommand{}, err
+	}
+	return resultcontracts.UpdateResultCommand{Result: item}, nil
+}
+
+func deleteResultCommandFromPayload(payload map[string]any) resultcontracts.DeleteResultCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.DeleteResultCommand); ok {
+		return cmd
+	}
+	return resultcontracts.DeleteResultCommand{ResultID: common.ResultID(stringPayload(payload, events.PayloadKeyResultID))}
+}
+
 func artifactFromPayload(payload map[string]any) (*resultmodel.Artifact, error) {
 	item, ok := payload[events.PayloadKeyArtifact].(*resultmodel.Artifact)
 	if !ok || item == nil {
 		return nil, common.ErrInvalidArgument
 	}
 	return item, nil
+}
+
+func createArtifactCommandFromPayload(payload map[string]any) (resultcontracts.CreateArtifactCommand, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.CreateArtifactCommand); ok {
+		if cmd.Artifact == nil {
+			return resultcontracts.CreateArtifactCommand{}, common.ErrInvalidArgument
+		}
+		return cmd, nil
+	}
+	item, err := artifactFromPayload(payload)
+	if err != nil {
+		return resultcontracts.CreateArtifactCommand{}, err
+	}
+	return resultcontracts.CreateArtifactCommand{Artifact: item}, nil
+}
+
+func getArtifactCommandFromPayload(payload map[string]any) resultcontracts.GetArtifactCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.GetArtifactCommand); ok {
+		return cmd
+	}
+	return resultcontracts.GetArtifactCommand{ArtifactID: common.ArtifactID(stringPayload(payload, events.PayloadKeyArtifactID))}
+}
+
+func listArtifactsByWorkspaceCommandFromPayload(payload map[string]any) resultcontracts.ListArtifactsByWorkspaceCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.ListArtifactsByWorkspaceCommand); ok {
+		return cmd
+	}
+	return resultcontracts.ListArtifactsByWorkspaceCommand{WorkspaceID: common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID))}
+}
+
+func listArtifactsByRunCommandFromPayload(payload map[string]any) resultcontracts.ListArtifactsByRunCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.ListArtifactsByRunCommand); ok {
+		return cmd
+	}
+	return resultcontracts.ListArtifactsByRunCommand{RunID: common.RunID(stringPayload(payload, events.PayloadKeyRunID))}
+}
+
+func listArtifactsByResultCommandFromPayload(payload map[string]any) resultcontracts.ListArtifactsByResultCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.ListArtifactsByResultCommand); ok {
+		return cmd
+	}
+	return resultcontracts.ListArtifactsByResultCommand{ResultID: common.ResultID(stringPayload(payload, events.PayloadKeyResultID))}
+}
+
+func updateArtifactCommandFromPayload(payload map[string]any) (resultcontracts.UpdateArtifactCommand, error) {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.UpdateArtifactCommand); ok {
+		if cmd.Artifact == nil {
+			return resultcontracts.UpdateArtifactCommand{}, common.ErrInvalidArgument
+		}
+		return cmd, nil
+	}
+	item, err := artifactFromPayload(payload)
+	if err != nil {
+		return resultcontracts.UpdateArtifactCommand{}, err
+	}
+	return resultcontracts.UpdateArtifactCommand{Artifact: item}, nil
+}
+
+func deleteArtifactCommandFromPayload(payload map[string]any) resultcontracts.DeleteArtifactCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(resultcontracts.DeleteArtifactCommand); ok {
+		return cmd
+	}
+	return resultcontracts.DeleteArtifactCommand{ArtifactID: common.ArtifactID(stringPayload(payload, events.PayloadKeyArtifactID))}
 }
 
 func stringPayload(payload map[string]any, key string) string {

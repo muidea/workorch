@@ -1,0 +1,61 @@
+package definitionports
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+)
+
+func ReadGoal(ctx context.Context, hub events.Hub, goalID common.GoalID) (*workspacemodel.Goal, error) {
+	return ownerreadports.ReadGoalByOwnerCommand(ctx, hub, goalID)
+}
+
+func ListGoalsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
+	return ownerreadports.ListGoalsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
+}
+
+func DefineGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+		events.PayloadKeyCommand: workspacecontracts.DefineGoalCommand{
+			GoalID:      goalID,
+			WorkspaceID: workspaceID,
+			Text:        text,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func UpdateGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+		events.PayloadKeyCommand: workspacecontracts.UpdateGoalCommand{
+			GoalID: goalID,
+			Text:   text,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	item, ok := response.Payload[events.PayloadKeyGoal].(*workspacemodel.Goal)
+	if !ok || item == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return item, nil
+}
+
+func DeleteGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID) error {
+	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+		events.PayloadKeyCommand: workspacecontracts.DeleteGoalCommand{GoalID: goalID},
+	})
+}

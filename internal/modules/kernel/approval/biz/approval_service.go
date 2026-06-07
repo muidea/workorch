@@ -7,8 +7,8 @@ import (
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
+	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -23,7 +23,7 @@ func NewService(approvals repository.ApprovalRepository, eventHub events.Hub) *S
 	return &Service{approvals: approvals, eventHub: eventHub}
 }
 
-func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.CreateApprovalCommand) error {
+func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
 	if cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
@@ -60,7 +60,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalservice.Create
 	})
 }
 
-func (s *Service) EnsureApproval(ctx context.Context, cmd approvalservice.CreateApprovalCommand) error {
+func (s *Service) EnsureApproval(ctx context.Context, cmd approvalcontracts.CreateApprovalCommand) error {
 	if cmd.ApprovalID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
@@ -83,16 +83,16 @@ func (s *Service) EnsureApproval(ctx context.Context, cmd approvalservice.Create
 	return s.CreateApproval(ctx, cmd)
 }
 
-func (s *Service) Approve(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+func (s *Service) Approve(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateApproved)
 }
 
-func (s *Service) EnsureApproved(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+func (s *Service) EnsureApproved(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureApprovedAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error) {
+func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalModel.Approval, error) {
 	if cmd.ApprovalID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -113,16 +113,16 @@ func (s *Service) EnsureApprovedAndReturn(ctx context.Context, cmd approvalservi
 	return item, nil
 }
 
-func (s *Service) Reject(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+func (s *Service) Reject(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	return s.resolve(ctx, cmd.ApprovalID, common.ApprovalStateRejected)
 }
 
-func (s *Service) EnsureRejected(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) error {
+func (s *Service) EnsureRejected(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) error {
 	_, err := s.EnsureRejectedAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalservice.ResolveApprovalCommand) (*approvalModel.Approval, error) {
+func (s *Service) EnsureRejectedAndReturn(ctx context.Context, cmd approvalcontracts.ResolveApprovalCommand) (*approvalModel.Approval, error) {
 	if cmd.ApprovalID == "" {
 		return nil, common.ErrInvalidArgument
 	}

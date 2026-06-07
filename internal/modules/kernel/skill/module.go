@@ -5,6 +5,7 @@ import (
 
 	skillbiz "github.com/muidea/workorch/internal/modules/kernel/skill/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/common"
+	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,8 +16,8 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = skillservice.Service
-type CreateSkillCommand = skillservice.CreateSkillCommand
-type UpdateSkillCommand = skillservice.UpdateSkillCommand
+type CreateSkillCommand = skillcontracts.CreateSkillCommand
+type UpdateSkillCommand = skillcontracts.UpdateSkillCommand
 
 type Dependencies struct {
 	Skills   repository.SkillRepository
@@ -92,7 +93,7 @@ func (m *Module) handleSkillCommand(ctx context.Context, envelope events.Envelop
 	}
 	switch envelope.Topic {
 	case events.TopicSkillCommandCreate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillservice.CreateSkillCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.CreateSkillCommand)
 		if !ok {
 			var err error
 			cmd, err = skillCommandFromPayload(envelope.Payload)
@@ -121,7 +122,7 @@ func (m *Module) handleSkillCommand(ctx context.Context, envelope events.Envelop
 		}
 		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkills: items})
 	case events.TopicSkillCommandUpdate:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillservice.UpdateSkillCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.UpdateSkillCommand)
 		if !ok {
 			var err error
 			cmd, err = skillCommandFromPayload(envelope.Payload)
@@ -163,12 +164,12 @@ func stringPayload(payload map[string]any, key string) string {
 	return value
 }
 
-func skillCommandFromPayload(payload map[string]any) (skillservice.CreateSkillCommand, error) {
+func skillCommandFromPayload(payload map[string]any) (skillcontracts.CreateSkillCommand, error) {
 	item, ok := payload[events.PayloadKeySkill].(*skillmodel.Skill)
 	if !ok || item == nil {
-		return skillservice.CreateSkillCommand{}, common.ErrInvalidArgument
+		return skillcontracts.CreateSkillCommand{}, common.ErrInvalidArgument
 	}
-	return skillservice.CreateSkillCommand{
+	return skillcontracts.CreateSkillCommand{
 		SkillID:                item.ID,
 		Name:                   item.Name,
 		Version:                item.Version,

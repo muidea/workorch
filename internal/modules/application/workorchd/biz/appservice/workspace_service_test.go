@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -331,7 +332,7 @@ func TestResolveWorkspaceDirectoryLayoutUsesFileBackendRoots(t *testing.T) {
 	}()
 
 	workspaceID := common.WorkspaceID("ws-layout-contract")
-	layout, err := resolveWorkspaceDirectoryLayout(session, workspaceID, "")
+	layout, err := workspacecore.ResolveDirectoryLayout(session.RepositoryBackend(), session.RepositoryDataDir(), string(workspaceID), "")
 	if err != nil {
 		t.Fatalf("resolveWorkspaceDirectoryLayout default: %v", err)
 	}
@@ -349,7 +350,7 @@ func TestResolveWorkspaceDirectoryLayoutUsesFileBackendRoots(t *testing.T) {
 	}
 
 	explicitDeliverable := filepath.Join(t.TempDir(), "explicit-project-root")
-	explicit, err := resolveWorkspaceDirectoryLayout(session, workspaceID, explicitDeliverable)
+	explicit, err := workspacecore.ResolveDirectoryLayout(session.RepositoryBackend(), session.RepositoryDataDir(), string(workspaceID), explicitDeliverable)
 	if err != nil {
 		t.Fatalf("resolveWorkspaceDirectoryLayout explicit: %v", err)
 	}

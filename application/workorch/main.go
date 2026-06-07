@@ -10,7 +10,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorch/app"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
-	_ "github.com/muidea/workorch/internal/modules/application/workorch"
 	_ "github.com/muidea/workorch/internal/modules/application/workorchd"
 	_ "github.com/muidea/workorch/internal/modules/blocks/file"
 	_ "github.com/muidea/workorch/internal/modules/blocks/git"
@@ -30,6 +29,7 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/kernel/run"
 	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
 	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
+	_ "github.com/muidea/workorch/internal/modules/kernel/system"
 	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 

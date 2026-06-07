@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterReadStatus(t *testing.T) {

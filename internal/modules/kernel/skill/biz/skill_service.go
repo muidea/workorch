@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
+	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
-	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -18,14 +18,14 @@ func NewService(skills repository.SkillRepository) *Service {
 	return &Service{skills: skills}
 }
 
-func (s *Service) CreateSkill(ctx context.Context, cmd skillservice.CreateSkillCommand) error {
+func (s *Service) CreateSkill(ctx context.Context, cmd skillcontracts.CreateSkillCommand) error {
 	if err := validateSkillCommand(cmd); err != nil {
 		return err
 	}
 	return s.skills.Create(ctx, skillFromCommand(cmd))
 }
 
-func (s *Service) UpdateSkill(ctx context.Context, cmd skillservice.UpdateSkillCommand) error {
+func (s *Service) UpdateSkill(ctx context.Context, cmd skillcontracts.UpdateSkillCommand) error {
 	if err := validateSkillCommand(cmd); err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func (s *Service) ListSkills(ctx context.Context) ([]*skillmodel.Skill, error) {
 	return s.skills.List(ctx)
 }
 
-func validateSkillCommand(cmd skillservice.CreateSkillCommand) error {
+func validateSkillCommand(cmd skillcontracts.CreateSkillCommand) error {
 	if cmd.SkillID == "" ||
 		strings.TrimSpace(cmd.Name) == "" ||
 		strings.TrimSpace(cmd.Version) == "" ||
@@ -61,7 +61,7 @@ func validateSkillCommand(cmd skillservice.CreateSkillCommand) error {
 	return nil
 }
 
-func skillFromCommand(cmd skillservice.CreateSkillCommand) *skillmodel.Skill {
+func skillFromCommand(cmd skillcontracts.CreateSkillCommand) *skillmodel.Skill {
 	return &skillmodel.Skill{
 		ID:                     cmd.SkillID,
 		Name:                   cmd.Name,

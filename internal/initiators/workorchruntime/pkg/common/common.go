@@ -1,42 +1,100 @@
 package common
 
 import (
-	orchestratormodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 )
 
 const InitiatorID = "workorch/runtime"
 
-type RepositorySet struct {
-	Souls                 repository.SoulRepository
-	WorkspaceTemplates    repository.WorkspaceTemplateRepository
-	MemoryItems           repository.MemoryItemRepository
-	MemoryRecallTraces    repository.MemoryRecallTraceRepository
-	AutoGovernanceTraces  repository.AutoGovernanceTraceRepository
-	Skills                repository.SkillRepository
-	MCPServers            repository.MCPServerRepository
-	MCPCapabilities       repository.MCPCapabilityRepository
-	Results               repository.ResultRepository
-	Artifacts             repository.ArtifactRepository
-	EventRecords          repository.EventRecordRepository
-	Workspaces            repository.WorkspaceRepository
-	Goals                 repository.GoalRepository
-	DoDs                  repository.DoDRepository
-	Runs                  repository.RunRepository
+type SystemRepositories struct {
+	Souls           repository.SoulRepository
+	Templates       repository.WorkspaceTemplateRepository
+	MCPServers      repository.MCPServerRepository
+	MCPCapabilities repository.MCPCapabilityRepository
+}
+
+type WorkspaceRepositories struct {
+	Workspaces repository.WorkspaceRepository
+	Goals      repository.GoalRepository
+	DoDs       repository.DoDRepository
+	Templates  repository.WorkspaceTemplateRepository
+}
+
+type DecisionRepositories struct {
+	Tickets     repository.DecisionTicketRepository
+	Resolutions repository.DecisionResolutionRepository
+}
+
+type ApprovalRepositories struct {
+	Approvals repository.ApprovalRepository
+}
+
+type EventStreamRepositories struct {
+	EventRecords repository.EventRecordRepository
+}
+
+type GovernanceRepositories struct {
+	AutoGovernanceTraces repository.AutoGovernanceTraceRepository
+}
+
+type MCPRepositories struct {
+	Servers      repository.MCPServerRepository
+	Capabilities repository.MCPCapabilityRepository
+}
+
+type MemoryRepositories struct {
+	MemoryItems        repository.MemoryItemRepository
+	MemoryRecallTraces repository.MemoryRecallTraceRepository
+}
+
+type OrchestratorRepositories struct {
 	Steps                 repository.StepRepository
 	ToolCalls             repository.ToolCallRepository
 	Patches               repository.PatchRepository
 	ValidationResults     repository.ValidationResultRepository
 	RuntimeCheckpoints    repository.RuntimeCheckpointRepository
 	ArtifactContinuations repository.ArtifactContinuationRepository
-	Tickets               repository.DecisionTicketRepository
-	Resolutions           repository.DecisionResolutionRepository
-	Approvals             repository.ApprovalRepository
+}
+
+type ResultRepositories struct {
+	Results   repository.ResultRepository
+	Artifacts repository.ArtifactRepository
+}
+
+type RunRepositories struct {
+	Runs        repository.RunRepository
+	Steps       repository.StepRepository
+	Checkpoints repository.RuntimeCheckpointRepository
+}
+
+type SkillRepositories struct {
+	Skills repository.SkillRepository
+}
+
+type SoulRepositories struct {
+	Souls repository.SoulRepository
+}
+
+type RepositoryProvider interface {
+	System() SystemRepositories
+	Workspace() WorkspaceRepositories
+	Decision() DecisionRepositories
+	Approval() ApprovalRepositories
+	EventStream() EventStreamRepositories
+	Governance() GovernanceRepositories
+	MCP() MCPRepositories
+	Memory() MemoryRepositories
+	Orchestrator() OrchestratorRepositories
+	Result() ResultRepositories
+	Run() RunRepositories
+	Skill() SkillRepositories
+	Soul() SoulRepositories
 }
 
 type Helper interface {
-	Repositories() RepositorySet
+	RepositoryProvider() RepositoryProvider
 	EventHub() events.Hub
-	RuntimePolicy() orchestratormodel.RuntimePolicy
+	RuntimePolicy() workorchruntimepolicy.RuntimePolicy
 }

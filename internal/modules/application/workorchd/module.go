@@ -15,10 +15,8 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-var defaultModule = New()
-
 func init() {
-	pluginmodule.Register(defaultModule)
+	pluginmodule.Register(New())
 }
 
 type Module struct {
@@ -112,10 +110,6 @@ func (m *Module) Done() <-chan error {
 		return closed
 	}
 	return m.service.Done()
-}
-
-func Done() <-chan error {
-	return defaultModule.Done()
 }
 
 func (m *Module) handleDoneCommand(_ context.Context, envelope events.Envelope) error {

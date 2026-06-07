@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governancecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/kernel/approval"
 	decisionmodule "github.com/muidea/workorch/internal/modules/kernel/decision"
@@ -457,10 +458,10 @@ func TestResolveDecisionWithSessionRejectsInlineProviderConfigForProviderRecover
 		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
 		Question:    "Fix or switch the LLM provider in system configuration first.",
 		Context: map[string]any{
-			"failureClass":                   "provider_timeout",
-			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
-			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+			"failureClass":                                  "provider_timeout",
+			governancecore.DecisionContextKeyScope:          governancecore.DecisionContextScopeWorkorchRuntime,
+			governancecore.DecisionContextKeyDependency:     governancecore.DecisionContextDependencyLLMProvider,
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyConfigOnly,
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -500,10 +501,10 @@ func TestResolveDecisionWithSessionAllowsProviderRecoveryConfirmationWithoutSecr
 		Reason:      "LLM provider retry attempts exhausted after 2 attempts",
 		Question:    "Fix or switch the LLM provider in system configuration first.",
 		Context: map[string]any{
-			"failureClass":                   "provider_timeout",
-			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
-			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+			"failureClass":                                  "provider_timeout",
+			governancecore.DecisionContextKeyScope:          governancecore.DecisionContextScopeWorkorchRuntime,
+			governancecore.DecisionContextKeyDependency:     governancecore.DecisionContextDependencyLLMProvider,
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyConfigOnly,
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -540,8 +541,8 @@ func TestResolveDecisionWithSessionAllowsTargetWorkspaceExternalDependencyConfig
 		Reason:      "integration test configuration is missing",
 		Question:    "Provide the target workspace external dependency test configuration.",
 		Context: map[string]any{
-			decisionContextKeyScope: decisionContextScopeTargetWorkspace,
-			"dependencyKind":        "external_service",
+			governancecore.DecisionContextKeyScope: governancecore.DecisionContextScopeTargetWorkspace,
+			"dependencyKind":                       "external_service",
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -577,8 +578,8 @@ func TestResolveDecisionWithSessionInfersRepairExhaustionReplanFromContinueUnder
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
 		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
-			"allowedRecoveryActions":         []any{"replan"},
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
+			"allowedRecoveryActions":                        []any{"replan"},
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -615,7 +616,7 @@ func TestResolveDecisionWithSessionAllowsExplicitRepairExhaustionRecoveryAction(
 		Reason:      "runtime repair attempts exhausted after 3 attempts",
 		Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
 		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+			governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
 		},
 		State: common.DecisionTicketStateOpen,
 	}); err != nil {
@@ -660,7 +661,7 @@ func TestResolveDecisionWithSessionMapsRepairExhaustionReplanAndTerminate(t *tes
 				Reason:      "runtime repair attempts exhausted after 3 attempts",
 				Question:    "Provide missing implementation guidance, choose replan, or reject the current path.",
 				Context: map[string]any{
-					decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+					governancecore.DecisionContextKeyRecoveryPolicy: governancecore.DecisionContextRecoveryPolicyRepairPlan,
 				},
 				State: common.DecisionTicketStateOpen,
 			}); err != nil {

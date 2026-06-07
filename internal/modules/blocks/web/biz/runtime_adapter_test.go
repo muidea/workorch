@@ -10,9 +10,9 @@ import (
 
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterSearchUsesHTTPProvider(t *testing.T) {

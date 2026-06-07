@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestExecutorRunIsIdempotent(t *testing.T) {

@@ -3,30 +3,13 @@ package decision
 import (
 	"context"
 
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type CreateTicketCommand struct {
-	TicketID     common.TicketID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	Reason       string
-	DecisionKind string
-	Question     string
-	Context      map[string]any
-}
-
-type ResolveTicketCommand struct {
-	ResolutionID common.ResolutionID
-	TicketID     common.TicketID
-	WorkspaceID  common.WorkspaceID
-	RunID        common.RunID
-	StepID       common.StepID
-	Type         string
-	Payload      map[string]any
-}
+type CreateTicketCommand = decisioncontracts.CreateTicketCommand
+type ResolveTicketCommand = decisioncontracts.ResolveTicketCommand
 
 type Service interface {
 	CreateTicket(context.Context, CreateTicketCommand) error

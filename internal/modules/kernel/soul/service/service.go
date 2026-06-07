@@ -3,33 +3,14 @@ package soul
 import (
 	"context"
 
+	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-type CreateSoulCommand struct {
-	SoulID                      common.SoulID
-	Name                        string
-	Description                 string
-	BusinessDomains             []string
-	SoulMD                      string
-	AllowedSkillRefs            []string
-	AllowedMCPServerRefs        []string
-	AllowedCapabilityRefs       []string
-	AllowedCapabilityCategories []string
-	AllowedToolKinds            []string
-}
-
-type UpdateSoulCommand = CreateSoulCommand
-
-type ValidateCapabilitySelectionCommand struct {
-	SoulID               common.SoulID
-	SkillRefs            []string
-	MCPServerRefs        []string
-	CapabilityRefs       []string
-	CapabilityCategories []string
-	ToolKinds            []string
-}
+type CreateSoulCommand = soulcontracts.CreateSoulCommand
+type UpdateSoulCommand = soulcontracts.UpdateSoulCommand
+type ValidateCapabilitySelectionCommand = soulcontracts.ValidateCapabilitySelectionCommand
 
 type Service interface {
 	CreateSoul(context.Context, CreateSoulCommand) error

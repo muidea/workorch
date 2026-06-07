@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
@@ -24,14 +24,14 @@ func NewServiceWithRecallTraces(items repository.MemoryItemRepository, traces re
 	return &Service{items: items, traces: traces}
 }
 
-func (s *Service) CreateMemoryItem(ctx context.Context, cmd memoryservice.CreateMemoryItemCommand) error {
+func (s *Service) CreateMemoryItem(ctx context.Context, cmd memorycontracts.CreateMemoryItemCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
 	return s.items.Create(ctx, memoryItemFromCommand(cmd))
 }
 
-func (s *Service) UpdateMemoryItem(ctx context.Context, cmd memoryservice.UpdateMemoryItemCommand) error {
+func (s *Service) UpdateMemoryItem(ctx context.Context, cmd memorycontracts.UpdateMemoryItemCommand) error {
 	if err := validateMemoryCommand(cmd); err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func (s *Service) DeleteMemoryRecallTrace(ctx context.Context, id common.MemoryR
 	return s.traces.Delete(ctx, id)
 }
 
-func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
+func validateMemoryCommand(cmd memorycontracts.CreateMemoryItemCommand) error {
 	if cmd.MemoryID == "" ||
 		cmd.WorkspaceID == "" ||
 		strings.TrimSpace(cmd.SourceType) == "" ||
@@ -126,7 +126,7 @@ func validateMemoryCommand(cmd memoryservice.CreateMemoryItemCommand) error {
 	return nil
 }
 
-func memoryItemFromCommand(cmd memoryservice.CreateMemoryItemCommand) *memorymodel.MemoryItem {
+func memoryItemFromCommand(cmd memorycontracts.CreateMemoryItemCommand) *memorymodel.MemoryItem {
 	return &memorymodel.MemoryItem{
 		ID:                  cmd.MemoryID,
 		WorkspaceID:         cmd.WorkspaceID,

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 )
 
 type fakeSkillHubCommandRunner struct {
@@ -223,12 +225,23 @@ func TestSelectedSkillsCanResolveSkillHubReferences(t *testing.T) {
 	}()
 
 	ref := "skillhub:workspace:" + workspace.ID + ":runtime-workspace-skill"
-	items, err := selectedSkills(ctx, session, []string{ref}, workspace.ID)
+	hub, err := session.RequiredEventHub()
 	if err != nil {
-		t.Fatalf("selectedSkills: %v", err)
+		t.Fatalf("session.RequiredEventHub: %v", err)
+	}
+	items, err := activationports.SelectedSkills(ctx, hub, []string{ref}, workspace.ID, skillHubCatalogForEventHub(hub))
+	if err != nil {
+		t.Fatalf("SelectedSkills: %v", err)
 	}
 	if got := []string{items[0].ID, items[0].SourceSkillID, items[0].Scope}; !reflect.DeepEqual(got, []string{ref, "runtime-workspace-skill", skillScopeWorkspace}) {
 		t.Fatalf("selected skill identifiers = %+v", got)
+	}
+}
+
+func TestSkillHubCatalogRequiresEventHubForWorkspaceSkills(t *testing.T) {
+	_, err := skillHubCatalogForEventHub(nil).ListWorkspaceSkills(context.Background(), "ws-missing-hub")
+	if err == nil {
+		t.Fatalf("ListWorkspaceSkills without hub succeeded")
 	}
 }
 

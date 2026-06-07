@@ -1,0 +1,29 @@
+package events
+
+const (
+	TopicOrchestratorCommandStartRun                       = "/orchestrator/command/start-run"
+	TopicOrchestratorCommandBlockDecision                  = "/orchestrator/command/block-decision"
+	TopicOrchestratorCommandBlockApproval                  = "/orchestrator/command/block-approval"
+	TopicOrchestratorCommandResumeRun                      = "/orchestrator/command/resume-run"
+	TopicOrchestratorCommandValidateRun                    = "/orchestrator/command/validate-run"
+	TopicOrchestratorCommandCompleteRun                    = "/orchestrator/command/complete-run"
+	TopicOrchestratorCommandCancelRun                      = "/orchestrator/command/cancel-run"
+	TopicOrchestratorCommandSupersedeRun                   = "/orchestrator/command/supersede-run"
+	TopicOrchestratorCommandFailRun                        = "/orchestrator/command/fail-run"
+	TopicOrchestratorCommandPurgeRun                       = "/orchestrator/command/purge-run"
+	TopicOrchestratorCommandListToolCallsByRun             = "/orchestrator/command/list-tool-calls-by-run"
+	TopicOrchestratorCommandListPatchesByRun               = "/orchestrator/command/list-patches-by-run"
+	TopicOrchestratorCommandListValidationResultsByRun     = "/orchestrator/command/list-validation-results-by-run"
+	TopicOrchestratorCommandListArtifactContinuationsByRun = "/orchestrator/command/list-artifact-continuations-by-run"
+
+	TopicPatchPreviewed                    = "/patch/previewed"
+	TopicPatchApplied                      = "/patch/applied"
+	TopicPatchFailed                       = "/patch/failed"
+	TopicPatchReverted                     = "/patch/reverted"
+	TopicArtifactContinuationCreated       = "/artifact_continuation/created"
+	TopicArtifactContinuationChunkRecorded = "/artifact_continuation/chunk_recorded"
+	TopicArtifactContinuationChunkRejected = "/artifact_continuation/chunk_rejected"
+	TopicArtifactContinuationAssembled     = "/artifact_continuation/assembled"
+	TopicArtifactContinuationApplied       = "/artifact_continuation/applied"
+	TopicArtifactContinuationFailed        = "/artifact_continuation/failed"
+)

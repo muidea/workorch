@@ -5,6 +5,7 @@ import (
 
 	approvalbiz "github.com/muidea/workorch/internal/modules/kernel/approval/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
+	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,8 +16,9 @@ import (
 const ModuleID = modulecommon.ModuleID
 
 type Service = approvalservice.Service
-type CreateApprovalCommand = approvalservice.CreateApprovalCommand
-type ResolveApprovalCommand = approvalservice.ResolveApprovalCommand
+type CreateApprovalCommand = approvalcontracts.CreateApprovalCommand
+type UpdateApprovalCommand = approvalcontracts.UpdateApprovalCommand
+type ResolveApprovalCommand = approvalcontracts.ResolveApprovalCommand
 
 type Dependencies struct {
 	Approvals repository.ApprovalRepository
@@ -100,11 +102,12 @@ func (m *Module) handleEnsureApprovedCommand(ctx context.Context, envelope event
 	if m == nil || m.servicePtr == nil || m.approvals == nil {
 		return common.ErrInvalidArgument
 	}
-	approvalID := common.ApprovalID(stringPayload(envelope.Payload, events.PayloadKeyApprovalID))
+	cmd := resolveApprovalCommandFromPayload(envelope.Payload)
+	approvalID := cmd.ApprovalID
 	if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
 		return err
 	}
-	item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID})
+	item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -115,11 +118,12 @@ func (m *Module) handleEnsureRejectedCommand(ctx context.Context, envelope event
 	if m == nil || m.servicePtr == nil || m.approvals == nil {
 		return common.ErrInvalidArgument
 	}
-	approvalID := common.ApprovalID(stringPayload(envelope.Payload, events.PayloadKeyApprovalID))
+	cmd := resolveApprovalCommandFromPayload(envelope.Payload)
+	approvalID := cmd.ApprovalID
 	if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
 		return err
 	}
-	item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, approvalservice.ResolveApprovalCommand{ApprovalID: approvalID})
+	item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -135,13 +139,13 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalservice.CreateApprovalCommand)
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.CreateApprovalCommand)
 		if !ok {
 			item, err := approvalFromPayload(envelope.Payload)
 			if err != nil {
 				return err
 			}
-			cmd = approvalservice.CreateApprovalCommand{
+			cmd = approvalcontracts.CreateApprovalCommand{
 				ApprovalID:  item.ID,
 				WorkspaceID: item.WorkspaceID,
 				RunID:       item.RunID,
@@ -156,22 +160,18 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 		}
 		return approvalCommandResponse(envelope, nil)
 	case events.TopicApprovalCommandCreate:
-		item, err := approvalFromPayload(envelope.Payload)
-		if err != nil {
-			return err
-		}
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
-		if err := m.servicePtr.CreateApproval(ctx, approvalservice.CreateApprovalCommand{
-			ApprovalID:  item.ID,
-			WorkspaceID: item.WorkspaceID,
-			RunID:       item.RunID,
-			StepID:      item.StepID,
-			Reason:      item.Reason,
-			Action:      item.Action,
-			Context:     item.Context,
-		}); err != nil {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.CreateApprovalCommand)
+		if !ok {
+			item, err := approvalFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
+			cmd = approvalCreateCommandFromModel(item)
+		}
+		if err := m.servicePtr.CreateApproval(ctx, cmd); err != nil {
 			return err
 		}
 		return approvalCommandResponse(envelope, nil)
@@ -204,9 +204,15 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 		}
 		return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
 	case events.TopicApprovalCommandUpdate:
-		item, err := approvalFromPayload(envelope.Payload)
-		if err != nil {
-			return err
+		var item *approvalmodel.Approval
+		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.UpdateApprovalCommand); ok {
+			item = approvalFromUpdateCommand(cmd)
+		} else {
+			var err error
+			item, err = approvalFromPayload(envelope.Payload)
+			if err != nil {
+				return err
+			}
 		}
 		if !approvalMatchesScope(item, envelope) {
 			return common.ErrNotFound
@@ -216,7 +222,7 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 		}
 		return approvalCommandResponse(envelope, nil)
 	case events.TopicApprovalCommandDelete:
-		approvalID := common.ApprovalID(stringPayload(envelope.Payload, events.PayloadKeyApprovalID))
+		approvalID := deleteApprovalIDFromPayload(envelope.Payload)
 		if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
 			return err
 		}
@@ -227,6 +233,52 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func approvalCreateCommandFromModel(item *approvalmodel.Approval) approvalcontracts.CreateApprovalCommand {
+	if item == nil {
+		return approvalcontracts.CreateApprovalCommand{}
+	}
+	return approvalcontracts.CreateApprovalCommand{
+		ApprovalID:  item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
+		StepID:      item.StepID,
+		Reason:      item.Reason,
+		Action:      item.Action,
+		Context:     cloneMap(item.Context),
+	}
+}
+
+func approvalFromUpdateCommand(cmd approvalcontracts.UpdateApprovalCommand) *approvalmodel.Approval {
+	return &approvalmodel.Approval{
+		ID:          cmd.ApprovalID,
+		WorkspaceID: cmd.WorkspaceID,
+		RunID:       cmd.RunID,
+		StepID:      cmd.StepID,
+		Reason:      cmd.Reason,
+		Action:      cmd.Action,
+		Context:     cloneMap(cmd.Context),
+		State:       cmd.State,
+		CreatedAt:   cmd.CreatedAt,
+		UpdatedAt:   cmd.UpdatedAt,
+	}
+}
+
+func resolveApprovalCommandFromPayload(payload map[string]any) approvalcontracts.ResolveApprovalCommand {
+	if cmd, ok := payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand); ok {
+		return cmd
+	}
+	return approvalcontracts.ResolveApprovalCommand{
+		ApprovalID: common.ApprovalID(stringPayload(payload, events.PayloadKeyApprovalID)),
+	}
+}
+
+func deleteApprovalIDFromPayload(payload map[string]any) common.ApprovalID {
+	if cmd, ok := payload[events.PayloadKeyCommand].(approvalcontracts.DeleteApprovalCommand); ok && cmd.ApprovalID != "" {
+		return cmd.ApprovalID
+	}
+	return common.ApprovalID(stringPayload(payload, events.PayloadKeyApprovalID))
 }
 
 func (m *Module) ensureApprovalScope(ctx context.Context, approvalID common.ApprovalID, envelope events.Envelope) error {
@@ -329,6 +381,10 @@ func mapPayload(payload map[string]any, key string) map[string]any {
 	if value == nil {
 		return nil
 	}
+	return cloneMap(value)
+}
+
+func cloneMap(value map[string]any) map[string]any {
 	ret := make(map[string]any, len(value))
 	for key, item := range value {
 		ret[key] = item

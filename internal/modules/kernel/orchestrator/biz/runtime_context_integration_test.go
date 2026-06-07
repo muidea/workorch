@@ -16,7 +16,6 @@ import (
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -24,6 +23,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeOrchestrator_LLMInputIncludesExecutionContextPackage(t *testing.T) {

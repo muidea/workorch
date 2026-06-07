@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	runtimemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeAdapterExecutesPasswordSSHThroughShellCommand(t *testing.T) {

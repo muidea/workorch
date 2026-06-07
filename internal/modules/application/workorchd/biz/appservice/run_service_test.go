@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	filecommon "github.com/muidea/workorch/internal/modules/blocks/file/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -18,6 +22,24 @@ import (
 	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
+
+func runportsCompressedContextPatchForRun(ctx context.Context, session *RuntimeSession, runID common.RunID) (map[string]any, *runmodel.Run, error) {
+	deps, err := readModelDependenciesFromSession(session)
+	if err != nil {
+		return nil, nil, err
+	}
+	return runports.CompressedContextPatchForRun(ctx, runports.CompressedContextDependencies{
+		Runs:          deps.runs,
+		Tickets:       deps.tickets,
+		Resolutions:   deps.resolutions,
+		Approvals:     deps.approvals,
+		MemoryRecalls: deps.memoryRecalls,
+		EventHub:      deps.eventHub,
+		RecoverySnapshot: func(snapshotCtx context.Context, snapshotRunID common.RunID) (RunSnapshot, error) {
+			return readRunRecoverySnapshot(snapshotCtx, deps, snapshotRunID)
+		},
+	}, runID)
+}
 
 func TestCreateRunWithSessionReturnsInvalidArgumentWhenSessionMissing(t *testing.T) {
 	if _, err := CreateRunWithSession(context.Background(), nil, "ws-1", "run-1", "", ""); !errors.Is(err, common.ErrInvalidArgument) {
@@ -203,11 +225,11 @@ func TestRecoverStuckRunningRunsWithDuplicateRunIDsUsesWorkspaceScope(t *testing
 }
 
 func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *testing.T) {
-	compressed := compressedContextForRunStart(context.Background(), &runmodel.Run{
+	compressed := runtimecore.CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
 		State:       common.RunStateCreated,
-	})
+	}, localizationcore.DefaultDialogLanguage())
 	if compressed == nil {
 		t.Fatalf("compressedContext nil, want lightweight projection")
 	}
@@ -220,11 +242,11 @@ func TestCompressedContextForRunStartUsesLightweightCreatedRunProjection(t *test
 	if compressed["currentMilestone"] != "execution_steps" {
 		t.Fatalf("currentMilestone = %v, want execution_steps", compressed["currentMilestone"])
 	}
-	if compressedContextForRunStart(context.Background(), &runmodel.Run{
+	if runtimecore.CreatedRunCompressedContext(&runmodel.Run{
 		ID:          "run-lightweight-start",
 		WorkspaceID: "ws-lightweight-start",
 		State:       common.RunStateRunning,
-	}) != nil {
+	}, localizationcore.DefaultDialogLanguage()) != nil {
 		t.Fatalf("running run should use full snapshot-based compressed context")
 	}
 }
@@ -263,12 +285,12 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 		t.Fatalf("seed approval: %v", err)
 	}
 
-	decision, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+	decision, err := runports.BlockedRunResumeCompressedContext(ctx, deps.tickets, deps.resolutions, deps.approvals, &runmodel.Run{
 		ID:               "run-lightweight-decision-resume",
 		WorkspaceID:      "ws-lightweight-decision-resume",
 		State:            common.RunStateBlockedOnDecision,
 		BlockingTicketID: "ticket-lightweight-resume",
-	})
+	}, "en-US")
 	if err != nil {
 		t.Fatalf("decision compressedContext: %v", err)
 	}
@@ -286,12 +308,12 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 		t.Fatalf("decision recovery = %+v, want resolved ticket resume", decisionRecovery)
 	}
 
-	approval, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+	approval, err := runports.BlockedRunResumeCompressedContext(ctx, deps.tickets, deps.resolutions, deps.approvals, &runmodel.Run{
 		ID:                 "run-lightweight-approval-resume",
 		WorkspaceID:        "ws-lightweight-approval-resume",
 		State:              common.RunStateBlockedOnApproval,
 		BlockingApprovalID: "approval-lightweight-resume",
-	})
+	}, "en-US")
 	if err != nil {
 		t.Fatalf("approval compressedContext: %v", err)
 	}
@@ -304,11 +326,11 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 		t.Fatalf("approval recovery = %+v, want approved approval resume", approvalRecovery)
 	}
 
-	nonBlocked, err := compressedContextForBlockedRunResume(ctx, deps, &runmodel.Run{
+	nonBlocked, err := runports.BlockedRunResumeCompressedContext(ctx, deps.tickets, deps.resolutions, deps.approvals, &runmodel.Run{
 		ID:          "run-lightweight-running",
 		WorkspaceID: "ws-lightweight-running",
 		State:       common.RunStateRunning,
-	})
+	}, "en-US")
 	if err != nil {
 		t.Fatalf("running compressedContext: %v", err)
 	}
@@ -365,12 +387,12 @@ func TestCompressedContextPatchRecordsRecoveryMemoryRecallTrace(t *testing.T) {
 		t.Fatalf("seed other workspace memory recall trace: %v", err)
 	}
 
-	patch, _, err := compressedContextPatchForRun(ctx, session, runID)
+	patch, _, err := runportsCompressedContextPatchForRun(ctx, session, runID)
 	if err != nil {
-		t.Fatalf("compressedContextPatchForRun: %v", err)
+		t.Fatalf("runportsCompressedContextPatchForRun: %v", err)
 	}
 	compressed, _ := patch["compressedContext"].(map[string]any)
-	if !containsString(stringSliceFromAny(compressed["sourceSectionRefs"]), "memory_recall") {
+	if !runtimecore.ContainsString(runtimecore.StringSliceFromAny(compressed["sourceSectionRefs"]), "memory_recall") {
 		t.Fatalf("compressed context = %+v, want memory_recall source section", compressed)
 	}
 	traces, err := exports.Repositories.MemoryRecallTraces.List(ctx, repository.MemoryRecallTraceQuery{WorkspaceID: workspaceID, RunID: runID, Source: "recovery"})
@@ -444,9 +466,9 @@ func TestCompressedContextPatchForRunRefreshesCumulativeGoalAndDoD(t *testing.T)
 		t.Fatalf("seed resolution: %v", err)
 	}
 
-	patch, _, err := compressedContextPatchForRun(ctx, session, runID)
+	patch, _, err := runportsCompressedContextPatchForRun(ctx, session, runID)
 	if err != nil {
-		t.Fatalf("compressedContextPatchForRun: %v", err)
+		t.Fatalf("runportsCompressedContextPatchForRun: %v", err)
 	}
 	if patch["goalId"] != "goal-2" || patch["doDId"] != "dod-2" {
 		t.Fatalf("definition patch = %+v, want latest goal/dod IDs", patch)
@@ -1065,7 +1087,7 @@ func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	actions := newEventHubActionPort(exports.Infrastructure.EventHub)
+	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
 	if err := actions.EnsureWorkspace(ctx, "ws-run-failure", "run failure workspace"); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

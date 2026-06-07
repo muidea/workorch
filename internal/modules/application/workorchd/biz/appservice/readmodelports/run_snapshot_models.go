@@ -1,0 +1,66 @@
+package readmodelports
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+)
+
+func loadRunSnapshotModels(ctx context.Context, readers RunSnapshotReaders, item *runmodel.Run, recovery bool) (runSnapshotModels, error) {
+	var models runSnapshotModels
+	tasks := []func() error{
+		func() error {
+			var err error
+			models.Workspace, err = readers.Workspaces.Get(ctx, item.WorkspaceID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Steps, err = readers.Steps.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.ToolCalls, err = readers.ToolCalls.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Patches, err = readers.Patches.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Validations, err = readers.Validations.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Checkpoints, err = readers.Checkpoints.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Results, err = readers.Results.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.Artifacts, err = readers.Artifacts.ListByRun(ctx, item.ID)
+			return err
+		},
+		func() error {
+			var err error
+			models.ArtifactContinuations, err = readers.ArtifactContinuations.ListByRun(ctx, item.ID)
+			return err
+		},
+	}
+	tasks = appendRunSnapshotObservabilityTasks(ctx, tasks, readers, item, &models)
+	tasks = appendRunSnapshotGovernanceTasks(ctx, tasks, readers, item, &models)
+	tasks = appendRunSnapshotCapabilityTasks(ctx, tasks, readers, recovery, &models)
+	if err := readmodelcore.RunTasks(tasks...); err != nil {
+		return runSnapshotModels{}, err
+	}
+	return models, nil
+}

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
-	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -24,7 +24,7 @@ func NewService(tickets repository.DecisionTicketRepository, resolutions reposit
 	return &Service{tickets: tickets, resolutions: resolutions, eventHub: eventHub}
 }
 
-func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTicketCommand) error {
+func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
@@ -62,7 +62,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisionservice.CreateTi
 	})
 }
 
-func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTicketCommand) error {
+func (s *Service) EnsureTicket(ctx context.Context, cmd decisioncontracts.CreateTicketCommand) error {
 	if cmd.TicketID == "" || cmd.WorkspaceID == "" || cmd.RunID == "" || cmd.Reason == "" {
 		return common.ErrInvalidArgument
 	}
@@ -86,7 +86,7 @@ func (s *Service) EnsureTicket(ctx context.Context, cmd decisionservice.CreateTi
 	return s.CreateTicket(ctx, cmd)
 }
 
-func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.ResolveTicketCommand) error {
+func (s *Service) ResolveTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return common.ErrInvalidArgument
 	}
@@ -109,7 +109,7 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisionservice.Resolve
 	return err
 }
 
-func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) (*decisionModel.Resolution, error) {
+func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Resolution, error) {
 	if ticket == nil || ticket.ID == "" {
 		return nil, common.ErrInvalidArgument
 	}
@@ -157,12 +157,12 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	return resolution, nil
 }
 
-func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisionservice.ResolveTicketCommand) error {
+func (s *Service) EnsureResolvedTicket(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) error {
 	_, _, err := s.EnsureResolvedTicketAndReturn(ctx, cmd)
 	return err
 }
 
-func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisionservice.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
+func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) (*decisionModel.Ticket, *decisionModel.Resolution, error) {
 	if cmd.ResolutionID == "" || cmd.TicketID == "" || cmd.Type == "" {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -197,7 +197,7 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	return ticket, resolution, nil
 }
 
-func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisionservice.ResolveTicketCommand) bool {
+func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) bool {
 	if ticket == nil {
 		return false
 	}

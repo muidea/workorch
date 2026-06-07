@@ -1,0 +1,24 @@
+package readmodelprojection
+
+import (
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+)
+
+func runContextBundleSections(snapshot readmodelcore.RunSnapshot, progress readmodelcore.TaskProgress, recentEvidence []readmodelcore.ContextEvidence) []readmodelcore.ContextSection {
+	return []readmodelcore.ContextSection{
+		ContextWorkspaceSection(snapshot),
+		ContextRunSection(snapshot),
+		ContextGoalSection(snapshot),
+		ContextDoDSection(snapshot),
+		ContextExecutionContextSection(snapshot),
+		ContextTaskProgressSection(progress),
+		ContextTaskDecompositionSection(snapshot.TaskDecompositions),
+		ContextExecutionSectionsSection(snapshot.ExecutionSections),
+		ContextMemoryRecallSection(snapshot.MemoryRecallTraces),
+		ContextGovernanceSection(snapshot, localizationcore.MilestoneTitle(SnapshotLanguage(snapshot), "governance")),
+		ContextFormalOutputSection(snapshot),
+		ContextRecentEvidenceSection(recentEvidence),
+		ContextRecoverySection(progress.Recovery),
+	}
+}
