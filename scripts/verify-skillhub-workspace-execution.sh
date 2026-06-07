@@ -224,7 +224,7 @@ skill_id = sys.argv[2]
 for item in data.get("items") or []:
     if item.get("skill_id") == skill_id and item.get("agent") == "codex":
         sys.exit(0)
-print(f"global SkillHub skill {skill_id!r} is not enabled for codex; run: skill-hub use {skill_id} --global --agent codex && skill-hub apply {skill_id} --global --agent codex", file=sys.stderr)
+print(f"global SkillHub skill {skill_id!r} is not enabled for codex; run: skill-hub use --pattern {skill_id!r} --global --agent codex && skill-hub apply --pattern {skill_id!r} --global --agent codex", file=sys.stderr)
 sys.exit(1)
 PY
 }
@@ -295,7 +295,7 @@ deliverable_directory="$(json_path "$TMP_DIR/workspace.json" "workspace.delivera
 [[ -n "$workspace_id" ]]
 [[ -n "$deliverable_directory" ]]
 mkdir -p "$deliverable_directory"
-(cd "$deliverable_directory" && printf 'y\n' | skill-hub use "$GLOBAL_SKILL_ID" >/dev/null && skill-hub apply "$GLOBAL_SKILL_ID" >/dev/null)
+(cd "$deliverable_directory" && printf 'y\n' | skill-hub use --pattern "$GLOBAL_SKILL_ID" >/dev/null && skill-hub apply --pattern "$GLOBAL_SKILL_ID" >/dev/null)
 
 curl -fsS "$BASE_URL/api/v1/workorch/skills?workspaceId=$workspace_id" >"$TMP_DIR/skills.json"
 grep "\"id\": \"skillhub:global:$GLOBAL_SKILL_ID\"" "$TMP_DIR/skills.json" >/dev/null
@@ -325,7 +325,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-
   -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
 grep '"state": "completed"' "$TMP_DIR/activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/run-snapshot.json"
 validate_snapshot
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory.json"
 grep 'Selected skills completed run' "$TMP_DIR/memory.json" >/dev/null

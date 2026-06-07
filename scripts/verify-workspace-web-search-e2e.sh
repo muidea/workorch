@@ -4,6 +4,7 @@ set -euo pipefail
 
 TMP_DIR="$(mktemp -d)"
 BASE_URL="${WORKORCH_WEB_SEARCH_E2E_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
+KEEP_ARTIFACTS="${WORKORCH_WEB_SEARCH_E2E_KEEP_ARTIFACTS:-0}"
 LLM_MOCK_ADDR="${WORKORCH_WEB_SEARCH_E2E_LLM_MOCK_ADDR:-127.0.0.1:18191}"
 WEB_MOCK_ADDR="${WORKORCH_WEB_SEARCH_E2E_WEB_MOCK_ADDR:-127.0.0.1:18192}"
 LLM_MOCK_BASE_URL="http://$LLM_MOCK_ADDR/v1"
@@ -11,6 +12,7 @@ WEB_MOCK_BASE_URL="http://$WEB_MOCK_ADDR"
 VERIFY_SUFFIX="${WORKORCH_WEB_SEARCH_E2E_SUFFIX:-$$}"
 LLM_PROVIDER_ID="web-search-e2e-llm-$VERIFY_SUFFIX"
 WEB_PROVIDER_ID="web-search-e2e-web-$VERIFY_SUFFIX"
+SOUL_ID="soul-web-search-e2e-$VERIFY_SUFFIX"
 LLM_MOCK_PID=""
 WEB_MOCK_PID=""
 LLM_MOCK_LOG="$TMP_DIR/llm-mock.log"
@@ -71,7 +73,11 @@ cleanup() {
   if [[ "$LOCK_HELD" == "1" ]]; then
     rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
   fi
-  rm -rf "$TMP_DIR"
+  if [[ "$KEEP_ARTIFACTS" == "1" ]]; then
+    echo "web search e2e artifacts retained at $TMP_DIR" >&2
+  else
+    rm -rf "$TMP_DIR"
+  fi
 }
 
 json_path() {
@@ -411,12 +417,13 @@ PY
 }
 
 wait_run_state() {
-  local run_id="$1"
-  local expected_state="$2"
-  local output_file="$3"
+  local workspace_id="$1"
+  local run_id="$2"
+  local expected_state="$3"
+  local output_file="$4"
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?waitState=$expected_state&waitTimeoutMillis=1000&waitIntervalMillis=100" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id&waitState=$expected_state&waitTimeoutMillis=1000&waitIntervalMillis=100" >"$output_file"
     if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
       return 0
     fi
@@ -427,11 +434,12 @@ wait_run_state() {
 }
 
 assert_web_search_traceability() {
-  local run_id="$1"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/run-observability.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id&limit=100" >"$TMP_DIR/run-events.json"
-  python3 - "$TMP_DIR/run-snapshot.json" "$TMP_DIR/run-observability.json" "$TMP_DIR/run-events.json" "$run_id" <<'PY'
+  local workspace_id="$1"
+  local run_id="$2"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/run-snapshot.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/run-observability.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id&limit=100" >"$TMP_DIR/run-events.json"
+  python3 - "$TMP_DIR/run-snapshot.json" "$TMP_DIR/run-observability.json" "$TMP_DIR/run-events.json" "$run_id" "$SOUL_ID" <<'PY'
 import json
 import sys
 
@@ -439,6 +447,7 @@ snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
 observability = json.load(open(sys.argv[2], encoding="utf-8")).get("observability") or {}
 events = json.load(open(sys.argv[3], encoding="utf-8")).get("eventRecords") or []
 run_id = sys.argv[4]
+expected_soul_id = sys.argv[5]
 errors = []
 
 run = snapshot.get("run") or {}
@@ -449,8 +458,8 @@ bindings = routing.get("bindings") or {}
 execution_binding = bindings.get("execution") or {}
 if routing.get("status") != "resolved":
     errors.append(f"soulRouting.status is {routing.get('status')!r}, want resolved")
-if execution_binding.get("soulId") != "soul-generic-governed-execution":
-    errors.append(f"execution soul binding is {execution_binding!r}, want soul-generic-governed-execution")
+if execution_binding.get("soulId") != expected_soul_id:
+    errors.append(f"execution soul binding is {execution_binding!r}, want {expected_soul_id!r}")
 
 sources = snapshot.get("webSources") or []
 observed_sources = observability.get("webSources") or []
@@ -521,13 +530,16 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H '
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: application/json' \
+  -d '{"id":"'"$SOUL_ID"'","name":"Web Search E2E Soul","description":"Allow governed web search and fetch execution for Web Search e2e verification.","businessDomains":["workorch","web"],"soulMd":"# Web Search E2E Soul\n\nExecute governed web search and fetch steps and produce evidence-backed DoD assessment.\n\n## Planning\n\ngoal-first\n\n## Decision\n\nask only when information is missing\n\n## Approval\n\nrespect runtime governance for risky actions\n\n## Validation\n\nrequire concrete source evidence\n\n## Output Contract\n\nworkorch llm step contract","allowedToolKinds":["llm/chat","web/search","web/fetch"]}' >"$TMP_DIR/soul.json"
+
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$LLM_PROVIDER_ID"'","priority":2}' >"$TMP_DIR/activation.json"
+  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$LLM_PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed.json"
-assert_web_search_traceability "$run_id"
+wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/run-completed.json"
+assert_web_search_traceability "$workspace_id" "$run_id"
 
 echo "workorch Web Search e2e verification passed for deployed workorch service $BASE_URL run=$run_id"
