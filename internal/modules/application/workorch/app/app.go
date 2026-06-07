@@ -4,21 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/muidea/magicCommon/framework/application"
-	"github.com/muidea/magicCommon/framework/service"
 	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
 	cliconfig "github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
-	"github.com/muidea/workorch/internal/modules/application/workorch/service/cli"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
-	"github.com/muidea/workorch/internal/pkg/workorchdeps"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -54,11 +47,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if parsed.Mode == ModeRemote {
-		ConfigureDirectory(parsed.ConfigDir)
-		return runRemote(opts.ProgramName, parsed)
+	svc, err := NewService(opts.ProgramName, parsed)
+	if err != nil {
+		return err
 	}
-	return runLocal(ctx, opts.ProgramName, parsed)
+	if err := svc.Startup(ctx); err != nil {
+		return err
+	}
+	runErr := svc.Run(ctx)
+	return errors.Join(runErr, svc.Shutdown(context.Background()))
 }
 
 func ParseStartupArgs(args []string, forceServer bool) (StartupArgs, error) {
@@ -95,126 +92,6 @@ func ParseStartupArgs(args []string, forceServer bool) (StartupArgs, error) {
 		ret.CobraArgs = append(ret.CobraArgs, arg)
 	}
 	return ret, nil
-}
-
-func runRemote(programName string, args StartupArgs) error {
-	be := backend.NewRemote(args.Remote)
-	return withArgs(programName, args.CobraArgs, func() error {
-		return cli.ExecuteWithBackend(be, backend.WorkspaceInfo{})
-	})
-}
-
-func runLocal(ctx context.Context, programName string, args StartupArgs) (err error) {
-	ConfigureDirectory(args.ConfigDir)
-	configDir := ResolveConfigDir(args.ConfigDir)
-	if err := EnsureConfigFile(configDir); err != nil {
-		return err
-	}
-	if args.Mode == ModeInteractive {
-		defer installInteractiveLogging(configDir)()
-	}
-	if err := application.Startup(ctx, service.DefaultService()); err != nil {
-		return err
-	}
-	defer shutdownApplication()
-
-	if err := application.Run(ctx); err != nil {
-		return err
-	}
-	if args.Mode == ModeServer {
-		return waitServer(ctx)
-	}
-
-	be, closeBackend, err := backend.NewEmbeddedEventHub()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err = errors.Join(err, closeBackend(context.Background()))
-	}()
-
-	workingDir, _ := os.Getwd()
-	defaultWS := ResolveDefaultWorkspace(context.Background(), be, workingDir, ExtractCLIConfigPath(args.CobraArgs))
-	return withArgs(programName, args.CobraArgs, func() error {
-		return cli.ExecuteWithBackend(be, defaultWS)
-	})
-}
-
-func shutdownApplication() {
-	timeout := applicationShutdownTimeout()
-	ctx := context.Background()
-	if timeout <= 0 {
-		application.Shutdown(ctx)
-		return
-	}
-	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	application.Shutdown(shutdownCtx)
-	if err := shutdownCtx.Err(); err != nil {
-		slog.Error("workorch application shutdown context finished", "timeout", timeout, "err", err)
-	}
-}
-
-func applicationShutdownTimeout() time.Duration {
-	timeout := defaultApplicationShutdownTimeout
-	cfg, err := workorchconfig.Current()
-	if err != nil {
-		return timeout
-	}
-	raw := strings.TrimSpace(cfg.Server.ShutdownTimeout)
-	if raw == "" {
-		return timeout
-	}
-	parsed, err := time.ParseDuration(raw)
-	if err != nil || parsed <= 0 {
-		return timeout
-	}
-	return parsed + 10*time.Second
-}
-
-func waitServer(ctx context.Context) error {
-	done, err := queryServerDoneChannel(ctx)
-	if err != nil {
-		return err
-	}
-	select {
-	case err, ok := <-done:
-		if ok {
-			return err
-		}
-		return nil
-	case <-ctx.Done():
-		return nil
-	}
-}
-
-func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
-	runtime, err := workorchdeps.ResolveRuntimeHelper("application/workorch server done")
-	if err != nil {
-		return nil, err
-	}
-	hub := runtime.EventHub()
-	if hub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	publishErr := hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicWorkorchDCommandDone,
-		SourceModule: "workorch/app",
-		SubjectType:  "workorchd",
-		SubjectID:    "server",
-	})
-	response, ok := events.ResponseEnvelope(publishErr)
-	if !ok {
-		if publishErr != nil {
-			return nil, publishErr
-		}
-		return nil, common.ErrInvalidArgument
-	}
-	done, ok := response.Payload[events.PayloadKeyDoneChannel].(<-chan error)
-	if !ok || done == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	return done, nil
 }
 
 func ConfigureDirectory(configDir string) {

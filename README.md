@@ -15,14 +15,14 @@ configured.
 ## Structure
 
 - `application/workorch`: executable entry; default mode starts the TUI, and `--server` starts the HTTP/Web service
-- `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository, event hub, and cross-module service wiring to plugin-loaded modules
+- `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository providers, EventHub access, runtime policy, and bootstrap helpers to plugin-loaded modules
 - `internal/modules/application/workorchd`: server-side application module plus `biz` / `service` / `pkg` implementation packages
 - `web/workorch-console`: React/TypeScript management console source, built into workorch server assets
 - `internal/modules/application/workorchd/service/server/consoleassets`: embedded management console build output served by `workorch --server`
-- `internal/modules/kernel/{workspace,run,decision,orchestrator,eventstream,mcp,memory,skill,soul}`: workorch kernel modules
+- `internal/modules/kernel/{workspace,run,decision,approval,orchestrator,eventstream,mcp,memory,skill,soul,result,system}`: workorch kernel modules
 - `internal/modules/kernel/result`: formal Result / Artifact business outcome models
-- `internal/modules/blocks/{approval,llm,mcp,shell,ssh}`: reusable/block modules
-- `internal/pkg/{common,events,repository}`: shared internal primitives
+- `internal/modules/blocks/{file,git,llm,mcp,shell,ssh,web}`: reusable runtime capability block modules
+- `internal/pkg/{common,events,repository,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy}`: shared internal primitives and runtime contracts
 - `docs/`: repo docs
 - `docs/next-stage-result-event-development-plan.md`: completed formal Result / Artifact and persistent Workorch event stream scope
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
@@ -41,26 +41,23 @@ The application layer is also split by responsibility:
 - `application/workorch/main.go`: thin process entry that starts the TUI by default, or starts the magicCommon service with `--server`; it explicitly imports the selected `workorchruntime` initiator plus the required `kernel` and `blocks` modules
 - `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorch HTTP service
 - `internal/initiators/workorchruntime`: application runtime dependency provider used by plugin-loaded modules
-- `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, and runtime construction
-- `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, service read/write flows, runtime activation, and runtime adapter
+- `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, EventHub/runtime dependency export, and application runtime construction
+- `internal/modules/application/workorchd/biz/appservice`: application-level business orchestration, service read/write flows, runtime activation, read-model projection, and EventHub-backed owner ports
 - `internal/modules/application/workorchd/pkg/observed`: workorch observed-envelope adapter for acceptance snapshots
 - `internal/modules/application/workorchd/pkg/presenter`: observable output rendering
 
 Current boundary:
 
 - `bootstrap.Runtime`: assembled capability export surface via `Exports()` plus lifecycle shutdown
-- `bootstrap.Runtime`: now stores a single assembled `Exports` bundle plus module lifecycle teardown, rather than scattering repo/service fields internally
-- `bootstrap.Exports`: now groups assembled capabilities into `Repositories`, `Services`, and `Infrastructure`
+- `bootstrap.Runtime`: stores a single assembled `Exports` bundle plus module lifecycle teardown, rather than scattering repo fields internally
+- `bootstrap.Exports`: groups assembled capabilities into `Repositories` and `Infrastructure`; cross-owner services are not exported
 - `appservice.Runtime`: workorch application runtime contract
-- `appservice/runtime_adapter.go`: bridges grouped `bootstrap.Exports` into the workorch runtime contract through grouped runtime dependencies
-- `appservice`: now keeps workspace write flows behind `workspace` module service instead of direct repository updates
-- `appservice`: uses explicit read-side vs action-side runtime faces inside workorch orchestration
-- `appservice`: action-side runtime ports are grouped by workspace/run/decision/approval business actions
-- `appservice`: workorch read-side is now further grouped by guard checks vs snapshot assembly
-- `appservice/runtime_adapter.go`: now also groups its own dependencies into read-side and action-side capabilities instead of flat repo/service fields
-- `appservice/runtime_dependencies.go`: now centralizes `bootstrap.Exports` to grouped runtime dependency assembly in one place
-- `appservice/runtime_assembly.go`: now centralizes managed runtime adapter plus collector assembly in one place
-- `appservice/runtime_session.go`: now centralizes repeated bootstrap-plus-managed-runtime lifecycle handling in one place
+- `appservice/runtimecore`: owns runtime interfaces, managed runtime lifecycle, runtime adapter construction, compressed-context helpers, and session lifecycle helpers
+- `appservice/runtimeports`: owns EventHub-backed runtime action and snapshot ports for workspace/run/decision/approval flows
+- `appservice/ownerreadports` and `ownercommandports`: own EventHub command/response access to formal owner state
+- `appservice/readmodelprojection`, `readmodelcore`, and `readmodelports`: own read-model DTOs, pure projection logic, and EventHub-backed read-model readers
+- `appservice`: keeps public application facade entrypoints while workspace/run/definition/context/governance/runtime operations delegate to focused packages and owner EventHub ports
+- `appservice/runtime_session.go`: centralizes repeated bootstrap-plus-managed-runtime lifecycle handling at the session boundary
 - `observed/`: owns workorch acceptance `observed` envelope assembly
 - `bootstrap.Exports.Infrastructure`: now carries the application `EventHub`
 - `internal/pkg/events/workorch_payload.go`: now centralizes reusable workorch event payload keys and builders
@@ -71,8 +68,8 @@ Current boundary:
 - `workspace / run / decision / approval`: now publish formal business events into the shared `EventHub`, and `run` now has both `created` and `state changed` events
 - `orchestrator`: now also publishes `workspace` runtime state changes when `activeRunId` is bound or cleared
 - `observed/collector.go`: now subscribes to workorch event topics, while `ManagedRuntime` can also read formal runtime EventHub history when available
-- `appservice/runtime_managed.go`: now owns explicit collector lifecycle via `ManagedRuntime`
-- `appservice/runtime_adapter.go`: now acts as a pure business runtime adapter without collector ownership
+- `appservice/runtimecore/managed.go`: owns explicit managed-runtime lifecycle
+- `appservice/runtimecore/adapter.go`: acts as a pure business runtime adapter without collector ownership
 - `observed/`: normalizes subscribed/published `workspace / run / step / decision / approval` events into acceptance snapshots and does not synthesize snapshots from repository state when formal events are missing
 - `presenter/`: owns snapshot view mapping and output only
 

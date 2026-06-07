@@ -429,7 +429,7 @@ if msg.Decisions != nil {
 | `internal/pkg/events/envelope.go` | Envelope 结构定义 |
 | `internal/pkg/events/hub.go` | MemoryHub（测试用） |
 | `internal/pkg/events/magic_hub.go` | MagicHub（生产用） |
-| `internal/pkg/events/topics.go` | 37 个事件 topic 常量 |
+| `internal/pkg/events/topics_*.go` | 按 owner / block / application 域拆分的事件 topic 常量 |
 | `internal/modules/application/workorchd/service/server/http.go:1723` | SSE endpoint handler |
 | `internal/modules/application/workorch/service/tui/model.go` | TUI 主模型 + Update + applyBackendEvent |
 | `internal/modules/application/workorch/service/tui/workspace_state.go` | applyWorkspaceContext + resetWorkspaceView |

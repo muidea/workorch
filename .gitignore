@@ -8,3 +8,8 @@
 /workorch
 /.workorch-data
 /.workorch-workspaces
+
+# Runtime/test data must not live under source packages.
+internal/modules/application/**/.workorch-data/
+internal/modules/application/**/.workorch-workspaces/
+internal/modules/application/**/workspaces/
