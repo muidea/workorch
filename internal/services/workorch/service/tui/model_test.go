@@ -243,6 +243,33 @@ func TestModelWorkspacePanelShowsActiveRunWhenPresent(t *testing.T) {
 	}
 }
 
+func TestModelWorkspacePanelCountsOnlyActiveRunBlockers(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	next, _ := m.Update(WorkspaceContextMsg{
+		Workspace: &backend.WorkspaceInfo{ID: "ws-1", Title: "Project", State: common.WorkspaceStateRunning, ActiveRunID: "run-active"},
+		ActiveRun: &backend.RunInfo{
+			ID:          "run-active",
+			WorkspaceID: "ws-1",
+			State:       common.RunStateRunning,
+		},
+		Decisions: []backend.DecisionInfo{
+			{ID: "ticket-active", WorkspaceID: "ws-1", RunID: "run-active", State: "open"},
+			{ID: "ticket-old", WorkspaceID: "ws-1", RunID: "run-old", State: "open"},
+		},
+		Approvals: []backend.ApprovalInfo{
+			{ID: "approval-old", WorkspaceID: "ws-1", RunID: "run-old", State: "pending"},
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	m.width = 120
+	m.height = 16
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "current ws: 1 decisions") || !strings.Contains(view, "current ws: 0 approvals") {
+		t.Fatalf("workspace panel blocker counts include stale run blockers:\n%s", view)
+	}
+}
+
 func TestModelWorkspacePanelDisambiguatesDuplicateNames(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1111111111111111", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -791,8 +818,8 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 			"stage":              "planning",
 			"retrievedMemoryIds": []any{"mem-1", "mem-2"},
 		},
-	}); cmd != nil {
-		t.Fatal("memory recall event should not fetch full workspace context")
+	}); cmd == nil {
+		t.Fatal("memory recall event should refresh workspace context after incremental update")
 	}
 	if len(m.memoryRecalls) != 1 || len(m.memoryRecalls[0].RetrievedMemoryIDs) != 2 {
 		t.Fatalf("memoryRecalls = %+v, want incremental recall", m.memoryRecalls)
@@ -812,11 +839,86 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 				"maxTokens": 2048,
 			},
 		},
-	}); cmd != nil {
-		t.Fatal("llm usage event should not fetch full workspace context")
+	}); cmd == nil {
+		t.Fatal("llm usage event should refresh workspace context after incremental update")
 	}
 	if m.llmUsage.EntryTotal != 1 || m.llmUsage.TotalTokens != 15 || m.llmContext["maxTokens"] != 2048 {
 		t.Fatalf("llm usage/context = %+v/%+v, want incremental usage", m.llmUsage, m.llmContext)
+	}
+}
+
+func TestModelBlockedWorkspaceInputRefreshesBlockerInsteadOfContinuing(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:          "ws-1",
+		State:       common.WorkspaceStateWaitingDecision,
+		ActiveRunID: "run-1",
+	}}
+	m.activeRunID = "run-1"
+	m.input = "continue"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("blocked workspace input should refresh blocker details")
+	}
+	if len(be.resumes) != 0 || len(be.goals) != 0 {
+		t.Fatalf("unexpected backend calls: resumes=%v goals=%v", be.resumes, be.goals)
+	}
+	if m.progress != progressWaitingDecision || !strings.Contains(m.progressText, "Waiting for") {
+		t.Fatalf("progress = %s %q, want waiting decision", m.progress, m.progressText)
+	}
+	if m.input != "continue" {
+		t.Fatalf("input = %q, want preserved answer text", m.input)
+	}
+}
+
+func TestModelRunContinueDoesNotBypassBlockingDecision(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.activeWorkspaceID = "ws-1"
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:          "ws-1",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-1",
+	}}
+	m.activeRunID = "run-1"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
+	m.input = "/run continue"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("run continue with decision should refresh blocker details")
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume while decision is open", be.resumes)
+	}
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" || m.progress != progressWaitingDecision {
+		t.Fatalf("blocking decision/progress = %+v/%s", m.blockingDecision, m.progress)
+	}
+}
+
+func TestContinueRunReturnsBlockedRunWithoutResume(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateBlockedOnDecision)
+	msg := ContinueRun(be, "ws-1", "run-1", "continue")()
+	runMsg, ok := msg.(RunControlMsg)
+	if !ok {
+		t.Fatalf("message = %T, want RunControlMsg", msg)
+	}
+	if runMsg.Error != nil {
+		t.Fatalf("error = %v, want nil", runMsg.Error)
+	}
+	if runMsg.Run == nil || runMsg.Run.State != common.RunStateBlockedOnDecision {
+		t.Fatalf("run = %+v, want blocked decision", runMsg.Run)
+	}
+	if !strings.Contains(runMsg.Message, "waiting for decision") {
+		t.Fatalf("message = %q, want waiting decision", runMsg.Message)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume", be.resumes)
 	}
 }
 

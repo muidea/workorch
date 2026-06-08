@@ -78,6 +78,72 @@ func TestRuntimeOrchestrator_RuntimeFailurePublishesWorkspaceReleaseEvent(t *tes
 	}
 }
 
+func TestRuntimeOrchestrator_TerminalRunDismissesOpenDecisionBlocker(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name  string
+		close func(context.Context, *RuntimeOrchestrator, common.RunID) error
+		want  common.RunState
+	}{
+		{
+			name: "failed",
+			close: func(ctx context.Context, orch *RuntimeOrchestrator, runID common.RunID) error {
+				return orch.FailRun(ctx, runID, "manual failure")
+			},
+			want: common.RunStateFailed,
+		},
+		{
+			name: "superseded",
+			close: func(ctx context.Context, orch *RuntimeOrchestrator, runID common.RunID) error {
+				return orch.SupersedeRun(ctx, runID)
+			},
+			want: common.RunStateSuperseded,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspaceRepo := memory.NewWorkspaceRepository()
+			runRepo := memory.NewRunRepository()
+			stepRepo := memory.NewStepRepository()
+			ticketRepo := memory.NewDecisionTicketRepository()
+			approvalRepo := memory.NewApprovalRepository()
+			orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"ok": true}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+			workspaceID := common.WorkspaceID("ws-terminal-dismiss-" + tc.name)
+			runID := common.RunID("run-terminal-dismiss-" + tc.name)
+			ticketID := common.TicketID("ticket-terminal-dismiss-" + tc.name)
+			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+				t.Fatalf("seed workspace: %v", err)
+			}
+			if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: ticketID}); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{ID: ticketID, WorkspaceID: workspaceID, RunID: runID, State: common.DecisionTicketStateOpen}); err != nil {
+				t.Fatalf("seed ticket: %v", err)
+			}
+
+			if err := tc.close(ctx, orch, runID); err != nil {
+				t.Fatalf("close run: %v", err)
+			}
+
+			run, err := runRepo.Get(ctx, runID)
+			if err != nil {
+				t.Fatalf("get run: %v", err)
+			}
+			if run.State != tc.want || run.BlockingTicketID != "" {
+				t.Fatalf("run = %+v, want %s without blocker", run, tc.want)
+			}
+			ticket, err := ticketRepo.Get(ctx, ticketID)
+			if err != nil {
+				t.Fatalf("get ticket: %v", err)
+			}
+			if ticket.State != common.DecisionTicketStateDismissed || ticket.UpdatedAt == "" {
+				t.Fatalf("ticket = %+v, want dismissed with updatedAt", ticket)
+			}
+		})
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunRejectsDifferentActiveRun(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

@@ -176,7 +176,7 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderRuntimeEventsCompact(m.runtimeEvents, width-2, 8); section != "" {
 		b.WriteString(section)
 	}
-	if section := renderGovernanceCompact(m.decisions, m.approvals, width-2, 2); section != "" {
+	if section := renderGovernanceCompact(m.activeScopeDecisions(), m.activeScopeApprovals(), width-2, 2); section != "" {
 		b.WriteString(section)
 	}
 
@@ -698,8 +698,8 @@ func (m AppModel) renderWorkspacePanel(width, height int) string {
 		b.WriteString("\n")
 	}
 
-	openDecisions := len(filterOpenDecisions(m.decisions))
-	pendingApprovals := len(filterPendingApprovals(m.approvals))
+	openDecisions := len(filterOpenDecisions(m.activeScopeDecisions()))
+	pendingApprovals := len(filterPendingApprovals(m.activeScopeApprovals()))
 	b.WriteString("\n")
 	b.WriteString(Warning.Render(fmt.Sprintf("current ws: %d decisions", openDecisions)))
 	b.WriteString("\n")

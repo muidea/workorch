@@ -344,36 +344,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if isTransientContextError(msg.Error) {
 				return m, nil
 			}
+			if errors.Is(msg.Error, common.ErrBlocked) {
+				if msg.Run != nil {
+					m.activeRunID = string(msg.Run.ID)
+					m.applyRunControlState(msg.Run, msg.Message)
+				} else {
+					m.running = false
+					m.progress = progressWaitingDecision
+					m.progressText = "Run is blocked; refreshing blocker details"
+				}
+				m.lastError = nil
+				return m, tea.Batch(m.refreshActiveWorkspaceState(), m.fetchActiveBlockerDetails())
+			}
 			m.setLastError(msg.Error)
 			return m, m.refreshActiveWorkspaceState()
 		}
 		if msg.Run != nil {
 			m.activeRunID = string(msg.Run.ID)
-			if !runStateIsTerminal(msg.Run.State) {
-				m.clearRunDisplayState()
-			}
-			switch msg.Run.State {
-			case common.RunStateCompleted:
-				m.running = false
-				m.progress = progressCompleted
-			case common.RunStateFailed:
-				m.running = false
-				m.progress = progressFailed
-			case common.RunStateBlockedOnDecision:
-				m.running = true
-				m.progress = progressWaitingDecision
-			case common.RunStateBlockedOnApproval:
-				m.running = true
-				m.progress = progressWaitingApproval
-			default:
-				m.running = true
-				m.progress = progressRunning
-			}
-		}
-		if msg.Message != "" {
+			m.applyRunControlState(msg.Run, msg.Message)
+		} else if msg.Message != "" {
 			m.progressText = msg.Message
-		} else {
-			m.progressText = "Continuing active run"
 		}
 		m.lastError = nil
 		return m, m.refreshActiveWorkspaceState()
@@ -591,6 +581,10 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("no active workspace")
 		return m, nil
 	}
+	if cmd := m.blockActiveWorkspaceContinue(""); cmd != nil {
+		m.lastError = nil
+		return m, cmd
+	}
 	m.clearInput()
 	m.lastError = nil
 	if runID := m.activeWorkspaceRunID(); runID != "" {
@@ -688,6 +682,10 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		case "continue":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
+			if cmd := m.blockActiveWorkspaceContinue(""); cmd != nil {
+				m.lastError = nil
+				return m, cmd, true
+			}
 			m.clearRunDisplayState()
 			m.lastError = nil
 			runID := m.activeWorkspaceRunID()
@@ -1679,6 +1677,34 @@ func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
 	return true
 }
 
+func (m AppModel) activeScopeDecisions() []backend.DecisionInfo {
+	var out []backend.DecisionInfo
+	for _, item := range m.decisions {
+		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+			continue
+		}
+		if m.activeRunID != "" && item.RunID != common.RunID(m.activeRunID) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (m AppModel) activeScopeApprovals() []backend.ApprovalInfo {
+	var out []backend.ApprovalInfo
+	for _, item := range m.approvals {
+		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
+			continue
+		}
+		if m.activeRunID != "" && item.RunID != common.RunID(m.activeRunID) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 func (m *AppModel) markDecisionResolved(id common.TicketID) {
 	if id == "" {
 		return
@@ -1782,6 +1808,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.appendRuntimeEvent(m.progressText)
 			m.followMainViewportTailUnlessUserScrolled()
 		}
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
 			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)),
@@ -1870,7 +1897,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return nil
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventLLMStreamProgress:
 		m.progress = progressRunning
 		m.progressText = llmStreamProgressText(evt.Payload)
@@ -1883,7 +1910,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return nil
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
@@ -1983,6 +2010,51 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 				m.progressText = string(state) + "; waiting for progress or final result"
 			}
 		}
+	}
+}
+
+func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
+	if run == nil {
+		if strings.TrimSpace(message) != "" {
+			m.progressText = message
+		}
+		return
+	}
+	if runStateIsLive(run.State) {
+		m.clearRunDisplayState()
+	}
+	switch run.State {
+	case common.RunStateCompleted:
+		m.running = false
+		m.blockingDecision = nil
+		m.blockingApproval = nil
+		m.progress = progressCompleted
+		m.progressText = nonEmpty(message, "Completed")
+	case common.RunStateFailed:
+		m.running = false
+		m.blockingDecision = nil
+		m.blockingApproval = nil
+		m.progress = progressFailed
+		m.failureReason = run.FailureReason
+		m.progressText = nonEmpty(message, m.failureReason, "Run failed")
+	case common.RunStateBlockedOnDecision:
+		m.running = false
+		m.progress = progressWaitingDecision
+		if run.BlockingTicketID != "" {
+			m.setBlockingDecision(run.BlockingTicketID, run.WorkspaceID, run.ID, "", "")
+		}
+		m.progressText = nonEmpty(message, blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+	case common.RunStateBlockedOnApproval:
+		m.running = false
+		m.progress = progressWaitingApproval
+		if run.BlockingApprovalID != "" {
+			m.setBlockingApproval(run.BlockingApprovalID, run.WorkspaceID, run.ID, "", "", nil)
+		}
+		m.progressText = nonEmpty(message, blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+	default:
+		m.running = true
+		m.progress = progressRunning
+		m.progressText = nonEmpty(message, "Continuing active run")
 	}
 }
 

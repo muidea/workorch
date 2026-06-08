@@ -213,6 +213,43 @@ func (m *AppModel) activeWorkspaceStateIsLive() bool {
 	return workspaceStateIsLive(ws.State)
 }
 
+func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
+	if m.blockingDecision != nil {
+		return progressWaitingDecision, true
+	}
+	if m.blockingApproval != nil {
+		return progressWaitingApproval, true
+	}
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return "", false
+	}
+	switch ws.State {
+	case common.WorkspaceStateWaitingDecision:
+		return progressWaitingDecision, true
+	case common.WorkspaceStateBlocked:
+		return progressWaitingApproval, true
+	default:
+		return "", false
+	}
+}
+
+func (m *AppModel) blockActiveWorkspaceContinue(reason string) tea.Cmd {
+	blockerProgress, ok := m.activeWorkspaceBlockerProgress()
+	if !ok {
+		return nil
+	}
+	m.running = false
+	m.progress = blockerProgress
+	switch blockerProgress {
+	case progressWaitingApproval:
+		m.progressText = nonEmpty(reason, blockingApprovalLabel(m.blockingApproval), "Waiting for approval; refreshing blocker details")
+	default:
+		m.progressText = nonEmpty(reason, blockingDecisionLabel(m.blockingDecision), "Waiting for decision; refreshing blocker details")
+	}
+	return m.fetchActiveBlockerDetails()
+}
+
 func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 	if m.selectedWorkspaceID == "" {
 		m.workspaceSelectMode = false
@@ -528,10 +565,14 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 		m.running = true
 		m.progress = progressRunning
 		m.progressText = string(state) + "; waiting for progress or final result"
-	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+	case common.WorkspaceStateWaitingDecision:
 		m.running = false
 		m.progress = progressWaitingDecision
 		m.progressText = "Waiting for workspace input"
+	case common.WorkspaceStateBlocked:
+		m.running = false
+		m.progress = progressWaitingApproval
+		m.progressText = "Waiting for workspace approval"
 	case common.WorkspaceStateCompleted:
 		m.running = false
 		m.progress = progressCompleted

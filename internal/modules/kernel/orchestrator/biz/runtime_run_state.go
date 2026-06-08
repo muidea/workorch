@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -202,6 +203,9 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 	if !canCloseRunAs(r.State, state) {
 		return common.ErrConflict
 	}
+	if err := o.dismissOpenDecisionBlocker(ctx, r); err != nil {
+		return err
+	}
 	r.State = state
 	r.BlockingTicketID = ""
 	r.BlockingApprovalID = ""
@@ -217,6 +221,25 @@ func (o *RuntimeOrchestrator) closeLoadedRun(ctx context.Context, r *runModel.Ru
 		return err
 	}
 	return o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID)
+}
+
+func (o *RuntimeOrchestrator) dismissOpenDecisionBlocker(ctx context.Context, r *runModel.Run) error {
+	if o == nil || o.tickets == nil || r == nil || r.BlockingTicketID == "" {
+		return nil
+	}
+	ticket, err := o.tickets.Get(ctx, r.BlockingTicketID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if ticket.RunID != r.ID || ticket.State != common.DecisionTicketStateOpen {
+		return nil
+	}
+	ticket.State = common.DecisionTicketStateDismissed
+	ticket.UpdatedAt = runtimeEvidenceTimestamp()
+	return o.tickets.Update(ctx, ticket)
 }
 
 func mergeRunExecutionContextPatch(run *runModel.Run, patch map[string]any) {

@@ -375,6 +375,10 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
 			return activateWorkspaceRun(ctx, be, wsID, run, operatorInput)
+		case common.RunStateBlockedOnDecision:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before continuing."}
+		case common.RunStateBlockedOnApproval:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before continuing."}
 		case common.RunStateValidating:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
