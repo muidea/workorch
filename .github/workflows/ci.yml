@@ -25,59 +25,27 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
-      - name: Make fmt-check
-        run: make fmt-check
-
-      - name: Make vet
-        run: make vet
-
-      - name: Make test
-        run: make test
-
       - name: Make verify-boundary-contract
         run: make verify-boundary-contract
 
-      - name: Make build
-        run: make build
-
-      - name: Start workorch file-backed service
-        run: |
-          rm -rf ./.workorch-data
-          ./bin/workorch --server -config-dir config/file > workorch-ci.log 2>&1 &
-          echo "$!" > workorch-ci.pid
-          for _ in $(seq 1 100); do
-            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
-              exit 0
-            fi
-            sleep 0.2
-          done
-          echo "workorch did not become ready" >&2
-          cat workorch-ci.log >&2 || true
-          exit 1
-
-      - name: Make verify-ci-mvp-file with mock providers
+      - name: Managed verify-ci-mvp-file with mock providers
         env:
-          WORKORCH_BASE_URL: http://127.0.0.1:8080
+          WORKORCH_MANAGED_VERIFY_TARGET: verify-ci-mvp-file
+          WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR: .ci-artifacts/managed-workorch
+          WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS: '1'
+          WORKORCH_VERIFY_KEEP_TMP: '1'
         run: |
           # CI intentionally runs only deployed-instance checks that use local
           # mock providers. Real LLM / real weather checks require external
           # credentials and are kept out of CI to avoid false negatives.
-          make verify-ci-mvp-file
+          ./scripts/verify-workorch-managed-full.sh
 
-      - name: Stop workorch service
-        if: always()
-        run: |
-          if [[ -f workorch-ci.pid ]]; then
-            kill "$(cat workorch-ci.pid)" >/dev/null 2>&1 || true
-            wait "$(cat workorch-ci.pid)" >/dev/null 2>&1 || true
-          fi
-
-      - name: Upload workorch service log
+      - name: Upload managed verification artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: workorch-ci-log-go${{ matrix.go-version }}
-          path: workorch-ci.log
+          name: workorch-managed-verify-artifacts-go${{ matrix.go-version }}
+          path: .ci-artifacts/managed-workorch
           if-no-files-found: ignore
 
       - name: Upload built binary
