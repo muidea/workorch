@@ -252,8 +252,16 @@ def decision_payload(user_content):
         or re.search(r'"assessmentOnlyContractCorrection"\s*:\s*true', user_content)
         or re.search(r'"type"\s*:\s*"assess_only"', user_content)
         or re.search(r'"previousStepOutput"\s*:', user_content)
+        or re.search(r'"repairObjective"\s*:\s*"produce_concrete_validation_evidence"', user_content)
+        or re.search(r'"completedGraphEvidence"\s*:', user_content)
+        or re.search(r'"latestActionEvidence"\s*:', user_content)
+        or "mcp_tool_call_completed" in user_content
     ):
-        previous = re.search(r'"previousStepId": "([^"]+)"', user_content)
+        previous = (
+            re.search(r'"previousStepId"\s*:\s*"([^"]+)"', user_content)
+            or re.search(r'"stepId"\s*:\s*"([^"]*mcp-stdio-call[^"]*)"', user_content)
+            or re.search(r'"sourceRef"\s*:\s*"step://([^"]*mcp-stdio-call[^"]*)"', user_content)
+        )
         evidence = previous.group(1) if previous else "mcp-stdio-call"
         return {
             "thoughtSummary": "MCP stdio tool call completed; DoD is satisfied.",

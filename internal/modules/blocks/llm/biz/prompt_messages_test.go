@@ -442,6 +442,144 @@ func TestMemorySignalPayloadFiltersNonReferenceMemoryNoise(t *testing.T) {
 	}
 }
 
+func TestMemorySignalPayloadBoundsSelectedMemoryContent(t *testing.T) {
+	memories := make([]map[string]any, 0, 8)
+	selectedIDs := make([]string, 0, 8)
+	scores := make([]map[string]any, 0, 8)
+	for idx := 0; idx < 8; idx++ {
+		id := fmt.Sprintf("memory-%02d", idx)
+		selectedIDs = append(selectedIDs, id)
+		memories = append(memories, map[string]any{
+			"id":         id,
+			"summary":    strings.Repeat("summary ", 300),
+			"content":    strings.Repeat("content ", 600),
+			"confidence": 0.9,
+			"importance": 0.9,
+		})
+		scores = append(scores, map[string]any{
+			"id":     id,
+			"score":  100 - idx,
+			"reason": strings.Repeat("reason ", 200),
+		})
+	}
+
+	payload := memorySignalPayload(map[string]any{
+		"executionContextPackage": map[string]any{
+			"selectedContext": map[string]any{
+				"memoryRetrieval": map[string]any{
+					"status":            "selected",
+					"selectedMemoryIds": selectedIDs,
+					"selectionScores":   scores,
+					"reason":            strings.Repeat("retrieval ", 200),
+				},
+				"memories": memories,
+			},
+		},
+	})
+	selected := recordFromAny(payload["selectedContext"])
+	gotMemories := mapSliceFromAny(selected["memories"])
+	if len(gotMemories) != 2 {
+		t.Fatalf("selected memories = %d, want bounded 2", len(gotMemories))
+	}
+	gotScores := mapSliceFromAny(recordFromAny(selected["memoryRetrieval"])["selectionScores"])
+	if len(gotScores) != 4 {
+		t.Fatalf("selection scores = %d, want bounded 4", len(gotScores))
+	}
+	encoded := marshalPromptSection("Memory Recall Signal", payload)
+	if len(encoded) > 9000 {
+		t.Fatalf("encoded memory signal length = %d, want bounded payload", len(encoded))
+	}
+	if strings.Contains(encoded, strings.Repeat("content ", 200)) {
+		t.Fatalf("memory signal leaked unbounded content")
+	}
+}
+
+func TestRepairActionPackagePromptSectionBoundsDuplicatedDynamicContext(t *testing.T) {
+	coverageItems := make([]map[string]any, 0, 20)
+	for idx := 0; idx < 20; idx++ {
+		coverageItems = append(coverageItems, map[string]any{
+			"id":                   fmt.Sprintf("cwi-%03d", idx),
+			"targetText":           strings.Repeat("coverage target ", 120),
+			"acceptedEvidenceRefs": []string{fmt.Sprintf("run/step/%03d", idx), fmt.Sprintf("run/step/%03d/validation", idx)},
+			"currentGap":           strings.Repeat("gap ", 120),
+			"status":               "open",
+		})
+	}
+	manifestItems := make([]map[string]any, 0, 40)
+	for idx := 0; idx < 40; idx++ {
+		manifestItems = append(manifestItems, map[string]any{
+			"path":    fmt.Sprintf("file-%03d.go", idx),
+			"summary": strings.Repeat("manifest-noise ", 120),
+		})
+	}
+	input := map[string]any{
+		"repairActionPackage": map[string]any{
+			"currentFailure":           map[string]any{"reason": strings.Repeat("failure ", 300)},
+			"workspaceFileManifest":    map[string]any{"items": manifestItems},
+			"coverageWorkItemContext":  map[string]any{"summary": map[string]any{"open": 20}, "currentFocusItems": coverageItems, "unresolvedItems": coverageItems, "ledgerSummary": coverageItems},
+			"currentExecutionProgress": map[string]any{"unresolvedCoverageTargets": coverageItems},
+			"coverageTargetSet":        coverageItems,
+		},
+	}
+
+	encoded := repairActionPackagePromptSection(input)
+	if len(encoded) > 24000 {
+		t.Fatalf("repair action package length = %d, want bounded C3 projection", len(encoded))
+	}
+	for _, forbidden := range []string{`"workspaceFileManifest":`, `"coverageWorkItemContext":`, strings.Repeat("manifest-noise ", 40)} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("repair action package leaked unbounded field %q", forbidden)
+		}
+	}
+	if !strings.Contains(encoded, "workspaceFileManifestSummary") || !strings.Contains(encoded, "coverageWorkItemContextRef") {
+		t.Fatalf("repair action package missing bounded refs: %s", encoded)
+	}
+}
+
+func TestValidationSignalPayloadBoundsFailedStepContext(t *testing.T) {
+	timeline := make([]map[string]any, 0, 16)
+	for idx := 0; idx < 16; idx++ {
+		timeline = append(timeline, map[string]any{
+			"stepId":    fmt.Sprintf("step-%03d", idx),
+			"sourceRef": fmt.Sprintf("step://%03d", idx),
+			"output": map[string]any{
+				"executionGraph": map[string]any{"nodes": []map[string]any{{"input": strings.Repeat("graph-noise ", 600)}}},
+				"contextBudget":  map[string]any{"actualBytes": 900000, "sectionHashes": []map[string]any{{"hash": strings.Repeat("hash", 1000)}}},
+			},
+		})
+	}
+	input := map[string]any{
+		"failedStepInput": map[string]any{
+			"workspaceId":             "ws-1",
+			"processEvidenceTimeline": timeline,
+			"repairActionPackage": map[string]any{
+				"currentFailure":        map[string]any{"reason": strings.Repeat("failure ", 200)},
+				"workspaceFileManifest": map[string]any{"items": []map[string]any{{"path": "main.go", "summary": strings.Repeat("manifest-noise ", 200)}}},
+			},
+		},
+		"failedStepOutput": map[string]any{
+			"summary":        strings.Repeat("summary ", 300),
+			"executionGraph": map[string]any{"nodes": []map[string]any{{"input": strings.Repeat("graph-noise ", 800)}}},
+			"contextBudget":  map[string]any{"actualBytes": 1000000, "sectionHashes": []map[string]any{{"hash": strings.Repeat("hash", 1000)}}},
+		},
+		"failedExecutionGraph": map[string]any{"nodes": []map[string]any{{"input": strings.Repeat("graph-noise ", 900)}}},
+	}
+
+	payload := validationSignalPayload(input)
+	encoded := marshalPromptSection("Validation Signal", payload)
+	if len(encoded) > 28000 {
+		t.Fatalf("validation signal length = %d, want bounded payload", len(encoded))
+	}
+	for _, forbidden := range []string{strings.Repeat("graph-noise ", 80), strings.Repeat("manifest-noise ", 80), "sectionHashes"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("validation signal leaked bulky field %q", forbidden)
+		}
+	}
+	if !strings.Contains(encoded, "processEvidenceTimelineRef") || !strings.Contains(encoded, "executionGraphSummary") {
+		t.Fatalf("validation signal missing compact refs: %s", encoded)
+	}
+}
+
 func TestProcessEvidenceTimelineSignalCompactsBulkyHistoricalOutputs(t *testing.T) {
 	timeline := make([]map[string]any, 0, 20)
 	for idx := 1; idx <= 20; idx++ {

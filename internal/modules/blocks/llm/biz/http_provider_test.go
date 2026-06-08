@@ -460,6 +460,32 @@ func TestHTTPProviderStreamCompleteRejectsEOFBeforeDone(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamCompleteTreatsTruncatedChunkAsIncomplete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+	})
+	_, err := provider.StreamComplete(context.Background(), llmProviderRequest(), nil)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "stream incomplete") ||
+		!strings.Contains(err.Error(), "truncated stream chunk json") {
+		t.Fatalf("stream complete err = %v, want truncated stream incomplete", err)
+	}
+	if strings.Contains(err.Error(), "provider protocol invalid") {
+		t.Fatalf("stream complete err = %v, truncated chunk should not be protocol invalid", err)
+	}
+}
+
 func TestHTTPProviderEmbedUsesEmbeddingsEndpoint(t *testing.T) {
 	var gotPath string
 	var gotAuthorization string

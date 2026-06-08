@@ -26,15 +26,16 @@ type doDAssessmentEvidenceQualityError struct {
 }
 
 type profileEvidenceKindRequirement struct {
-	Scope                string
-	ID                   string
-	EvidenceRole         string
-	AcceptedStepKinds    []string
-	AcceptedOperations   []string
-	RejectedStepKinds    []string
-	Description          string
-	RequireDirect        bool
-	RequireClaimEvidence bool
+	Scope                             string
+	ID                                string
+	EvidenceRole                      string
+	AcceptedStepKinds                 []string
+	AcceptedOperations                []string
+	RejectedStepKinds                 []string
+	Description                       string
+	RequireDirect                     bool
+	RequireClaimEvidence              bool
+	RequireExecutableBehaviorEvidence bool
 }
 
 func (e *doDAssessmentEvidenceQualityError) Error() string {
@@ -366,17 +367,18 @@ func profileEvidenceKindRequirementsFromExecutionContext(executionContext map[st
 				continue
 			}
 			req := profileEvidenceKindRequirement{
-				Scope:                scope,
-				ID:                   id,
-				EvidenceRole:         normalizedCoverageEvidenceRole(stringFromMap(raw, "evidenceRole")),
-				AcceptedStepKinds:    stringSliceFromValue(raw["acceptedStepKinds"]),
-				AcceptedOperations:   stringSliceFromValue(raw["acceptedOperations"]),
-				RejectedStepKinds:    stringSliceFromValue(raw["rejectedStepKinds"]),
-				Description:          strings.TrimSpace(stringFromMap(raw, "description")),
-				RequireDirect:        boolValue(raw["requireDirectEvidence"]),
-				RequireClaimEvidence: boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
+				Scope:                             scope,
+				ID:                                id,
+				EvidenceRole:                      normalizedCoverageEvidenceRole(stringFromMap(raw, "evidenceRole")),
+				AcceptedStepKinds:                 stringSliceFromValue(raw["acceptedStepKinds"]),
+				AcceptedOperations:                stringSliceFromValue(raw["acceptedOperations"]),
+				RejectedStepKinds:                 stringSliceFromValue(raw["rejectedStepKinds"]),
+				Description:                       strings.TrimSpace(stringFromMap(raw, "description")),
+				RequireDirect:                     boolValue(raw["requireDirectEvidence"]),
+				RequireClaimEvidence:              boolValue(raw["requireClaimEvidence"]) || boolValue(raw["requireClaimEvidenceAlignment"]),
+				RequireExecutableBehaviorEvidence: boolValue(raw["requireExecutableBehaviorEvidence"]) || boolValue(raw["requireRuntimeBehaviorEvidence"]),
 			}
-			if len(req.AcceptedStepKinds) == 0 && len(req.AcceptedOperations) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence {
+			if len(req.AcceptedStepKinds) == 0 && len(req.AcceptedOperations) == 0 && len(req.RejectedStepKinds) == 0 && !req.RequireDirect && !req.RequireClaimEvidence && !req.RequireExecutableBehaviorEvidence {
 				continue
 			}
 			ret = append(ret, req)
@@ -544,6 +546,7 @@ func validateEvidenceRefsStepKinds(ctx context.Context, steps repository.StepRep
 	knownEvidenceRefs := 0
 	rejectedRefs := make([]string, 0)
 	rejectedKind := ""
+	rejectedReason := ""
 	acceptedKindWrongOperationRefs := make([]string, 0)
 	acceptedWeakRefs := make([]string, 0)
 	acceptedSteps := make([]*runModel.Step, 0)
@@ -565,6 +568,16 @@ func validateEvidenceRefsStepKinds(ctx context.Context, steps repository.StepRep
 			}
 		}
 		if accepted[kind] {
+			if reason := behaviorEvidenceRejectReason(requirement, itemName, step); reason != "" {
+				rejectedRefs = append(rejectedRefs, ref)
+				if rejectedKind == "" {
+					rejectedKind = kind
+				}
+				if rejectedReason == "" {
+					rejectedReason = reason
+				}
+				continue
+			}
 			if len(acceptedOperations) > 0 {
 				operation := stepEvidenceOperation(step)
 				if !acceptedOperations[operation] {
@@ -585,9 +598,12 @@ func validateEvidenceRefsStepKinds(ctx context.Context, steps repository.StepRep
 	}
 	if !(hasAcceptedRequirement && hasAcceptedEvidence) {
 		if len(rejectedRefs) > 0 {
-			reason := fmt.Sprintf("step kind %q is not sufficient for this evidence requirement", rejectedKind)
-			if hasAcceptedRequirement {
-				reason = fmt.Sprintf("step kind %q is not sufficient by itself for this evidence requirement", rejectedKind)
+			reason := rejectedReason
+			if reason == "" {
+				reason = fmt.Sprintf("step kind %q is not sufficient for this evidence requirement", rejectedKind)
+				if hasAcceptedRequirement {
+					reason = fmt.Sprintf("step kind %q is not sufficient by itself for this evidence requirement", rejectedKind)
+				}
 			}
 			return evidenceKindRequirementError(requirement, itemName, strings.Join(rejectedRefs, ", "), rejectedKind, reason)
 		}
@@ -690,6 +706,89 @@ func evidenceKindRequirementItemName(requirement profileEvidenceKindRequirement,
 		}
 	}
 	return requirement.ID
+}
+
+func behaviorEvidenceRejectReason(requirement profileEvidenceKindRequirement, itemName string, step *runModel.Step) string {
+	if step == nil || !requirement.RequireExecutableBehaviorEvidence || !evidenceRequirementTargetsRuntimeBehavior(requirement, itemName) {
+		return ""
+	}
+	switch strings.TrimSpace(step.Kind) {
+	case "patch/apply":
+		return "patch/apply proves an implementation change but cannot by itself prove runtime behavior; run executable validation through the deliverable entrypoint, targeted tests, or a controlled substitute"
+	case "shell/command":
+		if shellStepIsStaticValidationOnly(step) {
+			return "generic build/vet/lint/static command evidence cannot by itself prove runtime behavior; run targeted tests or executable validation through the deliverable entrypoint"
+		}
+	}
+	return ""
+}
+
+func evidenceRequirementTargetsRuntimeBehavior(requirement profileEvidenceKindRequirement, itemName string) bool {
+	id := strings.ToLower(strings.TrimSpace(requirement.ID))
+	switch id {
+	case "functional_behavior", "external_contract", "runtime_entrypoint", "persistence_or_side_effect", "error_behavior", "streaming_or_long_running", "concurrency":
+		return true
+	}
+	if id != "*" && id != "all" {
+		return false
+	}
+	return claimTextMentionsRuntimeBehavior(itemName)
+}
+
+func claimTextMentionsRuntimeBehavior(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	normalized := normalizeClaimEvidenceText(text)
+	for _, marker := range []string{
+		"proxy", "forward", "stream", "streaming", "token", "extract", "passthrough", "pass through",
+		"error", "status", "usage", "append", "console", "concurrency", "concurrent", "race", "lock",
+		"request", "response", "api", "http", "endpoint", "route", "cli", "command", "service",
+		"config", "env", "persist", "audit", "side effect",
+		"代理", "转发", "流式", "令牌", "提取", "透传", "错误", "状态码", "追加", "写入",
+		"持久化", "并发", "竞态", "请求", "响应", "接口", "配置", "命令", "服务", "入口", "控制台",
+	} {
+		if strings.Contains(text, marker) || strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellStepIsStaticValidationOnly(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(step.Input, "command"),
+		stringFromMap(step.Input, "cmd"),
+		strings.Join(stringSliceFromValue(step.Input["args"]), " "),
+		stringFromMap(step.Output, "command"),
+		stringFromMap(step.Output, "cmd"),
+		strings.Join(stringSliceFromValue(step.Output["args"]), " "),
+		stringFromMap(step.Output, "stdout"),
+		stringFromMap(step.Output, "stderr"),
+	}, "\n"))
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	for _, marker := range []string{"go test", "npm test", "pnpm test", "yarn test", "pytest", "cargo test", "curl", "go run", "node ", "python "} {
+		if strings.Contains(text, marker) {
+			return false
+		}
+	}
+	for _, marker := range []string{
+		"go build", "go vet", "gofmt", "go fmt", "staticcheck", "golangci-lint",
+		"npm run build", "npm run lint", "pnpm build", "pnpm lint", "yarn build", "yarn lint",
+		"tsc", "eslint", "ruff", "flake8", "mypy", "cargo build", "cargo check", "cargo clippy",
+		"make build", "make lint", "make vet",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceKindRequirementError(requirement profileEvidenceKindRequirement, itemName, ref, kind, reason string) error {

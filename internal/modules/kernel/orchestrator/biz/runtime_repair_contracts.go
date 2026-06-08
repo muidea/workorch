@@ -648,7 +648,9 @@ func concreteValidationEvidenceRepairGuidance() []string {
 	return []string{
 		"Do not repeat assessment-only validation.",
 		"Produce concrete verification evidence for the failed Goal/DoD coverage before attempting state-changing repair.",
-		"Return a bounded executionGraph that runs available verification capabilities, or return a failed dodAssessment/blocker if concrete evidence cannot be produced.",
+		"Return a bounded executionGraph that runs available verification capabilities through the deliverable entrypoint, targeted tests, or an equivalent controlled substitute; do not cite implementation patches as behavior proof.",
+		"For API, CLI, service, proxy, streaming, error, token, persistence, console, or concurrency claims, prefer a local deterministic fake/stub/fixture plus the production entrypoint when real external prerequisites are unavailable.",
+		"Each shell/command or mcp/tool_call intended to close behavior coverage must declare validationEvidence.mode and validationEvidence.observationType as runtime behavior, executable contract, dynamic execution, or controlled substitute evidence.",
 		"If a dependency or environment prerequisite is unavailable, prefer a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port when that can validate the same contract without changing deliverables.",
 		"Do not use read-only inspection, self-inspection, run snapshot, observability, or context rehydration graphs as evidence repair.",
 		"If a verification command or tool later fails with concrete diagnostics, that failure may drive a separate state-changing repair.",
@@ -669,7 +671,7 @@ func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel
 		stringFromMap(failedStep.Output, "error"),
 		stringFromMap(failedStep.Output, "reason"),
 	}, "\n")
-	if class != failureClassProviderTimeout && !stateChangingReadOnlyGraphFailureText(errorText) {
+	if !providerTransientStreamFailure(class, stage) && !stateChangingReadOnlyGraphFailureText(errorText) {
 		return
 	}
 	input["stateChangingRecoveryMode"] = "direct_state_change"
@@ -697,4 +699,17 @@ func narrowStateChangingRecoveryInput(input map[string]any, failedStep *runModel
 		delete(input, stepInputKeyWorkspaceFileManifest)
 	}
 	delete(input, stepOutputKeyExecutionGraph)
+}
+
+func providerTransientStreamFailure(class, stage string) bool {
+	switch strings.TrimSpace(class) {
+	case failureClassProviderTimeout, failureClassProviderStreamIncomplete:
+		return true
+	}
+	switch strings.TrimSpace(stage) {
+	case "llm_provider_timeout", "llm_provider_stream_incomplete":
+		return true
+	default:
+		return false
+	}
 }

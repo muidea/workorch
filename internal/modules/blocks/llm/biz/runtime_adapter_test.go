@@ -1018,6 +1018,32 @@ func TestRuntimeAdapterReportsStreamDiagnosticsOnProviderTimeout(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterClassifiesProtocolWrappedTimeoutAsProviderTimeout(t *testing.T) {
+	provider := &staticProvider{
+		err: fmt.Errorf("%w: llm provider protocol invalid: invalid stream chunk json: context deadline exceeded (Client.Timeout or context cancellation while reading body)", common.ErrInvalidArgument),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err == nil {
+		t.Fatal("expected provider timeout")
+	}
+	if result.Output["stage"] != "llm_provider_timeout" {
+		t.Fatalf("stage = %v, want llm_provider_timeout", result.Output["stage"])
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok || usage["failureClass"] != providerFailureClassTimeout {
+		t.Fatalf("llmUsage = %+v, want provider timeout failure class", result.Output["llmUsage"])
+	}
+}
+
 func TestRuntimeAdapterClassifiesProviderStreamIncomplete(t *testing.T) {
 	provider := &streamingProvider{
 		events: []llmmodels.ProviderStreamEvent{{Type: "delta", Delta: `{"completionState"`}},

@@ -726,6 +726,48 @@ func TestProviderRetryStepInputNarrowsStateChangingProviderTimeout(t *testing.T)
 	}
 }
 
+func TestProviderRetryStepInputNarrowsStateChangingStreamIncomplete(t *testing.T) {
+	failedStep := &runmodel.Step{
+		ID:    "run-provider-retry-state-changing-stream-incomplete/step-1",
+		RunID: "run-provider-retry-state-changing-stream-incomplete",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failedExecutionGraph":            map[string]any{"nodes": []any{map[string]any{"kind": "shell/command"}}},
+			stepInputKeyGraphEvidence:         []map[string]any{{"nodeId": "inspect", "output": map[string]any{"stdout": strings.Repeat("x", 2048)}}},
+			stepInputKeyWorkspaceFileManifest: []map[string]any{{"path": "README.md"}},
+		},
+		Output: map[string]any{
+			"stage":               "llm_provider_stream_incomplete",
+			"status":              "failed",
+			"error":               "invalid argument: llm provider stream incomplete: truncated stream chunk json: unexpected end of json input",
+			failureOutputKeyClass: failureClassProviderStreamIncomplete,
+			"streamDiagnostics":   map[string]any{"streamIncomplete": true, "doneReceived": false},
+			"streamEvents": []map[string]any{
+				{"type": "delta", "delta": "{\"completionState\":\"continue\",\"executionGraph\":{\"nodes\":[{\"id\":\"write_go_mod\""},
+			},
+		},
+	}
+
+	input := providerRetryStepInput(failedStep, 1, errors.New("unexpected end of json input"))
+
+	if input["stateChangingRecoveryMode"] != "direct_state_change" {
+		t.Fatalf("provider retry input = %+v, want direct state-changing recovery mode", input)
+	}
+	for _, key := range []string{"failedExecutionGraph", stepInputKeyGraphEvidence, stepInputKeyWorkspaceFileManifest, "previousStepOutput"} {
+		if _, ok := input[key]; ok {
+			t.Fatalf("provider retry input retained %s: %+v", key, input[key])
+		}
+	}
+	failedOutput := mapFromValue(input["failedStepOutput"])
+	if !strings.Contains(fmt.Sprint(failedOutput["partialOutputPreview"]), "write_go_mod") {
+		t.Fatalf("partialOutputPreview = %q, want partial state-changing output hint", failedOutput["partialOutputPreview"])
+	}
+}
+
 func TestProviderRetryStepInputRestoresStateChangingContractFromMissingDoDRepair(t *testing.T) {
 	failedStep := &runmodel.Step{
 		ID:    "run-provider-retry-dod-gap-repair/repair-001-of-planning-001",

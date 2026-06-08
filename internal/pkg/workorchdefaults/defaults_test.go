@@ -592,6 +592,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 			t.Fatalf("evidence requirement %q requireDirectEvidence = false, want true", id)
 		}
+		if executable, _ := item["requireExecutableBehaviorEvidence"].(bool); !executable {
+			t.Fatalf("evidence requirement %q requireExecutableBehaviorEvidence = false, want true", id)
+		}
 		accepted, ok := item["acceptedStepKinds"].([]any)
 		if !ok {
 			t.Fatalf("evidence requirement %q acceptedStepKinds = %+v, want list", id, item["acceptedStepKinds"])
@@ -601,7 +604,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			t.Fatalf("evidence requirement %q rejectedStepKinds = %+v, want list", id, item["rejectedStepKinds"])
 		}
 		assertStringListContains(t, accepted, "shell/command")
-		assertStringListContains(t, accepted, "patch/apply")
+		assertStringListNotContains(t, accepted, "patch/apply")
 		assertStringListContains(t, accepted, "mcp/tool_call")
 		assertStringListContains(t, rejected, "file/read")
 		assertStringListContains(t, rejected, "file/list")
@@ -660,6 +663,15 @@ func assertStringListContains(t *testing.T, values []any, want string) {
 		}
 	}
 	t.Fatalf("list %+v missing %q", values, want)
+}
+
+func assertStringListNotContains(t *testing.T, values []any, forbidden string) {
+	t.Helper()
+	for _, raw := range values {
+		if value, _ := raw.(string); value == forbidden {
+			t.Fatalf("list %+v unexpectedly contains %q", values, forbidden)
+		}
+	}
 }
 
 func assertStringSliceContains(t *testing.T, values []string, want string) {

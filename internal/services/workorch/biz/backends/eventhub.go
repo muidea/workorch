@@ -167,6 +167,7 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 func convertEnvelope(envelope events.Envelope) (ret Event) {
 	defer func() {
 		if ret.Type != "" {
+			ret.ID = envelope.ID
 			ret.Revision = envelope.Revision
 		}
 	}()
@@ -207,6 +208,8 @@ func convertEnvelope(envelope events.Envelope) (ret Event) {
 		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	case runevents.TopicRunLLMUsageRecorded:
 		return Event{Type: EventLLMUsageRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
+	case runevents.TopicRunLLMStreamProgress:
+		return Event{Type: EventLLMStreamProgress, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
 	case orchestratorevents.TopicPatchPreviewed:
 		return Event{Type: EventPatchPreviewed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
 	case orchestratorevents.TopicPatchApplied:

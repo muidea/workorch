@@ -378,6 +378,9 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 		}
 		var chunk chatCompletionStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if providerStreamChunkJSONTruncated(err) {
+				return "", nil, fmt.Errorf("%w: llm provider stream incomplete: truncated stream chunk json: %v", common.ErrInvalidArgument, err)
+			}
 			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: invalid stream chunk json: %v", common.ErrInvalidArgument, err)
 		}
 		if chunk.Error != nil {
@@ -406,6 +409,15 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 		return "", nil, err
 	}
 	return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before [DONE]", common.ErrInvalidArgument)
+}
+
+func providerStreamChunkJSONTruncated(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "unexpected end of json input") ||
+		strings.Contains(text, "unexpected eof")
 }
 
 func (e *chatCompletionError) Summary() string {

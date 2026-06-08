@@ -122,6 +122,30 @@ print(quote(sys.argv[1], safe=""))
 PY
 }
 
+json_grep_string_value() {
+  local key="$1"
+  local value="$2"
+  local file="${3:-}"
+  local pattern="\"$key\"[[:space:]]*:[[:space:]]*\"$value\""
+  if [[ -n "$file" ]]; then
+    grep -E "$pattern" "$file"
+  else
+    grep -E "$pattern"
+  fi
+}
+
+json_grep_bool_value() {
+  local key="$1"
+  local value="$2"
+  local file="${3:-}"
+  local pattern="\"$key\"[[:space:]]*:[[:space:]]*$value"
+  if [[ -n "$file" ]]; then
+    grep -E "$pattern" "$file"
+  else
+    grep -E "$pattern"
+  fi
+}
+
 resolve_decision_ticket_if_needed() {
   local ticket_path="$1"
   local payload="$2"
@@ -129,17 +153,17 @@ resolve_decision_ticket_if_needed() {
   local resolve_file="$4"
 
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$detail_file"
-  if grep '"state": "resolved"' "$detail_file" >/dev/null; then
+  if json_grep_string_value state resolved "$detail_file" >/dev/null; then
     return 0
   fi
   if curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
     -d "$payload" >"$resolve_file"; then
-    grep '"resolutionType": "provide_missing_info"' "$resolve_file" >/dev/null
+    json_grep_string_value resolutionType provide_missing_info "$resolve_file" >/dev/null
     return 0
   fi
 
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$detail_file"
-  grep '"state": "resolved"' "$detail_file" >/dev/null
+  json_grep_string_value state resolved "$detail_file" >/dev/null
 }
 
 start_mock_provider() {
@@ -666,7 +690,7 @@ wait_run_state() {
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
-    if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
+    if json_grep_string_value state "$expected_state" "$output_file" >/dev/null; then
       return 0
     fi
     sleep 1
@@ -946,25 +970,25 @@ start_mock_provider
 wait_mock
 wait_ready
 
-curl -fsS "$BASE_URL/readyz" | grep '"status": "ready"' >/dev/null
+curl -fsS "$BASE_URL/readyz" | json_grep_string_value status ready >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
 write_llm_update_payloads
 curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
-grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
+json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
   -d '{"title":"llm acceptance workspace","description":"verify LLM driven workspace execution","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | grep '"description": "verify LLM driven workspace execution"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value description "verify LLM driven workspace execution" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"verify LLM driven workspace execution"}' >"$TMP_DIR/goal.json"
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | grep "\"id\": \"$goal_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | json_grep_string_value id "$goal_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" >"$TMP_DIR/goal-read.json"
 goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"
 [[ "$goal_text" == *"verify LLM driven workspace execution"* ]]
@@ -973,35 +997,35 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H '
   -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","multi gate decision then approval can complete","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | grep "\"id\": \"$dod_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | json_grep_string_value id "$dod_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"multi gate decision then approval can complete"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-defined.json"
-grep "\"id\": \"$workspace_id\"" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
+json_grep_string_value id "$workspace_id" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/mcp/servers" -H 'Content-Type: application/json' \
   -d '{"id":"'"$MCP_SERVER_ID"'","name":"MCP Context Verify","transport":"stdio","endpoint":"context-helper","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"defaultApprovalPolicy":"operator","sessionPolicy":"long_lived","timeoutMillis":60000}' >"$TMP_DIR/mcp-server.json"
-grep "\"id\": \"$MCP_SERVER_ID\"" "$TMP_DIR/mcp-server.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers" | grep "\"id\": \"$MCP_SERVER_ID\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" | grep '"sessionPolicy": "long_lived"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/tools" | grep '"name": "repo.summary"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/resources" | grep '"uri": "workspace://acceptance"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/prompts" | grep '"name": "workorch.acceptance"' >/dev/null
+json_grep_string_value id "$MCP_SERVER_ID" "$TMP_DIR/mcp-server.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers" | json_grep_string_value id "$MCP_SERVER_ID" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID" | json_grep_string_value sessionPolicy long_lived >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/tools" | json_grep_string_value name repo.summary >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/resources" | json_grep_string_value uri "workspace://acceptance" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/mcp/servers/$MCP_SERVER_ID/prompts" | json_grep_string_value name workorch.acceptance >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/skills" -H 'Content-Type: application/json' \
   -d '{"id":"'"$SKILL_ID"'","name":"LLM acceptance skill","version":"v1","description":"acceptance skill for governed execution","triggerRules":["workspace acceptance"],"instruction":"Use the provided Goal, DoD, MCP and Memory context to complete the run.","requiredToolKinds":["llm/chat"],"requiredMCPServerRefs":["'"$MCP_SERVER_ID"'"],"constraints":["must preserve governance gates"]}' >"$TMP_DIR/skill.json"
-grep "\"id\": \"$SKILL_ID\"" "$TMP_DIR/skill.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/skills" | grep "\"id\": \"$SKILL_ID\"" >/dev/null
+json_grep_string_value id "$SKILL_ID" "$TMP_DIR/skill.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/skills" | json_grep_string_value id "$SKILL_ID" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/skills/$SKILL_ID" | grep '"requiredMCPServerRefs"' >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: application/json' \
   -d '{"id":"'"$SOUL_ID"'","name":"LLM Acceptance Soul","description":"acceptance soul for governed execution","businessDomains":["workorch"],"soulMd":"# LLM Acceptance Soul\n\nDrive the workspace according to Goal and DoD while respecting governance gates.\n\n## Planning\n\ngoal-first\n\n## Decision\n\nask when missing info is required\n\n## Approval\n\nrequire operator approval for risky action\n\n## Validation\n\nproduce DoD evidence\n\n## Output Contract\n\nworkorch llm step contract","allowedSkillRefs":["'"$SKILL_ID"'"],"allowedMCPServerRefs":["'"$MCP_SERVER_ID"'"],"allowedToolKinds":["llm/chat"]}' >"$TMP_DIR/soul.json"
-grep "\"id\": \"$SOUL_ID\"" "$TMP_DIR/soul.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/souls" | grep "\"id\": \"$SOUL_ID\"" >/dev/null
+json_grep_string_value id "$SOUL_ID" "$TMP_DIR/soul.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/souls" | json_grep_string_value id "$SOUL_ID" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/souls/$SOUL_ID" | grep '"soulMd"' >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
   -d '{"memoryId":"'"$MEMORY_ID"'","sourceType":"user","memoryType":"project_context","content":"Seed memory for acceptance execution.","summary":"Seeded acceptance memory is available to runs.","tags":["acceptance","seed"],"importance":8,"confidence":9,"visibility":"workspace","embeddingProviderId":"verify","embeddingModel":"verify-embedding","embeddingText":"seeded acceptance memory","vector":[0.1,0.2,0.3]}' >"$TMP_DIR/memory-seed.json"
-grep "\"id\": \"$MEMORY_ID\"" "$TMP_DIR/memory-seed.json" >/dev/null
+json_grep_string_value id "$MEMORY_ID" "$TMP_DIR/memory-seed.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" | grep "\"$MEMORY_ID\"" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id&q=Seeded" | grep "\"$MEMORY_ID\"" >/dev/null
 if curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
@@ -1016,31 +1040,31 @@ if curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory"
 fi
 
 activate_workspace_execution "$TMP_DIR/happy-activation.json"
-grep '"state": "completed"' "$TMP_DIR/happy-activation.json" >/dev/null
 happy_run_id="$(json_path "$TMP_DIR/happy-activation.json" "activation.run.id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | grep "\"id\": \"$happy_run_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id" | grep '"state": "completed"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/status" | grep '"state": "completed"' >/dev/null
+wait_run_state "$happy_run_id" "completed" "$TMP_DIR/happy-completed-status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | json_grep_string_value id "$happy_run_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id" | json_grep_string_value state completed >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/status" | json_grep_string_value state completed >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
 grep '"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"memoryRefs"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"soulRouting"' "$TMP_DIR/happy-snapshot.json" >/dev/null
-grep '"status": "resolved"' "$TMP_DIR/happy-snapshot.json" >/dev/null
-grep "\"soulId\": \"$SOUL_ID\"" "$TMP_DIR/happy-snapshot.json" >/dev/null
+json_grep_string_value status resolved "$TMP_DIR/happy-snapshot.json" >/dev/null
+json_grep_string_value soulId "$SOUL_ID" "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"skillIds"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/observability" >"$TMP_DIR/happy-observability.json"
-grep '"terminal": true' "$TMP_DIR/happy-observability.json" >/dev/null
+json_grep_bool_value terminal true "$TMP_DIR/happy-observability.json" >/dev/null
 assert_run_recovery_read_models "$happy_run_id" "happy" "completed" "estimated"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
 grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/decision-activation.json"
 decision_run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
-decision_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.state")"
+wait_run_state_any "$decision_run_id" "$TMP_DIR/decision-current-status.json" "blocked_on_decision" "completed"
+decision_state="$(json_path "$TMP_DIR/decision-current-status.json" "status.state")"
 if [[ "$decision_state" == "blocked_on_decision" ]]; then
-  ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
+  ticket_id="$(json_path "$TMP_DIR/decision-current-status.json" "status.blockingTicketId")"
   ticket_path="$(url_encode "$ticket_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$decision_run_id/status" >"$TMP_DIR/decision-current-status.json"
   python3 - "$TMP_DIR/decision-current-status.json" <<'PY'
 import json
 import sys
@@ -1048,10 +1072,10 @@ import sys
 state = (json.load(open(sys.argv[1], encoding="utf-8")).get("status") or {}).get("state")
 raise SystemExit(0 if state in {"blocked_on_decision", "running", "completed"} else 1)
 PY
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | json_grep_string_value id "$ticket_id" >/dev/null
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$decision_run_id" | json_grep_string_value id "$ticket_id" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/decision-detail-before-resolve.json"
-  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-detail-before-resolve.json" >/dev/null
+  json_grep_string_value decisionKind provide_missing_info "$TMP_DIR/decision-detail-before-resolve.json" >/dev/null
   resolve_decision_ticket_if_needed \
     "$ticket_path" \
     '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance"}}' \
@@ -1070,40 +1094,40 @@ PY
 )"
   ticket_path="$(url_encode "$ticket_id")"
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/decision-auto-resolved-detail.json"
-  grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
-  grep '"state": "resolved"' "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
+  json_grep_string_value decisionKind provide_missing_info "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
+  json_grep_string_value state resolved "$TMP_DIR/decision-auto-resolved-detail.json" >/dev/null
 else
   echo "decision scenario state=$decision_state, want blocked_on_decision or completed" >&2
   exit 1
 fi
 wait_run_state "$decision_run_id" "completed" "$TMP_DIR/decision-after-resolve-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$decision_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$decision_run_id/observability" | json_grep_bool_value terminal true >/dev/null
 assert_run_recovery_read_models "$decision_run_id" "decision" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-decision.json"
 grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-after-decision.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/approval-activation.json"
-grep '"state": "blocked_on_approval"' "$TMP_DIR/approval-activation.json" >/dev/null
 approval_run_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.id")"
-approval_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.blockingApprovalId")"
+wait_run_state "$approval_run_id" "blocked_on_approval" "$TMP_DIR/approval-blocked-status.json"
+approval_id="$(json_path "$TMP_DIR/approval-blocked-status.json" "status.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/status" | grep '"state": "blocked_on_approval"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$approval_run_id" | grep "\"id\": \"$approval_id\"" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/status" | json_grep_string_value state blocked_on_approval >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | json_grep_string_value id "$approval_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$approval_run_id" | json_grep_string_value id "$approval_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path?workspaceId=$workspace_id" >"$TMP_DIR/approval-detail.json"
 [[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.action")" == "continue risky test path" ]]
 [[ "$(json_path "$TMP_DIR/approval-detail.json" "approval.context.scenario")" == "approval" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject?workspaceId=$workspace_id" | grep '"state": "rejected"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/reject?workspaceId=$workspace_id" | json_grep_string_value state rejected >/dev/null
 wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/observability" | json_grep_bool_value terminal true >/dev/null
 assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed" "provider_native"
 
 activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
-grep '"state": "blocked_on_decision"' "$TMP_DIR/multi-gate-decision-activation.json" >/dev/null
 multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.id")"
-multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.blockingTicketId")"
+wait_run_state "$multi_gate_run_id" "blocked_on_decision" "$TMP_DIR/multi-gate-decision-status.json"
+multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-status.json" "status.blockingTicketId")"
 multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path?workspaceId=$workspace_id" | grep '"decisionKind": "provide_missing_info"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/decisions/$multi_gate_ticket_path?workspaceId=$workspace_id" | json_grep_string_value decisionKind provide_missing_info >/dev/null
 resolve_decision_ticket_if_needed \
   "$multi_gate_ticket_path" \
   '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","nextGate":"approval"}}' \
@@ -1113,23 +1137,23 @@ wait_run_state "$multi_gate_run_id" "blocked_on_approval" "$TMP_DIR/multi-gate-a
 multi_gate_approval_id="$(json_path "$TMP_DIR/multi-gate-approval-status.json" "status.blockingApprovalId")"
 multi_gate_approval_path="$(url_encode "$multi_gate_approval_id")"
 curl -fsS "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path?workspaceId=$workspace_id" >"$TMP_DIR/multi-gate-approval-detail.json"
-grep '"state": "pending"' "$TMP_DIR/multi-gate-approval-detail.json" >/dev/null
+json_grep_string_value state pending "$TMP_DIR/multi-gate-approval-detail.json" >/dev/null
 [[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.action")" == "complete multi-gate LLM path" ]]
 [[ "$(json_path "$TMP_DIR/multi-gate-approval-detail.json" "approval.context.scenario")" == "decision_then_approval" ]]
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve?workspaceId=$workspace_id" | grep '"state": "approved"' >/dev/null
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$multi_gate_approval_path/approve?workspaceId=$workspace_id" | json_grep_string_value state approved >/dev/null
 wait_run_state "$multi_gate_run_id" "completed" "$TMP_DIR/multi-gate-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/snapshot" >"$TMP_DIR/multi-gate-snapshot.json"
-grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
-grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+json_grep_string_value id "$multi_gate_ticket_id" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
+json_grep_string_value id "$multi_gate_approval_id" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/status" | grep '"state": "completed"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/status" | json_grep_string_value state completed >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
-grep '"terminal": true' "$TMP_DIR/multi-gate-observability.json" >/dev/null
+json_grep_bool_value terminal true "$TMP_DIR/multi-gate-observability.json" >/dev/null
 assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed" "provider_native"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-after-governance.json"
-grep "\"id\": \"$multi_gate_run_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
-grep "\"id\": \"$multi_gate_ticket_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
-grep "\"id\": \"$multi_gate_approval_id\"" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
+json_grep_string_value id "$multi_gate_run_id" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
+json_grep_string_value id "$multi_gate_ticket_id" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
+json_grep_string_value id "$multi_gate_approval_id" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 
 activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
@@ -1141,18 +1165,18 @@ if [[ "$schema_run_state" == "blocked_on_decision" ]]; then
   schema_ticket_id="$(json_path "$TMP_DIR/schema-failure-status.json" "status.blockingTicketId")"
   schema_ticket_path="$(url_encode "$schema_ticket_id")"
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/schema-failure-decision.json"
-  grep '"recoveryPolicy": "runtime_repair_exhausted_requires_strategy"' "$TMP_DIR/schema-failure-decision.json" >/dev/null
-  if grep '"state": "resolved"' "$TMP_DIR/schema-failure-decision.json" >/dev/null; then
+  json_grep_string_value recoveryPolicy runtime_repair_exhausted_requires_strategy "$TMP_DIR/schema-failure-decision.json" >/dev/null
+  if json_grep_string_value state resolved "$TMP_DIR/schema-failure-decision.json" >/dev/null; then
     wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-auto-resolved-status.json" "failed" "superseded"
     schema_run_state="$(json_path "$TMP_DIR/schema-failure-auto-resolved-status.json" "status.state")"
   else
     curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$schema_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
-      -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","recoveryAction":"terminate"}}' | grep '"resolutionType": "reject_current_path"' >/dev/null
+      -d '{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"llm-acceptance","recoveryAction":"terminate"}}' | json_grep_string_value resolutionType reject_current_path >/dev/null
     wait_run_state "$schema_run_id" "failed" "$TMP_DIR/schema-failure-terminated-status.json"
     schema_run_state="failed"
   fi
 fi
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_run_id/observability" | grep '"terminal": true' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_run_id/observability" | json_grep_bool_value terminal true >/dev/null
 if [[ "$schema_run_state" == "superseded" ]]; then
   assert_run_recovery_read_models "$schema_run_id" "schema-failure" "superseded" "provider_native"
   schema_successor_run_id="$(find_replan_successor_run "$schema_run_id" "$TMP_DIR/schema-failure-workspace-snapshot.json")"
@@ -1160,21 +1184,21 @@ if [[ "$schema_run_state" == "superseded" ]]; then
   wait_run_state "$schema_successor_run_id" "completed" "$TMP_DIR/schema-failure-successor-status.json"
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_successor_run_id/snapshot" >"$TMP_DIR/schema-failure-successor-snapshot.json"
   grep '"replanContinuation"' "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
-  grep "\"predecessorRunId\": \"$schema_run_id\"" "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
+  json_grep_string_value predecessorRunId "$schema_run_id" "$TMP_DIR/schema-failure-successor-snapshot.json" >/dev/null
   assert_run_recovery_read_models "$schema_successor_run_id" "schema-failure-successor" "completed" "provider_native"
 else
   assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed" "provider_native"
 fi
 
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
-grep '"state": "completed"' "$TMP_DIR/memory-recall-activation.json" >/dev/null
 memory_run_id="$(json_path "$TMP_DIR/memory-recall-activation.json" "activation.run.id")"
+wait_run_state "$memory_run_id" "completed" "$TMP_DIR/memory-recall-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$memory_run_id/snapshot" >"$TMP_DIR/memory-recall-snapshot.json"
 grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep '"memoryRetrieval"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 grep "\"$MEMORY_ID\"" "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$memory_run_id/observability" >"$TMP_DIR/memory-recall-observability.json"
-grep '"terminal": true' "$TMP_DIR/memory-recall-observability.json" >/dev/null
+json_grep_bool_value terminal true "$TMP_DIR/memory-recall-observability.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$memory_run_id/context-bundle" >"$TMP_DIR/memory-recall-context-bundle.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$memory_run_id/memory-recalls" >"$TMP_DIR/memory-recall-run-api.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory-recalls" >"$TMP_DIR/memory-recall-workspace-api.json"
@@ -1258,14 +1282,14 @@ PY
 assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed" "provider_native"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native"
-grep '"state": "completed"' "$TMP_DIR/stream-native-activation.json" >/dev/null
 stream_native_run_id="$(json_path "$TMP_DIR/stream-native-activation.json" "activation.run.id")"
+wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" "provider_native"
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "true"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated"
-grep '"state": "completed"' "$TMP_DIR/stream-estimated-activation.json" >/dev/null
 stream_estimated_run_id="$(json_path "$TMP_DIR/stream-estimated-activation.json" "activation.run.id")"
+wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
 assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
 assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "true"
 

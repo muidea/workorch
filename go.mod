@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/muidea/magicCommon v1.5.9
+	github.com/muidea/magicCommon v1.5.10
 	github.com/muidea/magicEngine v1.4.9
 	github.com/openai/openai-go v1.12.0
 	github.com/pelletier/go-toml/v2 v2.3.1

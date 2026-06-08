@@ -70,31 +70,31 @@ type AppModel struct {
 	activeRunID         string
 	cursor              int
 
-	input                 string
-	inputCursor           int
-	slashCursor           int
-	inputHistory          []string
-	historyCursor         int
-	currentTask           string
-	dodItems              []string
-	transcript            []transcriptItem
-	result                string
-	artifacts             []string
-	sources               []string
-	patches               []backend.PatchInfo
-	artifactContinuations []backend.ArtifactContinuationInfo
-	taskDecomp            []backend.TaskDecompositionInfo
-	memoryRecalls         []backend.MemoryRecallTraceInfo
-	llmUsage              backend.LLMUsageSummaryInfo
-	llmContext            map[string]any
-	runtimeEvents         []string
-	progress              progressState
-	progressText          string
-	repairLoop            string
-	failureReason         string
-	failureHint           string
-	running               bool
-	lastRevision          int64
+	input                   string
+	inputCursor             int
+	slashCursor             int
+	inputHistory            []string
+	historyCursor           int
+	currentTask             string
+	dodItems                []string
+	transcript              []transcriptItem
+	result                  string
+	artifacts               []string
+	sources                 []string
+	patches                 []backend.PatchInfo
+	artifactContinuations   []backend.ArtifactContinuationInfo
+	taskDecomp              []backend.TaskDecompositionInfo
+	memoryRecalls           []backend.MemoryRecallTraceInfo
+	llmUsage                backend.LLMUsageSummaryInfo
+	llmContext              map[string]any
+	runtimeEvents           []string
+	progress                progressState
+	progressText            string
+	repairLoop              string
+	failureReason           string
+	failureHint             string
+	running                 bool
+	lastRevisionByWorkspace map[string]int64
 
 	blockingDecision          *backend.DecisionInfo
 	blockingApproval          *backend.ApprovalInfo
@@ -132,20 +132,21 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		}
 	}
 	return AppModel{
-		be:                  be,
-		mode:                modeAgentSession,
-		defaultWorkspaceID:  defaultWorkspaceID,
-		activeWorkspaceID:   defaultWorkspaceID,
-		selectedWorkspaceID: defaultWorkspaceID,
-		eventCh:             eventCh,
-		unsubscribe:         unsubscribe,
-		initialGoal:         strings.TrimSpace(initialGoal),
-		currentTask:         strings.TrimSpace(initialGoal),
-		transcript:          initialTranscript(initialGoal),
-		options:             options,
-		progress:            progressIdle,
-		historyCursor:       -1,
-		mainViewport:        newMainViewport(),
+		be:                      be,
+		mode:                    modeAgentSession,
+		defaultWorkspaceID:      defaultWorkspaceID,
+		activeWorkspaceID:       defaultWorkspaceID,
+		selectedWorkspaceID:     defaultWorkspaceID,
+		eventCh:                 eventCh,
+		unsubscribe:             unsubscribe,
+		initialGoal:             strings.TrimSpace(initialGoal),
+		currentTask:             strings.TrimSpace(initialGoal),
+		transcript:              initialTranscript(initialGoal),
+		options:                 options,
+		progress:                progressIdle,
+		lastRevisionByWorkspace: map[string]int64{},
+		historyCursor:           -1,
+		mainViewport:            newMainViewport(),
 	}
 }
 
@@ -158,7 +159,7 @@ func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
 		return
 	default:
 	}
-	if !isWorkspaceListCriticalEvent(evt.Type) {
+	if !isBackendEventQueueCritical(evt.Type) {
 		return
 	}
 	select {
@@ -171,11 +172,20 @@ func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
 	}
 }
 
-func isWorkspaceListCriticalEvent(eventType backend.EventType) bool {
+func isBackendEventQueueCritical(eventType backend.EventType) bool {
 	switch eventType {
 	case backend.EventWorkspaceCreated,
+		backend.EventWorkspaceStateChanged,
 		backend.EventWorkspaceDeleted,
-		backend.EventWorkspaceListChanged:
+		backend.EventWorkspaceListChanged,
+		backend.EventRunStateChanged,
+		backend.EventDecisionCreated,
+		backend.EventDecisionResolved,
+		backend.EventApprovalCreated,
+		backend.EventApprovalResolved,
+		backend.EventResultAccepted,
+		backend.EventPatchApplied,
+		backend.EventPatchFailed:
 		return true
 	default:
 		return false
@@ -583,7 +593,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.clearInput()
 	m.lastError = nil
-	if runID := m.activeWorkspaceRunID(); runID != "" || m.activeWorkspaceStateIsLive() {
+	if runID := m.activeWorkspaceRunID(); runID != "" {
 		m.cancelWorkspaceSelection()
 		m.clearRunDisplayState()
 		m.appendTranscript("Input", text)
@@ -680,9 +690,14 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.cancelWorkspaceSelection()
 			m.clearRunDisplayState()
 			m.lastError = nil
+			runID := m.activeWorkspaceRunID()
 			m.progress = progressSubmitting
-			m.progressText = "Continuing active run"
-			return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeWorkspaceRunID(), rest), true
+			if runID != "" {
+				m.progressText = "Continuing active run"
+			} else {
+				m.progressText = "Checking workspace run state"
+			}
+			return m, ContinueRun(m.be, m.activeWorkspaceID, runID, rest), true
 		case "restart":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
@@ -1689,15 +1704,8 @@ func (m *AppModel) markApprovalResolved(id common.ApprovalID) {
 }
 
 func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
-	if evt.Revision > 0 {
-		if m.lastRevision > 0 && evt.Revision > m.lastRevision+1 && evt.WorkspaceID != "" && string(evt.WorkspaceID) == m.activeWorkspaceID {
-			m.lastRevision = evt.Revision
-			m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
-			return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
-		}
-		if evt.Revision > m.lastRevision {
-			m.lastRevision = evt.Revision
-		}
+	if cmd := m.recordWorkspaceEventRevision(evt); cmd != nil {
+		return cmd
 	}
 	switch evt.Type {
 	case backend.EventWorkspaceListChanged:
@@ -1863,6 +1871,12 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
 		return nil
+	case backend.EventLLMStreamProgress:
+		m.progress = progressRunning
+		m.progressText = llmStreamProgressText(evt.Payload)
+		m.appendRuntimeEvent(m.progressText)
+		m.followMainViewportTailUnlessUserScrolled()
+		return nil
 	case backend.EventLLMUsageRecorded:
 		m.applyLLMUsageEvent(evt.Payload)
 		m.progressText = llmUsageProgressText(evt.Payload)
@@ -1873,6 +1887,26 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
 		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	}
+	return nil
+}
+
+func (m *AppModel) recordWorkspaceEventRevision(evt backend.Event) tea.Cmd {
+	if evt.Revision <= 0 || evt.WorkspaceID == "" {
+		return nil
+	}
+	workspaceID := string(evt.WorkspaceID)
+	if m.lastRevisionByWorkspace == nil {
+		m.lastRevisionByWorkspace = map[string]int64{}
+	}
+	previous := m.lastRevisionByWorkspace[workspaceID]
+	if previous > 0 && evt.Revision > previous+1 && workspaceID == m.activeWorkspaceID {
+		m.lastRevisionByWorkspace[workspaceID] = evt.Revision
+		m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
+		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	}
+	if evt.Revision > previous {
+		m.lastRevisionByWorkspace[workspaceID] = evt.Revision
 	}
 	return nil
 }

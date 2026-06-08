@@ -83,6 +83,7 @@ const (
 	EventMemoryUpdated               EventType = "memory/updated"
 	EventMemoryDeleted               EventType = "memory/deleted"
 	EventMemoryRecallRecorded        EventType = "memory/recall/recorded"
+	EventLLMStreamProgress           EventType = "llm/stream/progress"
 	EventLLMUsageRecorded            EventType = "llm/usage/recorded"
 	EventPatchPreviewed              EventType = "patch/previewed"
 	EventPatchApplied                EventType = "patch/applied"
@@ -96,6 +97,7 @@ const (
 )
 
 type Event struct {
+	ID          string
 	Type        EventType
 	WorkspaceID common.WorkspaceID
 	RunID       common.RunID

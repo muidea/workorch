@@ -666,7 +666,9 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 }
 
 type remoteEventsBackend struct {
-	cl *client.Client
+	cl          *client.Client
+	mu          sync.Mutex
+	lastEventID string
 }
 
 func (b *remoteEventsBackend) Subscribe(ctx context.Context, handler EventHandler) (func(), error) {
@@ -709,6 +711,12 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	if err != nil {
 		return false
 	}
+	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
+		req.Header.Set("Last-Event-ID", lastEventID)
+		query := req.URL.Query()
+		query.Set("lastEventId", lastEventID)
+		req.URL.RawQuery = query.Encode()
+	}
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
@@ -727,6 +735,7 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	var dataLines []string
+	var eventID string
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -735,8 +744,13 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 		}
 		line := scanner.Text()
 		if line == "" {
-			b.dispatchSSEData(ctx, dataLines, handler)
+			b.dispatchSSEData(ctx, dataLines, eventID, handler)
 			dataLines = nil
+			eventID = ""
+			continue
+		}
+		if strings.HasPrefix(line, "id:") {
+			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
@@ -746,7 +760,7 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	return true
 }
 
-func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, handler EventHandler) {
+func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []string, eventID string, handler EventHandler) {
 	if len(lines) == 0 {
 		return
 	}
@@ -758,7 +772,29 @@ func (b *remoteEventsBackend) dispatchSSEData(ctx context.Context, lines []strin
 	if evt.Type == "" {
 		return
 	}
+	if evt.ID == "" {
+		evt.ID = strings.TrimSpace(eventID)
+	}
+	b.rememberLastEventID(evt.ID)
 	handler(ctx, evt)
+}
+
+func (b *remoteEventsBackend) lastEventIDSnapshot() string {
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastEventID
+}
+
+func (b *remoteEventsBackend) rememberLastEventID(id string) {
+	if b == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastEventID = strings.TrimSpace(id)
 }
 
 // Ensure remoteBackend implements Backend.

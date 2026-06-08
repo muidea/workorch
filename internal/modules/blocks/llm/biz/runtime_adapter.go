@@ -563,6 +563,8 @@ func classifyProviderInvocationFailure(err error) string {
 		strings.Contains(text, "prompt is too long"),
 		strings.Contains(text, "413"):
 		return providerFailureClassContextLarge
+	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "client.timeout"), strings.Contains(text, "context cancellation while reading body"), strings.Contains(text, "timeout"):
+		return providerFailureClassTimeout
 	case strings.Contains(text, "stream incomplete"),
 		strings.Contains(text, "ended before [done]"),
 		strings.Contains(text, "without [done]"):
@@ -574,8 +576,6 @@ func classifyProviderInvocationFailure(err error) string {
 	case strings.Contains(text, "context gate"),
 		strings.Contains(text, "context integrity"):
 		return providerFailureClassContextIntegrity
-	case strings.Contains(text, "deadline exceeded"), strings.Contains(text, "timeout"):
-		return providerFailureClassTimeout
 	case strings.Contains(text, "rate limit"),
 		strings.Contains(text, "too many requests"),
 		strings.Contains(text, "quota exceeded"),

@@ -486,6 +486,30 @@ func llmUsageProgressText(payload map[string]any) string {
 	return "LLM usage recorded: " + strings.TrimSpace(label+" "+status)
 }
 
+func llmStreamProgressText(payload map[string]any) string {
+	summary := firstPayloadString(payload, events.PayloadKeySummary, "summary", "Summary")
+	if strings.TrimSpace(summary) != "" {
+		return "LLM streaming: " + strings.TrimSpace(summary)
+	}
+	provider := firstPayloadString(payload, events.PayloadKeyProviderID, "providerId", "ProviderID")
+	model := firstPayloadString(payload, events.PayloadKeyModel, "model", "Model")
+	status := firstPayloadString(payload, events.PayloadKeyStatus, "status", "Status")
+	chunks := payloadIntValue(payload, events.PayloadKeyChunkCount, "chunkCount", "ChunkCount")
+	bytes := payloadIntValue(payload, events.PayloadKeyReceivedBytes, "receivedBytes", "ReceivedBytes")
+	label := strings.TrimSpace(strings.Join([]string{nonEmpty(provider, "llm"), model}, "/"))
+	parts := []string{"LLM streaming:", label}
+	if status != "" {
+		parts = append(parts, status)
+	}
+	if chunks > 0 {
+		parts = append(parts, fmt.Sprintf("%d chunks", chunks))
+	}
+	if bytes > 0 {
+		parts = append(parts, fmt.Sprintf("%d bytes", bytes))
+	}
+	return strings.Join(parts, " ")
+}
+
 func artifactContinuationProgressText(payload map[string]any) string {
 	state := firstPayloadString(payload, "state", "State", events.PayloadKeyState)
 	targetRef := firstPayloadString(payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)

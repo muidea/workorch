@@ -143,6 +143,91 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	}
 }
 
+func TestRemoteEventsBackendReconnectsWithLastEventID(t *testing.T) {
+	var requests atomic.Int32
+	seenLastEventID := make(chan string, 2)
+	first := events.Envelope{
+		ID:          "evt-first",
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
+		WorkspaceID: "ws-replay",
+		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateRunning, "run-replay"),
+	}
+	second := events.Envelope{
+		ID:          "evt-second",
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
+		WorkspaceID: "ws-replay",
+		Payload:     events.WorkspacePayload("replay", "", "/tmp/replay", "", common.WorkspaceStateCompleted, "run-replay"),
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workorch/events/stream" {
+			http.NotFound(w, r)
+			return
+		}
+		lastID := r.Header.Get("Last-Event-ID")
+		if lastID == "" {
+			lastID = r.URL.Query().Get("lastEventId")
+		}
+		seenLastEventID <- lastID
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		envelope := first
+		if requests.Add(1) > 1 {
+			envelope = second
+		}
+		data, err := json.Marshal(envelope)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprintf(w, "id: %s\n", envelope.ID)
+		_, _ = fmt.Fprintf(w, "event: workorch\n")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	received := make(chan Event, 8)
+	be := NewRemote(server.URL)
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+		received <- evt
+	})
+	if err != nil {
+		t.Fatalf("subscribe remote events: %v", err)
+	}
+	defer unsubscribe()
+
+	sawSecond := false
+	deadline := time.After(3 * time.Second)
+	for !sawSecond {
+		select {
+		case evt := <-received:
+			if evt.Type == EventWorkspaceListChanged {
+				continue
+			}
+			if evt.ID == "evt-second" {
+				sawSecond = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for replayed remote SSE event")
+		}
+	}
+	if requests.Load() < 2 {
+		t.Fatalf("requests = %d, want reconnect", requests.Load())
+	}
+	firstLastID := <-seenLastEventID
+	secondLastID := <-seenLastEventID
+	if firstLastID != "" {
+		t.Fatalf("first stream lastEventId = %q, want empty", firstLastID)
+	}
+	if secondLastID != "evt-first" {
+		t.Fatalf("reconnect lastEventId = %q, want evt-first", secondLastID)
+	}
+}
+
 func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 	be := NewRemote("http://127.0.0.1:1")
 	status, err := be.Run().Status(context.Background(), "", common.RunID("run-remote"))

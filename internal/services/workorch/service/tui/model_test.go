@@ -13,6 +13,7 @@ import (
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -369,6 +370,38 @@ func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
 	}
 }
 
+func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRun(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-1", "")
+	m.workspaces = []backend.WorkspaceInfo{
+		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed, ActiveRunID: "run-stale"},
+	}
+	m.activeRunID = "run-stale"
+	m.running = true
+	m.progress = progressRunning
+	m.setInput("重新整理目标")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("expected goal submission command for failed workspace")
+	}
+	if m.progressText == "Continuing active run" {
+		t.Fatalf("progressText = %q, want non-continuation submission text", m.progressText)
+	}
+	msg, ok := cmd().(RunStartedMsg)
+	if !ok || msg.Error != nil || msg.Run == nil {
+		t.Fatalf("submit msg = %#v, want RunStartedMsg", msg)
+	}
+	_, _ = m.Update(msg)
+	if len(be.goals) != 1 || be.goals[0] != "重新整理目标" {
+		t.Fatalf("goals = %v, want failed workspace input submitted as new goal", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no stale run resume", be.resumes)
+	}
+}
+
 func TestModelIgnoresRunStartedErrorForInactiveWorkspace(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 	m.progressText = "active workspace"
@@ -429,6 +462,43 @@ func TestModelRunContinueCommandQueuesOperatorInput(t *testing.T) {
 	queue, ok := be.resumePatches[0]["operatorInputQueue"].([]map[string]any)
 	if !ok || len(queue) != 1 || queue[0]["content"] != "补充约束：优先修复当前失败项" {
 		t.Fatalf("operatorInputQueue = %#v, want queued input", be.resumePatches[0]["operatorInputQueue"])
+	}
+}
+
+func TestModelRunContinueWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateFailed)
+	m := NewAppModel(be, "ws-1", "")
+	m.workspaces = []backend.WorkspaceInfo{
+		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed, ActiveRunID: "run-stale"},
+	}
+	m.activeRunID = "run-stale"
+	m.setInput("/run continue retry with current workspace")
+
+	next, cmd := m.submitInput()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("expected run continue command")
+	}
+	if m.progressText != "Checking workspace run state" {
+		t.Fatalf("progressText = %q, want backend state check", m.progressText)
+	}
+	msg, ok := cmd().(RunControlMsg)
+	if !ok || msg.Error != nil || msg.Run == nil {
+		t.Fatalf("run continue msg = %#v, want RunControlMsg with activated run", msg)
+	}
+	if msg.Message != "Restarting workspace run" {
+		t.Fatalf("message = %q, want restart message from backend activation path", msg.Message)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no terminal/stale run resume", be.resumes)
+	}
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	}
+	patch := be.activations[0].ExecutionContextPatch
+	latest, _ := patch["latestOperatorInput"].(map[string]any)
+	if latest["content"] != "retry with current workspace" {
+		t.Fatalf("latestOperatorInput = %#v, want slash input queued", latest)
 	}
 }
 
@@ -2107,6 +2177,9 @@ func TestModelWorkspaceSwitchClearsStaleViewBeforeRefresh(t *testing.T) {
 	if m.activeWorkspaceID != "ws-b" || m.currentTask != "" || m.result != "" || m.failureReason != "" || m.blockingDecision != nil || len(m.decisions) != 0 {
 		t.Fatalf("switch state not fully reset: active=%q task=%q result=%q failure=%q blocker=%+v decisions=%d", m.activeWorkspaceID, m.currentTask, m.result, m.failureReason, m.blockingDecision, len(m.decisions))
 	}
+	if _, ok := cmd().(tea.BatchMsg); !ok {
+		t.Fatal("workspace switch should batch list and selected workspace context refresh")
+	}
 }
 
 func TestModelIgnoresRunControlForInactiveWorkspace(t *testing.T) {
@@ -2985,6 +3058,75 @@ func TestModelNonActiveWorkspaceStateEventOnlyUpdatesMonitor(t *testing.T) {
 	}
 	if m.workspaces[1].State != "running" || m.progressText != "active progress" {
 		t.Fatalf("non-active state update leaked into active view: ws=%+v progress=%q", m.workspaces[1], m.progressText)
+	}
+}
+
+func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}})
+	m = asModel(next)
+
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-b",
+		Revision:    50,
+		Payload:     map[string]any{"state": "running"},
+	})
+	if cmd != nil {
+		t.Fatal("inactive workspace revision should not refresh active context")
+	}
+	cmd = m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Revision:    2,
+		Payload:     map[string]any{"kind": "shell/command"},
+	})
+	if cmd != nil {
+		t.Fatal("active workspace first revision should not be compared against inactive workspace revision")
+	}
+	if m.lastRevisionByWorkspace["ws-b"] != 50 || m.lastRevisionByWorkspace["ws-a"] != 2 {
+		t.Fatalf("workspace revisions = %+v, want ws-a=2 ws-b=50", m.lastRevisionByWorkspace)
+	}
+
+	cmd = m.applyBackendEvent(backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Revision:    4,
+		Payload:     map[string]any{"kind": "shell/command"},
+	})
+	if cmd == nil || !strings.Contains(m.progressText, "revision gap") {
+		t.Fatalf("active workspace revision gap should refresh context: cmd=%v progress=%q", cmd != nil, m.progressText)
+	}
+}
+
+func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventLLMStreamProgress,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Revision:    1,
+		Payload: map[string]any{
+			events.PayloadKeyProviderID:    "local",
+			events.PayloadKeyModel:         "verify-model",
+			events.PayloadKeyStatus:        "streaming",
+			events.PayloadKeyChunkCount:    3,
+			events.PayloadKeyReceivedBytes: 128,
+		},
+	})
+	if cmd != nil {
+		t.Fatal("llm stream progress should not fetch context")
+	}
+	if m.progress != progressRunning || !strings.Contains(m.progressText, "LLM streaming") || len(m.runtimeEvents) != 1 {
+		t.Fatalf("stream progress not applied: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
 	}
 }
 

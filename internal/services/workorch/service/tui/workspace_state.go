@@ -188,8 +188,13 @@ func (m *AppModel) selectedWorkspaceIndex() int {
 
 func (m *AppModel) activeWorkspaceRunID() string {
 	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
-	if ws != nil && ws.ActiveRunID != "" {
-		return string(ws.ActiveRunID)
+	if ws != nil {
+		if !workspaceStateIsLive(ws.State) {
+			return ""
+		}
+		if ws.ActiveRunID != "" {
+			return string(ws.ActiveRunID)
+		}
 	}
 	if strings.TrimSpace(m.activeRunID) == "" {
 		return ""
@@ -221,7 +226,7 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 	m.workspaceSelectMode = false
 	m.resetWorkspaceView()
 	m.progressText = "Workspace switched; refreshing state"
-	return m, FetchAll(m.be)
+	return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContext(m.be, m.activeWorkspaceID))
 }
 
 func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {

@@ -106,14 +106,14 @@ $(CONSOLE_DEPS_STAMP): $(CONSOLE_PACKAGE_JSON) $(CONSOLE_PACKAGE_LOCK)
 	@touch $(CONSOLE_DEPS_STAMP)
 
 fmt: go-deps
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -n "$$files" ]]; then \
 		$(GOFMT) -w $$files; \
 	fi
 	$(GO) fmt $(PKGS)
 
 fmt-check:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -z "$$files" ]]; then \
 		exit 0; \
 	fi; \

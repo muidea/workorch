@@ -746,6 +746,46 @@ func TestEnforceProviderRequestBudgetAdaptiveShrinkForProviderRetry(t *testing.T
 	}
 }
 
+func TestEnforceProviderRequestBudgetAdaptiveShrinkForStreamIncompleteRetry(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-stream-retry",
+		RunID:       "run-stream-retry",
+		StepID:      "run-stream-retry/step-1",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"currentSoulStage":      "execution",
+			"providerRetryFollowUp": true,
+			"providerRetryAttempt":  2,
+			"failureClass":          "provider_stream_incomplete",
+			"failedExecutionGraph":  repeatedBudgetItems(80),
+			"workspaceFileManifest": repeatedBudgetItems(80),
+			"executionContext": map[string]any{
+				"goal": strings.Repeat("goal ", 200),
+				"dod":  strings.Repeat("dod ", 200),
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         512,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         256 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+	got := enforceProviderRequestBudget(req)
+	if got.ContextBudget == nil {
+		t.Fatal("contextBudget metadata missing")
+	}
+	if got.ContextBudget.ShrinkLevel < 4 {
+		t.Fatalf("contextBudget = %+v, want adaptive shrink level >=4 on stream incomplete retry attempt 2", got.ContextBudget)
+	}
+}
+
 func TestEnforceProviderRequestBudgetDoesNotHalveContextRetryBudget(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID: "ws-context-retry",

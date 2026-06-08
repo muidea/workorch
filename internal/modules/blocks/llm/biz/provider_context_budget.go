@@ -273,7 +273,7 @@ func adaptiveShrinkLevelFromInput(input map[string]any) int {
 	if !boolValue(input["providerRetryFollowUp"]) {
 		return 0
 	}
-	if strings.TrimSpace(stringValue(input["failureClass"])) != "provider_timeout" {
+	if !providerRetryFailureClassNeedsAdaptiveShrink(strings.TrimSpace(stringValue(input["failureClass"]))) {
 		return 0
 	}
 	attempt := intValue(input["providerRetryAttempt"])
@@ -284,6 +284,15 @@ func adaptiveShrinkLevelFromInput(input map[string]any) int {
 		return 3
 	default:
 		return 0
+	}
+}
+
+func providerRetryFailureClassNeedsAdaptiveShrink(failureClass string) bool {
+	switch strings.TrimSpace(failureClass) {
+	case "provider_timeout", "provider_stream_incomplete":
+		return true
+	default:
+		return false
 	}
 }
 

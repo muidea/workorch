@@ -221,6 +221,125 @@ func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T)
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementRejectsPatchAndBuildForBehaviorClaim(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-behavior-evidence")
+	claim := "streaming proxy forwarding works"
+	patchStepID := common.StepID("run-dod-behavior-evidence/graph-001/001-apply")
+	buildStepID := common.StepID("run-dod-behavior-evidence/graph-001/002-build")
+	for _, step := range []*runmodel.Step{
+		{
+			ID:    patchStepID,
+			RunID: runID,
+			Kind:  "patch/apply",
+			State: common.StepStateCompleted,
+			Input: map[string]any{"coverageTargets": []string{claim}},
+		},
+		{
+			ID:    buildStepID,
+			RunID: runID,
+			Kind:  shellcommon.StepKindCommand,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"command":         "go build ./...",
+				"coverageTargets": []string{claim},
+			},
+			Output: map[string]any{"stdout": "build passed"},
+		},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                                "*",
+							"scope":                             "dodItem",
+							"requireDirectEvidence":             true,
+							"requireClaimEvidence":              true,
+							"requireExecutableBehaviorEvidence": true,
+							"acceptedStepKinds":                 []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+							"rejectedStepKinds":                 []string{"file/read", "file/list"},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         claim,
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(patchStepID), string(buildStepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "runtime behavior") ||
+		!strings.Contains(err.Error(), "implementation change") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want behavior evidence rejection", err)
+	}
+}
+
+func TestDoDAssessmentEvidenceKindRequirementAcceptsTargetedTestForBehaviorClaim(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	runID := common.RunID("run-dod-behavior-test-evidence")
+	claim := "streaming proxy forwarding works"
+	testStepID := common.StepID("run-dod-behavior-test-evidence/graph-001/003-test")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    testStepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"command":         "go test ./... -run TestStreamingProxyForwarding",
+			"coverageTargets": []string{claim},
+		},
+		Output: map[string]any{"stdout": "=== RUN   TestStreamingProxyForwarding\n--- PASS: TestStreamingProxyForwarding\nPASS"},
+	}); err != nil {
+		t.Fatalf("seed test step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                                "*",
+							"scope":                             "dodItem",
+							"requireDirectEvidence":             true,
+							"requireClaimEvidence":              true,
+							"requireExecutableBehaviorEvidence": true,
+							"acceptedStepKinds":                 []string{shellcommon.StepKindCommand, "patch/apply", "mcp/tool_call"},
+							"rejectedStepKinds":                 []string{"file/read", "file/list"},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
+		"items": []map[string]any{{
+			"item":         claim,
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(testStepID)},
+		}},
+	}); err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality: %v", err)
+	}
+}
+
 func TestDoDAssessmentEvidenceQualityRejectsArtifactChunkEvidence(t *testing.T) {
 	ctx := context.Background()
 	stepRepo := memory.NewStepRepository()

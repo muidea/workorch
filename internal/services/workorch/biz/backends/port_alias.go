@@ -81,6 +81,7 @@ const (
 	EventMemoryUpdated               = port.EventMemoryUpdated
 	EventMemoryDeleted               = port.EventMemoryDeleted
 	EventMemoryRecallRecorded        = port.EventMemoryRecallRecorded
+	EventLLMStreamProgress           = port.EventLLMStreamProgress
 	EventLLMUsageRecorded            = port.EventLLMUsageRecorded
 	EventPatchPreviewed              = port.EventPatchPreviewed
 	EventPatchApplied                = port.EventPatchApplied

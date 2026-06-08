@@ -506,35 +506,62 @@ func repairActionPackagePromptSection(input map[string]any) string {
 	if len(pkg) == 0 {
 		return ""
 	}
+	section := compactRepairActionPackagePromptPayload(pkg)
+	if len(section) == 0 {
+		return ""
+	}
+	return marshalPromptSection("Current Repair Action Package", section)
+}
+
+func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		return nil
+	}
 	section := map[string]any{}
 	for _, key := range []string{
-		"currentFailure",
-		"lastFailureDiagnostics",
-		"requiredOutput",
-		"structuredFailureSignals",
-		"targetSnapshots",
-		"workspaceFileManifest",
-		"currentExecutionProgress",
-		"coverageTargetSet",
-		"coverageWorkItemContext",
-		"recentRepairAttempts",
-		"previousRejectedOutputSummary",
-		"forbiddenActions",
-		"repairBudget",
-		"exitCriteria",
 		"failureClass",
 		"failureSignature",
 		"failureTargetScope",
 		"failedStepId",
 		"failedStepKind",
 		"reason",
+		"coverageRepairRequired",
 	} {
 		copyMapValue(section, key, pkg[key])
 	}
-	if len(section) == 0 {
-		section = pkg
+	for _, key := range []string{
+		"currentFailure",
+		"lastFailureDiagnostics",
+		"requiredOutput",
+		"structuredFailureSignals",
+		"recentRepairAttempts",
+		"previousRejectedOutputSummary",
+		"forbiddenActions",
+		"repairBudget",
+		"exitCriteria",
+		"strategyReassessment",
+	} {
+		if value, ok := pkg[key]; ok {
+			section[key] = budgetProviderValue(value, 0, 1024, 6, 12, 3)
+		}
 	}
-	return marshalPromptSection("Current Repair Action Package", section)
+	if progress := compactCurrentExecutionProgressSignal(recordFromAny(pkg["currentExecutionProgress"])); len(progress) > 0 {
+		section["currentExecutionProgress"] = progress
+	}
+	if targets := compactCoverageTargetSetForPrompt(mapSliceFromAny(pkg["coverageTargetSet"]), 6); len(targets) > 0 {
+		section["coverageTargetSet"] = targets
+	}
+	if targetSnapshots := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targetSnapshots) > 0 {
+		section["targetSnapshots"] = compactRepairSnapshotsForPrompt(targetSnapshots, 2, 8192)
+	}
+	if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+		section["workspaceFileManifestSummary"] = manifest
+	}
+	if context := compactCoverageWorkItemContextRef(recordFromAny(pkg["coverageWorkItemContext"])); len(context) > 0 {
+		section["coverageWorkItemContextRef"] = context
+	}
+	section["projectionPolicy"] = "bounded C3 repair package; detailed coverage ledger is projected in C4.coverage-work-items when available"
+	return section
 }
 
 func governanceSoulPolicyPromptSection(input map[string]any) string {
@@ -821,18 +848,36 @@ func currentFailureSignalPayload(input map[string]any) map[string]any {
 
 func currentProgressSignalPayload(input map[string]any) map[string]any {
 	payload := map[string]any{}
-	copyMapValue(payload, "currentExecutionProgress", input["currentExecutionProgress"])
-	copyMapValue(payload, "currentProgressDigest", input["currentProgressDigest"])
+	if progress := compactCurrentExecutionProgressSignal(recordFromAny(input["currentExecutionProgress"])); len(progress) > 0 {
+		payload["currentExecutionProgress"] = progress
+	}
+	if digest := recordFromAny(input["currentProgressDigest"]); len(digest) > 0 {
+		payload["currentProgressDigest"] = budgetProviderValue(digest, 0, 1024, 6, 12, 3)
+	}
 	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
-		copyMapValue(payload, "packagedCurrentProgressDigest", pkg["currentProgressDigest"])
-		copyMapValue(payload, "currentDeliverables", pkg["currentDeliverables"])
-		copyMapValue(payload, "latestAcceptedResult", pkg["latestAcceptedResult"])
+		if digest := recordFromAny(pkg["currentProgressDigest"]); len(digest) > 0 && payload["currentProgressDigest"] == nil {
+			payload["packagedCurrentProgressDigest"] = budgetProviderValue(digest, 0, 1024, 6, 12, 3)
+		}
+		if value, ok := pkg["currentDeliverables"]; ok {
+			payload["currentDeliverables"] = budgetProviderValue(value, 0, 768, 6, 12, 2)
+		}
+		if value, ok := pkg["latestAcceptedResult"]; ok {
+			payload["latestAcceptedResult"] = budgetProviderValue(value, 0, 768, 4, 10, 2)
+		}
 	}
 	if repairPkg := recordFromAny(input["repairActionPackage"]); len(repairPkg) > 0 {
-		copyMapValue(payload, "packagedCurrentExecutionProgress", repairPkg["currentExecutionProgress"])
-		copyMapValue(payload, "coverageTargetSet", repairPkg["coverageTargetSet"])
-		copyMapValue(payload, "requiredOutput", repairPkg["requiredOutput"])
-		copyMapValue(payload, "exitCriteria", repairPkg["exitCriteria"])
+		if progress := compactCurrentExecutionProgressSignal(recordFromAny(repairPkg["currentExecutionProgress"])); len(progress) > 0 && payload["currentExecutionProgress"] == nil {
+			payload["packagedCurrentExecutionProgress"] = progress
+		}
+		if targets := compactCoverageTargetSetForPrompt(mapSliceFromAny(repairPkg["coverageTargetSet"]), 6); len(targets) > 0 {
+			payload["coverageTargetSet"] = targets
+		}
+		if value, ok := repairPkg["requiredOutput"]; ok {
+			payload["requiredOutput"] = budgetProviderValue(value, 0, 1024, 6, 12, 3)
+		}
+		if value, ok := repairPkg["exitCriteria"]; ok {
+			payload["exitCriteria"] = budgetProviderValue(value, 0, 768, 6, 12, 2)
+		}
 	}
 	return payload
 }
@@ -851,31 +896,186 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 	if len(context) == 0 {
 		return nil
 	}
-	payload := map[string]any{}
-	for _, key := range []string{
-		"schemaVersion",
-		"definitionRevision",
-		"coverageBaselineHash",
-		"summary",
-		"currentFocus",
-		"currentFocusItems",
-		"unresolvedItems",
-		"ledgerSummary",
-		"omittedCount",
-		"omittedStatusDistribution",
-		"omittedSourceScopeDistribution",
-		"excludedCount",
-		"excludedSources",
-		"historicalCount",
-		"historicalItems",
-		"fullLedgerRef",
-	} {
-		copyMapValue(payload, key, context[key])
-	}
+	payload := compactCoverageWorkItemSignalContext(context)
 	if len(payload) == 0 {
 		return nil
 	}
 	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD; missing evidence binding means the runtime ledger still needs accepted evidence refs, not that matching evidence is absent from history or memory"
+	return payload
+}
+
+func compactCurrentExecutionProgressSignal(progress map[string]any) map[string]any {
+	if len(progress) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"state",
+		"stage",
+		"currentStepId",
+		"currentStepKind",
+		"currentStepState",
+		"stepTotal",
+		"stepCompleted",
+		"stepFailed",
+		"stepDispatched",
+		"blocked",
+		"terminal",
+		"summary",
+		"currentGap",
+		"nextRequiredAction",
+	} {
+		copyMapValue(out, key, progress[key])
+	}
+	for _, key := range []string{"latestEvidenceRefs", "acceptedEvidenceRefs", "rejectedEvidenceRefs"} {
+		if refs := limitedStringSlice(stringSliceFromAny(progress[key]), 8); len(refs) > 0 {
+			out[key] = refs
+		}
+	}
+	if targets := compactCoverageTargetSetForPrompt(mapSliceFromAny(progress["unresolvedCoverageTargets"]), 6); len(targets) > 0 {
+		out["unresolvedCoverageTargets"] = targets
+	}
+	if len(out) == 0 {
+		value, _ := budgetProviderValue(progress, 0, 768, 6, 12, 2).(map[string]any)
+		return value
+	}
+	return out
+}
+
+func compactCoverageTargetSetForPrompt(targets []map[string]any, limit int) []map[string]any {
+	if limit <= 0 || len(targets) == 0 {
+		return nil
+	}
+	if len(targets) > limit {
+		targets = targets[:limit]
+	}
+	ret := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		item := map[string]any{}
+		for _, key := range []string{
+			"id",
+			"source",
+			"sourceScope",
+			"sourceRequirementId",
+			"sourcePath",
+			"sourceRequirementAliases",
+			"targetText",
+			"status",
+			"currentGap",
+			"requiredEvidenceKinds",
+			"missingEvidenceKinds",
+			"evidenceRole",
+		} {
+			if value, ok := target[key]; ok {
+				item[key] = budgetProviderValue(value, 0, 512, 4, 8, 2)
+			}
+		}
+		if len(item) > 0 {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) []map[string]any {
+	if limit <= 0 || len(items) == 0 {
+		return nil
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	ret := make([]map[string]any, 0, len(items))
+	for _, raw := range items {
+		item := recordFromAny(raw)
+		if len(item) == 0 {
+			continue
+		}
+		out := map[string]any{}
+		for _, key := range []string{
+			"targetRef",
+			"contentHash",
+			"contentComplete",
+			"safeForFileWrite",
+			"redacted",
+			"truncated",
+			"isBinary",
+			"baseHash",
+			"language",
+		} {
+			copyMapValue(out, key, item[key])
+		}
+		if content, ok := item["content"].(string); ok {
+			if contentLimit > 0 && len(content) > contentLimit {
+				out["content"] = content[:contentLimit] + "\n[TRUNCATED]"
+				out["contentTruncatedForPrompt"] = true
+			} else {
+				out["content"] = content
+			}
+		}
+		if len(out) > 0 {
+			ret = append(ret, out)
+		}
+	}
+	return ret
+}
+
+func compactWorkspaceFileManifestSignal(value any) map[string]any {
+	manifest := recordFromAny(value)
+	if len(manifest) == 0 {
+		if items := mapSliceFromAny(value); len(items) > 0 {
+			return map[string]any{
+				"itemCount": len(items),
+				"items":     budgetProviderValue(items, 0, 256, 12, 8, 2),
+			}
+		}
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"root", "workspaceRoot", "deliverableDirectory", "summary", "hash", "generatedAt"} {
+		copyMapValue(out, key, manifest[key])
+	}
+	for _, key := range []string{"files", "entries", "items"} {
+		if items := mapSliceFromAny(manifest[key]); len(items) > 0 {
+			out[key+"Count"] = len(items)
+			out[key] = budgetProviderValue(items, 0, 256, 12, 8, 2)
+			break
+		}
+	}
+	if len(out) == 0 {
+		value, _ := budgetProviderValue(manifest, 0, 256, 12, 8, 2).(map[string]any)
+		return value
+	}
+	return out
+}
+
+func compactCoverageWorkItemContextRef(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"schemaVersion", "definitionRevision", "coverageBaselineHash", "fullLedgerRef", "summary", "omittedCount", "excludedCount", "historicalCount"} {
+		copyMapValue(out, key, context[key])
+	}
+	if focus := recordFromAny(context["currentFocus"]); len(focus) > 0 {
+		out["currentFocus"] = budgetProviderValue(compactProviderCoverageWorkItemFocus(focus), 0, 512, 4, 10, 3)
+	}
+	return out
+}
+
+func compactCoverageWorkItemSignalContext(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	compacted := compactProviderCoverageWorkItemContext(context)
+	if len(compacted) == 0 {
+		return nil
+	}
+	payload, _ := budgetProviderValue(compacted, 0, 768, 6, 16, 4).(map[string]any)
+	for _, key := range []string{"excludedSources", "historicalItems"} {
+		if items := mapSliceFromAny(context[key]); len(items) > 0 {
+			payload[key+"Count"] = len(items)
+		}
+	}
 	return payload
 }
 
@@ -1225,6 +1425,77 @@ func compactTimelineDoDAssessment(assessment map[string]any) map[string]any {
 	return out
 }
 
+func compactFailedStepInputSignal(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"workspaceId",
+		"runId",
+		"stepId",
+		"kind",
+		"schema",
+		"runtimeStage",
+		"runtimeStageMode",
+		"currentRuntimeStage",
+		"currentRuntimeStageMode",
+		"currentSoulStage",
+		"failureClass",
+		"failureSignature",
+		"repairObjective",
+		"assessmentOnly",
+		"assessmentOnlyReason",
+	} {
+		copyMapValue(out, key, input[key])
+	}
+	if digest := recordFromAny(input["currentProgressDigest"]); len(digest) > 0 {
+		out["currentProgressDigest"] = budgetProviderValue(digest, 0, 768, 6, 12, 2)
+	}
+	if failure := recordFromAny(input["currentFailure"]); len(failure) > 0 {
+		out["currentFailure"] = budgetProviderValue(failure, 0, 1024, 6, 12, 2)
+	}
+	if context := compactCoverageWorkItemContextRef(recordFromAny(input["coverageWorkItemContext"])); len(context) > 0 {
+		out["coverageWorkItemContextRef"] = context
+	}
+	if pkg := compactRepairActionPackagePromptPayload(recordFromAny(input["repairActionPackage"])); len(pkg) > 0 {
+		out["repairActionPackage"] = budgetProviderValue(pkg, 0, 1024, 4, 10, 2)
+	}
+	if timeline := compactProcessEvidenceTimelineSignal(mapSliceFromAny(input["processEvidenceTimeline"])); len(timeline) > 0 {
+		out["processEvidenceTimelineRef"] = map[string]any{
+			"totalEvents":        timeline["totalEvents"],
+			"omittedMiddleCount": timeline["omittedMiddleCount"],
+			"retentionPolicy":    timeline["retentionPolicy"],
+		}
+	}
+	return out
+}
+
+func compactFailedStepOutputSignal(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	out := compactProcessEvidenceOutput(output)
+	for _, key := range []string{
+		"status",
+		"stage",
+		"summary",
+		"reason",
+		"failureClass",
+		"failureSignature",
+		"error",
+	} {
+		copyCompactTimelineValue(out, key, output[key])
+	}
+	for _, key := range []string{"resultId", "artifactId", "decisionId", "approvalId"} {
+		copyMapValue(out, key, output[key])
+	}
+	if graph := recordFromAny(output["executionGraph"]); len(graph) > 0 {
+		out["executionGraphSummary"] = budgetProviderValue(graph, 0, 384, 4, 8, 2)
+	}
+	return out
+}
+
 func limitedStringSlice(values []string, limit int) []string {
 	if limit <= 0 || len(values) == 0 {
 		return nil
@@ -1241,17 +1512,40 @@ func limitedStringSlice(values []string, limit int) []string {
 
 func validationSignalPayload(input map[string]any) map[string]any {
 	payload := map[string]any{}
-	for _, key := range []string{"failedStepInput", "failedStepOutput", "failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "previousResults"} {
-		copyMapValue(payload, key, input[key])
+	if failedInput := compactFailedStepInputSignal(recordFromAny(input["failedStepInput"])); len(failedInput) > 0 {
+		payload["failedStepInput"] = failedInput
+	}
+	if failedOutput := compactFailedStepOutputSignal(recordFromAny(input["failedStepOutput"])); len(failedOutput) > 0 {
+		payload["failedStepOutput"] = failedOutput
+	}
+	for _, key := range []string{"failedExecutionGraph", "graphEvidence", "runEvidenceSummary", "previousResults"} {
+		if value, ok := input[key]; ok {
+			payload[key] = budgetProviderValue(value, 0, 512, 6, 12, 2)
+		}
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
-		copyMapValue(payload, "targetSnapshots", pkg["targetSnapshots"])
-		copyMapValue(payload, "workspaceFileManifest", pkg["workspaceFileManifest"])
-		copyMapValue(payload, "recentRepairAttempts", pkg["recentRepairAttempts"])
+		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
+			payload["targetSnapshots"] = compactRepairSnapshotsForPrompt(targets, 2, 4096)
+		}
+		if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+			payload["workspaceFileManifestSummary"] = manifest
+		}
+		if value, ok := pkg["recentRepairAttempts"]; ok {
+			payload["recentRepairAttempts"] = budgetProviderValue(value, 0, 768, 6, 12, 2)
+		}
 	}
 	if pkg := recordFromAny(input["executionContextPackage"]); len(pkg) > 0 {
-		copyMapValue(payload, "recentFailureSummary", pkg["recentFailureSummary"])
-		copyMapValue(payload, "workspaceFileManifest", pkg["workspaceFileManifest"])
+		if value, ok := pkg["recentFailureSummary"]; ok {
+			payload["recentFailureSummary"] = budgetProviderValue(value, 0, 1024, 6, 12, 2)
+		}
+		if payload["workspaceFileManifestSummary"] == nil {
+			if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
+				payload["workspaceFileManifestSummary"] = manifest
+			}
+		}
+	}
+	if len(payload) > 0 {
+		payload["projectionPolicy"] = "bounded validation signal; full step inputs/outputs are available by evidence refs, not duplicated in the provider volatile tail"
 	}
 	return payload
 }
@@ -1328,9 +1622,18 @@ func cacheAwareMemoryRetrievalSummary(retrieval map[string]any) map[string]any {
 		"queryTextSha256",
 		"providerId",
 		"operation",
-		"reason",
 	} {
-		copyMapValue(out, key, retrieval[key])
+		switch key {
+		case "selectedMemoryIds", "excludedMemoryIds", "retrievedMemoryIds":
+			if values := limitedStringSlice(stringSliceFromAny(retrieval[key]), 12); len(values) > 0 {
+				out[key] = values
+			}
+		default:
+			copyMapValue(out, key, retrieval[key])
+		}
+	}
+	if reason := strings.TrimSpace(firstProviderString(retrieval["reason"])); reason != "" {
+		out["reason"] = truncateProviderBudgetString(reason, 256)
 	}
 	if scores := cacheAwareMemorySelectionScores(mapSliceFromAny(retrieval["selectionScores"])); len(scores) > 0 {
 		out["selectionScores"] = scores
@@ -1342,12 +1645,18 @@ func cacheAwareMemorySelectionScores(scores []map[string]any) []map[string]any {
 	if len(scores) == 0 {
 		return nil
 	}
+	const maxScores = 4
+	if len(scores) > maxScores {
+		scores = scores[:maxScores]
+	}
 	ret := make([]map[string]any, 0, len(scores))
 	for _, score := range scores {
 		item := map[string]any{}
 		copyMapValue(item, "id", score["id"])
 		copyMapValue(item, "score", score["score"])
-		copyMapValue(item, "reason", score["reason"])
+		if reason := strings.TrimSpace(firstProviderString(score["reason"])); reason != "" {
+			item["reason"] = truncateProviderBudgetString(reason, 256)
+		}
 		if len(item) > 0 {
 			ret = append(ret, item)
 		}
@@ -1361,17 +1670,27 @@ func cacheAwareSelectedMemories(memories []map[string]any, retrieval map[string]
 	}
 	selectedIDs := stringSetFromProviderValue(retrieval["selectedMemoryIds"])
 	excludedIDs := stringSetFromProviderValue(retrieval["excludedMemoryIds"])
-	ret := make([]map[string]any, 0, len(memories))
+	const maxMemories = 2
+	ret := make([]map[string]any, 0, min(len(memories), maxMemories))
 	for _, memory := range memories {
 		if !cacheAwareMemoryAllowed(memory, selectedIDs, excludedIDs) {
 			continue
 		}
 		item := map[string]any{}
-		for _, key := range []string{"id", "memoryType", "summary", "content", "tags", "importance", "confidence", "visibility", "provenance", "vectorScore"} {
+		for _, key := range []string{"id", "memoryType", "tags", "importance", "confidence", "visibility", "provenance", "vectorScore"} {
 			copyMapValue(item, key, memory[key])
+		}
+		if summary := strings.TrimSpace(firstProviderString(memory["summary"])); summary != "" {
+			item["summary"] = truncateProviderBudgetString(summary, 512)
+		}
+		if content := strings.TrimSpace(firstProviderString(memory["content"])); content != "" {
+			item["content"] = truncateProviderBudgetString(content, 512)
 		}
 		item["cacheability"] = cacheAwareMemoryCacheability(memory)
 		ret = append(ret, item)
+		if len(ret) >= maxMemories {
+			break
+		}
 	}
 	return ret
 }
