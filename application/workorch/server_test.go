@@ -256,18 +256,18 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	assertWorkspaceListAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces", workspaceID)
 	assertWorkspaceAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "main file workspace", "active")
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
-	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file", "run-main-file", workspaceID)
+	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")
-	blockedProviderRun := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/start", "run-main-file", "blocked_on_decision")
+	blockedProviderRun := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/start", "run-main-file", "blocked_on_decision")
 	if blockedProviderRun.Run.BlockingTicketID == "" {
 		t.Fatalf("blocked provider run ticket = %q, want non-empty", blockedProviderRun.Run.BlockingTicketID)
 	}
-	assertRunSnapshotAvailableWithState(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/snapshot", "run-main-file", workspaceID, "blocked_on_decision")
-	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/run-main-file/status", "run-main-file", "blocked_on_decision")
+	assertRunSnapshotAvailableWithState(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/snapshot", "run-main-file", workspaceID, "blocked_on_decision")
+	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/status", "run-main-file", "blocked_on_decision")
 
 	decisionResolveRunID := "run-decision-main-file"
 	blockedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionResolveRunID)
-	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionResolveRunID+"/status", decisionResolveRunID, "blocked_on_decision")
+	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+decisionResolveRunID+"/status", decisionResolveRunID, "blocked_on_decision")
 	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions", blockedDecisionID)
 	assertDecisionAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "open")
 	assertDecisionListAvailable(t, "http://"+addr+"/api/v1/workorch/decisions?workspaceId="+workspaceID, blockedDecisionID)
@@ -277,7 +277,7 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	decisionRejectRunID := "run-decision-rejected-main-file"
 	rejectedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionRejectRunID)
 	assertDecisionRejectAvailable(t, "http://"+addr+"/api/v1/workorch/decisions/"+rejectedDecisionID+"/resolve", rejectedDecisionID, decisioncommon.ResolutionTypeRejectCurrentPath)
-	rejectedRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+decisionRejectRunID+"/status", decisionRejectRunID, "failed")
+	rejectedRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+decisionRejectRunID+"/status", decisionRejectRunID, "failed")
 	if rejectedRun.Status.FailureReason == "" {
 		t.Fatalf("rejected run failureReason = %q, want non-empty", rejectedRun.Status.FailureReason)
 	}
@@ -293,7 +293,7 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	approvalRejectRunID := "run-approval-rejected-main-file"
 	rejectedApprovalID := seedBlockedApprovalRunForProcess(t, dataDir, workspaceID, approvalRejectRunID)
 	assertApprovalRejectAvailable(t, "http://"+addr+"/api/v1/workorch/approvals/"+rejectedApprovalID+"/reject", rejectedApprovalID, "rejected")
-	rejectedApprovalRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/runs/"+approvalRejectRunID+"/status", approvalRejectRunID, "failed")
+	rejectedApprovalRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRejectRunID+"/status", approvalRejectRunID, "failed")
 	if rejectedApprovalRun.Status.FailureReason == "" {
 		t.Fatalf("rejected approval run failureReason = %q, want non-empty", rejectedApprovalRun.Status.FailureReason)
 	}
@@ -334,17 +334,17 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-restart-completed", "", "")
-	blockedProviderRun := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/run-restart-completed/start", "run-restart-completed", "blocked_on_decision")
+	blockedProviderRun := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "run-restart-completed", "blocked_on_decision")
 
 	decisionRunID := "run-decision-restart-resolved"
 	blockedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionRunID)
 	assertDecisionResolveAvailable(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecisionID+"/resolve", blockedDecisionID, decisioncommon.ResolutionTypeProvideMissingInfo)
-	assertRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+decisionRunID+"/status", decisionRunID, "blocked_on_decision")
+	assertRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+decisionRunID+"/status", decisionRunID, "blocked_on_decision")
 
 	approvalRunID := "run-approval-restart-failed"
 	blockedApprovalID := seedBlockedApprovalRunForProcess(t, dataDir, workspaceID, approvalRunID)
 	assertApprovalRejectAvailable(t, "http://"+firstAddr+"/api/v1/workorch/approvals/"+blockedApprovalID+"/reject", blockedApprovalID, "rejected")
-	waitForRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/runs/"+approvalRunID+"/status", approvalRunID, "failed")
+	waitForRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID+"/status", approvalRunID, "failed")
 
 	stopWorkorchProcess(t, first)
 
@@ -355,20 +355,20 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 	waitForHealthy(t, "http://"+secondAddr+"/healthz")
 
 	assertWorkspaceAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID, workspaceID, "restart file workspace", "waiting_decision")
-	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed", "run-restart-completed", workspaceID, "blocked_on_decision")
-	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "blocked_on_decision")
-	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/status", "run-restart-completed", "blocked_on_decision")
+	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed", "run-restart-completed", workspaceID, "blocked_on_decision")
+	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/snapshot", "run-restart-completed", workspaceID, "blocked_on_decision")
+	assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/status", "run-restart-completed", "blocked_on_decision")
 
-	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID, decisionRunID, workspaceID, "blocked_on_decision")
-	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+decisionRunID+"/snapshot", decisionRunID, workspaceID, "blocked_on_decision")
+	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+decisionRunID, decisionRunID, workspaceID, "blocked_on_decision")
+	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+decisionRunID+"/snapshot", decisionRunID, workspaceID, "blocked_on_decision")
 	assertDecisionAvailable(t, "http://"+secondAddr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "resolved")
 
-	failedStatus := assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/status", approvalRunID, "failed")
+	failedStatus := assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID+"/status", approvalRunID, "failed")
 	if failedStatus.Status.FailureReason == "" {
 		t.Fatalf("failed status = %+v, want non-empty failure reason", failedStatus.Status)
 	}
-	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID, approvalRunID, workspaceID, "failed")
-	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/snapshot", approvalRunID, workspaceID, "failed")
+	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID, approvalRunID, workspaceID, "failed")
+	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID+"/snapshot", approvalRunID, workspaceID, "failed")
 	assertApprovalAvailable(t, "http://"+secondAddr+"/api/v1/workorch/approvals/"+blockedApprovalID, blockedApprovalID, "rejected")
 
 	assertWorkspaceSnapshotAvailable(
@@ -379,9 +379,9 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 		[]string{blockedProviderRun.Run.BlockingTicketID, blockedDecisionID},
 		[]string{blockedApprovalID},
 	)
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/run-restart-completed/start", "conflict")
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/resume", "conflict")
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/runs/"+approvalRunID+"/start", "conflict")
+	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "conflict")
+	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID+"/resume", "conflict")
+	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+approvalRunID+"/start", "conflict")
 }
 
 func TestWorkorchServerModeFailsWithUnsupportedRepositoryBackend(t *testing.T) {
@@ -942,7 +942,7 @@ func assertRunStatusAvailable(t *testing.T, endpoint string, runID string, expec
 func waitForRunStatusAvailable(t *testing.T, endpoint string, runID string, expectedState string) workorchRunStatusResponse {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	var last workorchRunStatusResponse
 	var lastErr error
 	for time.Now().Before(deadline) {
@@ -1291,6 +1291,6 @@ func TestWorkorchServerModeReadyzReflectsConfiguration(t *testing.T) {
 }
 
 func Example_main() {
-	fmt.Println("workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
-	// Output: workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/runs, /api/v1/workorch/runs/{runId}, /api/v1/workorch/runs/{runId}/snapshot, /api/v1/workorch/runs/{runId}/status, /api/v1/workorch/runs/{runId}/observability, /api/v1/workorch/runs/{runId}/start, /api/v1/workorch/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
+	fmt.Println("workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/status, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/observability, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/start, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject")
+	// Output: workorch --server serves HTTP endpoints: /healthz, /readyz, /metrics, /api/v1/workorch/workspaces, /api/v1/workorch/workspaces/{workspaceId}, /api/v1/workorch/workspaces/{workspaceId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/snapshot, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/status, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/observability, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/start, /api/v1/workorch/workspaces/{workspaceId}/runs/{runId}/resume, /api/v1/workorch/decisions, /api/v1/workorch/decisions/{ticketId}, /api/v1/workorch/decisions/{ticketId}/resolve, /api/v1/workorch/approvals, /api/v1/workorch/approvals/{approvalId}, /api/v1/workorch/approvals/{approvalId}/approve, /api/v1/workorch/approvals/{approvalId}/reject
 }

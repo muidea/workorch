@@ -411,9 +411,9 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$TMP_DIR/status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$TMP_DIR/status.json"
 grep '"state": "completed"' "$TMP_DIR/status.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
 assert_long_result
 
 cat <<EOF

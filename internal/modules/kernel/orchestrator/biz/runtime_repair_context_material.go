@@ -1503,6 +1503,9 @@ func repairInputHasEmptyWorkspaceSurfaceEvidence(input map[string]any) bool {
 	if nested := mapFromValue(input["failedStepOutput"]); len(nested) > 0 && repairInputHasEmptyWorkspaceSurfaceEvidence(nested) {
 		return true
 	}
+	if processTimelineHasEmptyWorkspaceSurface(input["processEvidenceTimeline"]) {
+		return true
+	}
 	return false
 }
 
@@ -1516,6 +1519,9 @@ func graphEvidenceHasEmptyWorkspaceSurface(value any) bool {
 	stage := strings.TrimSpace(stringFromMap(item, "stage"))
 	if stage == "" {
 		stage = strings.TrimSpace(stringFromMap(output, "stage"))
+	}
+	if graphEvidenceHasNoGoModuleSurface(item, output) {
+		return true
 	}
 	if kind != "file/list" && stage != "file_list" {
 		return false
@@ -1541,6 +1547,39 @@ func graphEvidenceHasEmptyWorkspaceSurface(value any) bool {
 		}
 	}
 	return false
+}
+
+func processTimelineHasEmptyWorkspaceSurface(value any) bool {
+	for _, item := range mapSliceFromValue(value) {
+		if graphEvidenceHasEmptyWorkspaceSurface(item) {
+			return true
+		}
+		if graphEvidenceHasNoGoModuleSurface(item, mapFromValue(item["output"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphEvidenceHasNoGoModuleSurface(item map[string]any, output map[string]any) bool {
+	kind := canonicalRuntimeGraphNodeKind(firstNonEmptyString(
+		stringFromMap(item, "kind"),
+		stringFromMap(output, "kind"),
+	))
+	if kind != "shell/command" {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(item, "summary"),
+		stringFromMap(item, "outputSummary"),
+		stringFromMap(output, "stdout"),
+		stringFromMap(output, "stderr"),
+		stringFromMap(output, "error"),
+		stringFromMap(output, "reason"),
+	}, "\n"))
+	return strings.Contains(text, "directory prefix . does not contain main module") ||
+		strings.Contains(text, "go.mod file not found") ||
+		strings.Contains(text, "cannot find main module")
 }
 
 func graphEvidenceEntryCount(value any) (int, bool) {

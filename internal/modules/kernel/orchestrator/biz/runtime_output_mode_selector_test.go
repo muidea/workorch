@@ -209,6 +209,83 @@ func TestOutputModeSelectorUsesIncrementalArtifactForRequestedModeWithInheritedB
 	}
 }
 
+func TestOutputModeSelectorInheritsStateChangingSignalFromRunExecutionContext(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-output-mode-state-changing-context",
+		WorkspaceID: "ws-output-mode-state-changing-context",
+		ExecutionContext: map[string]any{
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+		},
+	}
+	input := map[string]any{}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
+
+	if input["stateChangingOutputRequired"] != true ||
+		input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["requestedOutputMode"] != outputModeIncrementalArtifact {
+		t.Fatalf("input did not inherit run execution-context state-changing signals: %+v", input)
+	}
+	if outputModeFromInput(input) != outputModeIncrementalArtifact {
+		t.Fatalf("outputMode = %v, want incrementalArtifact", input["outputMode"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustReturnArtifactPlan"] != true ||
+		required["outputMode"] != outputModeIncrementalArtifact {
+		t.Fatalf("requiredOutput = %+v, want artifact plan contract", required)
+	}
+	if inputRequiresConcreteValidationEvidence(input) {
+		t.Fatalf("inputRequiresConcreteValidationEvidence = true, want incremental artifact state-changing contract to take precedence")
+	}
+	contract := mapFromValue(input["artifactOutputContract"])
+	if contract["phase"] != artifactOutputPhasePlan {
+		t.Fatalf("artifactOutputContract = %+v, want artifact_plan phase", contract)
+	}
+}
+
+func TestOutputModeSelectorDoesNotInheritStateChangingSignalForCompletionFollowUp(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-output-mode-completion-follow-up",
+		WorkspaceID: "ws-output-mode-completion-follow-up",
+		ExecutionContext: map[string]any{
+			"requestedOutputMode":         outputModeIncrementalArtifact,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"estimatedPatchContentBytes":         defaultMaxPatchContentBytes + 1,
+					"expectedStateChangingArtifactCount": 1,
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"completionFollowUp":       true,
+		stepInputKeyAssessmentOnly: true,
+	}
+	orch := &RuntimeOrchestrator{policy: NormalizeRuntimePolicy(RuntimePolicy{})}
+
+	applyLLMOutputModeSelection(context.Background(), orch.policy.LLMOutput, orch.evidence.ArtifactContinuations, run, input, nil, 0)
+
+	for _, key := range []string{"stateChangingOutputRequired", "repairObjective", "requestedOutputMode", "outputMode", "outputModeSelector", "artifactOutputContract"} {
+		if input[key] != nil {
+			t.Fatalf("%s = %v, want nil for assessment-only completion follow-up; input=%+v", key, input[key], input)
+		}
+	}
+	if input["completionFollowUp"] != true || input[stepInputKeyAssessmentOnly] != true {
+		t.Fatalf("completion follow-up markers were not preserved: %+v", input)
+	}
+}
+
 func TestOutputModeSelectorRestoresBudgetSignalFromRunExecutionContext(t *testing.T) {
 	run := &runmodel.Run{
 		ID:          "run-output-mode-restored",

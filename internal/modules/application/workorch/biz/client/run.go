@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-
-	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 // ListRuns returns all runs, optionally filtered by workspace.
 func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error) {
 	path := "/api/v1/workorch/runs"
 	if workspaceID != "" {
-		path += "?workspaceId=" + workspaceID
+		values := url.Values{}
+		values.Set("workspaceId", workspaceID)
+		path = joinQuery(path, values)
 	}
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
@@ -21,9 +21,12 @@ func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error
 	return decodeEnvelopeSlice[Run](resp, "runs")
 }
 
-// GetRun returns a single run.
-func (c *Client) GetRun(ctx context.Context, runID string) (*Run, error) {
-	resp, err := c.do(ctx, "GET", runPath(ctx, runID, ""), nil)
+// GetRun returns a single run, optionally scoped to a workspace.
+func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	resp, err := c.do(ctx, "GET", runPath(workspaceID, runID, ""), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +40,7 @@ func (c *Client) CreateRun(ctx context.Context, workspaceID, runID, goalID, dodI
 		GoalID string `json:"goalId,omitempty"`
 		DoDID  string `json:"doDId,omitempty"`
 	}{RunID: runID, GoalID: goalID, DoDID: dodID}
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs", workspaceID), req)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs", escapePath(workspaceID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -45,8 +48,11 @@ func (c *Client) CreateRun(ctx context.Context, workspaceID, runID, goalID, dodI
 }
 
 // StartRun starts a created run.
-func (c *Client) StartRun(ctx context.Context, runID string) (*Run, error) {
-	resp, err := c.do(ctx, "POST", runPath(ctx, runID, "start"), nil)
+func (c *Client) StartRun(ctx context.Context, workspaceID, runID string) (*Run, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	resp, err := c.do(ctx, "POST", runPath(workspaceID, runID, "start"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -54,14 +60,21 @@ func (c *Client) StartRun(ctx context.Context, runID string) (*Run, error) {
 }
 
 // ResumeRun resumes a blocked run, optionally merging additional execution context.
-func (c *Client) ResumeRun(ctx context.Context, runID string, executionContextPatch ...map[string]any) (*Run, error) {
+func (c *Client) ResumeRun(ctx context.Context, workspaceID, runID string, executionContextPatch ...map[string]any) (*Run, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	return c.resumeRun(ctx, runPath(workspaceID, runID, "resume"), executionContextPatch...)
+}
+
+func (c *Client) resumeRun(ctx context.Context, path string, executionContextPatch ...map[string]any) (*Run, error) {
 	var body any
 	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
 		body = struct {
 			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
 		}{ExecutionContextPatch: executionContextPatch[0]}
 	}
-	resp, err := c.do(ctx, "POST", runPath(ctx, runID, "resume"), body)
+	resp, err := c.do(ctx, "POST", path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -69,14 +82,22 @@ func (c *Client) ResumeRun(ctx context.Context, runID string, executionContextPa
 }
 
 // GetRunStatus returns the status of a run, optionally with long-poll waiting.
-func (c *Client) GetRunStatus(ctx context.Context, runID, waitState string, waitTimeoutMs int) (*RunStatus, error) {
-	path := runPath(ctx, runID, "status")
+func (c *Client) GetRunStatus(ctx context.Context, workspaceID, runID, waitState string, waitTimeoutMs int) (*RunStatus, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	return c.getRunStatus(ctx, runPath(workspaceID, runID, "status"), waitState, waitTimeoutMs)
+}
+
+func (c *Client) getRunStatus(ctx context.Context, path string, waitState string, waitTimeoutMs int) (*RunStatus, error) {
+	values := url.Values{}
 	if waitState != "" {
-		path += fmt.Sprintf("?waitState=%s", url.QueryEscape(waitState))
+		values.Set("waitState", waitState)
 		if waitTimeoutMs > 0 {
-			path += fmt.Sprintf("&waitTimeoutMillis=%d", waitTimeoutMs)
+			values.Set("waitTimeoutMillis", fmt.Sprintf("%d", waitTimeoutMs))
 		}
 	}
+	path = joinQuery(path, values)
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -85,8 +106,11 @@ func (c *Client) GetRunStatus(ctx context.Context, runID, waitState string, wait
 }
 
 // GetRunSnapshot returns the full run snapshot.
-func (c *Client) GetRunSnapshot(ctx context.Context, runID string) (*RunSnapshot, error) {
-	resp, err := c.do(ctx, "GET", runPath(ctx, runID, "snapshot"), nil)
+func (c *Client) GetRunSnapshot(ctx context.Context, workspaceID, runID string) (*RunSnapshot, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	resp, err := c.do(ctx, "GET", runPath(workspaceID, runID, "snapshot"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -94,17 +118,19 @@ func (c *Client) GetRunSnapshot(ctx context.Context, runID string) (*RunSnapshot
 }
 
 // GetRunObservability returns the run observability with timeline.
-func (c *Client) GetRunObservability(ctx context.Context, runID string) (*RunObservability, error) {
-	resp, err := c.do(ctx, "GET", runPath(ctx, runID, "observability"), nil)
+func (c *Client) GetRunObservability(ctx context.Context, workspaceID, runID string) (*RunObservability, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	resp, err := c.do(ctx, "GET", runPath(workspaceID, runID, "observability"), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[RunObservability](resp, "observability")
 }
 
-func runPath(ctx context.Context, runID string, action string) string {
-	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
-	encodedRunID := url.PathEscape(runID)
+func runPath(workspaceID string, runID string, action string) string {
+	encodedRunID := escapePath(runID)
 	if workspaceID == "" {
 		if action == "" {
 			return fmt.Sprintf("/api/v1/workorch/runs/%s", encodedRunID)
@@ -112,7 +138,7 @@ func runPath(ctx context.Context, runID string, action string) string {
 		return fmt.Sprintf("/api/v1/workorch/runs/%s/%s", encodedRunID, action)
 	}
 	if action == "" {
-		return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s", url.PathEscape(string(workspaceID)), encodedRunID)
+		return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s", escapePath(workspaceID), encodedRunID)
 	}
-	return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s/%s", url.PathEscape(string(workspaceID)), encodedRunID, action)
+	return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s/%s", escapePath(workspaceID), encodedRunID, action)
 }

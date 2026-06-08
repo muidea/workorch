@@ -16,7 +16,7 @@ func (c *Client) ListSouls(ctx context.Context) ([]Soul, error) {
 }
 
 func (c *Client) GetSoul(ctx context.Context, id string) (*Soul, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/souls/%s", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (c *Client) CreateSoul(ctx context.Context, s *Soul) (*Soul, error) {
 }
 
 func (c *Client) UpdateSoul(ctx context.Context, id string, s *Soul) (*Soul, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/souls/%s", id), s)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (c *Client) UpdateSoul(ctx context.Context, id string, s *Soul) (*Soul, err
 }
 
 func (c *Client) DeleteSoul(ctx context.Context, id string) error {
-	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/souls/%s", id), nil)
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/souls/%s", escapePath(id)), nil)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,9 @@ func (c *Client) DeleteSoul(ctx context.Context, id string) error {
 func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]Skill, error) {
 	path := "/api/v1/workorch/skills"
 	if workspaceID != "" {
-		path += "?workspaceId=" + workspaceID
+		values := url.Values{}
+		values.Set("workspaceId", workspaceID)
+		path = joinQuery(path, values)
 	}
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
@@ -61,9 +63,11 @@ func (c *Client) ListSkills(ctx context.Context, workspaceID string) ([]Skill, e
 }
 
 func (c *Client) GetSkill(ctx context.Context, id, workspaceID string) (*Skill, error) {
-	path := fmt.Sprintf("/api/v1/workorch/skills/%s", id)
+	path := fmt.Sprintf("/api/v1/workorch/skills/%s", escapePath(id))
 	if workspaceID != "" {
-		path += "?workspaceId=" + workspaceID
+		values := url.Values{}
+		values.Set("workspaceId", workspaceID)
+		path = joinQuery(path, values)
 	}
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
@@ -89,7 +93,7 @@ func (c *Client) ListMCPServers(ctx context.Context) ([]MCPServer, error) {
 }
 
 func (c *Client) GetMCPServer(ctx context.Context, id string) (*MCPServer, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +109,7 @@ func (c *Client) CreateMCPServer(ctx context.Context, s *MCPServer) (*MCPServer,
 }
 
 func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *MCPServer) (*MCPServer, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", id), s)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s", escapePath(id)), s)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +117,7 @@ func (c *Client) UpdateMCPServer(ctx context.Context, id string, s *MCPServer) (
 }
 
 func (c *Client) ListMCPServerTools(ctx context.Context, serverID string) ([]MCPTool, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s/tools", serverID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/servers/%s/tools", escapePath(serverID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +133,7 @@ func (c *Client) ListMCPCapabilities(ctx context.Context) ([]MCPCapability, erro
 }
 
 func (c *Client) GetMCPCapability(ctx context.Context, id string) (*MCPCapability, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/capabilities/%s", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/mcp/capabilities/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +175,7 @@ func (c *Client) SearchMemory(ctx context.Context, query MemorySearchQuery) ([]M
 }
 
 func (c *Client) GetMemory(ctx context.Context, memoryID string) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +183,7 @@ func (c *Client) GetMemory(ctx context.Context, memoryID string) (*MemoryItem, e
 }
 
 func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *MemoryItem) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory", url.PathEscape(workspaceID)), item)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory", escapePath(workspaceID)), item)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +191,7 @@ func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *Mem
 }
 
 func (c *Client) UpdateMemory(ctx context.Context, memoryID string, item *MemoryItem) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), item)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), item)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +199,7 @@ func (c *Client) UpdateMemory(ctx context.Context, memoryID string, item *Memory
 }
 
 func (c *Client) DeleteMemory(ctx context.Context, memoryID string) error {
-	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/memory/%s", url.PathEscape(memoryID)), nil)
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), nil)
 	if err != nil {
 		return err
 	}
@@ -212,7 +216,7 @@ func (c *Client) ListWorkspaceTemplates(ctx context.Context) ([]WorkspaceTemplat
 }
 
 func (c *Client) GetWorkspaceTemplate(ctx context.Context, id string) (*WorkspaceTemplate, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +232,7 @@ func (c *Client) CreateWorkspaceTemplate(ctx context.Context, t *WorkspaceTempla
 }
 
 func (c *Client) UpdateWorkspaceTemplate(ctx context.Context, id string, t *WorkspaceTemplate) (*WorkspaceTemplate, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", id), t)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", escapePath(id)), t)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +240,7 @@ func (c *Client) UpdateWorkspaceTemplate(ctx context.Context, id string, t *Work
 }
 
 func (c *Client) DeleteWorkspaceTemplate(ctx context.Context, id string) error {
-	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", id), nil)
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspace-templates/%s", escapePath(id)), nil)
 	if err != nil {
 		return err
 	}
@@ -254,22 +258,14 @@ func (c *Client) GetConfiguration(ctx context.Context) (*ServiceConfiguration, e
 
 func (c *Client) ListEvents(ctx context.Context, workspaceID, runID string) ([]EventRecord, error) {
 	path := "/api/v1/workorch/events"
-	parts := []string{}
+	values := url.Values{}
 	if workspaceID != "" {
-		parts = append(parts, "workspaceId="+workspaceID)
+		values.Set("workspaceId", workspaceID)
 	}
 	if runID != "" {
-		parts = append(parts, "runId="+runID)
+		values.Set("runId", runID)
 	}
-	if len(parts) > 0 {
-		path += "?"
-		for i, p := range parts {
-			if i > 0 {
-				path += "&"
-			}
-			path += p
-		}
-	}
+	path = joinQuery(path, values)
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -279,7 +275,7 @@ func (c *Client) ListEvents(ctx context.Context, workspaceID, runID string) ([]E
 
 // GetWorkspaceSoulBindings returns the soul bindings for a workspace.
 func (c *Client) GetWorkspaceSoulBindings(ctx context.Context, workspaceID string) (*WorkspaceSoulBindings, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", workspaceID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +284,7 @@ func (c *Client) GetWorkspaceSoulBindings(ctx context.Context, workspaceID strin
 
 // UpdateWorkspaceSoulBindings updates the soul bindings for a workspace.
 func (c *Client) UpdateWorkspaceSoulBindings(ctx context.Context, workspaceID string, b *WorkspaceSoulBindings) (*WorkspaceSoulBindings, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", workspaceID), b)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/soul-bindings", escapePath(workspaceID)), b)
 	if err != nil {
 		return nil, err
 	}

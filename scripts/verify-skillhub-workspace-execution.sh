@@ -325,7 +325,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-
   -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
 grep '"state": "completed"' "$TMP_DIR/activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/run-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
 validate_snapshot
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory.json"
 grep 'Selected skills completed run' "$TMP_DIR/memory.json" >/dev/null

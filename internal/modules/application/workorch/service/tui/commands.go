@@ -67,7 +67,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 				var goal *backend.GoalInfo
 				var dod *backend.DoDInfo
 				if displayRun != nil {
-					status, _ = be.Run().Status(ctx, displayRun.ID)
+					status, _ = be.Run().Status(ctx, wsID, displayRun.ID)
 					if displayRun.GoalID != "" {
 						goal, _ = be.Goal().Get(ctx, displayRun.GoalID)
 					}
@@ -106,7 +106,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		}
 		run := selectWorkspaceRun(workspace.ActiveRunID, runs)
 		if run != nil {
-			fullRun, err := be.Run().Get(ctx, run.ID)
+			fullRun, err := be.Run().Get(ctx, wsID, run.ID)
 			if err == nil && fullRun != nil {
 				run = fullRun
 			}
@@ -115,7 +115,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		var goal *backend.GoalInfo
 		var dod *backend.DoDInfo
 		if run != nil {
-			status, _ = be.Run().Status(ctx, run.ID)
+			status, _ = be.Run().Status(ctx, wsID, run.ID)
 			if run.GoalID != "" {
 				goal, _ = be.Goal().Get(ctx, run.GoalID)
 			}
@@ -333,7 +333,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		targetRunID := common.RunID(runID)
 		var run *backend.RunInfo
 		if targetRunID != "" {
-			fetchedRun, err := be.Run().Get(ctx, targetRunID)
+			fetchedRun, err := be.Run().Get(ctx, wsID, targetRunID)
 			if err != nil {
 				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
 			}
@@ -357,7 +357,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 				return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
 			}
 			targetRunID = run.ID
-			fetchedRun, err := be.Run().Get(ctx, targetRunID)
+			fetchedRun, err := be.Run().Get(ctx, wsID, targetRunID)
 			if err != nil {
 				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
 			}
@@ -374,7 +374,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		case common.RunStateValidating:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
-			resumed, err := be.Run().Resume(ctx, run.ID, operatorInputPatch(run, operatorInput))
+			resumed, err := be.Run().Resume(ctx, wsID, run.ID, operatorInputPatch(run, operatorInput))
 			if err != nil {
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
 			}
@@ -489,7 +489,7 @@ func ResolveDecisionWithType(be backend.Backend, ticketID string, resolutionType
 		}
 		if decision.RunID != "" {
 			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, decision.WorkspaceID)
-			_, err = be.Run().Resume(resumeCtx, decision.RunID)
+			_, err = be.Run().Resume(resumeCtx, decision.WorkspaceID, decision.RunID)
 		}
 		return DecisionResolvedMsg{Decision: decision, Error: err}
 	}
@@ -530,7 +530,7 @@ func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cm
 		}
 		if err == nil && !resumeHandled && approval != nil && approval.RunID != "" {
 			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-			_, err = be.Run().Resume(resumeCtx, approval.RunID)
+			_, err = be.Run().Resume(resumeCtx, approval.WorkspaceID, approval.RunID)
 		}
 		return ApprovalResolvedMsg{Approval: approval, Error: err}
 	}
@@ -541,13 +541,13 @@ func resumeApprovalRun(ctx context.Context, be backend.Backend, approval *backen
 		return nil
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-	run, err := be.Run().Get(ctx, approval.RunID)
+	run, err := be.Run().Get(ctx, approval.WorkspaceID, approval.RunID)
 	if err != nil {
 		return err
 	}
 	if run == nil || run.State != common.RunStateBlockedOnApproval {
 		return nil
 	}
-	_, err = be.Run().Resume(ctx, approval.RunID)
+	_, err = be.Run().Resume(ctx, approval.WorkspaceID, approval.RunID)
 	return err
 }

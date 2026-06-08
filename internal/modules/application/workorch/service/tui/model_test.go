@@ -3325,29 +3325,38 @@ func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, re
 	f.parent.activations = append(f.parent.activations, req)
 	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
 }
-func (f *recordingRun) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
+func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumes = append(f.parent.resumes, id)
-	f.parent.lastResumeWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
+	f.parent.lastResumeWorkspace = wsID
 	if len(executionContextPatch) > 0 {
 		f.parent.resumePatches = append(f.parent.resumePatches, executionContextPatch[0])
 	}
-	workspaceID := f.parent.lastListWorkspace
+	workspaceID := wsID
 	if workspaceID == "" {
 		workspaceID = "ws-1"
 	}
 	return &backend.RunInfo{ID: id, WorkspaceID: workspaceID, State: common.RunStateRunning}, nil
 }
-func (f *recordingRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
-	f.parent.lastGetWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
-	return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
+func (f *recordingRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
+	f.parent.lastGetWorkspace = wsID
+	if id == "run-from-ws-1" {
+		return &backend.RunInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
+	}
+	if wsID == "" {
+		wsID = "ws-1"
+	}
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil
 }
 func (f *recordingRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
 	f.parent.lastListWorkspace = wsID
 	return []backend.RunInfo{{ID: "run-continue", WorkspaceID: wsID, State: f.parent.runState}}, nil
 }
-func (f *recordingRun) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
-	f.parent.lastStatusWorkspace = common.RuntimeWorkspaceIDFromContext(ctx)
-	return &backend.RunStatusInfo{ID: id, WorkspaceID: "ws-1", State: f.parent.runState}, nil
+func (f *recordingRun) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
+	f.parent.lastStatusWorkspace = wsID
+	if wsID == "" {
+		wsID = "ws-1"
+	}
+	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil
 }
 
 type conflictApprovalBE struct {
@@ -3382,18 +3391,18 @@ type conflictRunBackend struct{ parent *conflictApprovalBE }
 func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
 }
-func (f *conflictRunBackend) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
+func (f *conflictRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumed = true
-	return &backend.RunInfo{ID: id, State: common.RunStateRunning}, nil
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: common.RunStateRunning}, nil
 }
-func (f *conflictRunBackend) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id, State: f.parent.runState}, nil
+func (f *conflictRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil
 }
 func (f *conflictRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
 	return nil, nil
 }
-func (f *conflictRunBackend) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
-	return &backend.RunStatusInfo{ID: id, State: f.parent.runState}, nil
+func (f *conflictRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
+	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: f.parent.runState}, nil
 }
 
 type fakeWS struct{}
@@ -3473,17 +3482,17 @@ type fakeR struct{}
 func (f *fakeR) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", State: "running"}, nil
 }
-func (f *fakeR) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id}, nil
+func (f *fakeR) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeR) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id}, nil
+func (f *fakeR) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID}, nil
 }
 func (f *fakeR) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
 	return nil, nil
 }
-func (f *fakeR) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
-	return &backend.RunStatusInfo{ID: id, State: "running"}, nil
+func (f *fakeR) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
+	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
 
 type fakeDC struct{}

@@ -242,6 +242,33 @@ func coverageValidationRepairShouldEscalateToStateChanging(
 		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
 }
 
+func emptyWorkspaceEvidenceShouldStartStateChangingRepair(
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	input map[string]any,
+) bool {
+	if run == nil || failedStep == nil || !runExecutionContractRequiresStateChange(run) {
+		return false
+	}
+	if !stepRequiresConcreteFailureEvidenceAcquisition(failedStep) {
+		return false
+	}
+	class := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(failedStep.Output, failureOutputKeyClass),
+		stringFromMap(input, failureOutputKeyClass),
+	))
+	if class != failureClassDoDCoverageMissing {
+		return false
+	}
+	if len(missingDoDItemsFromFailureOutput(failedStep.Output)) == 0 &&
+		len(missingGoalCoverageFromFailureOutput(failedStep.Output)) == 0 &&
+		len(missingGoalCoverageFromStep(failedStep)) == 0 {
+		return false
+	}
+	return repairInputHasEmptyWorkspaceSurfaceEvidence(input) ||
+		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
+}
+
 func runtimeRepairHasConcreteImplementationTargetEvidence(input map[string]any, failedStep *runModel.Step) bool {
 	if repairHasImplementationTargetEvidence(input, mapFromValue(input["repairActionPackage"])) {
 		return true

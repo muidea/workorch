@@ -1627,6 +1627,110 @@ func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsConcreteValidation
 	}
 }
 
+func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAppliesToConcreteFailureEvidenceAcquisition(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				return map[string]any{
+					"completionState": "completed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":             true,
+						"summary":               "graph expansion limit assessment completed",
+						"goalOutcome":           "bounded",
+						"implementationSummary": "bounded",
+						"verificationSummary":   "bounded",
+						"items": []map[string]any{{
+							"item":         "bounded",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
+			return map[string]any{"status": "completed"}, nil
+		},
+	}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-graph-limit-concrete-failure-evidence")
+	runID := common.RunID("run-graph-limit-concrete-failure-evidence")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           "dod",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		State:           common.RunStateRunning,
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for i := 0; i <= maxGraphFollowUpExpansionAttempts; i++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/follow-up-%d", runID, i)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"graphFollowUp":                   true,
+				"concreteFailureEvidenceRequired": true,
+				"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			},
+			Output: map[string]any{
+				stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+					{ID: fmt.Sprintf("verify-%d", i), Kind: "shell/command", Input: map[string]any{"command": "true"}},
+				}},
+			},
+		}
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed expansion step: %v", err)
+		}
+	}
+	current := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-current"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		},
+		Output: map[string]any{
+			stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+				{ID: "verify-current", Kind: "shell/command", Input: map[string]any{"command": "true"}},
+			}},
+		},
+	}
+	if err := stepRepo.Create(ctx, current); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+
+	handled, err := orch.validateGraphExpansionBoundary(ctx, run, current, nil, current.Output, workspace)
+	if err != nil {
+		t.Fatalf("validate graph expansion boundary: %v", err)
+	}
+	if !handled {
+		t.Fatalf("handled = false, want concrete failure evidence graph to obey graph expansion limit")
+	}
+	stored, err := stepRepo.Get(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("get current step: %v", err)
+	}
+	if !boolValue(stored.Output["ignoredExecutionGraph"]) {
+		t.Fatalf("ignoredExecutionGraph = %v, want true", stored.Output["ignoredExecutionGraph"])
+	}
+}
+
 func TestRuntimeOrchestrator_GraphFollowUpExpansionLimitAllowsContractedStateChangingGraph(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

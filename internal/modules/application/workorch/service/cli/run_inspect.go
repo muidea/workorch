@@ -19,7 +19,7 @@ var runCoverageCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runID := common.RunID(args[0])
-		run, err := mustBackend().Run().Get(ctx(), runID)
+		run, err := mustBackend().Run().Get(runCommandContext(cmd), runCommandWorkspaceID(cmd), runID)
 		if err != nil {
 			return fmt.Errorf("get run: %w", err)
 		}
@@ -60,7 +60,7 @@ var runTimelineCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runID := common.RunID(args[0])
-		items, err := listRunTimelineEvents(runID)
+		items, err := listRunTimelineEvents(runCommandContext(cmd), runCommandWorkspaceID(cmd), runID)
 		if err != nil {
 			return err
 		}
@@ -105,8 +105,8 @@ func workspaceSnapshotForRun(run *backend.RunInfo) (*backend.WorkspaceSnapshotIn
 	return snapshot, nil
 }
 
-func listRunTimelineEvents(runID common.RunID) ([]backend.EventRecordInfo, error) {
-	run, err := mustBackend().Run().Get(ctx(), runID)
+func listRunTimelineEvents(runCtx context.Context, workspaceID common.WorkspaceID, runID common.RunID) ([]backend.EventRecordInfo, error) {
+	run, err := mustBackend().Run().Get(runCtx, workspaceID, runID)
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
 	}

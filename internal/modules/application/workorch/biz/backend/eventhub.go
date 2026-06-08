@@ -323,24 +323,24 @@ func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.Workspace
 	})
 	return decodeResultResource[RunInfo](result, err)
 }
-func (b *eventHubRunBackend) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
+func (b *eventHubRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
 	var payload map[string]any
 	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
 		payload = map[string]any{"executionContextPatch": executionContextPatch[0]}
 	}
-	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), payload)
+	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, wsID, id, "run", string(id), payload)
 	return decodeResultResource[RunInfo](result, err)
 }
-func (b *eventHubRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), nil)
+func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, wsID, id, "run", string(id), nil)
 	return decodeResultResource[RunInfo](result, err)
 }
 func (b *eventHubRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandRunList, wsID, "", "run", "", nil)
 	return decodeResultResources[RunInfo](result, err)
 }
-func (b *eventHubRunBackend) Status(ctx context.Context, id common.RunID) (*RunStatusInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunStatus, common.RuntimeWorkspaceIDFromContext(ctx), id, "run", string(id), nil)
+func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandRunStatus, wsID, id, "run", string(id), nil)
 	return decodeResultResource[RunStatusInfo](result, err)
 }
 

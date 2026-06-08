@@ -131,7 +131,7 @@ wait_run_state() {
   local output_file="$4"
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
     if python3 - "$output_file" "$expected_state" <<'PY'
 import json
 import sys
@@ -155,7 +155,7 @@ wait_run_state_any() {
   shift 3
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
     if python3 - "$output_file" "$@" <<'PY'
 import json
 import sys
@@ -266,7 +266,7 @@ verify_software_dev_profile_snapshot() {
   local snapshot_file="$3"
   local results_metadata_file="$TMP_DIR/${workspace_id_for_run}-${run_id}-profile-results-metadata.json"
   local results_file="$TMP_DIR/${workspace_id_for_run}-${run_id}-profile-results.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/results?workspaceId=$workspace_id_for_run&limit=500" >"$results_metadata_file"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id_for_run/runs/$run_id/results&limit=500" >"$results_metadata_file"
   python3 - "$results_metadata_file" "$results_file" "$snapshot_file" "$TMP_DIR/configuration.json" "$BASE_URL" "$workspace_id_for_run" "$run_id" <<'PY'
 import json
 import os
@@ -2142,8 +2142,8 @@ scenario1_run_id="$(activate_workspace_execution \
   "$TMP_DIR/scenario1-activation.json" \
   "$scenario1_known_run_ids")"
 wait_run_state "$workspace_id" "$scenario1_run_id" "completed" "$TMP_DIR/scenario1-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/scenario1-snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario1_run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/scenario1-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$scenario1_run_id/snapshot" >"$TMP_DIR/scenario1-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$scenario1_run_id/observability" >"$TMP_DIR/scenario1-observability.json"
 verify_software_dev_profile_snapshot "$workspace_id" "$scenario1_run_id" "$TMP_DIR/scenario1-snapshot.json"
 
 python3 - "$TMP_DIR/scenario1-snapshot.json" "$workspace_workdir/calculator.go" <<'PY'
@@ -2218,7 +2218,7 @@ if [[ "$scenario2_state" == "blocked_on_decision" ]]; then
   fi
   wait_run_state "$workspace_id" "$scenario2_run_id" "superseded" "$TMP_DIR/scenario2-status.json"
 fi
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario2_run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/scenario2-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$scenario2_run_id/snapshot" >"$TMP_DIR/scenario2-snapshot.json"
 deadline=$((SECONDS + 60))
 while (( SECONDS <= deadline )); do
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/scenario2-workspace-snapshot.json"
@@ -2317,7 +2317,7 @@ scenario3_run_id="$(activate_workspace_execution \
   "$TMP_DIR/scenario3-activation.json" \
   "$scenario3_known_run_ids")"
 wait_run_state_any "$scenario3_workspace_id" "$scenario3_run_id" "$TMP_DIR/scenario3-initial-status.json" "completed" "superseded"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_run_id/snapshot?workspaceId=$scenario3_workspace_id" >"$TMP_DIR/scenario3-initial-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario3_run_id/snapshot" >"$TMP_DIR/scenario3-initial-snapshot.json"
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/goals" -H 'Content-Type: application/json' \
   -d '{"text":"['"$E2E_MARKER"'] 补充目标：项目还必须生成 README.md，并说明这是从空 workspace 初始化的新项目。"}' >"$TMP_DIR/scenario3-goal-added.json"
@@ -2361,9 +2361,9 @@ PY
     exit 1
   fi
 fi
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/snapshot?workspaceId=$scenario3_workspace_id" >"$TMP_DIR/scenario3-snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/observability?workspaceId=$scenario3_workspace_id" >"$TMP_DIR/scenario3-observability.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario3_effective_run_id/context-bundle?workspaceId=$scenario3_workspace_id" >"$TMP_DIR/scenario3-context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario3_effective_run_id/snapshot" >"$TMP_DIR/scenario3-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario3_effective_run_id/observability" >"$TMP_DIR/scenario3-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario3_effective_run_id/context-bundle" >"$TMP_DIR/scenario3-context-bundle.json"
 curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$scenario3_workspace_id&runId=$scenario3_effective_run_id&limit=200" >"$TMP_DIR/scenario3-events.json"
 verify_software_dev_profile_snapshot "$scenario3_workspace_id" "$scenario3_effective_run_id" "$TMP_DIR/scenario3-snapshot.json"
 
@@ -2518,7 +2518,7 @@ scenario4_run_id="$(activate_workspace_execution \
   "$TMP_DIR/scenario4-activation.json" \
   "$scenario4_known_run_ids")"
 wait_run_state_any "$scenario3_workspace_id" "$scenario4_run_id" "$TMP_DIR/scenario4-blocked-status.json" "blocked_on_decision" "superseded"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario4_run_id/snapshot?workspaceId=$scenario3_workspace_id" >"$TMP_DIR/scenario4-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario3_workspace_id/runs/$scenario4_run_id/snapshot" >"$TMP_DIR/scenario4-snapshot.json"
 
 python3 - "$TMP_DIR/scenario4-snapshot.json" "$TMP_DIR/scenario4-blocked-status.json" <<'PY'
 import json
@@ -2583,7 +2583,7 @@ scenario5_run_id="$(activate_workspace_execution \
   "$TMP_DIR/scenario5-activation.json" \
   "$scenario5_known_run_ids")"
 wait_run_state "$scenario5_workspace_id" "$scenario5_run_id" "completed" "$TMP_DIR/scenario5-completed-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario5_run_id/snapshot?workspaceId=$scenario5_workspace_id" >"$TMP_DIR/scenario5-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario5_workspace_id/runs/$scenario5_run_id/snapshot" >"$TMP_DIR/scenario5-snapshot.json"
 
 python3 - "$TMP_DIR/scenario5-snapshot.json" <<'PY'
 import json
@@ -2636,8 +2636,8 @@ scenario6_run_id="$(activate_workspace_execution \
   "$TMP_DIR/scenario6-activation.json" \
   "$scenario6_known_run_ids")"
 wait_run_state "$scenario6_workspace_id" "$scenario6_run_id" "completed" "$TMP_DIR/scenario6-completed-status.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/snapshot?workspaceId=$scenario6_workspace_id" >"$TMP_DIR/scenario6-snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$scenario6_run_id/observability?workspaceId=$scenario6_workspace_id" >"$TMP_DIR/scenario6-observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/runs/$scenario6_run_id/snapshot" >"$TMP_DIR/scenario6-snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$scenario6_workspace_id/runs/$scenario6_run_id/observability" >"$TMP_DIR/scenario6-observability.json"
 
 python3 - "$TMP_DIR/scenario6-snapshot.json" "$TMP_DIR/scenario6-observability.json" <<'PY'
 import json

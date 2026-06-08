@@ -154,17 +154,17 @@ func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req bac
 	f.b.runs = append(f.b.runs, *r)
 	return r, nil
 }
-func (f *fakeRun) Resume(ctx context.Context, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id, State: "running"}, nil
+func (f *fakeRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
-func (f *fakeRun) Get(ctx context.Context, id common.RunID) (*backend.RunInfo, error) {
-	return &backend.RunInfo{ID: id, State: "running"}, nil
+func (f *fakeRun) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
 func (f *fakeRun) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.RunInfo, error) {
 	return f.b.runs, nil
 }
-func (f *fakeRun) Status(ctx context.Context, id common.RunID) (*backend.RunStatusInfo, error) {
-	return &backend.RunStatusInfo{ID: id, State: "running"}, nil
+func (f *fakeRun) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*backend.RunStatusInfo, error) {
+	return &backend.RunStatusInfo{ID: id, WorkspaceID: wsID, State: "running"}, nil
 }
 
 // ── Decision ──

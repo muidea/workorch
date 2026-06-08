@@ -468,11 +468,12 @@ PY
 
 wait_run_terminal() {
   local run_id="$1"
-  local status_file="$2"
+  local workspace_id="$2"
+  local status_file="$3"
   local state=""
   local end=$((SECONDS + RUN_WAIT_SECONDS))
   while [[ $SECONDS -lt $end ]]; do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$status_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$status_file"
     state="$(json_path "$status_file" "status.state")"
     case "$state" in
       completed|failed|canceled|blocked_on_decision|blocked_on_approval)
@@ -634,14 +635,14 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-terminal_state="$(wait_run_terminal "$run_id" "$TMP_DIR/status.json")"
+terminal_state="$(wait_run_terminal "$run_id" "$workspace_id" "$TMP_DIR/status.json")"
 if [[ "$terminal_state" != "completed" ]]; then
   echo "run $run_id reached state $terminal_state, want completed" >&2
   exit 1
 fi
 
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id&limit=200" >"$TMP_DIR/events.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id&limit=200" >"$TMP_DIR/events.json"
 validate_incremental_artifact_result
 
 echo "workorch incremental artifact e2e verification passed for deployed workorch service $BASE_URL workspace=$workspace_id run=$run_id"

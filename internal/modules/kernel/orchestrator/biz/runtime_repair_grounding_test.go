@@ -836,6 +836,132 @@ func TestInitialStepInputReplanUsesEvidenceAcquisitionWithoutConcreteTarget(t *t
 	}
 }
 
+func TestRuntimeRepairEmptyWorkspaceSurfaceEvidenceIncludesGoNoModuleDiagnostic(t *testing.T) {
+	failedStep := &runmodel.Step{
+		ID:    "run-empty-go-module/follow-up",
+		RunID: "run-empty-go-module",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyGraphEvidence: []map[string]any{{
+				"kind": "file/list",
+				"output": map[string]any{
+					"stage":     "file_list",
+					"path":      ".",
+					"truncated": false,
+					"entries": []map[string]any{{
+						"path": ".agents",
+						"kind": "directory",
+					}},
+				},
+			}, {
+				"kind": "shell/command",
+				"output": map[string]any{
+					"stdout": "# ./...\npattern ./...: directory prefix . does not contain main module or its selected dependencies\nFAIL\t./... [setup failed]\nFAIL",
+				},
+			}},
+		},
+	}
+
+	if !runtimeRepairHasConcreteImplementationTargetEvidence(map[string]any{}, failedStep) {
+		t.Fatalf("runtimeRepairHasConcreteImplementationTargetEvidence = false, want Go no-module diagnostic to count as empty workspace surface evidence")
+	}
+}
+
+func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *testing.T) {
+	runID := common.RunID("run-empty-workspace-escalation")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-empty-workspace-escalation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/follow-up-graph-repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"repairActionPackage": map[string]any{
+				"evidenceAcquisitionRequired": true,
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+				},
+			},
+			stepInputKeyGraphEvidence: []map[string]any{{
+				"kind": "file/list",
+				"output": map[string]any{
+					"stage":     "file_list",
+					"path":      ".",
+					"truncated": false,
+					"entries": []map[string]any{{
+						"path": ".agents",
+						"kind": "directory",
+					}},
+				},
+			}, {
+				"kind": "shell/command",
+				"output": map[string]any{
+					"stdout": "# ./...\npattern ./...: directory prefix . does not contain main module or its selected dependencies\nFAIL\t./... [setup failed]\nFAIL",
+				},
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			"error":                   "invalid argument: dodAssessment is not satisfied",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|error=invalid argument: dodassessment is not satisfied",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "The workspace is empty and still needs a state-changing project initialization.",
+				"items": []map[string]any{{
+					"item":         "生成最小可运行 Go 项目",
+					"state":        "failed",
+					"evidenceRefs": []string{"run-empty-workspace-escalation/graph-001/list-empty-workspace"},
+				}},
+				"goalCoverage": map[string]any{
+					"satisfied": false,
+					"items": []map[string]any{{
+						"goalRequirementId": "goal-req-empty-workspace",
+						"goal":              "从空 workspace 初始化一个最小 Go 项目",
+						"state":             "failed",
+						"reason":            "State-changing project initialization has not run.",
+						"evidenceRefs":      []string{"run-empty-workspace-escalation/graph-001/list-empty-workspace"},
+					}},
+				},
+			},
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDoDItems": []map[string]any{{
+					"item":  "生成最小可运行 Go 项目",
+					"state": "failed",
+				}},
+				"missingGoalCoverage": []map[string]any{{
+					"goalRequirementId": "goal-req-empty-workspace",
+					"item":              "从空 workspace 初始化一个最小 Go 项目",
+					"state":             "failed",
+					"reason":            "State-changing project initialization has not run.",
+				}},
+			},
+		},
+	}
+
+	input := (&RuntimeOrchestrator{steps: memory.NewStepRepository()}).runtimeRepairFollowUpStepInput(context.Background(), run, failedStep, 2, errors.New("invalid argument: dodAssessment is not satisfied"))
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		boolValue(input["concreteFailureEvidenceRequired"]) {
+		t.Fatalf("runtime repair input = %#v, want state-changing repair after empty workspace evidence", input)
+	}
+	if input["emptyWorkspaceEvidenceEscalatedToImplementation"] != true {
+		t.Fatalf("emptyWorkspaceEvidenceEscalatedToImplementation = %#v, want true", input["emptyWorkspaceEvidenceEscalatedToImplementation"])
+	}
+}
+
 func TestRuntimeRepairActionPackageIncludesStructuredFailureSignalsAndForbiddenReuse(t *testing.T) {
 	runID := common.RunID("run-repair-grounding")
 	failedStep := &runmodel.Step{

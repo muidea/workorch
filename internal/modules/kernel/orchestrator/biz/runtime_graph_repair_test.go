@@ -373,6 +373,64 @@ func TestEvidenceAcquisitionFollowUpKeepsCurrentFailure(t *testing.T) {
 	}
 }
 
+func TestEvidenceAcquisitionFollowUpCopiesFollowUpProgressIntoRepairActionPackage(t *testing.T) {
+	runID := common.RunID("run-evidence-follow-up-progress")
+	source := &runModel.Step{
+		ID:    common.StepID(runID + "/step-1"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"workspaceId": string(common.WorkspaceID("ws-evidence-follow-up-progress")),
+		"currentProgressDigest": map[string]any{
+			"currentGap":         "none_observed_in_recent_process_evidence",
+			"nextRequiredAction": "continue_current_stage_contract",
+			"lastAttempt": map[string]any{
+				"stepId": "run-evidence-follow-up-progress/graph-001/002-collect-evidence",
+				"kind":   "shell/command",
+				"state":  string(common.StepStateCompleted),
+			},
+		},
+	}
+	evidence := []map[string]any{{
+		"kind":   "file/read",
+		"stepId": string(runID) + "/graph-001/001-read-target",
+		"output": map[string]any{
+			"stage":       "file_read",
+			"status":      "completed",
+			"path":        "README.md",
+			"exists":      true,
+			"content":     "current content",
+			"contentHash": "hash-current",
+			"size":        15,
+			"truncated":   false,
+		},
+	}}
+
+	out := restoreRepairContractAfterConcreteEvidenceAcquisition(input, source, evidence)
+	pkg := mapFromValue(out["repairActionPackage"])
+	progress := mapFromValue(pkg["currentExecutionProgress"])
+	if len(progress) == 0 {
+		t.Fatalf("repairActionPackage.currentExecutionProgress = %+v, want follow-up progress digest", pkg["currentExecutionProgress"])
+	}
+	if progress["nextRequiredAction"] != "continue_current_stage_contract" {
+		t.Fatalf("currentExecutionProgress = %+v, want follow-up digest", progress)
+	}
+	if len(mapFromValue(out["currentExecutionProgress"])) == 0 {
+		t.Fatalf("currentExecutionProgress = %+v, want top-level copy for provider context gate", out["currentExecutionProgress"])
+	}
+}
+
 func TestEvidenceAcquisitionFollowUpRestoresCurrentFailureFromRepairOfScope(t *testing.T) {
 	runID := common.RunID("run-evidence-follow-up-repair-of-scope")
 	source := &runModel.Step{

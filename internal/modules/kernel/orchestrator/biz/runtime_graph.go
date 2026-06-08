@@ -1326,7 +1326,16 @@ func inputHasStateChangingOutputRequirement(input map[string]any) bool {
 		return false
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	return boolValue(required["mustIncludeStateChangingNode"])
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		return true
+	}
+	if outputModeIsIncrementalArtifact(input) &&
+		(boolValue(required["mustReturnArtifactPlan"]) ||
+			boolValue(required["mustReturnArtifactChunk"]) ||
+			boolValue(required["stateChangingEvidenceDeferredUntilApply"])) {
+		return true
+	}
+	return false
 }
 
 func cloneStepInputValue(value any) any {
@@ -1494,6 +1503,12 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	}
 	if signals := mapFromValue(sourcePackage["structuredFailureSignals"]); len(signals) > 0 && len(mapFromValue(input["structuredFailureSignals"])) == 0 {
 		input["structuredFailureSignals"] = compactLLMContextMap(signals, 1)
+	}
+	if len(mapFromValue(actionPackage["currentExecutionProgress"])) == 0 {
+		if progress := currentExecutionProgressForEvidenceAcquisitionFollowUp(input, actionPackage); len(progress) > 0 {
+			actionPackage["currentExecutionProgress"] = progress
+			input["currentExecutionProgress"] = progress
+		}
 	}
 	input["repairActionPackage"] = actionPackage
 	contract := BuildConvergenceContract(nil, nil, source, map[string]any{"input": input}, map[string]any{"sourceRef": string(source.ID)})

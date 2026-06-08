@@ -41,18 +41,20 @@ const (
 )
 
 type DecisionInfo struct {
-	TicketID string
-	Question string
-	Reason   string
-	RunID    string
+	TicketID    string
+	Question    string
+	Reason      string
+	WorkspaceID string
+	RunID       string
 }
 
 type ApprovalInfo struct {
-	ApprovalID string
-	Reason     string
-	Action     string
-	Context    map[string]any
-	RunID      string
+	ApprovalID  string
+	Reason      string
+	Action      string
+	Context     map[string]any
+	WorkspaceID string
+	RunID       string
 }
 
 type RunCreatedInfo struct {
@@ -174,10 +176,11 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		a.notifiedDecision = ticketID
 		a.mu.Unlock()
 		a.Send(Event{Type: EventDecision, Payload: DecisionInfo{
-			TicketID: ticketID,
-			Question: firstString(evt.Payload, "question", "Question"),
-			Reason:   firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
-			RunID:    string(evt.RunID),
+			TicketID:    ticketID,
+			Question:    firstString(evt.Payload, "question", "Question"),
+			Reason:      firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			WorkspaceID: string(evt.WorkspaceID),
+			RunID:       string(evt.RunID),
 		}})
 	case backend.EventApprovalCreated:
 		approvalID := firstString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)
@@ -192,11 +195,12 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 		a.notifiedApproval = approvalID
 		a.mu.Unlock()
 		a.Send(Event{Type: EventApproval, Payload: ApprovalInfo{
-			ApprovalID: approvalID,
-			Reason:     firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
-			Action:     firstString(evt.Payload, "action", "Action", events.PayloadKeyAction),
-			Context:    mapFromPayload(evt.Payload, "context", "Context", events.PayloadKeyContext),
-			RunID:      string(evt.RunID),
+			ApprovalID:  approvalID,
+			Reason:      firstString(evt.Payload, "reason", "Reason", events.PayloadKeyReason),
+			Action:      firstString(evt.Payload, "action", "Action", events.PayloadKeyAction),
+			Context:     mapFromPayload(evt.Payload, "context", "Context", events.PayloadKeyContext),
+			WorkspaceID: string(evt.WorkspaceID),
+			RunID:       string(evt.RunID),
 		}})
 	case backend.EventResultAccepted:
 		a.mu.Lock()
@@ -258,12 +262,12 @@ func (a *Agent) ClearNotified() {
 	a.notifiedApproval = ""
 }
 
-func (a *Agent) ResumeRun(ctx context.Context, runID string) error {
+func (a *Agent) ResumeRun(ctx context.Context, workspaceID string, runID string) error {
 	a.ClearNotified()
 	if a.be == nil {
 		return fmt.Errorf("agent backend is required")
 	}
-	_, err := a.be.Run().Resume(ctx, common.RunID(runID))
+	_, err := a.be.Run().Resume(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)), common.RunID(runID))
 	return err
 }
 

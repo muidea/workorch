@@ -515,6 +515,42 @@ func TestPromoteRepairActionPackageContextPrefersLatestActionableProgressDigest(
 	}
 }
 
+func TestPromoteRepairActionPackageContextCopiesInformativeProgressDigest(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+		"stateChangingOutputRequired":     true,
+		stepInputKeyCurrentProgressDigest: map[string]any{
+			"currentGap":         "none_observed_in_recent_process_evidence",
+			"nextRequiredAction": "continue_current_stage_contract",
+			"lastAttempt": map[string]any{
+				"stepId": "run-progress/graph-001/002-collect-evidence",
+				"kind":   "shell/command",
+				"state":  string(common.StepStateCompleted),
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{
+				"mustIncludeStateChangingNode": true,
+			},
+		},
+	}
+
+	promoteRepairActionPackageContext(input)
+
+	progress := mapFromValue(input["currentExecutionProgress"])
+	if progress["nextRequiredAction"] != "continue_current_stage_contract" {
+		t.Fatalf("currentExecutionProgress = %+v, want informative progress digest", progress)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	pkgProgress := mapFromValue(pkg["currentExecutionProgress"])
+	if pkgProgress["nextRequiredAction"] != "continue_current_stage_contract" {
+		t.Fatalf("repairActionPackage.currentExecutionProgress = %+v, want informative progress digest", pkgProgress)
+	}
+	if len(mapFromValue(input["currentFailure"])) > 0 || len(mapFromValue(pkg["currentFailure"])) > 0 {
+		t.Fatalf("input = %+v, did not expect non-failure digest to synthesize currentFailure", input)
+	}
+}
+
 func TestRunExecutionContextPackageInheritsReplanProcessEvidence(t *testing.T) {
 	ctx := context.Background()
 	run := &runmodel.Run{

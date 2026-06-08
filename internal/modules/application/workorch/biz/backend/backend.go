@@ -436,6 +436,7 @@ type RunInfo struct {
 type ActivateRunRequest struct {
 	GoalID                common.GoalID
 	DoDID                 common.DoDID
+	LLMProviderID         string
 	DialogLanguage        string
 	SoulID                common.SoulID
 	SkillIDs              []common.SkillID
@@ -461,10 +462,10 @@ type RunStatusInfo struct {
 
 type RunBackend interface {
 	Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error)
-	Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error)
-	Get(ctx context.Context, id common.RunID) (*RunInfo, error)
+	Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error)
-	Status(ctx context.Context, id common.RunID) (*RunStatusInfo, error)
+	Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error)
 }
 
 // ── Decision ──

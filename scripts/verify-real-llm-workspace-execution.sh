@@ -109,12 +109,12 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activati
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-progress" >"$TMP_DIR/task-progress.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/context-bundle" >"$TMP_DIR/context-bundle.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/task-decompositions" >"$TMP_DIR/task-decompositions.json"
-curl -fsS "$BASE_URL/api/v1/workorch/events?runId=$run_id" >"$TMP_DIR/events.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/observability" >"$TMP_DIR/observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/task-progress" >"$TMP_DIR/task-progress.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/context-bundle" >"$TMP_DIR/context-bundle.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/task-decompositions" >"$TMP_DIR/task-decompositions.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/events.json"
 
 python3 - "$TMP_DIR/activation.json" "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$TMP_DIR/task-progress.json" "$TMP_DIR/context-bundle.json" "$TMP_DIR/task-decompositions.json" "$TMP_DIR/events.json" <<'PY'
 import json

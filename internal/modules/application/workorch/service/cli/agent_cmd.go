@@ -75,7 +75,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 				a.ClearNotified()
 				continue
 			}
-			if err := a.ResumeRun(ctx, info.RunID); err != nil {
+			if err := a.ResumeRun(ctx, info.WorkspaceID, info.RunID); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				a.ClearNotified()
 				continue
@@ -89,7 +89,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			if err := a.ResolveApproval(ctx, info.ApprovalID, answer == "y" || answer == "Y"); err != nil {
 				return finish(fmt.Errorf("resolve approval: %w", err))
 			}
-			if err := a.ResumeRun(ctx, info.RunID); err != nil {
+			if err := a.ResumeRun(ctx, info.WorkspaceID, info.RunID); err != nil {
 				return finish(fmt.Errorf("resume run: %w", err))
 			}
 

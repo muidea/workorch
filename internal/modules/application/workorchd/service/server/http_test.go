@@ -489,14 +489,14 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 		t.Fatalf("list run body = %s, want created run", listRunRec.Body.String())
 	}
 
-	startRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-memory-http/start", nil)
+	startRunReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/start", nil)
 	startRunRec := httptest.NewRecorder()
 	mux.ServeHTTP(startRunRec, startRunReq)
 	if startRunRec.Code != http.StatusOK {
 		t.Fatalf("start run status = %d, want 200, body = %s", startRunRec.Code, startRunRec.Body.String())
 	}
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-memory-http/status", nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/status", nil)
 	statusRec := httptest.NewRecorder()
 	mux.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
@@ -507,7 +507,7 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 		t.Fatalf("run status body = %s, want provider decision blocker without configured LLM provider", statusRec.Body.String())
 	}
 
-	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-memory-http/observability", nil)
+	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-memory-http/observability", nil)
 	observabilityRec := httptest.NewRecorder()
 	mux.ServeHTTP(observabilityRec, observabilityReq)
 	if observabilityRec.Code != http.StatusOK {
@@ -914,23 +914,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/snapshot"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/steps"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/tool-calls"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/runtime-checkpoints"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/results"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/patches"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/validation-results"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/artifacts"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/status"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/observability"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/memory-recalls"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-progress"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/context-bundle"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/runs/:runId/task-decompositions"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/start"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/runs/:runId/resume"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runtime/payloads"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/decisions"},
@@ -1002,7 +985,7 @@ func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
 	handler := newMuxWithState(state)
 
 	for _, path := range []string{
-		"/api/v1/workorch/runs/run-recall-http/memory-recalls",
+		"/api/v1/workorch/workspaces/ws-recall-http/runs/run-recall-http/memory-recalls",
 		"/api/v1/workorch/workspaces/ws-recall-http/memory-recalls",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -1946,22 +1929,22 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs", body: `{"runId":"run-native-write","goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/runs?workspaceId=ws-native-read", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/snapshot", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/steps?cursorAfterId=step-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/tool-calls?cursorAfterId=tool-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/runtime-checkpoints?cursorAfterId=checkpoint-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/results?cursorAfterId=result-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/patches?cursorAfterId=patch-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/validation-results?cursorAfterId=validation-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/artifacts?cursorAfterId=artifact-native-1&limit=2", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/status", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/observability", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-progress", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/context-bundle", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/runs/run-native-read/task-decompositions", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/start", status: http.StatusOK},
-		{method: http.MethodPost, path: "/api/v1/workorch/runs/run-native-read/resume", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/snapshot", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/steps?cursorAfterId=step-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/tool-calls?cursorAfterId=tool-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/runtime-checkpoints?cursorAfterId=checkpoint-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/results?cursorAfterId=result-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/patches?cursorAfterId=patch-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/validation-results?cursorAfterId=validation-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/artifacts?cursorAfterId=artifact-native-1&limit=2", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/status", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/observability", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/task-progress", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/context-bundle", status: http.StatusOK},
+		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/task-decompositions", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/start", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmProviderId":"deepseek","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=ticket-native-cursor&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
@@ -2563,7 +2546,7 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 		t.Fatalf("workspace scoped runs = %+v, want run-a for %s", workspaceScoped.Runs, workspaceA.ID)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-a", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/runs/run-a", nil)
 	getRec := httptest.NewRecorder()
 	handler.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -2575,6 +2558,94 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 	}
 	if fetched.Run.ID != "run-a" || fetched.Run.WorkspaceID != workspaceA.ID {
 		t.Fatalf("fetched run = %+v, want run-a/%s", fetched.Run, workspaceA.ID)
+	}
+}
+
+func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
+	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+
+	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate run workspace a", "workspaces/dup-run-a")
+	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate run workspace b", "workspaces/dup-run-b")
+	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
+	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
+
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-001", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("unscoped duplicate run get status = %d, want 404, body=%s", getRec.Code, getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), "404 page not found") {
+		t.Fatalf("unscoped duplicate run get body = %s, want not found", getRec.Body.String())
+	}
+
+	scopedReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/runs/run-001", nil)
+	scopedRec := httptest.NewRecorder()
+	handler.ServeHTTP(scopedRec, scopedReq)
+	if scopedRec.Code != http.StatusOK {
+		t.Fatalf("workspace scoped duplicate run get status = %d, want 200, body=%s", scopedRec.Code, scopedRec.Body.String())
+	}
+}
+
+func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
+	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+
+	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace a", "workspaces/dup-scoped-run-a")
+	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace b", "workspaces/dup-scoped-run-b")
+	goalA, dodA := defineGoalAndDoDForHTTP(t, handler, workspaceA.ID)
+	goalB, dodB := defineGoalAndDoDForHTTP(t, handler, workspaceB.ID)
+
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/v1/workorch/workspaces/" + workspaceA.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalA + `","doDId":"` + dodA + `"}`},
+		{path: "/api/v1/workorch/workspaces/" + workspaceB.ID + "/runs", body: `{"runId":"run-001","goalId":"` + goalB + `","doDId":"` + dodB + `"}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("run create status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "snapshot", method: http.MethodGet, path: "/api/v1/workorch/runs/run-001/snapshot"},
+		{name: "status", method: http.MethodGet, path: "/api/v1/workorch/runs/run-001/status"},
+		{name: "start", method: http.MethodPost, path: "/api/v1/workorch/runs/run-001/start"},
+		{name: "resume", method: http.MethodPost, path: "/api/v1/workorch/runs/run-001/resume"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s duplicate run endpoint status = %d, want 404, body=%s", tc.name, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "404 page not found") {
+			t.Fatalf("%s duplicate run endpoint body = %s, want not found", tc.name, rec.Body.String())
+		}
 	}
 }
 
@@ -2618,7 +2689,7 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 		t.Fatalf("run events = %+v, want replayed run-created event", runEvents)
 	}
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-event-replay/snapshot", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-event-replay/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	secondHandler.ServeHTTP(snapshotRec, snapshotReq)
 	if snapshotRec.Code != http.StatusOK {
@@ -2632,7 +2703,7 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 		t.Fatalf("snapshot eventRecords = %+v, want replayed run-created event", snapshotBody.Snapshot.EventRecords)
 	}
 
-	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-event-replay/observability", nil)
+	observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-event-replay/observability", nil)
 	observabilityRec := httptest.NewRecorder()
 	secondHandler.ServeHTTP(observabilityRec, observabilityReq)
 	if observabilityRec.Code != http.StatusOK {
@@ -2676,7 +2747,7 @@ func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 
 	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run snapshot http workspace", runID)
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+runID+"/snapshot", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 
@@ -2779,7 +2850,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 	}
 
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+string(runID)+"/snapshot", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/runs/"+string(runID)+"/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 
@@ -2811,7 +2882,7 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 
 	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run status http workspace", runID)
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+runID+"/status", nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/status", nil)
 	statusRec := httptest.NewRecorder()
 	handler.ServeHTTP(statusRec, statusReq)
 
@@ -2846,7 +2917,7 @@ func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
 	}
 	handler := newMuxWithState(state)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-wait-status/status?waitState=completed&waitTimeoutMillis=200&waitIntervalMillis=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-wait-status/runs/run-wait-status/status?waitState=completed&waitTimeoutMillis=200&waitIntervalMillis=10", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2928,9 +2999,9 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 	handler := newMuxWithState(state)
 
 	for _, path := range []string{
-		"/api/v1/workorch/runs/run-cache/snapshot",
-		"/api/v1/workorch/runs/run-cache/status",
-		"/api/v1/workorch/runs/run-cache/observability",
+		"/api/v1/workorch/workspaces/ws-cache/runs/run-cache/snapshot",
+		"/api/v1/workorch/workspaces/ws-cache/runs/run-cache/status",
+		"/api/v1/workorch/workspaces/ws-cache/runs/run-cache/observability",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -2947,7 +3018,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 	}
 
 	state.notifyRunStatusChanged()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-cache/snapshot", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-cache/runs/run-cache/snapshot", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -2973,7 +3044,7 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 	}
 	handler := newMuxWithState(state)
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-warm-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-warm-cache/runs/run-status-warm-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
 	statusRec := httptest.NewRecorder()
 	handler.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
@@ -2985,7 +3056,7 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 		return ok
 	})
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-warm-cache/snapshot", nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-warm-cache/runs/run-status-warm-cache/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 	if snapshotRec.Code != http.StatusOK {
@@ -3019,7 +3090,7 @@ func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 		return ok
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-notify-warm-cache/snapshot", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-notify-warm-cache/runs/run-notify-warm-cache/snapshot", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -3049,7 +3120,7 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 	}
 	handler := newMuxWithState(state)
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-inflight-cache/runs/run-status-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
 	statusRec := httptest.NewRecorder()
 	handler.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
@@ -3064,7 +3135,7 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 	snapshotDone := make(chan struct{})
 	go func() {
 		defer close(snapshotDone)
-		snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-status-inflight-cache/snapshot", nil)
+		snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-status-inflight-cache/runs/run-status-inflight-cache/snapshot", nil)
 		snapshotRec := httptest.NewRecorder()
 		handler.ServeHTTP(snapshotRec, snapshotReq)
 		if snapshotRec.Code != http.StatusOK {
@@ -3110,7 +3181,7 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 	}
 	handler := newMuxWithState(state)
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-observability-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-observability-inflight-cache/runs/run-observability-inflight-cache/status?waitState=completed&waitTimeoutMillis=1000", nil)
 	statusRec := httptest.NewRecorder()
 	handler.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
@@ -3125,7 +3196,7 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 	observabilityDone := make(chan struct{})
 	go func() {
 		defer close(observabilityDone)
-		observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-observability-inflight-cache/observability", nil)
+		observabilityReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-observability-inflight-cache/runs/run-observability-inflight-cache/observability", nil)
 		observabilityRec := httptest.NewRecorder()
 		handler.ServeHTTP(observabilityRec, observabilityReq)
 		if observabilityRec.Code != http.StatusOK {
@@ -3240,7 +3311,7 @@ func TestRunCreateEndpointReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 }
 
 func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-missing", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-run-missing/runs/run-missing", nil)
 	rec := httptest.NewRecorder()
 
 	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
@@ -3264,7 +3335,7 @@ func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
 		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
 	}
 
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-start-http/start", nil)
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-start-http/start", nil)
 	startRec := httptest.NewRecorder()
 	handler.ServeHTTP(startRec, startReq)
 
@@ -3288,9 +3359,9 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-http"
 
-	_, seeded := seedBlockedDecisionRunForHTTP(t, dataRoot, "run start blocked http workspace", runID)
+	workspace, seeded := seedBlockedDecisionRunForHTTP(t, dataRoot, "run start blocked http workspace", runID)
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/"+runID, nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID, nil)
 	getRec := httptest.NewRecorder()
 	handler.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -3310,14 +3381,14 @@ func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuati
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-resume-http"
 
-	_, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run resume decision http workspace", runID)
+	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run resume decision http workspace", runID)
 	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
 		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
 	}
 
 	resolveDecisionForHTTP(t, dataRoot, started.BlockingTicketID, false)
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
@@ -3338,14 +3409,14 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuati
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-resume-http"
 
-	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval http workspace", runID)
+	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval http workspace", runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}
 
 	resolveApprovalForHTTP(t, dataRoot, started.BlockingApprovalID, false)
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
@@ -3366,14 +3437,14 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-rejected-http"
 
-	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval rejected http workspace", runID)
+	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval rejected http workspace", runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}
 
 	resolveApprovalForHTTP(t, dataRoot, started.BlockingApprovalID, true)
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
@@ -3394,12 +3465,12 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-pending-http"
 
-	_, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume pending http workspace", runID)
+	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume pending http workspace", runID)
 	if started.State != "blocked_on_approval" || started.BlockingApprovalID == "" {
 		t.Fatalf("started run = %+v, want blocked approval with approval id", started)
 	}
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/resume", nil)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/"+runID+"/resume", nil)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
@@ -3410,9 +3481,9 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 
 func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
 	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
-	createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
+	workspace := createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
 
-	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-resume-created-http/resume", nil)
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-resume-created-http/resume", nil)
 	resumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(resumeRec, resumeReq)
 
@@ -4263,7 +4334,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	if runCreateRec.Code != http.StatusCreated {
 		t.Fatalf("run create status = %d, want 201", runCreateRec.Code)
 	}
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-metrics/start", nil)
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-metrics/start", nil)
 	startRec := httptest.NewRecorder()
 	handler.ServeHTTP(startRec, startReq)
 	if startRec.Code != http.StatusOK {
@@ -4280,7 +4351,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	}
 	waitRunStateForHTTP(t, dataRoot, blockedRunID, string(common.RunStateFailed))
 
-	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/runs/run-metrics"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/v1/workorch/workspaces", "/api/v1/workorch/workspaces/" + workspace.ID, "/api/v1/workorch/runs", "/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -4291,8 +4362,8 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/v1/workorch/workspaces/" + workspace.ID + "/snapshot",
-		"/api/v1/workorch/runs/run-metrics/snapshot",
-		"/api/v1/workorch/runs/run-metrics/status",
+		"/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics/snapshot",
+		"/api/v1/workorch/workspaces/" + workspace.ID + "/runs/run-metrics/status",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -4391,7 +4462,7 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 	}
 	getRun := func() appservice.Run {
 		t.Helper()
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-stuck-validation", nil)
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
 		getRec := httptest.NewRecorder()
 		second.http.Handler.ServeHTTP(getRec, getReq)
 		if getRec.Code != http.StatusOK {
@@ -4441,7 +4512,7 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runs/run-stuck-validation", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
 	getRec := httptest.NewRecorder()
 	second.http.Handler.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -4752,10 +4823,10 @@ func timelineContainsPersistedEvent(items []appservice.RuntimeTimelineItem, topi
 	return false
 }
 
-func startRunForHTTP(t *testing.T, handler http.Handler, runID string) appservice.Run {
+func startRunForHTTP(t *testing.T, handler http.Handler, workspaceID string, runID string) appservice.Run {
 	t.Helper()
 
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/"+runID+"/start", nil)
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/runs/"+runID+"/start", nil)
 	startRec := httptest.NewRecorder()
 	handler.ServeHTTP(startRec, startReq)
 	if startRec.Code != http.StatusOK {
@@ -4902,7 +4973,7 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	defer server.Close()
 
 	go func() {
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/runs/run-held/start", nil)
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/workspaces/ws-run-held/runs/run-held/start", nil)
 		if err != nil {
 			t.Errorf("new request: %v", err)
 			close(done)
@@ -4924,7 +4995,7 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	<-started
 
 	go func() {
-		secondResp, err := http.Post(server.URL+"/api/v1/workorch/runs/run-second/start", "application/json", nil)
+		secondResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces/ws-run-second/runs/run-second/start", "application/json", nil)
 		if err != nil {
 			t.Errorf("second run request: %v", err)
 			secondDone <- 0
@@ -4985,7 +5056,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 	defer server.Close()
 
 	go func() {
-		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/runs/run-1/start", nil)
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/workorch/workspaces/ws-run-1/runs/run-1/start", nil)
 		if err != nil {
 			t.Errorf("new first start request: %v", err)
 			close(firstDone)
@@ -5007,7 +5078,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 	<-firstStarted
 
 	go func() {
-		resp, err := http.Post(server.URL+"/api/v1/workorch/runs/run-2/start", "application/json", nil)
+		resp, err := http.Post(server.URL+"/api/v1/workorch/workspaces/ws-run-2/runs/run-2/start", "application/json", nil)
 		if err != nil {
 			t.Errorf("second start request: %v", err)
 			secondDone <- 0
@@ -5092,10 +5163,10 @@ func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
 		errs <- nil
 	}
 
-	go postStart("/api/v1/workorch/runs/run-held/start")
+	go postStart("/api/v1/workorch/workspaces/ws-run-held/runs/run-held/start")
 	<-heldStarted
-	go postStart("/api/v1/workorch/runs/run-low/start?priority=1")
-	go postStart("/api/v1/workorch/runs/run-high/start?priority=10")
+	go postStart("/api/v1/workorch/workspaces/ws-run-low/runs/run-low/start?priority=1")
+	go postStart("/api/v1/workorch/workspaces/ws-run-high/runs/run-high/start?priority=10")
 	waitForRunQueueWaiting(t, state, 2)
 
 	close(releaseHeld)
@@ -5157,7 +5228,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	handler := newMuxWithState(state)
 
 	go func() {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-held/resume", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-held/runs/run-held/resume", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -5170,7 +5241,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/runs/run-queued/resume", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-run-queued/runs/run-queued/resume", nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

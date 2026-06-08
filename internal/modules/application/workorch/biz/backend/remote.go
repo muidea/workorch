@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -212,6 +213,7 @@ type remoteRunBackend struct{ cl *client.Client }
 func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
 	act, err := b.cl.ActivateWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
 		GoalID: string(req.GoalID), DoDID: string(req.DoDID),
+		LLMProviderID:  req.LLMProviderID,
 		DialogLanguage: req.DialogLanguage, SoulID: string(req.SoulID), Priority: req.Priority,
 		ExecutionContextPatch: req.ExecutionContextPatch,
 	})
@@ -224,8 +226,11 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 		ExecutionContext: act.Run.ExecutionContext, State: common.RunState(act.Run.State),
 	}, nil
 }
-func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
-	r, err := b.cl.ResumeRun(ctx, string(id), executionContextPatch...)
+func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	r, err := b.cl.ResumeRun(ctx, string(wsID), string(id), executionContextPatch...)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +240,11 @@ func (b *remoteRunBackend) Resume(ctx context.Context, id common.RunID, executio
 		ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
 	}, nil
 }
-func (b *remoteRunBackend) Get(ctx context.Context, id common.RunID) (*RunInfo, error) {
-	r, err := b.cl.GetRun(ctx, string(id))
+func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	r, err := b.cl.GetRun(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +269,11 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 	}
 	return result, nil
 }
-func (b *remoteRunBackend) Status(ctx context.Context, id common.RunID) (*RunStatusInfo, error) {
-	s, err := b.cl.GetRunStatus(ctx, string(id), "", 0)
+func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	s, err := b.cl.GetRunStatus(ctx, string(wsID), string(id), "", 0)
 	if err != nil {
 		return nil, err
 	}

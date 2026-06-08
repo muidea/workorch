@@ -27,7 +27,7 @@ type outputModeSelection struct {
 }
 
 func applyLLMOutputModeSelection(ctx context.Context, policy LLMOutputRuntimePolicy, continuations repository.ArtifactContinuationRepository, run *runModel.Run, input map[string]any, failedStep *runModel.Step, attempt int) {
-	if len(input) == 0 {
+	if input == nil {
 		return
 	}
 	inheritOutputModeSignalsFromRunExecutionContext(input, run)
@@ -53,10 +53,13 @@ func applyLLMOutputModeSelection(ctx context.Context, policy LLMOutputRuntimePol
 }
 
 func inheritOutputModeSignalsFromRunExecutionContext(input map[string]any, run *runModel.Run) {
-	if len(input) == 0 || run == nil || len(run.ExecutionContext) == 0 {
+	if input == nil || run == nil || len(run.ExecutionContext) == 0 {
 		return
 	}
-	for _, key := range []string{"requestedOutputMode"} {
+	if boolValue(input["completionFollowUp"]) || boolValue(input[stepInputKeyAssessmentOnly]) {
+		return
+	}
+	for _, key := range []string{"requestedOutputMode", "stateChangingOutputRequired", "repairObjective"} {
 		if _, exists := input[key]; !exists && run.ExecutionContext[key] != nil {
 			input[key] = cloneStepInputValue(run.ExecutionContext[key])
 		}

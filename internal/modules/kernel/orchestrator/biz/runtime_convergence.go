@@ -152,6 +152,16 @@ func BuildConvergenceContract(
 		populateConcreteValidationConvergenceContract(input, &contract)
 		return contract
 	}
+	if boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) {
+		contract.State = convergenceStateNeedStateChange
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveStateChangingOutput
+		contract.StateChangingOutputRequired = true
+		contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
+		return contract
+	}
 	if boolValue(input["validationRepairEscalatedToImplementation"]) {
 		pkg := repeatedValidationRepairEscalationPackage(run, input, failedStep)
 		if repairActionPackageRequiresEvidenceAcquisition(pkg) {

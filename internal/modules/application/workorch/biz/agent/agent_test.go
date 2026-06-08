@@ -166,14 +166,14 @@ type fakeRun struct{}
 func (fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
 }
-func (fakeRun) Resume(context.Context, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
+func (fakeRun) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{}, nil
 }
-func (fakeRun) Get(context.Context, common.RunID) (*backend.RunInfo, error) {
+func (fakeRun) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
 	return &backend.RunInfo{}, nil
 }
 func (fakeRun) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) { return nil, nil }
-func (fakeRun) Status(context.Context, common.RunID) (*backend.RunStatusInfo, error) {
+func (fakeRun) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
 	return &backend.RunStatusInfo{}, nil
 }
 

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 )
 
 // ListWorkspaces returns all workspaces.
@@ -16,7 +17,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 
 // GetWorkspace returns a single workspace by ID.
 func (c *Client) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -40,10 +41,11 @@ func (c *Client) CreateWorkspace(ctx context.Context, title, description, workin
 
 // DeleteWorkspace deletes a workspace.
 func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) error {
-	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s", id)
+	values := url.Values{}
 	if purge {
-		path += "?purge=true"
+		values.Set("purge", "true")
 	}
+	path := joinQuery(fmt.Sprintf("/api/v1/workorch/workspaces/%s", escapePath(id)), values)
 	resp, err := c.do(ctx, "DELETE", path, nil)
 	if err != nil {
 		return err
@@ -54,7 +56,7 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 
 // GetWorkspaceSnapshot returns the workspace snapshot (aggregated read model).
 func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*WorkspaceSnapshot, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/snapshot", id), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/snapshot", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +65,7 @@ func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*Workspac
 
 // ListGoals returns goals for a workspace.
 func (c *Client) ListGoals(ctx context.Context, workspaceID string) ([]Goal, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals", workspaceID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +77,7 @@ func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*Goa
 	req := struct {
 		Text string `json:"text"`
 	}{Text: text}
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals", workspaceID), req)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals", escapePath(workspaceID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +86,7 @@ func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*Goa
 
 // GetGoal returns a single goal.
 func (c *Client) GetGoal(ctx context.Context, goalID string) (*Goal, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/goals/%s", goalID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/goals/%s", escapePath(goalID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +98,7 @@ func (c *Client) UpdateGoal(ctx context.Context, goalID string, text string) (*G
 	req := struct {
 		Text string `json:"text"`
 	}{Text: text}
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/goals/%s", goalID), req)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/goals/%s", escapePath(goalID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +107,7 @@ func (c *Client) UpdateGoal(ctx context.Context, goalID string, text string) (*G
 
 // ListDoDs returns DoDs for a workspace.
 func (c *Client) ListDoDs(ctx context.Context, workspaceID string) ([]DoD, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods", workspaceID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods", escapePath(workspaceID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []stri
 	req := struct {
 		Items []string `json:"items"`
 	}{Items: items}
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods", workspaceID), req)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods", escapePath(workspaceID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +128,7 @@ func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []stri
 
 // GetDoD returns a single DoD.
 func (c *Client) GetDoD(ctx context.Context, dodID string) (*DoD, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/dods/%s", dodID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/dods/%s", escapePath(dodID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +140,7 @@ func (c *Client) UpdateDoD(ctx context.Context, dodID string, items []string) (*
 	req := struct {
 		Items []string `json:"items"`
 	}{Items: items}
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/dods/%s", dodID), req)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/dods/%s", escapePath(dodID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +149,7 @@ func (c *Client) UpdateDoD(ctx context.Context, dodID string, items []string) (*
 
 // ActivateWorkspaceExecution activates a workspace execution (create + start run).
 func (c *Client) ActivateWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*Activation, error) {
-	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", workspaceID)
+	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", escapePath(workspaceID))
 	resp, err := c.do(ctx, "POST", path, req)
 	if err != nil {
 		return nil, err
@@ -159,6 +161,7 @@ func (c *Client) ActivateWorkspaceExecution(ctx context.Context, workspaceID str
 type ActivationRequest struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
+	LLMProviderID         string            `json:"llmProviderId,omitempty"`
 	SoulID                string            `json:"soulId,omitempty"`
 	SoulBindings          map[string]string `json:"soulBindings,omitempty"`
 	SkillIDs              []string          `json:"skillIds,omitempty"`

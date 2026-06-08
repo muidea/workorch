@@ -368,7 +368,7 @@ func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
 		return false, nil
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
-		if graphIsConcreteValidationEvidenceGraph(graph) {
+		if !stepRequiresConcreteFailureEvidenceAcquisition(step) && graphIsConcreteValidationEvidenceGraph(graph) {
 			return false, nil
 		}
 		if inputRequiresStateChangingOutput(step.Input) && graphIsConcreteStateChangingContinuation(graph) {

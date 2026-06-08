@@ -423,7 +423,7 @@ wait_run_state() {
   local output_file="$4"
   local deadline=$((SECONDS + 60))
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status?workspaceId=$workspace_id&waitState=$expected_state&waitTimeoutMillis=1000&waitIntervalMillis=100" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status&waitState=$expected_state&waitTimeoutMillis=1000&waitIntervalMillis=100" >"$output_file"
     if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
       return 0
     fi
@@ -436,8 +436,8 @@ wait_run_state() {
 assert_web_search_traceability() {
   local workspace_id="$1"
   local run_id="$2"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot?workspaceId=$workspace_id" >"$TMP_DIR/run-snapshot.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability?workspaceId=$workspace_id" >"$TMP_DIR/run-observability.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/observability" >"$TMP_DIR/run-observability.json"
   curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id&limit=100" >"$TMP_DIR/run-events.json"
   python3 - "$TMP_DIR/run-snapshot.json" "$TMP_DIR/run-observability.json" "$TMP_DIR/run-events.json" "$run_id" "$SOUL_ID" <<'PY'
 import json

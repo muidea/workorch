@@ -345,6 +345,23 @@ func applyRuntimeRepairValidationEscalationProjection(input map[string]any, vali
 	delete(input, "evidenceRepairSource")
 }
 
+func applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input map[string]any, required bool) {
+	if input == nil || !required {
+		return
+	}
+	input["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	delete(input, "concreteFailureEvidenceRequired")
+	delete(input, "boundedValidationRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, "evidenceRepairSource")
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"Concrete evidence shows the workspace has no Go module or implementation files; stop collecting more empty-workspace evidence.",
+		"Initialize the requested project through auditable state-changing output, such as patch/apply file_write nodes for go.mod, source, tests, and README when required by Goal/DoD.",
+	)
+}
+
 func applyRuntimeRepairGovernanceHistoryProjection(
 	ctx context.Context,
 	tickets repository.DecisionTicketRepository,
@@ -735,10 +752,12 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		coverageVerificationGapPresent(input, failedStep)
 	coverageValidationHasTargetEvidence := runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep)
 	coverageValidationEvidenceRepair := coverageGapEligibleForValidationRepair && !coverageValidationHasTargetEvidence
-	validationRepairEscalatesToStateChanging := coverageGapEligibleForValidationRepair &&
+	emptyWorkspaceStateChangingRepair := emptyWorkspaceEvidenceShouldStartStateChangingRepair(run, failedStep, input)
+	validationRepairEscalatesToStateChanging := emptyWorkspaceStateChangingRepair || (coverageGapEligibleForValidationRepair &&
 		coverageValidationHasTargetEvidence &&
-		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input)
+		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
 	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
+	applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
 	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging
 	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)

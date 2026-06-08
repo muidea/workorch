@@ -400,8 +400,9 @@ def extract_run_status(response: dict[str, Any]) -> dict[str, Any]:
     return response.get("status") or response.get("run") or nested(response, "activation.run", {}) or {}
 
 
-def wait_run_state(run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = POLL_INTERVAL_SECONDS) -> dict[str, Any]:
+def wait_run_state(workspace_id: str, run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = POLL_INTERVAL_SECONDS) -> dict[str, Any]:
     return wait_run_status(
+        workspace_id,
         run_id,
         lambda status: status.get("state") == expected_state,
         f"state {expected_state}",
@@ -412,6 +413,7 @@ def wait_run_state(run_id: str, expected_state: str, *, timeout_seconds: float =
 
 
 def wait_run_status(
+    workspace_id: str,
     run_id: str,
     predicate,
     description: str,
@@ -423,7 +425,7 @@ def wait_run_status(
     deadline = time.monotonic() + timeout_seconds
     last_status: dict[str, Any] = {}
     while time.monotonic() <= deadline:
-        path = f"/api/v1/workorch/runs/{url_quote(run_id)}/status"
+        path = f"/api/v1/workorch/workspaces/{url_quote(workspace_id)}/runs/{url_quote(run_id)}/status"
         if wait_state and STATUS_WAIT_TIMEOUT_SECONDS > 0:
             path += (
                 f"?waitState={url_quote(wait_state)}"
@@ -753,16 +755,16 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
 
 
 def collect_failure_evidence(result: WorkspaceResult, case_dir: Path) -> None:
-    if not result.run_id:
+    if not result.workspace_id or not result.run_id:
         return
     try:
-        snapshot = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/snapshot")
+        snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/snapshot")
         write_json(case_dir / "failure-snapshot.json", snapshot)
     except Exception as exc:
         write_text(case_dir / "failure-snapshot-error.txt", str(exc) + "\n")
         snapshot = {}
     try:
-        observability = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/observability")
+        observability = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/observability")
         write_json(case_dir / "failure-observability.json", observability)
     except Exception as exc:
         write_text(case_dir / "failure-observability-error.txt", str(exc) + "\n")
@@ -841,6 +843,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
 
         with timed(result, "decision1_to_decision2"):
             decision2_status = wait_run_status(
+                result.workspace_id,
                 result.run_id,
                 lambda status: status.get("state") == "blocked_on_decision"
                 and bool(status.get("blockingTicketId"))
@@ -874,6 +877,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
 
         with timed(result, "decision2_to_approval"):
             approval_status = wait_run_status(
+                result.workspace_id,
                 result.run_id,
                 lambda status: status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId")),
                 "state blocked_on_approval with blockingApprovalId",
@@ -894,20 +898,20 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
             raise RuntimeError(f"approval state={nested(approval, 'approval.state', None)!r}, want approved")
 
         with timed(result, "approval_to_completed"):
-            completed = wait_run_state(result.run_id, "completed")
+            completed = wait_run_state(result.workspace_id, result.run_id, "completed")
         write_json(case_dir / "run-completed-status.json", completed)
         run4 = extract_run_status(completed)
         if run4.get("state") != "completed":
             raise RuntimeError(f"final run state={run4.get('state')!r}, want completed")
 
         with timed(result, "snapshot_read"):
-            snapshot = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/snapshot")
+            snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/snapshot")
         with timed(result, "workspace_snapshot_read"):
             workspace_snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/snapshot")
         with timed(result, "status_read"):
-            status = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/status")
+            status = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/status")
         with timed(result, "observability_read"):
-            observability = run_curl("GET", f"/api/v1/workorch/runs/{url_quote(result.run_id)}/observability")
+            observability = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/observability")
         write_json(case_dir / "snapshot.json", snapshot)
         write_json(case_dir / "workspace-snapshot.json", workspace_snapshot)
         write_json(case_dir / "status.json", status)

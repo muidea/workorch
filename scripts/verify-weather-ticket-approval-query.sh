@@ -688,7 +688,7 @@ wait_run_state() {
   local deadline=$((SECONDS + 180))
 
   while (( SECONDS <= deadline )); do
-    curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$output_file"
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
     if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
       return 0
     fi
@@ -938,9 +938,9 @@ if [[ "$activation_state" == "blocked_on_decision" ]]; then
   grep '"resolutionType": "provide_missing_info"' "$TMP_DIR/decision-resolved.json" >/dev/null
   wait_run_state "$run_id" "blocked_on_approval" "$TMP_DIR/approval-status.json"
 elif [[ "$activation_state" == "blocked_on_approval" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$TMP_DIR/approval-status.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$TMP_DIR/approval-status.json"
 elif [[ "$activation_state" == "completed" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$run_id" >"$TMP_DIR/decision-auto-list.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/decision-auto-list.json"
   grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-auto-list.json" >/dev/null
   grep '"state": "resolved"' "$TMP_DIR/decision-auto-list.json" >/dev/null
 else
@@ -975,14 +975,14 @@ PY
   grep '"state": "approved"' "$TMP_DIR/approval-approved.json" >/dev/null
   wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed-status.json"
 else
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$run_id" >"$TMP_DIR/approval-auto-list.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/approval-auto-list.json"
   grep '"state": "approved"' "$TMP_DIR/approval-auto-list.json" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/status" >"$TMP_DIR/run-completed-status.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$TMP_DIR/run-completed-status.json"
   grep '"state": "completed"' "$TMP_DIR/run-completed-status.json" >/dev/null
 fi
 
 if [[ -z "${ticket_id:-}" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions?runId=$run_id" >"$TMP_DIR/decision-final-list.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/decision-final-list.json"
   ticket_id="$(python3 - "$TMP_DIR/decision-final-list.json" <<'PY'
 import json
 import sys
@@ -997,7 +997,7 @@ PY
 )"
 fi
 if [[ -z "${approval_id:-}" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals?runId=$run_id" >"$TMP_DIR/approval-final-list.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$run_id" >"$TMP_DIR/approval-final-list.json"
   approval_id="$(python3 - "$TMP_DIR/approval-final-list.json" <<'PY'
 import json
 import sys
@@ -1012,8 +1012,8 @@ PY
 )"
 fi
 
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-curl -fsS "$BASE_URL/api/v1/workorch/runs/$run_id/observability" >"$TMP_DIR/observability.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/observability" >"$TMP_DIR/observability.json"
 
 echo "workspaceId=$workspace_id"
 echo "provider=$PROVIDER_ID"

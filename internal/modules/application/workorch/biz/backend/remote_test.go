@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -141,33 +142,13 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 }
 
 func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/workorch/runs/run-remote/status" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"status":{
-			"id":"run-remote",
-			"workspaceId":"ws-remote",
-			"state":"running",
-			"currentStepId":"run-remote/llm-after-decision",
-			"currentStepKind":"llm/workspace-plan",
-			"currentStepState":"dispatched",
-			"stepCount":6
-		}}`)
-	}))
-	defer server.Close()
-
-	be := NewRemote(server.URL)
-	status, err := be.Run().Status(context.Background(), common.RunID("run-remote"))
-	if err != nil {
-		t.Fatalf("remote run status: %v", err)
+	be := NewRemote("http://127.0.0.1:1")
+	status, err := be.Run().Status(context.Background(), "", common.RunID("run-remote"))
+	if err == nil || !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("remote run status err = %v, want invalid argument", err)
 	}
-	if status.CurrentStepID != "run-remote/llm-after-decision" ||
-		status.CurrentStepKind != "llm/workspace_execution" ||
-		status.CurrentStepState != common.StepStateDispatched {
-		t.Fatalf("status current step = %s/%s/%s, want mapped current step fields", status.CurrentStepID, status.CurrentStepKind, status.CurrentStepState)
+	if status != nil {
+		t.Fatalf("status = %+v, want nil on missing workspace scope", status)
 	}
 }
 
@@ -184,7 +165,7 @@ func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *te
 
 	be := NewRemote(server.URL)
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-remote")
-	status, err := be.Run().Status(ctx, common.RunID("run-001"))
+	status, err := be.Run().Status(ctx, "ws-remote", common.RunID("run-001"))
 	if err != nil {
 		t.Fatalf("remote run status: %v", err)
 	}

@@ -207,27 +207,6 @@ func workspaceRunActionFromPath(path string) (workspaceID string, runID string, 
 	return "", "", "", false
 }
 
-func runActionFromPath(path string) (runID string, action string, ok bool) {
-	if _, runID, action, ok := workspaceRunActionFromPath(path); ok {
-		return runID, action, true
-	}
-	if !strings.HasPrefix(path, "/api/v1/workorch/runs/") {
-		return "", "", false
-	}
-	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/runs/")
-	if trimmed == "" {
-		return "", "", false
-	}
-	parts := strings.Split(trimmed, "/")
-	if len(parts) == 1 && parts[0] != "" {
-		return parts[0], "", true
-	}
-	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-		return parts[0], parts[1], true
-	}
-	return "", "", false
-}
-
 func decisionActionFromPath(path string) (ticketID string, action string, ok bool) {
 	if !strings.HasPrefix(path, "/api/v1/workorch/decisions/") {
 		return "", "", false

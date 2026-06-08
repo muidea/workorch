@@ -3,27 +3,20 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 )
 
 // ListApprovals returns all approvals, optionally filtered.
 func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) ([]Approval, error) {
 	path := "/api/v1/workorch/approvals"
-	parts := []string{}
+	values := url.Values{}
 	if workspaceID != "" {
-		parts = append(parts, "workspaceId="+workspaceID)
+		values.Set("workspaceId", workspaceID)
 	}
 	if runID != "" {
-		parts = append(parts, "runId="+runID)
+		values.Set("runId", runID)
 	}
-	if len(parts) > 0 {
-		path += "?"
-		for i, p := range parts {
-			if i > 0 {
-				path += "&"
-			}
-			path += p
-		}
-	}
+	path = joinQuery(path, values)
 	resp, err := c.do(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -33,7 +26,7 @@ func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) (
 
 // GetApproval returns a single approval.
 func (c *Client) GetApproval(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/approvals/%s", approvalID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/approvals/%s", escapePath(approvalID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +35,7 @@ func (c *Client) GetApproval(ctx context.Context, approvalID string) (*Approval,
 
 // Approve approves an approval gate.
 func (c *Client) Approve(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", approvalID), nil)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", escapePath(approvalID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +44,7 @@ func (c *Client) Approve(ctx context.Context, approvalID string) (*Approval, err
 
 // Reject rejects an approval gate.
 func (c *Client) Reject(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", approvalID), nil)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", escapePath(approvalID)), nil)
 	if err != nil {
 		return nil, err
 	}

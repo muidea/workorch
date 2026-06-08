@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ var runShowCmd = &cobra.Command{
 	Short: "Show run details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
+		r, err := mustBackend().Run().Get(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get run: %w", err)
 		}
@@ -123,7 +124,7 @@ var runStatusCmd = &cobra.Command{
 	Short: "Show run status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := mustBackend().Run().Status(ctx(), common.RunID(args[0]))
+		s, err := mustBackend().Run().Status(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get run status: %w", err)
 		}
@@ -154,7 +155,7 @@ var runResumeCmd = &cobra.Command{
 	Short: "Resume a blocked run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := mustBackend().Run().Resume(ctx(), common.RunID(args[0]))
+		r, err := mustBackend().Run().Resume(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("resume run: %w", err)
 		}
@@ -170,7 +171,7 @@ var runObservabilityCmd = &cobra.Command{
 	Aliases: []string{"obs"},
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		run, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
+		run, err := mustBackend().Run().Get(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get observability: %w", err)
 		}
@@ -192,7 +193,7 @@ var runPatchesCmd = &cobra.Command{
 	Short: "Show patch evidence for a run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		run, err := mustBackend().Run().Get(ctx(), common.RunID(args[0]))
+		run, err := mustBackend().Run().Get(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get run: %w", err)
 		}
@@ -248,6 +249,7 @@ func init() {
 	runCmd.AddCommand(runTimelineCmd)
 
 	runListCmd.Flags().String("workspace", "", "Filter by workspace ID")
+	runShowCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 
 	runActivateCmd.Flags().String("goal", "", "Goal ID")
 	runActivateCmd.Flags().String("dod", "", "DoD ID")
@@ -257,8 +259,35 @@ func init() {
 	runActivateCmd.Flags().String("lang", "", "Dialog language")
 	runActivateCmd.Flags().Int("priority", 0, "Run priority")
 
+	runStatusCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
 	runStatusCmd.Flags().String("wait", "", "Wait for run to reach this state")
 	runStatusCmd.Flags().Int("wait-timeout", 30000, "Wait timeout in ms")
+	runResumeCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
+	runObservabilityCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
+	runPatchesCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
+	runCoverageCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
+	runTimelineCmd.Flags().String("workspace", "", "Scope the run lookup to a workspace ID")
+}
+
+func runCommandContext(cmd *cobra.Command) context.Context {
+	base := ctx()
+	workspaceID := runCommandWorkspaceID(cmd)
+	if workspaceID == "" {
+		return base
+	}
+	return common.ContextWithRuntimeWorkspaceID(base, workspaceID)
+}
+
+func runCommandWorkspaceID(cmd *cobra.Command) common.WorkspaceID {
+	if cmd == nil {
+		return ""
+	}
+	workspaceID, _ := cmd.Flags().GetString("workspace")
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return ""
+	}
+	return common.WorkspaceID(workspaceID)
 }
 
 func patchesForRun(snapshot *backend.WorkspaceSnapshotInfo, runID common.RunID) []backend.PatchInfo {

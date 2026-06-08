@@ -112,6 +112,15 @@ func promoteRepairActionPackageContext(input map[string]any) {
 			input["currentFailure"] = compactLLMContextMap(currentFailure, 1)
 		}
 	}
+	if digest := mapFromValue(input[stepInputKeyCurrentProgressDigest]); repairProgressDigestIsInformative(digest) &&
+		len(mapFromValue(input["currentExecutionProgress"])) == 0 &&
+		len(mapFromValue(pkg["currentExecutionProgress"])) == 0 {
+		progress := compactLLMContextMap(digest, 0)
+		input["currentExecutionProgress"] = progress
+		pkg["currentExecutionProgress"] = progress
+		input["repairActionPackage"] = pkg
+		return
+	}
 	if len(mapFromValue(input["currentExecutionProgress"])) == 0 {
 		if progress := mapFromValue(pkg["currentExecutionProgress"]); len(progress) > 0 {
 			input["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
