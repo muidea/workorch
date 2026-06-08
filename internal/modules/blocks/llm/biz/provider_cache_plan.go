@@ -85,10 +85,10 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 			SectionOrder:       sectionOrder,
 			OrderedDataPolicy:  "preserve_runtime_sequence_for_goal_dod_events_tools_validations_steps_memory",
 			MapKeyPolicy:       "stable_key_order_for_unordered_maps_only",
-			ProviderMapping:    "adapter_optional",
+			ProviderMapping:    "adapter_maps_cacheable_prefix_to_provider_stable_prefix",
 		},
 		ObservedRequestShape: llmmodels.ProviderObservedRequestShape{
-			ProviderFacingMode:  "prompt_context_turns",
+			ProviderFacingMode:  "cacheable_prefix_sections_then_dynamic_tail",
 			TurnsHaveSectionIDs: promptContextTurnsHaveSectionIDs(request.PromptContext),
 			TypedEventTape:      promptContextHasTypedEventTape(request.PromptContext),
 		},
@@ -146,7 +146,7 @@ func providerAdapterCacheHint(plan llmmodels.ProviderCachePlan) llmmodels.Provid
 	return llmmodels.ProviderAdapterCacheHint{
 		Enabled:          len(cacheablePrefix) > 0,
 		Mode:             "provider_neutral_prefix_hint",
-		ProviderMapping:  "adapter_optional_no_core_private_fields",
+		ProviderMapping:  "adapter_stable_prefix_no_core_private_fields",
 		CacheablePrefix:  cacheablePrefix,
 		VolatileSections: volatileSections,
 		CacheBreakers:    uniqueStrings(breakers),

@@ -474,9 +474,15 @@ func chatMessagesForRequest(request *llmmodels.ProviderRequest) []chatCompletion
 			{Role: "user", Content: "{}"},
 		}
 	}
-	build := buildProviderPromptMessages(*request)
-	messages := make([]chatCompletionMessage, 0, len(build.Messages))
-	for _, item := range build.Messages {
+	prompt := buildProviderFacingPrompt(*request)
+	messages := make([]chatCompletionMessage, 0, len(prompt.DynamicMessages)+1)
+	if stablePrefix := strings.TrimSpace(prompt.StablePrefix); stablePrefix != "" {
+		messages = append(messages, chatCompletionMessage{
+			Role:    "system",
+			Content: stablePrefix,
+		})
+	}
+	for _, item := range prompt.DynamicMessages {
 		content := strings.TrimSpace(item.Content)
 		if content == "" {
 			continue
@@ -494,21 +500,10 @@ func chatMessagesForRequest(request *llmmodels.ProviderRequest) []chatCompletion
 	}
 	if request.ContextBudget != nil {
 		request.ContextBudget.PromptCaptured = true
-		request.ContextBudget.NormalizedSections = uniqueStrings(append(request.ContextBudget.NormalizedSections, build.NormalizedSections...))
-		request.ContextBudget.IncludedSections = uniqueStrings(append(request.ContextBudget.IncludedSections, defaultPromptIncludedSections(messages)...))
+		request.ContextBudget.NormalizedSections = uniqueStrings(append(request.ContextBudget.NormalizedSections, prompt.NormalizedSections...))
+		request.ContextBudget.IncludedSections = uniqueStrings(append(request.ContextBudget.IncludedSections, providerFacingPromptIncludedSections(prompt)...))
 	}
 	return messages
-}
-
-func defaultPromptIncludedSections(messages []chatCompletionMessage) []string {
-	if len(messages) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(messages))
-	for _, item := range messages {
-		out = append(out, item.Role)
-	}
-	return out
 }
 
 func systemPrompt(assessmentOnly bool) string {

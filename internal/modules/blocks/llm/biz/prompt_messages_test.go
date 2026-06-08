@@ -244,6 +244,62 @@ func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T
 	}
 }
 
+func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-provider-prefix",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{{Kind: "file/read", Description: "read file"}},
+		},
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"goal": "goal text",
+				"dod":  "dod text",
+			},
+			"currentRuntimeStage": "execution",
+			"currentProgressDigest": map[string]any{
+				"nextRequiredAction": "continue",
+			},
+		},
+	}
+	req.PromptContext = buildPromptContextFromRequest(req)
+
+	prompt := buildProviderFacingPrompt(req)
+	if prompt.StablePrefix == "" || len(prompt.StablePrefixSectionIDs) == 0 {
+		t.Fatalf("stable prefix missing: %+v", prompt)
+	}
+	for _, want := range []string{"C0.system", "C1.goal-contract-original", "C2.runtime-capability-summary", "goal text", "runtimeCapabilities"} {
+		if !strings.Contains(prompt.StablePrefix, want) {
+			t.Fatalf("stable prefix missing %q: %s", want, prompt.StablePrefix)
+		}
+	}
+	for _, forbidden := range []string{"C3.workspace-run", "C4.current-progress", "C4.current-action", "nextRequiredAction"} {
+		if strings.Contains(prompt.StablePrefix, forbidden) {
+			t.Fatalf("stable prefix leaked dynamic section %q: %s", forbidden, prompt.StablePrefix)
+		}
+	}
+	dynamic := ""
+	for _, message := range prompt.DynamicMessages {
+		dynamic += "\n" + message.SectionID + "\n" + message.Content
+	}
+	for _, want := range []string{"C3.workspace-run", "C4.current-progress", "C4.current-action", "nextRequiredAction"} {
+		if !strings.Contains(dynamic, want) {
+			t.Fatalf("dynamic tail missing %q: %s", want, dynamic)
+		}
+	}
+	for _, sectionID := range prompt.StablePrefixSectionIDs {
+		group := promptSectionGroup(sectionID)
+		if group != "C0" && group != "C1" && group != "C2" {
+			t.Fatalf("stable prefix section %q group=%q, want C0/C1/C2", sectionID, group)
+		}
+	}
+}
+
 func TestBuildPromptContextIncludesSelectedCapabilityUsageGuidance(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-capability",

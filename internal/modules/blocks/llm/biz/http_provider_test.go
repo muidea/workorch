@@ -68,6 +68,18 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	for _, message := range gotPayload.Messages {
 		joined += "\n" + message.Content
 	}
+	if gotPayload.Messages[0].Role != "system" ||
+		!strings.Contains(gotPayload.Messages[0].Content, "C0.system") ||
+		!strings.Contains(gotPayload.Messages[0].Content, "C2.runtime-capability-summary") {
+		t.Fatalf("first message = %+v, want stable provider prefix", gotPayload.Messages[0])
+	}
+	if strings.Contains(gotPayload.Messages[0].Content, "C3.workspace-run") ||
+		strings.Contains(gotPayload.Messages[0].Content, "C4.current-action") {
+		t.Fatalf("first message leaked dynamic sections: %s", gotPayload.Messages[0].Content)
+	}
+	if !strings.Contains(joined, "C3.workspace-run") || !strings.Contains(joined, "C4.current-action") {
+		t.Fatalf("messages = %+v, want dynamic tail after stable prefix", gotPayload.Messages)
+	}
 	if !strings.Contains(gotPayload.Messages[0].Content, "Do not invent a workorch CLI") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "runtimeCapabilities") ||
 		!strings.Contains(gotPayload.Messages[0].Content, "dialogLanguage") ||

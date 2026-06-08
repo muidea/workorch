@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-08
 
 ## Purpose
 
@@ -146,11 +146,20 @@ provider-specific 差异应尽量限制在 adapter 内，不扩散到上层 flow
 - 消费 provider 私有 cache-control / cache-key / equivalent field
 - 保证 provider/model/baseURL 等动态绑定不进入 provider-neutral stable prefix 语义
 
+当前 provider-facing 渲染规则：
+
+- 先从 `PromptContext` 或 prompt builder 中取连续 `C0` / `C1` / `C2`
+- 将这些 section 合并为第一段 stable prefix，并保留 section id heading
+- OpenAI Chat Completions 与 compatible HTTP provider 将 stable prefix 渲染为第一条 `system` message
+- Anthropic Messages 将 stable prefix 渲染为 `system` text block，并在该 text block 上设置 provider 私有 cache marker
+- `C3` / `C4` / `C5` 保持在 stable prefix 后方，作为 user/assistant 动态 tail
+
 约束：
 
 - cache mapping 只改变 provider-facing request 形态，不改变 core contract
 - provider-specific 字段名不得上浮到 flow / product / domain 文档
 - 不同 provider 的 cache 策略差异必须收敛在 adapter 或 provider assembly 层
+- 不得使用可能把动态 tail 一起标记为缓存断点的顶层 cache marker，除非该 provider 明确支持只指向 stable prefix
 
 ## Request-Log Verifier Landing
 

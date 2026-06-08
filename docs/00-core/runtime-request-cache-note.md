@@ -4,7 +4,7 @@ Status: active
 
 Type: core-note
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-08
 
 ## Purpose
 
@@ -35,6 +35,19 @@ request 应按 cacheability 从高到低组织：
 - capability contract 声明式稳定
 - 当前失败、当前进展、latest validation、memory recall、requested action 位于易变尾部
 - raw stream、full provider payload、large artifact 默认 ref-only
+
+### Provider-Facing Stable Prefix
+
+core 仍只输出 provider-neutral `PromptContext` 与 `ProviderCachePlan`，但 provider adapter
+必须把连续的 `C0` / `C1` / `C2` section 渲染为 provider-facing 的第一段稳定 prefix。
+
+稳定要求：
+
+- 出站请求第一段必须只包含 `C0` stable runtime prefix、`C1` workspace definition、`C2` capability contract
+- `C3` current stage bundle、`C4` volatile execution tail、`C5` large refs 必须在稳定 prefix 之后
+- provider/model/baseURL、stepId 这类动态绑定只能进入动态 tail 或 request audit，不能进入稳定 prefix
+- provider 私有 cache-control、prompt cache key 或等价字段只在 adapter 层设置
+- adapter 应保留 section id heading，使 request-log 能对齐 `ProviderCachePlan.sectionHashes`
 
 ### Canonical Rendering
 

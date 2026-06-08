@@ -4,7 +4,7 @@ Status: active
 
 Type: runtime-flow
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-08
 
 ## Purpose
 
@@ -268,6 +268,8 @@ LLM-facing context 至少要区分以下层级：
 - recent execution / failure / validation / memory recall 应进入 volatile tail
 - large artifact、raw stream、旧 evidence 默认只通过 refs 进入
 - prompt normalization 只允许做无语义损失清理，不能改写 Goal / DoD、ticket、approval、patch、diff 或代码块
+- provider-facing request 必须把连续 `C0` / `C1` / `C2` 合并为第一段稳定 prefix，并把 `C3` / `C4` / `C5` 作为后续动态 tail
+- 每个 provider-facing section 都应保留 section id heading，便于 request-log 与 cache plan 对齐
 
 ## Memory Recall Flow
 

@@ -62,6 +62,28 @@ func TestOpenAIProviderCompleteUsesOfficialSDKChatCompletions(t *testing.T) {
 	if gotPayload["max_completion_tokens"] != float64(65536) || gotPayload["reasoning_effort"] != "high" {
 		t.Fatalf("payload = %+v, want configured OpenAI inference profile", gotPayload)
 	}
+	messages, ok := gotPayload["messages"].([]any)
+	if !ok || len(messages) < 2 {
+		t.Fatalf("messages = %#v, want stable prefix plus dynamic tail", gotPayload["messages"])
+	}
+	firstMessage, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first message = %#v, want object", messages[0])
+	}
+	firstContent, _ := firstMessage["content"].(string)
+	if firstMessage["role"] != "system" ||
+		!strings.Contains(firstContent, "C0.system") ||
+		!strings.Contains(firstContent, "C2.runtime-capability-summary") {
+		t.Fatalf("first message = %+v, want stable provider prefix", firstMessage)
+	}
+	if strings.Contains(firstContent, "C3.workspace-run") || strings.Contains(firstContent, "C4.current-action") {
+		t.Fatalf("first message leaked dynamic sections: %s", firstContent)
+	}
+	encodedMessages, _ := json.Marshal(messages)
+	if !strings.Contains(string(encodedMessages), "C3.workspace-run") ||
+		!strings.Contains(string(encodedMessages), "C4.current-action") {
+		t.Fatalf("messages = %s, want dynamic tail after stable prefix", encodedMessages)
+	}
 	if !strings.Contains(string(result.Payload), `"summary":"openai sdk done"`) {
 		t.Fatalf("payload = %s, want SDK decision content", result.Payload)
 	}
@@ -162,6 +184,31 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 	}
 	if gotPayload["model"] != "claude-test" || gotPayload["max_tokens"] == nil || gotPayload["system"] == nil {
 		t.Fatalf("payload = %+v, want messages request with system prompt", gotPayload)
+	}
+	systemBlocks, ok := gotPayload["system"].([]any)
+	if !ok || len(systemBlocks) == 0 {
+		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
+	}
+	firstSystem, ok := systemBlocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
+	}
+	systemText, _ := firstSystem["text"].(string)
+	cacheControl, ok := firstSystem["cache_control"].(map[string]any)
+	if !ok || cacheControl["type"] != "ephemeral" {
+		t.Fatalf("system block = %+v, want Anthropic cache_control on stable prefix", firstSystem)
+	}
+	if !strings.Contains(systemText, "C0.system") ||
+		!strings.Contains(systemText, "C2.runtime-capability-summary") {
+		t.Fatalf("system text = %s, want stable provider prefix", systemText)
+	}
+	if strings.Contains(systemText, "C3.workspace-run") || strings.Contains(systemText, "C4.current-action") {
+		t.Fatalf("system text leaked dynamic sections: %s", systemText)
+	}
+	anthropicMessages, _ := json.Marshal(gotPayload["messages"])
+	if !strings.Contains(string(anthropicMessages), "C3.workspace-run") ||
+		!strings.Contains(string(anthropicMessages), "C4.current-action") {
+		t.Fatalf("messages = %s, want dynamic tail after cached system prefix", anthropicMessages)
 	}
 	thinking, _ := gotPayload["thinking"].(map[string]any)
 	if gotPayload["max_tokens"] != float64(65536) ||

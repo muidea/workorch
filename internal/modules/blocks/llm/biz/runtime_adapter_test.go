@@ -1535,9 +1535,9 @@ func TestRuntimeAdapterBuildsPromptContextFromGovernanceAndGoalDoDHistory(t *tes
 		t.Fatalf("cachePlan section order=%+v sections=%+v, want one entry per section", provider.request.ContextBudget.CachePlan.Canonicalization.SectionOrder, provider.request.PromptContext.Sections)
 	}
 	if !provider.request.ContextBudget.CachePlan.AdapterHint.Enabled ||
-		provider.request.ContextBudget.CachePlan.AdapterHint.ProviderMapping != "adapter_optional_no_core_private_fields" ||
+		provider.request.ContextBudget.CachePlan.AdapterHint.ProviderMapping != "adapter_stable_prefix_no_core_private_fields" ||
 		len(provider.request.ContextBudget.CachePlan.AdapterHint.CacheablePrefix) == 0 {
-		t.Fatalf("adapterHint = %+v, want provider-neutral optional cache hint", provider.request.ContextBudget.CachePlan.AdapterHint)
+		t.Fatalf("adapterHint = %+v, want provider-neutral stable-prefix cache hint", provider.request.ContextBudget.CachePlan.AdapterHint)
 	}
 	cacheablePrefix := provider.request.ContextBudget.CachePlan.AdapterHint.CacheablePrefix
 	if cacheablePrefix[len(cacheablePrefix)-1] != "C2.runtime-capability-summary" {

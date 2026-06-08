@@ -138,9 +138,12 @@ func (p *OpenAIProvider) Embed(ctx context.Context, request llmmodels.ProviderEm
 }
 
 func (p *OpenAIProvider) chatParams(request llmmodels.ProviderRequest) openai.ChatCompletionNewParams {
-	messages := buildProviderPromptMessages(request)
-	chatMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages.Messages))
-	for _, item := range messages.Messages {
+	prompt := buildProviderFacingPrompt(request)
+	chatMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(prompt.DynamicMessages)+1)
+	if stablePrefix := strings.TrimSpace(prompt.StablePrefix); stablePrefix != "" {
+		chatMessages = append(chatMessages, openai.SystemMessage(stablePrefix))
+	}
+	for _, item := range prompt.DynamicMessages {
 		content := strings.TrimSpace(item.Content)
 		if content == "" {
 			continue
@@ -273,9 +276,9 @@ func (p *AnthropicProvider) StreamComplete(ctx context.Context, request llmmodel
 }
 
 func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) anthropic.MessageNewParams {
-	messages := buildProviderPromptMessages(request)
-	anthropicMessages := make([]anthropic.MessageParam, 0, len(messages.Messages))
-	for _, item := range messages.Messages {
+	prompt := buildProviderFacingPrompt(request)
+	anthropicMessages := make([]anthropic.MessageParam, 0, len(prompt.DynamicMessages))
+	for _, item := range prompt.DynamicMessages {
 		role := normalizedPromptRole(item.Role)
 		content := strings.TrimSpace(item.Content)
 		if content == "" || role == "system" {
@@ -290,14 +293,20 @@ func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) ant
 	if len(anthropicMessages) == 0 {
 		anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt(request))))
 	}
+	system := []anthropic.TextBlockParam{{Text: systemPromptForRequest(request)}}
+	if stablePrefix := strings.TrimSpace(prompt.StablePrefix); stablePrefix != "" {
+		block := anthropic.TextBlockParam{Text: stablePrefix}
+		if len(prompt.StablePrefixSectionIDs) > 0 {
+			block.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
+		system = []anthropic.TextBlockParam{block}
+	}
 	params := anthropic.MessageNewParams{
 		MaxTokens:   anthropicMaxTokens(p.config),
 		Messages:    anthropicMessages,
 		Model:       anthropic.Model(p.config.Model),
 		Temperature: anthropic.Float(providerTemperature(p.config)),
-		System: []anthropic.TextBlockParam{{
-			Text: systemPromptForRequest(request),
-		}},
+		System:      system,
 	}
 	if p.config.InferenceProfile.ThinkingBudgetTokens > 0 {
 		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(p.config.InferenceProfile.ThinkingBudgetTokens))
