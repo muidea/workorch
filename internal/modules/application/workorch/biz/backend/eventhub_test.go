@@ -209,14 +209,14 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("define goal: %v", err)
 	}
-	if _, err := be.Goal().Update(ctx, goal.ID, "updated goal"); err != nil {
+	if _, err := be.Goal().Update(ctx, ws.ID, goal.ID, "updated goal"); err != nil {
 		t.Fatalf("update goal: %v", err)
 	}
 	dod, err := be.DoD().Define(ctx, ws.ID, []string{"initial dod"})
 	if err != nil {
 		t.Fatalf("define dod: %v", err)
 	}
-	if _, err := be.DoD().Update(ctx, dod.ID, []string{"updated dod"}); err != nil {
+	if _, err := be.DoD().Update(ctx, ws.ID, dod.ID, []string{"updated dod"}); err != nil {
 		t.Fatalf("update dod: %v", err)
 	}
 

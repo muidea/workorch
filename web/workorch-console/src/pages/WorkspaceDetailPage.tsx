@@ -293,10 +293,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunStepPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunStepLoading(true);
     try {
       const page = await workorchApi.listRunSteps(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeStepPageLimit
       });
@@ -329,10 +333,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunToolCallPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunToolCallLoading(true);
     try {
       const page = await workorchApi.listRunToolCalls(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeToolCallPageLimit
       });
@@ -362,10 +370,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunCheckpointPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunCheckpointLoading(true);
     try {
       const page = await workorchApi.listRunRuntimeCheckpoints(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeCheckpointPageLimit
       });
@@ -395,10 +407,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunResultPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunResultLoading(true);
     try {
       const page = await workorchApi.listRunResults(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeResultPageLimit
       });
@@ -416,10 +432,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunPatchPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunPatchLoading(true);
     try {
       const page = await workorchApi.listRunPatches(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimePatchPageLimit
       });
@@ -437,10 +457,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunValidationPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunValidationLoading(true);
     try {
       const page = await workorchApi.listRunValidationResults(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeValidationPageLimit
       });
@@ -458,10 +482,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunArtifactPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunArtifactLoading(true);
     try {
       const page = await workorchApi.listRunArtifacts(runId, {
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         cursorAfterId,
         limit: runtimeArtifactPageLimit
       });
@@ -660,10 +688,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunEventPage(runId: string, cursorAfterId?: string) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunEventLoading(true);
     try {
       const items = await workorchApi.listEventRecords({
-        workspaceId,
+        workspaceId: targetWorkspaceId,
         runId,
         cursorAfterId,
         limit: runtimeEventPageLimit
@@ -675,6 +707,10 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   }
 
   async function loadRunProcess(runId: string, includeContext = false) {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId) {
+      return;
+    }
     setRunEventLoading(true);
     setRunStepLoading(true);
     setRunToolCallLoading(true);
@@ -685,17 +721,17 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setRunArtifactLoading(true);
     try {
       const [nextRunSnapshot, nextRunObservability, nextRunContextBundle, stepPage, toolCallPage, checkpointPage, resultPage, patchPage, validationPage, artifactPage, eventRecords] = await Promise.all([
-        workorchApi.readRunSnapshot(runId, workspaceId),
-        workorchApi.readRunObservability(runId, workspaceId),
-        includeContext ? workorchApi.readRunContextBundle(runId, workspaceId) : Promise.resolve(undefined),
-        workorchApi.listRunSteps(runId, { workspaceId, limit: runtimeStepPageLimit }),
-        workorchApi.listRunToolCalls(runId, { workspaceId, limit: runtimeToolCallPageLimit }),
-        workorchApi.listRunRuntimeCheckpoints(runId, { workspaceId, limit: runtimeCheckpointPageLimit }),
-        workorchApi.listRunResults(runId, { workspaceId, limit: runtimeResultPageLimit }),
-        workorchApi.listRunPatches(runId, { workspaceId, limit: runtimePatchPageLimit }),
-        workorchApi.listRunValidationResults(runId, { workspaceId, limit: runtimeValidationPageLimit }),
-        workorchApi.listRunArtifacts(runId, { workspaceId, limit: runtimeArtifactPageLimit }),
-        workorchApi.listEventRecords({ workspaceId, runId, limit: runtimeEventPageLimit })
+        workorchApi.readRunSnapshot(runId, targetWorkspaceId),
+        workorchApi.readRunObservability(runId, targetWorkspaceId),
+        includeContext ? workorchApi.readRunContextBundle(runId, targetWorkspaceId) : Promise.resolve(undefined),
+        workorchApi.listRunSteps(runId, { workspaceId: targetWorkspaceId, limit: runtimeStepPageLimit }),
+        workorchApi.listRunToolCalls(runId, { workspaceId: targetWorkspaceId, limit: runtimeToolCallPageLimit }),
+        workorchApi.listRunRuntimeCheckpoints(runId, { workspaceId: targetWorkspaceId, limit: runtimeCheckpointPageLimit }),
+        workorchApi.listRunResults(runId, { workspaceId: targetWorkspaceId, limit: runtimeResultPageLimit }),
+        workorchApi.listRunPatches(runId, { workspaceId: targetWorkspaceId, limit: runtimePatchPageLimit }),
+        workorchApi.listRunValidationResults(runId, { workspaceId: targetWorkspaceId, limit: runtimeValidationPageLimit }),
+        workorchApi.listRunArtifacts(runId, { workspaceId: targetWorkspaceId, limit: runtimeArtifactPageLimit }),
+        workorchApi.listEventRecords({ workspaceId: targetWorkspaceId, runId, limit: runtimeEventPageLimit })
       ]);
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
@@ -1267,9 +1303,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </Button>
           <Button
             size="small"
-            onClick={() => void workorchApi.resumeRun(item.id, numericRunPriority(item), snapshot?.workspace.id)
-              .then(refreshWorkspace)
-              .catch((error: unknown) => message.error(errorMessage(error)))}
+            onClick={() => {
+              if (!workspaceId) {
+                return;
+              }
+              void workorchApi.resumeRun(item.id, numericRunPriority(item), workspaceId)
+                .then(refreshWorkspace)
+                .catch((error: unknown) => message.error(errorMessage(error)));
+            }}
           >
             继续运行
           </Button>
@@ -2627,7 +2668,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             setBusinessSubmitting(true);
             try {
               if (editingGoal) {
-                await workorchApi.updateGoal(editingGoal.id, values.text);
+                await workorchApi.updateGoal(workspaceId, editingGoal.id, values.text);
               } else {
                 await workorchApi.defineGoal(workspaceId, values.text);
               }
@@ -2671,7 +2712,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             try {
               const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
               if (editingDoD) {
-                await workorchApi.updateDoD(editingDoD.id, items);
+                await workorchApi.updateDoD(workspaceId, editingDoD.id, items);
               } else {
                 await workorchApi.defineDoD(workspaceId, items);
               }

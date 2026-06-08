@@ -84,21 +84,21 @@ func (c *Client) CreateGoal(ctx context.Context, workspaceID, text string) (*Goa
 	return decodeEnvelope[Goal](resp, "goal")
 }
 
-// GetGoal returns a single goal.
-func (c *Client) GetGoal(ctx context.Context, goalID string) (*Goal, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/goals/%s", escapePath(goalID)), nil)
+// GetGoal returns a single goal scoped to a workspace.
+func (c *Client) GetGoal(ctx context.Context, workspaceID string, goalID string) (*Goal, error) {
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals/%s", escapePath(workspaceID), escapePath(goalID)), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[Goal](resp, "goal")
 }
 
-// UpdateGoal replaces an existing goal text.
-func (c *Client) UpdateGoal(ctx context.Context, goalID string, text string) (*Goal, error) {
+// UpdateGoal replaces an existing goal text scoped to a workspace.
+func (c *Client) UpdateGoal(ctx context.Context, workspaceID string, goalID string, text string) (*Goal, error) {
 	req := struct {
 		Text string `json:"text"`
 	}{Text: text}
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/goals/%s", escapePath(goalID)), req)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/goals/%s", escapePath(workspaceID), escapePath(goalID)), req)
 	if err != nil {
 		return nil, err
 	}
@@ -126,21 +126,21 @@ func (c *Client) CreateDoD(ctx context.Context, workspaceID string, items []stri
 	return decodeEnvelope[DoD](resp, "dod")
 }
 
-// GetDoD returns a single DoD.
-func (c *Client) GetDoD(ctx context.Context, dodID string) (*DoD, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/dods/%s", escapePath(dodID)), nil)
+// GetDoD returns a single DoD scoped to a workspace.
+func (c *Client) GetDoD(ctx context.Context, workspaceID string, dodID string) (*DoD, error) {
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods/%s", escapePath(workspaceID), escapePath(dodID)), nil)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[DoD](resp, "dod")
 }
 
-// UpdateDoD replaces the items of an existing DoD.
-func (c *Client) UpdateDoD(ctx context.Context, dodID string, items []string) (*DoD, error) {
+// UpdateDoD replaces the items of an existing DoD scoped to a workspace.
+func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string, items []string) (*DoD, error) {
 	req := struct {
 		Items []string `json:"items"`
 	}{Items: items}
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/dods/%s", escapePath(dodID)), req)
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/dods/%s", escapePath(workspaceID), escapePath(dodID)), req)
 	if err != nil {
 		return nil, err
 	}

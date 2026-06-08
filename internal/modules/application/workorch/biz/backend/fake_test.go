@@ -116,11 +116,11 @@ func (f *fakeGoal) Define(ctx context.Context, wsID common.WorkspaceID, text str
 func (f *fakeGoal) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.GoalInfo, error) {
 	return f.b.goals, nil
 }
-func (f *fakeGoal) Get(ctx context.Context, id common.GoalID) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: id, Text: "test"}, nil
+func (f *fakeGoal) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id, WorkspaceID: wsID, Text: "test"}, nil
 }
-func (f *fakeGoal) Update(ctx context.Context, id common.GoalID, text string) (*backend.GoalInfo, error) {
-	return f.Get(ctx, id)
+func (f *fakeGoal) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*backend.GoalInfo, error) {
+	return f.Get(ctx, wsID, id)
 }
 
 // ── DoD ──
@@ -135,11 +135,11 @@ func (f *fakeDoD) Define(ctx context.Context, wsID common.WorkspaceID, items []s
 func (f *fakeDoD) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DoDInfo, error) {
 	return f.b.dods, nil
 }
-func (f *fakeDoD) Get(ctx context.Context, id common.DoDID) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{ID: id}, nil
+func (f *fakeDoD) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*backend.DoDInfo, error) {
+	return &backend.DoDInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeDoD) Update(ctx context.Context, id common.DoDID, items []string) (*backend.DoDInfo, error) {
-	return f.Get(ctx, id)
+func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*backend.DoDInfo, error) {
+	return f.Get(ctx, wsID, id)
 }
 
 // ── Run ──

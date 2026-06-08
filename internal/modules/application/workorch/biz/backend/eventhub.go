@@ -280,11 +280,11 @@ func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID)
 	result, err := b.parent.sendCommand(ctx, events.CommandGoalList, wsID, "", "goal", "", nil)
 	return decodeResultResources[GoalInfo](result, err)
 }
-func (b *eventHubGoalBackend) Get(ctx context.Context, id common.GoalID) (*GoalInfo, error) {
+func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*GoalInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandGoalGet, "", "", "goal", string(id), nil)
 	return decodeResultResource[GoalInfo](result, err)
 }
-func (b *eventHubGoalBackend) Update(ctx context.Context, id common.GoalID, text string) (*GoalInfo, error) {
+func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*GoalInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandGoalUpdate, "", "", "goal", string(id), map[string]any{"text": text})
 	return decodeResultResource[GoalInfo](result, err)
 }
@@ -299,11 +299,11 @@ func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) 
 	result, err := b.parent.sendCommand(ctx, events.CommandDoDList, wsID, "", "dod", "", nil)
 	return decodeResultResources[DoDInfo](result, err)
 }
-func (b *eventHubDoDBackend) Get(ctx context.Context, id common.DoDID) (*DoDInfo, error) {
+func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*DoDInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandDoDGet, "", "", "dod", string(id), nil)
 	return decodeResultResource[DoDInfo](result, err)
 }
-func (b *eventHubDoDBackend) Update(ctx context.Context, id common.DoDID, items []string) (*DoDInfo, error) {
+func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*DoDInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandDoDUpdate, "", "", "dod", string(id), map[string]any{"items": items})
 	return decodeResultResource[DoDInfo](result, err)
 }

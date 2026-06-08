@@ -398,8 +398,8 @@ type GoalInfo struct {
 type GoalBackend interface {
 	Define(ctx context.Context, wsID common.WorkspaceID, text string) (*GoalInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]GoalInfo, error)
-	Get(ctx context.Context, id common.GoalID) (*GoalInfo, error)
-	Update(ctx context.Context, id common.GoalID, text string) (*GoalInfo, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*GoalInfo, error)
+	Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*GoalInfo, error)
 }
 
 // ── DoD ──
@@ -414,8 +414,8 @@ type DoDInfo struct {
 type DoDBackend interface {
 	Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*DoDInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]DoDInfo, error)
-	Get(ctx context.Context, id common.DoDID) (*DoDInfo, error)
-	Update(ctx context.Context, id common.DoDID, items []string) (*DoDInfo, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*DoDInfo, error)
+	Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*DoDInfo, error)
 }
 
 // ── Run ──

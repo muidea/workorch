@@ -3312,11 +3312,11 @@ func (f *recordingGoal) Define(ctx context.Context, wsID common.WorkspaceID, tex
 func (f *recordingGoal) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.GoalInfo, error) {
 	return nil, nil
 }
-func (f *recordingGoal) Get(ctx context.Context, id common.GoalID) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: id}, nil
+func (f *recordingGoal) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *recordingGoal) Update(ctx context.Context, id common.GoalID, text string) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: id, Text: text}, nil
+func (f *recordingGoal) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id, WorkspaceID: wsID, Text: text}, nil
 }
 
 type recordingRun struct{ parent *recordingBE }
@@ -3424,11 +3424,11 @@ func (f *fakeG) Define(ctx context.Context, wsID common.WorkspaceID, text string
 func (f *fakeG) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.GoalInfo, error) {
 	return nil, nil
 }
-func (f *fakeG) Get(ctx context.Context, id common.GoalID) (*backend.GoalInfo, error) {
-	return &backend.GoalInfo{ID: id}, nil
+func (f *fakeG) Get(ctx context.Context, wsID common.WorkspaceID, id common.GoalID) (*backend.GoalInfo, error) {
+	return &backend.GoalInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeG) Update(ctx context.Context, id common.GoalID, text string) (*backend.GoalInfo, error) {
-	return f.Get(ctx, id)
+func (f *fakeG) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*backend.GoalInfo, error) {
+	return f.Get(ctx, wsID, id)
 }
 
 type fakeD struct{}
@@ -3439,11 +3439,11 @@ func (f *fakeD) Define(ctx context.Context, wsID common.WorkspaceID, items []str
 func (f *fakeD) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DoDInfo, error) {
 	return nil, nil
 }
-func (f *fakeD) Get(ctx context.Context, id common.DoDID) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{ID: id}, nil
+func (f *fakeD) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*backend.DoDInfo, error) {
+	return &backend.DoDInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeD) Update(ctx context.Context, id common.DoDID, items []string) (*backend.DoDInfo, error) {
-	return f.Get(ctx, id)
+func (f *fakeD) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*backend.DoDInfo, error) {
+	return f.Get(ctx, wsID, id)
 }
 
 type recordingDoDBE struct {
@@ -3469,12 +3469,12 @@ func (f *recordingDoD) List(ctx context.Context, wsID common.WorkspaceID) ([]bac
 	}
 	return nil, nil
 }
-func (f *recordingDoD) Get(ctx context.Context, id common.DoDID) (*backend.DoDInfo, error) {
-	return &backend.DoDInfo{ID: id, WorkspaceID: f.parent.workspaceID, Items: append([]string(nil), f.parent.items...), State: "ready"}, nil
+func (f *recordingDoD) Get(ctx context.Context, wsID common.WorkspaceID, id common.DoDID) (*backend.DoDInfo, error) {
+	return &backend.DoDInfo{ID: id, WorkspaceID: wsID, Items: append([]string(nil), f.parent.items...), State: "ready"}, nil
 }
-func (f *recordingDoD) Update(ctx context.Context, id common.DoDID, items []string) (*backend.DoDInfo, error) {
+func (f *recordingDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*backend.DoDInfo, error) {
 	f.parent.items = append([]string(nil), items...)
-	return &backend.DoDInfo{ID: id, WorkspaceID: f.parent.workspaceID, Items: items, State: "ready"}, nil
+	return &backend.DoDInfo{ID: id, WorkspaceID: wsID, Items: items, State: "ready"}, nil
 }
 
 type fakeR struct{}

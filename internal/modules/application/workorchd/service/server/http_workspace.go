@@ -187,9 +187,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			Goals:    items,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/goals/:goalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals/:goalId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		goalID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/goals/")
+		workspaceID, goalID, ok := workspaceResourceIDFromPath(r.URL.Path, "goals")
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -198,6 +198,10 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		item, err := state.readGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID)
 		if err != nil {
 			writeBusinessError(w, err)
+			return
+		}
+		if item.WorkspaceID != workspaceID {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "goal not found in workspace"})
 			return
 		}
 		writeJSON(w, http.StatusOK, goalResponse{
@@ -227,9 +231,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			DoDs:     items,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/dods/:dodId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods/:dodId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		dodID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/dods/")
+		workspaceID, dodID, ok := workspaceResourceIDFromPath(r.URL.Path, "dods")
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -238,6 +242,10 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 		item, err := state.readDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID)
 		if err != nil {
 			writeBusinessError(w, err)
+			return
+		}
+		if item.WorkspaceID != workspaceID {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "dod not found in workspace"})
 			return
 		}
 		writeJSON(w, http.StatusOK, dodResponse{
@@ -408,9 +416,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Goal:     item,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/goals/:goalId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals/:goalId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		goalID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/goals/")
+		workspaceID, goalID, ok := workspaceResourceIDFromPath(r.URL.Path, "goals")
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -419,6 +427,15 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		var req defineGoalRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		current, err := state.readGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		if current.WorkspaceID != workspaceID {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "goal not found in workspace"})
 			return
 		}
 		item, err := state.updateGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID, req.Text)
@@ -458,9 +475,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			DoD:      item,
 		})
 	})
-	router.AddHandler("/api/v1/workorch/dods/:dodId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods/:dodId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		dodID, ok := resourceIDFromPath(r.URL.Path, "/api/v1/workorch/dods/")
+		workspaceID, dodID, ok := workspaceResourceIDFromPath(r.URL.Path, "dods")
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -469,6 +486,15 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		var req defineDoDRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		current, err := state.readDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		if current.WorkspaceID != workspaceID {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "dod not found in workspace"})
 			return
 		}
 		item, err := state.updateDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID, req.Items)

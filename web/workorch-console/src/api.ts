@@ -87,20 +87,17 @@ function querySuffix(extra?: Record<string, string | number | undefined>) {
   return search.toString() ? `?${search.toString()}` : '';
 }
 
-function runPageSuffix(query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) {
+function runPageSuffix(query?: { cursorAfterId?: string; limit?: number }) {
   return querySuffix({
     cursorAfterId: query?.cursorAfterId,
     limit: query?.limit
   });
 }
 
-function runPath(runId: string, action?: string, workspaceId?: string) {
+function runPath(workspaceId: string, runId: string, action?: string) {
   const encodedRunId = encodeURIComponent(runId);
   const suffix = action ? `/${action}` : '';
-  if (workspaceId) {
-    return `${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodedRunId}${suffix}`;
-  }
-  return `${apiBase}/runs/${encodedRunId}${suffix}`;
+  return `${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodedRunId}${suffix}`;
 }
 
 export const workorchApi = {
@@ -208,8 +205,8 @@ export const workorchApi = {
     });
     return body.goal;
   },
-  updateGoal: async (goalId: string, text: string) => {
-    const body = await request<{ goal: Goal }>(`${apiBase}/goals/${encodeURIComponent(goalId)}`, {
+  updateGoal: async (workspaceId: string, goalId: string, text: string) => {
+    const body = await request<{ goal: Goal }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals/${encodeURIComponent(goalId)}`, {
       method: 'PUT',
       body: JSON.stringify({ text })
     });
@@ -226,8 +223,8 @@ export const workorchApi = {
     });
     return body.dod;
   },
-  updateDoD: async (dodId: string, items: string[]) => {
-    const body = await request<{ dod: DoD }>(`${apiBase}/dods/${encodeURIComponent(dodId)}`, {
+  updateDoD: async (workspaceId: string, dodId: string, items: string[]) => {
+    const body = await request<{ dod: DoD }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods/${encodeURIComponent(dodId)}`, {
       method: 'PUT',
       body: JSON.stringify({ items })
     });
@@ -237,72 +234,72 @@ export const workorchApi = {
     const body = await request<{ runs: Run[] }>(`${apiBase}/runs`);
     return body.runs ?? [];
   },
-  readRunSnapshot: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ snapshot: RunSnapshot }>(runPath(runId, 'snapshot', workspaceId));
+  readRunSnapshot: async (runId: string, workspaceId: string) => {
+    const body = await request<{ snapshot: RunSnapshot }>(runPath(workspaceId, runId, 'snapshot'));
     return body.snapshot;
   },
-  listRunSteps: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunSteps: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ steps?: StepPage['steps']; page: StepPage }>(`${runPath(runId, 'steps', query?.workspaceId)}${suffix}`);
+    const body = await request<{ steps?: StepPage['steps']; page: StepPage }>(`${runPath(query.workspaceId, runId, 'steps')}${suffix}`);
     return {
       ...body.page,
       steps: body.steps ?? body.page.steps ?? []
     };
   },
-  listRunToolCalls: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunToolCalls: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ toolCalls?: ToolCallPage['toolCalls']; page: ToolCallPage }>(`${runPath(runId, 'tool-calls', query?.workspaceId)}${suffix}`);
+    const body = await request<{ toolCalls?: ToolCallPage['toolCalls']; page: ToolCallPage }>(`${runPath(query.workspaceId, runId, 'tool-calls')}${suffix}`);
     return {
       ...body.page,
       toolCalls: body.toolCalls ?? body.page.toolCalls ?? []
     };
   },
-  listRunRuntimeCheckpoints: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunRuntimeCheckpoints: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ runtimeCheckpoints?: RuntimeCheckpointPage['runtimeCheckpoints']; page: RuntimeCheckpointPage }>(`${runPath(runId, 'runtime-checkpoints', query?.workspaceId)}${suffix}`);
+    const body = await request<{ runtimeCheckpoints?: RuntimeCheckpointPage['runtimeCheckpoints']; page: RuntimeCheckpointPage }>(`${runPath(query.workspaceId, runId, 'runtime-checkpoints')}${suffix}`);
     return {
       ...body.page,
       runtimeCheckpoints: body.runtimeCheckpoints ?? body.page.runtimeCheckpoints ?? []
     };
   },
-  listRunResults: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunResults: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ results?: ResultPage['results']; page: ResultPage }>(`${runPath(runId, 'results', query?.workspaceId)}${suffix}`);
+    const body = await request<{ results?: ResultPage['results']; page: ResultPage }>(`${runPath(query.workspaceId, runId, 'results')}${suffix}`);
     return {
       ...body.page,
       results: body.results ?? body.page.results ?? []
     };
   },
-  listRunPatches: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunPatches: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ patches?: PatchPage['patches']; page: PatchPage }>(`${runPath(runId, 'patches', query?.workspaceId)}${suffix}`);
+    const body = await request<{ patches?: PatchPage['patches']; page: PatchPage }>(`${runPath(query.workspaceId, runId, 'patches')}${suffix}`);
     return {
       ...body.page,
       patches: body.patches ?? body.page.patches ?? []
     };
   },
-  listRunValidationResults: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunValidationResults: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ validationResults?: ValidationResultPage['validationResults']; page: ValidationResultPage }>(`${runPath(runId, 'validation-results', query?.workspaceId)}${suffix}`);
+    const body = await request<{ validationResults?: ValidationResultPage['validationResults']; page: ValidationResultPage }>(`${runPath(query.workspaceId, runId, 'validation-results')}${suffix}`);
     return {
       ...body.page,
       validationResults: body.validationResults ?? body.page.validationResults ?? []
     };
   },
-  listRunArtifacts: async (runId: string, query?: { workspaceId?: string; cursorAfterId?: string; limit?: number }) => {
+  listRunArtifacts: async (runId: string, query: { workspaceId: string; cursorAfterId?: string; limit?: number }) => {
     const suffix = runPageSuffix(query);
-    const body = await request<{ artifacts?: ArtifactPage['artifacts']; page: ArtifactPage }>(`${runPath(runId, 'artifacts', query?.workspaceId)}${suffix}`);
+    const body = await request<{ artifacts?: ArtifactPage['artifacts']; page: ArtifactPage }>(`${runPath(query.workspaceId, runId, 'artifacts')}${suffix}`);
     return {
       ...body.page,
       artifacts: body.artifacts ?? body.page.artifacts ?? []
     };
   },
-  readRunObservability: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ observability: RunObservability }>(runPath(runId, 'observability', workspaceId));
+  readRunObservability: async (runId: string, workspaceId: string) => {
+    const body = await request<{ observability: RunObservability }>(runPath(workspaceId, runId, 'observability'));
     return body.observability;
   },
-  readRunMemoryRecalls: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ memoryRecallTraces: MemoryRecallTrace[] }>(runPath(runId, 'memory-recalls', workspaceId));
+  readRunMemoryRecalls: async (runId: string, workspaceId: string) => {
+    const body = await request<{ memoryRecallTraces: MemoryRecallTrace[] }>(runPath(workspaceId, runId, 'memory-recalls'));
     return body.memoryRecallTraces ?? [];
   },
   readWorkspaceMemoryRecalls: async (workspaceId: string) => {
@@ -311,16 +308,16 @@ export const workorchApi = {
   },
   artifactContentURL: (uri: string) => `${apiBase}/artifacts/content?${new URLSearchParams({ uri }).toString()}`,
   runtimePayloadURL: (ref: string) => `${apiBase}/runtime/payloads?${new URLSearchParams({ ref }).toString()}`,
-  readRunTaskProgress: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ taskProgress: TaskProgress }>(runPath(runId, 'task-progress', workspaceId));
+  readRunTaskProgress: async (runId: string, workspaceId: string) => {
+    const body = await request<{ taskProgress: TaskProgress }>(runPath(workspaceId, runId, 'task-progress'));
     return body.taskProgress;
   },
-  readRunTaskDecompositions: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ taskDecompositions: TaskDecomposition[] }>(runPath(runId, 'task-decompositions', workspaceId));
+  readRunTaskDecompositions: async (runId: string, workspaceId: string) => {
+    const body = await request<{ taskDecompositions: TaskDecomposition[] }>(runPath(workspaceId, runId, 'task-decompositions'));
     return body.taskDecompositions ?? [];
   },
-  readRunContextBundle: async (runId: string, workspaceId?: string) => {
-    const body = await request<{ contextBundle: ContextBundle }>(runPath(runId, 'context-bundle', workspaceId));
+  readRunContextBundle: async (runId: string, workspaceId: string) => {
+    const body = await request<{ contextBundle: ContextBundle }>(runPath(workspaceId, runId, 'context-bundle'));
     return body.contextBundle;
   },
   listEventRecords: async (query?: { workspaceId?: string; runId?: string; topic?: string; subjectType?: string; subjectId?: string; cursorAfterId?: string; limit?: number }) => {
@@ -341,12 +338,12 @@ export const workorchApi = {
     });
     return body.run;
   },
-  startRun: async (runId: string, priority?: number, workspaceId?: string) => {
-    const body = await request<{ run: Run }>(`${runPath(runId, 'start', workspaceId)}${querySuffix({ priority })}`, { method: 'POST' });
+  startRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
+    const body = await request<{ run: Run }>(`${runPath(workspaceId, runId, 'start')}${querySuffix({ priority })}`, { method: 'POST' });
     return body.run;
   },
-  resumeRun: async (runId: string, priority?: number, workspaceId?: string) => {
-    const body = await request<{ run: Run }>(`${runPath(runId, 'resume', workspaceId)}${querySuffix({ priority })}`, { method: 'POST' });
+  resumeRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
+    const body = await request<{ run: Run }>(`${runPath(workspaceId, runId, 'resume')}${querySuffix({ priority })}`, { method: 'POST' });
     return body.run;
   },
   activateWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {

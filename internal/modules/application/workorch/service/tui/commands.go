@@ -69,10 +69,10 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 				if displayRun != nil {
 					status, _ = be.Run().Status(ctx, wsID, displayRun.ID)
 					if displayRun.GoalID != "" {
-						goal, _ = be.Goal().Get(ctx, displayRun.GoalID)
+						goal, _ = be.Goal().Get(ctx, wsID, displayRun.GoalID)
 					}
 					if displayRun.DoDID != "" {
-						dod, _ = be.DoD().Get(ctx, displayRun.DoDID)
+						dod, _ = be.DoD().Get(ctx, wsID, displayRun.DoDID)
 					}
 				}
 				goal = resolveWorkspaceContextGoal(snapshot, displayRun, goal)
@@ -117,10 +117,10 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		if run != nil {
 			status, _ = be.Run().Status(ctx, wsID, run.ID)
 			if run.GoalID != "" {
-				goal, _ = be.Goal().Get(ctx, run.GoalID)
+				goal, _ = be.Goal().Get(ctx, wsID, run.GoalID)
 			}
 			if run.DoDID != "" {
-				dod, _ = be.DoD().Get(ctx, run.DoDID)
+				dod, _ = be.DoD().Get(ctx, wsID, run.DoDID)
 			}
 		}
 		if dod == nil {

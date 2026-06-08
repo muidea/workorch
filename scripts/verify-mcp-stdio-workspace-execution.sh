@@ -207,7 +207,7 @@ ensure_goal() {
   get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" "$list_output"
   existing_id="$(json_first_id "$list_output" "goals")"
   if [[ -n "$existing_id" ]]; then
-    put_json "$BASE_URL/api/v1/workorch/goals/$existing_id" \
+    put_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$existing_id" \
       '{"text":"'"$text"'"}' \
       "$TMP_DIR/goal.json"
     return
@@ -225,7 +225,7 @@ ensure_dod() {
   get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" "$list_output"
   existing_id="$(json_first_id "$list_output" "dods")"
   if [[ -n "$existing_id" ]]; then
-    put_json "$BASE_URL/api/v1/workorch/dods/$existing_id" \
+    put_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$existing_id" \
       '{"items":["'"$item"'"]}' \
       "$TMP_DIR/dod.json"
     return

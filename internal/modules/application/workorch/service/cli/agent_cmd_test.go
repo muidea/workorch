@@ -84,10 +84,10 @@ func (b agentCommandGoalBackend) Define(context.Context, common.WorkspaceID, str
 func (agentCommandGoalBackend) List(context.Context, common.WorkspaceID) ([]backend.GoalInfo, error) {
 	return nil, nil
 }
-func (agentCommandGoalBackend) Get(context.Context, common.GoalID) (*backend.GoalInfo, error) {
+func (agentCommandGoalBackend) Get(context.Context, common.WorkspaceID, common.GoalID) (*backend.GoalInfo, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandGoalBackend) Update(context.Context, common.GoalID, string) (*backend.GoalInfo, error) {
+func (agentCommandGoalBackend) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*backend.GoalInfo, error) {
 	return nil, common.ErrNotFound
 }
 
@@ -99,10 +99,10 @@ func (agentCommandDoDBackend) Define(context.Context, common.WorkspaceID, []stri
 func (agentCommandDoDBackend) List(context.Context, common.WorkspaceID) ([]backend.DoDInfo, error) {
 	return nil, nil
 }
-func (agentCommandDoDBackend) Get(context.Context, common.DoDID) (*backend.DoDInfo, error) {
+func (agentCommandDoDBackend) Get(context.Context, common.WorkspaceID, common.DoDID) (*backend.DoDInfo, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandDoDBackend) Update(context.Context, common.DoDID, []string) (*backend.DoDInfo, error) {
+func (agentCommandDoDBackend) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*backend.DoDInfo, error) {
 	return nil, common.ErrNotFound
 }
 

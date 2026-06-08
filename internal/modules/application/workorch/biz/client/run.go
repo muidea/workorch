@@ -21,7 +21,7 @@ func (c *Client) ListRuns(ctx context.Context, workspaceID string) ([]Run, error
 	return decodeEnvelopeSlice[Run](resp, "runs")
 }
 
-// GetRun returns a single run, optionally scoped to a workspace.
+// GetRun returns a single run scoped to a workspace.
 func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspaceId is required")
@@ -35,6 +35,9 @@ func (c *Client) GetRun(ctx context.Context, workspaceID, runID string) (*Run, e
 
 // CreateRun creates a new run for a workspace.
 func (c *Client) CreateRun(ctx context.Context, workspaceID, runID, goalID, dodID string) (*Run, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
 	req := struct {
 		RunID  string `json:"runId"`
 		GoalID string `json:"goalId,omitempty"`
@@ -131,12 +134,6 @@ func (c *Client) GetRunObservability(ctx context.Context, workspaceID, runID str
 
 func runPath(workspaceID string, runID string, action string) string {
 	encodedRunID := escapePath(runID)
-	if workspaceID == "" {
-		if action == "" {
-			return fmt.Sprintf("/api/v1/workorch/runs/%s", encodedRunID)
-		}
-		return fmt.Sprintf("/api/v1/workorch/runs/%s/%s", encodedRunID, action)
-	}
 	if action == "" {
 		return fmt.Sprintf("/api/v1/workorch/workspaces/%s/runs/%s", escapePath(workspaceID), encodedRunID)
 	}

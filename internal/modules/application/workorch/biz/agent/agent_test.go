@@ -141,10 +141,10 @@ func (fakeGoal) Define(context.Context, common.WorkspaceID, string) (*backend.Go
 func (fakeGoal) List(context.Context, common.WorkspaceID) ([]backend.GoalInfo, error) {
 	return nil, nil
 }
-func (fakeGoal) Get(context.Context, common.GoalID) (*backend.GoalInfo, error) {
+func (fakeGoal) Get(context.Context, common.WorkspaceID, common.GoalID) (*backend.GoalInfo, error) {
 	return &backend.GoalInfo{}, nil
 }
-func (fakeGoal) Update(context.Context, common.GoalID, string) (*backend.GoalInfo, error) {
+func (fakeGoal) Update(context.Context, common.WorkspaceID, common.GoalID, string) (*backend.GoalInfo, error) {
 	return &backend.GoalInfo{}, nil
 }
 
@@ -154,10 +154,10 @@ func (fakeDoD) Define(context.Context, common.WorkspaceID, []string) (*backend.D
 	return &backend.DoDInfo{ID: "dod-1"}, nil
 }
 func (fakeDoD) List(context.Context, common.WorkspaceID) ([]backend.DoDInfo, error) { return nil, nil }
-func (fakeDoD) Get(context.Context, common.DoDID) (*backend.DoDInfo, error) {
+func (fakeDoD) Get(context.Context, common.WorkspaceID, common.DoDID) (*backend.DoDInfo, error) {
 	return &backend.DoDInfo{}, nil
 }
-func (fakeDoD) Update(context.Context, common.DoDID, []string) (*backend.DoDInfo, error) {
+func (fakeDoD) Update(context.Context, common.WorkspaceID, common.DoDID, []string) (*backend.DoDInfo, error) {
 	return &backend.DoDInfo{}, nil
 }
 

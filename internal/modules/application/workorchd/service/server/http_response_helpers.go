@@ -189,6 +189,21 @@ func workspaceActionFromPath(path string) (workspaceID string, action string, ok
 	return "", "", false
 }
 
+func workspaceResourceIDFromPath(path string, resource string) (workspaceID string, resourceID string, ok bool) {
+	if !strings.HasPrefix(path, "/api/v1/workorch/workspaces/") {
+		return "", "", false
+	}
+	trimmed := strings.TrimPrefix(path, "/api/v1/workorch/workspaces/")
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 3 && parts[0] != "" && parts[1] == resource && parts[2] != "" {
+		return parts[0], parts[2], true
+	}
+	return "", "", false
+}
+
 func workspaceRunActionFromPath(path string) (workspaceID string, runID string, action string, ok bool) {
 	if !strings.HasPrefix(path, "/api/v1/workorch/workspaces/") {
 		return "", "", "", false

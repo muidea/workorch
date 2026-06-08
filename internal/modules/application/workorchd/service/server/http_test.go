@@ -900,12 +900,12 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/goals/:goalId"},
-		{method: http.MethodPut, pattern: "/api/v1/workorch/goals/:goalId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/dods/:dodId"},
-		{method: http.MethodPut, pattern: "/api/v1/workorch/dods/:dodId"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
@@ -2423,7 +2423,7 @@ func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
 	workspace := createWorkspaceForHTTP(t, handler, "definition update workspace", "workspaces/definition-update")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
-	goalReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/goals/"+goalID, strings.NewReader(`{"text":"updated goal text"}`))
+	goalReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspace.ID+"/goals/"+goalID, strings.NewReader(`{"text":"updated goal text"}`))
 	goalReq.Header.Set("Content-Type", "application/json")
 	goalRec := httptest.NewRecorder()
 	handler.ServeHTTP(goalRec, goalReq)
@@ -2438,7 +2438,7 @@ func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
 		t.Fatalf("goal response = %+v, want normalized updated text", goalBody.Goal)
 	}
 
-	dodReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/dods/"+dodID, strings.NewReader(`{"items":["updated dod","second dod"]}`))
+	dodReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspace.ID+"/dods/"+dodID, strings.NewReader(`{"items":["updated dod","second dod"]}`))
 	dodReq.Header.Set("Content-Type", "application/json")
 	dodRec := httptest.NewRecorder()
 	handler.ServeHTTP(dodRec, dodReq)

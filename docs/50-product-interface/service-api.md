@@ -120,12 +120,12 @@ repository-level `409 Conflict`.
 
 - `GET /api/v1/workorch/workspaces/:workspaceId/goals`
 - `POST /api/v1/workorch/workspaces/:workspaceId/goals`
-- `GET /api/v1/workorch/goals/:goalId`
-- `PUT /api/v1/workorch/goals/:goalId`
+- `GET /api/v1/workorch/workspaces/:workspaceId/goals/:goalId`
+- `PUT /api/v1/workorch/workspaces/:workspaceId/goals/:goalId`
 - `GET /api/v1/workorch/workspaces/:workspaceId/dods`
 - `POST /api/v1/workorch/workspaces/:workspaceId/dods`
-- `GET /api/v1/workorch/dods/:dodId`
-- `PUT /api/v1/workorch/dods/:dodId`
+- `GET /api/v1/workorch/workspaces/:workspaceId/dods/:dodId`
+- `PUT /api/v1/workorch/workspaces/:workspaceId/dods/:dodId`
 
 ### Run And Run Detail
 

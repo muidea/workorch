@@ -397,8 +397,8 @@ if [[ "$BACKEND" == "file" ]]; then
 
   curl -fsS "$BASE_URL/readyz" | json_contains '"status"[[:space:]]*:[[:space:]]*"ready"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_contains '"title"[[:space:]]*:[[:space:]]*"verify workspace"'
-  curl -fsS "$BASE_URL/api/v1/workorch/goals/$goal_id" | json_contains '"text"[[:space:]]*:[[:space:]]*"verify workorch service delivery"'
-  curl -fsS "$BASE_URL/api/v1/workorch/dods/$dod_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"ready"'
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" | json_contains '"text"[[:space:]]*:[[:space:]]*"verify workorch service delivery"'
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"ready"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" | json_contains '"id"[[:space:]]*:[[:space:]]*"run-verify"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-verify" | json_contains '"state"[[:space:]]*:[[:space:]]*"completed"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-verify/snapshot" | json_contains '"id"[[:space:]]*:[[:space:]]*"run-verify"'
