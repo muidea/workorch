@@ -297,11 +297,23 @@ func TestMagicHubFallsBackToTopicLaneForGlobalEvents(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
 	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+TopicCLICommand {
 		t.Fatalf("lanes = %v, want topic fallback lane", rawHub.lanes)
+	}
+}
+
+func TestMagicHubUsesTopicLaneForCLIResultWithScope(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLIResult, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+		t.Fatalf("publish scoped CLI result event: %v", err)
+	}
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+TopicCLIResult {
+		t.Fatalf("lanes = %v, want CLI result topic lane", rawHub.lanes)
 	}
 }
 

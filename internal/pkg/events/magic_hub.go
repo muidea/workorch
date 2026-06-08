@@ -302,6 +302,10 @@ func (h *MagicHub) dispatchLocalWildcard(ctx context.Context, envelope Envelope)
 }
 
 func workorchEventLaneKey(envelope Envelope) string {
+	topic := strings.TrimSpace(envelope.Topic)
+	if isFacadeTopicLane(topic) {
+		return "topic/" + topic
+	}
 	runID := strings.TrimSpace(envelope.RunID)
 	if runID != "" {
 		return "run/" + runID
@@ -310,11 +314,19 @@ func workorchEventLaneKey(envelope Envelope) string {
 	if workspaceID != "" {
 		return "workspace/" + workspaceID
 	}
-	topic := strings.TrimSpace(envelope.Topic)
 	if topic != "" {
 		return "topic/" + topic
 	}
 	return "topic/unknown"
+}
+
+func isFacadeTopicLane(topic string) bool {
+	switch topic {
+	case TopicCLICommand, TopicCLIResult, TopicCLIProgress:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *MagicHub) Published() []Envelope {
