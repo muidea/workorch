@@ -3,6 +3,9 @@ package runports
 import (
 	"context"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
@@ -19,7 +22,7 @@ func CreateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if kind == "" {
 		kind = llmcommon.StepKindWorkspaceExecution
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.CreateRunCommand{
 			RunID:              item.ID,
 			WorkspaceID:        item.WorkspaceID,
@@ -37,7 +40,7 @@ func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicRunCommandStart, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandStart, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.StartRunCommand{RunID: item.ID},
 	})
 }
@@ -46,7 +49,7 @@ func ResumeRun(ctx context.Context, hub events.Hub, item *runmodel.Run, executio
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicOrchestratorCommandResumeRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.ResumeRunCommand{
 			WorkspaceID:           item.WorkspaceID,
 			RunID:                 item.ID,

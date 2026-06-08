@@ -4,12 +4,13 @@ import (
 	"context"
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -72,7 +73,7 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 			return []*eventstreammodel.EventRecord{{
 				WorkspaceID: workspaceID,
 				RunID:       common.RunID("run-002"),
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-06-05T00:00:00Z",
 			}}, nil
 		}),

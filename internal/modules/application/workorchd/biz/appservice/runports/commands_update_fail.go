@@ -3,6 +3,8 @@ package runports
 import (
 	"context"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -14,7 +16,7 @@ func UpdateRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.UpdateRunCommand{
 			RunID:              item.ID,
 			WorkspaceID:        item.WorkspaceID,
@@ -36,7 +38,7 @@ func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason str
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicRunCommandFail, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandFail, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.FailRunCommand{RunID: item.ID, Reason: reason},
 	})
 }

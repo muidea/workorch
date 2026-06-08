@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -14,7 +16,7 @@ import (
 func TestEventHubGeneratorUsesLLMCommandEvent(t *testing.T) {
 	hub := events.NewMemoryHub()
 	var seenRequest llmmodels.ProviderRequest
-	unsubscribe := hub.Subscribe(events.TopicLLMCommandCompleteProvider, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribe := hub.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(_ context.Context, envelope events.Envelope) error {
 		request, ok := envelope.Payload[events.PayloadKeyProviderRequest].(llmmodels.ProviderRequest)
 		if !ok {
 			t.Fatalf("provider request payload = %#v, want ProviderRequest", envelope.Payload[events.PayloadKeyProviderRequest])

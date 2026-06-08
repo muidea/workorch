@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -111,7 +111,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		_ = o.runs.Update(ctx, run)
 	}
 	_ = o.steps.Update(ctx, step)
-	_ = o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if graphBatchStep(step) {
 		if execErr != nil {
 			return execErr

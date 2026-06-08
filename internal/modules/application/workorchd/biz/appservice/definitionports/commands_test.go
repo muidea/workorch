@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -32,7 +34,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	workspaceID := common.WorkspaceID("ws-definition-port")
-	hub.Subscribe(events.TopicWorkspaceCommandListGoalsByWS, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, func(_ context.Context, envelope events.Envelope) error {
 		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != string(workspaceID) {
 			t.Fatalf("workspace payload = %v, want %s", got, workspaceID)
 		}
@@ -43,7 +45,7 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 			},
 		})
 	})
-	hub.Subscribe(events.TopicWorkspaceCommandDefineGoal, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DefineGoalCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want DefineGoalCommand", envelope.Payload[events.PayloadKeyCommand])
@@ -82,7 +84,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 	hub := events.NewMemoryHub()
 	workspaceID := common.WorkspaceID("ws-definition-port")
 	deleteCount := 0
-	hub.Subscribe(events.TopicWorkspaceCommandListDoDsByWS, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{
@@ -93,7 +95,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 			},
 		})
 	})
-	hub.Subscribe(events.TopicWorkspaceCommandUpdateDoD, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateDoDCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want UpdateDoDCommand", envelope.Payload[events.PayloadKeyCommand])
@@ -117,7 +119,7 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 			},
 		})
 	})
-	hub.Subscribe(events.TopicWorkspaceCommandDeleteDoD, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(_ context.Context, envelope events.Envelope) error {
 		deleteCount++
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteDoDCommand)
 		if !ok {

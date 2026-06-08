@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -344,32 +347,32 @@ func TestRuntimeOrchestrator_StartRunPublishesRunAndStepEvents(t *testing.T) {
 	if published[0].Version != events.WorkorchEventVersion {
 		t.Fatalf("first event version = %s, want %s", published[0].Version, events.WorkorchEventVersion)
 	}
-	if published[0].Topic != events.TopicRunStateChanged || published[0].Payload[events.PayloadKeyState] != string(common.RunStateRunning) {
+	if published[0].Topic != runevents.TopicRunStateChanged || published[0].Payload[events.PayloadKeyState] != string(common.RunStateRunning) {
 		t.Fatalf("first event = %#v, want run running", published[0])
 	}
-	if published[1].Topic != events.TopicWorkspaceStateChanged || published[1].Payload[events.PayloadKeyActiveRunID] != string(runID) {
+	if published[1].Topic != workspaceevents.TopicWorkspaceStateChanged || published[1].Payload[events.PayloadKeyActiveRunID] != string(runID) {
 		t.Fatalf("second event = %#v, want workspace active run bound", published[1])
 	}
 	if published[1].Payload[events.PayloadKeyState] != string(common.WorkspaceStateRunning) {
 		t.Fatalf("second event state = %v, want workspace running", published[1].Payload[events.PayloadKeyState])
 	}
-	if published[2].Topic != events.TopicStepDispatched || published[2].Payload[events.PayloadKeyState] != string(common.StepStateDispatched) {
+	if published[2].Topic != runevents.TopicStepDispatched || published[2].Payload[events.PayloadKeyState] != string(common.StepStateDispatched) {
 		t.Fatalf("third event = %#v, want step dispatched", published[2])
 	}
-	if published[3].Topic != events.TopicStepStateChanged || published[3].Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
+	if published[3].Topic != runevents.TopicStepStateChanged || published[3].Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
 		t.Fatalf("fourth event = %#v, want step completed", published[3])
 	}
-	if published[4].Topic != events.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateValidating) {
+	if published[4].Topic != runevents.TopicRunStateChanged || published[4].Payload[events.PayloadKeyState] != string(common.RunStateValidating) {
 		t.Fatalf("fifth event = %#v, want run validating", published[4])
 	}
-	if published[5].Topic != events.TopicWorkspaceStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
+	if published[5].Topic != workspaceevents.TopicWorkspaceStateChanged || published[5].Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
 		t.Fatalf("sixth event = %#v, want workspace validating", published[5])
 	}
-	if published[6].Topic != events.TopicRunStateChanged || published[6].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
+	if published[6].Topic != runevents.TopicRunStateChanged || published[6].Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
 		t.Fatalf("seventh event = %#v, want run completed", published[6])
 	}
 	last := published[len(published)-1]
-	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
 		t.Fatalf("last event = %#v, want workspace active run cleared", last)
 	}
 	if last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateCompleted) {
@@ -435,7 +438,7 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 	var streamProgress events.Envelope
 	found := false
 	for _, item := range hub.Published() {
-		if item.Topic != events.TopicRunLLMStreamProgress {
+		if item.Topic != runevents.TopicRunLLMStreamProgress {
 			continue
 		}
 		streamProgress = item
@@ -443,7 +446,7 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 		break
 	}
 	if !found {
-		t.Fatalf("published events missing %s", events.TopicRunLLMStreamProgress)
+		t.Fatalf("published events missing %s", runevents.TopicRunLLMStreamProgress)
 	}
 	if streamProgress.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
 		streamProgress.Payload[events.PayloadKeyRunID] != string(runID) {
@@ -462,7 +465,7 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 	var usageRecorded events.Envelope
 	usageFound := false
 	for _, item := range hub.Published() {
-		if item.Topic != events.TopicRunLLMUsageRecorded {
+		if item.Topic != runevents.TopicRunLLMUsageRecorded {
 			continue
 		}
 		usageRecorded = item
@@ -470,7 +473,7 @@ func TestRuntimeOrchestrator_StartRunPublishesLLMStreamProgressEvent(t *testing.
 		break
 	}
 	if !usageFound {
-		t.Fatalf("published events missing %s", events.TopicRunLLMUsageRecorded)
+		t.Fatalf("published events missing %s", runevents.TopicRunLLMUsageRecorded)
 	}
 	if usageRecorded.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) ||
 		usageRecorded.Payload[events.PayloadKeyRunID] != string(runID) ||
@@ -527,7 +530,7 @@ func TestRuntimeOrchestrator_CompleteRunClearsStaleTerminalActiveRun(t *testing.
 		t.Fatalf("workspace = %+v, want completed with no active run", ws)
 	}
 	last := hub.Published()[len(hub.Published())-1]
-	if last.Topic != events.TopicWorkspaceStateChanged ||
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged ||
 		last.RunID != string(completedRunID) ||
 		last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateCompleted) ||
 		last.Payload[events.PayloadKeyActiveRunID] != "" {

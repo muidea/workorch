@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -248,7 +248,7 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
 	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.steps.Update(ctx, step)
-	_ = o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if shouldCloseCompletionGateFailureWithoutRepair(summary, step, step.Output) {
 		reason := errText
 		if reason == "" {

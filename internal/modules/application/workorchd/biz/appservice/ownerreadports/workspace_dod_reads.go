@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -12,7 +14,7 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub events.Hub, dodID common.DoD
 	if hub == nil || dodID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandGetDoD, "dod", string(dodID), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), "", "", map[string]any{
 		events.PayloadKeyDoDID: string(dodID),
 	})
 	if err != nil {
@@ -29,7 +31,7 @@ func ListDoDsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, worksp
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandListDoDsByWS, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {

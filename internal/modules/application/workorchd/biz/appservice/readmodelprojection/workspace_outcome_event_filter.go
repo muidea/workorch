@@ -2,7 +2,7 @@ package readmodelprojection
 
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 )
 
 func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, runsByID map[string]*readmodelcore.Run) *readmodelcore.EventRecord {
@@ -16,7 +16,7 @@ func latestWorkspaceOutcomeRunEvent(snapshot readmodelcore.WorkspaceSnapshot, ru
 			continue
 		}
 		switch item.Topic {
-		case events.TopicRunCreated, events.TopicRunStateChanged:
+		case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		default:
 			continue
 		}

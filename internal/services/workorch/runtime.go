@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+
 	"github.com/muidea/magicCommon/framework/application"
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -110,7 +112,7 @@ func queryServerDoneChannel(ctx context.Context) (<-chan error, error) {
 		return nil, common.ErrInvalidArgument
 	}
 	publishErr := hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicWorkorchDCommandDone,
+		Topic:        workorchdevents.TopicWorkorchDCommandDone,
 		SourceModule: "workorch/app",
 		SubjectType:  "workorchd",
 		SubjectID:    "server",

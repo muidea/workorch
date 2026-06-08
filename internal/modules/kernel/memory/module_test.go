@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -33,7 +35,7 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	traceID := common.MemoryRecallTraceID("trace-contract")
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicMemoryRecallTraceCommandUpsert,
+		Topic:       memoryevents.TopicMemoryRecallTraceCommandUpsert,
 		SubjectType: "memory_recall_trace",
 		SubjectID:   string(traceID),
 		WorkspaceID: "ws-trace-contract",
@@ -67,7 +69,7 @@ func TestMemoryRecallTraceCommandsAcceptContractPayloads(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicMemoryRecallTraceCommandDelete,
+		Topic:       memoryevents.TopicMemoryRecallTraceCommandDelete,
 		SubjectType: "memory_recall_trace",
 		SubjectID:   string(traceID),
 		Payload: map[string]any{

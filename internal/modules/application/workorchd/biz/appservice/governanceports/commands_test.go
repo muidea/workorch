@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
@@ -14,7 +17,7 @@ import (
 
 func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicApprovalCommandListByRun, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(approvalevents.TopicApprovalCommandListByRun, func(_ context.Context, envelope events.Envelope) error {
 		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
 			t.Fatalf("run payload = %v, want run-001", got)
 		}
@@ -42,7 +45,7 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 
 func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicDecisionCommandListTicketsByRun, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByRun, func(_ context.Context, envelope events.Envelope) error {
 		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
 			t.Fatalf("run payload = %v, want run-001", got)
 		}
@@ -71,7 +74,7 @@ func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 	hub := events.NewMemoryHub()
 	readCount := 0
-	hub.Subscribe(events.TopicDecisionCommandGetResolution, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandGetResolution, func(_ context.Context, envelope events.Envelope) error {
 		readCount++
 		if got := envelope.Payload[events.PayloadKeyBlockingTicketID]; got != "ticket-resolved" {
 			t.Fatalf("ticket payload = %v, want ticket-resolved", got)
@@ -114,7 +117,7 @@ func TestResolutionForTicketReadsOnlyResolvedTickets(t *testing.T) {
 func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
@@ -157,7 +160,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	var resolutionIDs []common.ResolutionID
-	hub.Subscribe(events.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
@@ -196,7 +199,7 @@ func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
 func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
 		if !ok {
 			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])

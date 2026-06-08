@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -11,7 +13,7 @@ import (
 )
 
 func CreateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPServer) (contextregistrycore.MCPServer, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandCreateServer, "mcp_server", cmd.ID, map[string]any{
 		events.PayloadKeyCommand: mcpServerCommandFromView(cmd),
 	})
 	if err != nil {
@@ -28,7 +30,7 @@ func UpdateMCPServer(ctx context.Context, hub events.Hub, cmd contextregistrycor
 		}
 		cmd.Env = cloneStringMap(existing.Env)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandUpdateServer, "mcp_server", cmd.ID, map[string]any{
 		events.PayloadKeyCommand: mcpServerCommandFromView(cmd),
 	})
 	if err != nil {
@@ -51,7 +53,7 @@ func UpdateMCPServerByID(ctx context.Context, hub events.Hub, serverID string, c
 }
 
 func ListMCPServers(ctx context.Context, hub events.Hub) ([]contextregistrycore.MCPServer, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandListServers, "mcp_server", "all", nil)
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandListServers, "mcp_server", "all", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +61,7 @@ func ListMCPServers(ctx context.Context, hub events.Hub) ([]contextregistrycore.
 }
 
 func ReadMCPServer(ctx context.Context, hub events.Hub, serverID string) (*mcpmodel.Server, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandGetServer, "mcp_server", serverID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetServer, "mcp_server", serverID, map[string]any{
 		events.PayloadKeyServerID: serverID,
 	})
 	if err != nil {

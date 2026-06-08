@@ -3,21 +3,25 @@ package events
 import (
 	"context"
 	"testing"
+
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 )
 
 func TestMemoryHubAssignsWorkspaceRevision(t *testing.T) {
 	hub := NewMemoryHub()
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
 		t.Fatalf("publish first workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-a"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-a"}); err != nil {
 		t.Fatalf("publish second workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
 		t.Fatalf("publish other workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
 

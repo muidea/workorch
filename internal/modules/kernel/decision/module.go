@@ -6,6 +6,7 @@ import (
 	decisionbiz "github.com/muidea/workorch/internal/modules/kernel/decision/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -64,19 +65,19 @@ func (m *Module) Start() error {
 	if len(m.unsub) > 0 {
 		return nil
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicDecisionCommandEnsureResolved, m.handleEnsureResolvedCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, m.handleEnsureResolvedCommand))
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicDecisionCommandEnsureTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandCreateTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandGetTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandListTickets, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandListTicketsByRun, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandListTicketsByWS, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandUpdateTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandDeleteTicket, m.handleTicketCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandCreateResolution, m.handleResolutionCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandGetResolution, m.handleResolutionCommand),
-		m.eventHub.Subscribe(events.TopicDecisionCommandDeleteResolution, m.handleResolutionCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandEnsureTicket, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandCreateTicket, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTickets, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByRun, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandUpdateTicket, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandDeleteTicket, m.handleTicketCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandCreateResolution, m.handleResolutionCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandGetResolution, m.handleResolutionCommand),
+		m.eventHub.Subscribe(decisionevents.TopicDecisionCommandDeleteResolution, m.handleResolutionCommand),
 	)
 	return nil
 }
@@ -140,7 +141,7 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicDecisionCommandEnsureTicket:
+	case decisionevents.TopicDecisionCommandEnsureTicket:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -165,7 +166,7 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
-	case events.TopicDecisionCommandCreateTicket:
+	case decisionevents.TopicDecisionCommandCreateTicket:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -181,7 +182,7 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
-	case events.TopicDecisionCommandGetTicket:
+	case decisionevents.TopicDecisionCommandGetTicket:
 		item, err := m.tickets.Get(ctx, common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID)))
 		if err != nil {
 			return err
@@ -190,26 +191,26 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 			return common.ErrNotFound
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyTicket: item})
-	case events.TopicDecisionCommandListTickets:
+	case decisionevents.TopicDecisionCommandListTickets:
 		items, err := m.tickets.List(ctx)
 		if err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyTickets: items})
-	case events.TopicDecisionCommandListTicketsByRun:
+	case decisionevents.TopicDecisionCommandListTicketsByRun:
 		items, err := m.tickets.ListByRunID(ctx, common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)))
 		if err != nil {
 			return err
 		}
 		items = filterTicketsByScope(items, envelope)
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyTickets: items})
-	case events.TopicDecisionCommandListTicketsByWS:
+	case decisionevents.TopicDecisionCommandListTicketsByWS:
 		items, err := m.tickets.ListByWorkspaceID(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
 		if err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyTickets: items})
-	case events.TopicDecisionCommandUpdateTicket:
+	case decisionevents.TopicDecisionCommandUpdateTicket:
 		var item *decisionmodel.Ticket
 		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.UpdateTicketCommand); ok {
 			item = ticketFromUpdateCommand(cmd)
@@ -227,7 +228,7 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
-	case events.TopicDecisionCommandDeleteTicket:
+	case decisionevents.TopicDecisionCommandDeleteTicket:
 		ticketID := deleteTicketIDFromPayload(envelope.Payload)
 		if err := m.ensureTicketScope(ctx, ticketID, envelope); err != nil {
 			return err
@@ -292,7 +293,7 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicDecisionCommandCreateResolution:
+	case decisionevents.TopicDecisionCommandCreateResolution:
 		item, err := resolutionFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -301,13 +302,13 @@ func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.En
 			return err
 		}
 		return decisionCommandResponse(envelope, nil)
-	case events.TopicDecisionCommandGetResolution:
+	case decisionevents.TopicDecisionCommandGetResolution:
 		item, err := m.resolutions.GetByTicketID(ctx, common.TicketID(stringPayload(envelope.Payload, events.PayloadKeyBlockingTicketID)))
 		if err != nil {
 			return err
 		}
 		return decisionCommandResponse(envelope, map[string]any{events.PayloadKeyResolution: item})
-	case events.TopicDecisionCommandDeleteResolution:
+	case decisionevents.TopicDecisionCommandDeleteResolution:
 		if err := m.resolutions.DeleteByTicketID(ctx, deleteResolutionTicketIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}

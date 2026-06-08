@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
@@ -2033,7 +2035,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 	runID := common.RunID("run-repair-exhaustion-result-before-ticket")
 	resultID := common.ResultID(string(runID) + "/result/dod-assessment")
 	resultVisibleAtTicketEvent := false
-	hub.Subscribe(events.TopicTicketCreated, func(ctx context.Context, _ events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicTicketCreated, func(ctx context.Context, _ events.Envelope) error {
 		result, err := resultRepo.Get(ctx, resultID)
 		resultVisibleAtTicketEvent = err == nil && result != nil && result.State == common.ResultStateRejected
 		return nil

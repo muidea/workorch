@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -18,7 +19,7 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 		return nil, common.ErrInvalidArgument
 	}
 	err := r.hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicWorkspaceCommandGet,
+		Topic:        workspaceevents.TopicWorkspaceCommandGet,
 		SourceModule: ModuleID,
 		SubjectType:  "workspace",
 		SubjectID:    string(id),
@@ -37,5 +38,5 @@ func (r workspaceEventReader) Get(ctx context.Context, id common.WorkspaceID) (*
 	if err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("workspace command %s returned no response", events.TopicWorkspaceCommandGet)
+	return nil, fmt.Errorf("workspace command %s returned no response", workspaceevents.TopicWorkspaceCommandGet)
 }

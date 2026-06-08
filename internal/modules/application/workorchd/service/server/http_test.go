@@ -20,6 +20,12 @@ import (
 	"testing"
 	"time"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -140,7 +146,7 @@ func waitWorkspaceCreatedSSE(t *testing.T, lines <-chan string, readErr <-chan e
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 				t.Fatalf("decode stream data %q: %v", line, err)
 			}
-			if envelope.Topic == events.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == title {
+			if envelope.Topic == workspaceevents.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == title {
 				return envelope
 			}
 		case err := <-readErr:
@@ -1040,14 +1046,14 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	}()
 
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicWorkspaceCreated,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-other",
 		Payload:     events.WorkspacePayload("other", "", "/tmp/other", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
 		t.Fatalf("publish nonmatching event: %v", err)
 	}
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicWorkspaceCreated,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-stream",
 		Payload:     events.WorkspacePayload("stream workspace", "", "/tmp/stream", "", common.WorkspaceStateActive, ""),
 	}); err != nil {
@@ -1065,7 +1071,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 				t.Fatalf("decode stream data %q: %v", line, err)
 			}
-			if envelope.WorkspaceID != "ws-stream" || envelope.Topic != events.TopicWorkspaceCreated {
+			if envelope.WorkspaceID != "ws-stream" || envelope.Topic != workspaceevents.TopicWorkspaceCreated {
 				t.Fatalf("stream envelope = %+v, want filtered workspace-created event", envelope)
 			}
 			return
@@ -1100,7 +1106,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	waitSSEConnected(t, lines, readErr)
 
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicWorkspaceStateChanged,
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-summary",
 		Payload:     events.WorkspacePayload("summary", "", "/tmp/summary", "", common.WorkspaceStateRunning, "run-001"),
 	}); err != nil {
@@ -1141,18 +1147,18 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	waitSSEConnected(t, lines, readErr)
 
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicWorkspaceStateChanged,
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		Payload:     events.WorkspacePayload("first", "", "/tmp/first", "", common.WorkspaceStateRunning, ""),
 	}); err != nil {
 		t.Fatalf("publish first event: %v", err)
 	}
 	firstID, first := readSSEEnvelope(t, lines, readErr)
-	if firstID == "" || first.Topic != events.TopicWorkspaceStateChanged {
+	if firstID == "" || first.Topic != workspaceevents.TopicWorkspaceStateChanged {
 		t.Fatalf("first replay baseline = %q %+v", firstID, first)
 	}
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-stream-replay",
 		RunID:       "run-replay",
 		Payload:     events.RunPayload("", "", common.RunStateRunning, "", "", ""),
@@ -1175,7 +1181,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	replayLines, replayErr := readSSELines(replayResp.Body)
 	waitSSEConnected(t, replayLines, replayErr)
 	_, replayed := readSSEEnvelope(t, replayLines, replayErr)
-	if replayed.Topic != events.TopicRunStateChanged || replayed.RunID != "run-replay" {
+	if replayed.Topic != runevents.TopicRunStateChanged || replayed.RunID != "run-replay" {
 		t.Fatalf("replayed envelope = %+v, want run state event after Last-Event-ID", replayed)
 	}
 }
@@ -1320,7 +1326,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 				if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &envelope); err != nil {
 					t.Fatalf("%s decode stream data %q: %v", name, line, err)
 				}
-				if envelope.Topic == events.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == "streamed multi-client workspace" {
+				if envelope.Topic == workspaceevents.TopicWorkspaceCreated && envelope.Payload[events.PayloadKeyTitle] == "streamed multi-client workspace" {
 					return
 				}
 			case err := <-readErr:
@@ -1336,22 +1342,22 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 
 func TestEnqueueEventStreamEnvelopeKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
 	ch := make(chan events.Envelope, 1)
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicStepStateChanged, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicWorkspaceCreated, WorkspaceID: "ws-b"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"})
 
 	got := <-ch
-	if got.Topic != events.TopicWorkspaceCreated || got.WorkspaceID != "ws-b" {
+	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-b" {
 		t.Fatalf("envelope = %+v, want workspace-created to replace older non-critical event", got)
 	}
 }
 
 func TestEnqueueEventStreamEnvelopeDropsNonCriticalWhenChannelFull(t *testing.T) {
 	ch := make(chan events.Envelope, 1)
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: events.TopicStepStateChanged, WorkspaceID: "ws-b"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b"})
 
 	got := <-ch
-	if got.Topic != events.TopicWorkspaceCreated || got.WorkspaceID != "ws-a" {
+	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-a" {
 		t.Fatalf("envelope = %+v, want existing critical event preserved", got)
 	}
 }
@@ -2677,15 +2683,15 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 	secondHandler := second.http.Handler
 
 	workspaceEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?workspaceId="+workspace.ID)
-	if !eventRecordsContainTopic(workspaceEvents, events.TopicWorkspaceCreated) ||
-		!eventRecordsContainTopic(workspaceEvents, events.TopicGoalDefined) ||
-		!eventRecordsContainTopic(workspaceEvents, events.TopicDoDDefined) ||
-		!eventRecordsContainTopic(workspaceEvents, events.TopicRunCreated) {
+	if !eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicWorkspaceCreated) ||
+		!eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicGoalDefined) ||
+		!eventRecordsContainTopic(workspaceEvents, workspaceevents.TopicDoDDefined) ||
+		!eventRecordsContainTopic(workspaceEvents, runevents.TopicRunCreated) {
 		t.Fatalf("workspace events = %+v, want workspace/goal/dod/run persisted events after restart", workspaceEvents)
 	}
 
 	runEvents := readEventRecordsForHTTP(t, secondHandler, "/api/v1/workorch/events?runId=run-event-replay")
-	if len(runEvents) != 1 || runEvents[0].Topic != events.TopicRunCreated || runEvents[0].WorkspaceID != workspace.ID {
+	if len(runEvents) != 1 || runEvents[0].Topic != runevents.TopicRunCreated || runEvents[0].WorkspaceID != workspace.ID {
 		t.Fatalf("run events = %+v, want replayed run-created event", runEvents)
 	}
 
@@ -2699,7 +2705,7 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &snapshotBody); err != nil {
 		t.Fatalf("unmarshal run snapshot: %v", err)
 	}
-	if len(snapshotBody.Snapshot.EventRecords) != 1 || snapshotBody.Snapshot.EventRecords[0].Topic != events.TopicRunCreated {
+	if len(snapshotBody.Snapshot.EventRecords) != 1 || snapshotBody.Snapshot.EventRecords[0].Topic != runevents.TopicRunCreated {
 		t.Fatalf("snapshot eventRecords = %+v, want replayed run-created event", snapshotBody.Snapshot.EventRecords)
 	}
 
@@ -2713,7 +2719,7 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 	if err := json.Unmarshal(observabilityRec.Body.Bytes(), &observabilityBody); err != nil {
 		t.Fatalf("unmarshal run observability: %v", err)
 	}
-	if !timelineContainsPersistedEvent(observabilityBody.Observability.Timeline, events.TopicRunCreated) {
+	if !timelineContainsPersistedEvent(observabilityBody.Observability.Timeline, runevents.TopicRunCreated) {
 		t.Fatalf("timeline = %+v, want persisted run event after restart", observabilityBody.Observability.Timeline)
 	}
 }
@@ -3832,7 +3838,7 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 	}
 
 	if err := state.eventHub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		WorkspaceID: "ws-replan-watcher",
 		RunID:       "run-replan-watcher",
 		SubjectID:   "run-replan-watcher",
@@ -3894,7 +3900,7 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 	}
 
 	if err := state.eventHub.Publish(context.Background(), events.Envelope{
-		Topic:       events.TopicGovernanceAutoResolved,
+		Topic:       governanceevents.TopicGovernanceAutoResolved,
 		WorkspaceID: "ws-auto-replan",
 		RunID:       "run-auto-replan",
 		SubjectID:   "ticket-auto-replan/auto-governance",
@@ -4888,7 +4894,7 @@ func resolveDecisionForHTTP(t *testing.T, dataRoot string, ticketID string, reje
 		t.Fatalf("exports: %v", err)
 	}
 	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicDecisionCommandEnsureResolved,
+		Topic:        decisionevents.TopicDecisionCommandEnsureResolved,
 		SourceModule: "workorchd/server/http-test",
 		SubjectType:  "decision_ticket",
 		SubjectID:    ticketID,
@@ -4936,9 +4942,9 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	topic := events.TopicApprovalCommandEnsureApproved
+	topic := approvalevents.TopicApprovalCommandEnsureApproved
 	if reject {
-		topic = events.TopicApprovalCommandEnsureRejected
+		topic = approvalevents.TopicApprovalCommandEnsureRejected
 	}
 	if err := publishHTTPTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
 		Topic:        topic,

@@ -40,7 +40,7 @@ func (e *Executor) Run() error {
 		if kind == "" {
 			return common.ErrInvalidArgument
 		}
-		e.unsub = append(e.unsub, e.hub.Subscribe(events.RuntimeBlockExecuteTopic(kind), e.handle))
+		e.unsub = append(e.unsub, e.hub.Subscribe(RuntimeBlockExecuteTopic(kind), e.handle))
 	}
 	return nil
 }

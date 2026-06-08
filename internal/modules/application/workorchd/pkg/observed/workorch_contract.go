@@ -3,6 +3,11 @@ package observed
 import (
 	"fmt"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	workorchdcommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -35,7 +40,7 @@ type workorchSnapshotContract struct {
 
 var (
 	workorchWorkspaceSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{events.TopicWorkspaceCreated, events.TopicWorkspaceStateChanged},
+		publishedTopics: []string{workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().WorkspaceID == string(ref.workspaceID)
 		},
@@ -71,7 +76,7 @@ var (
 		},
 	}
 	workorchRunSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{events.TopicRunCreated, events.TopicRunStateChanged},
+		publishedTopics: []string{runevents.TopicRunCreated, runevents.TopicRunStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().RunID == string(ref.runID)
 		},
@@ -93,7 +98,7 @@ var (
 		},
 	}
 	workorchStepSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{events.TopicStepDispatched, events.TopicStepStateChanged},
+		publishedTopics: []string{runevents.TopicStepDispatched, runevents.TopicStepStateChanged},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().StepID == string(ref.stepID)
 		},
@@ -111,7 +116,7 @@ var (
 		},
 	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{events.TopicTicketCreated, events.TopicTicketResolved},
+		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().SubjectID == ref.subjectID
 		},
@@ -130,7 +135,7 @@ var (
 		},
 	}
 	workorchApprovalSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{events.TopicApprovalCreated, events.TopicApprovalResolved},
+		publishedTopics: []string{approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().SubjectID == ref.subjectID
 		},

@@ -5,6 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
@@ -66,17 +72,17 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 	hub := events.NewMemoryHub()
 	port := runtimeports.NewEventHubActionPort(hub)
 	wantTopics := []string{
-		events.TopicWorkspaceCommandEnsure,
-		events.TopicRunCommandEnsure,
-		events.TopicRunCommandStart,
-		events.TopicOrchestratorCommandBlockDecision,
-		events.TopicOrchestratorCommandBlockApproval,
-		events.TopicRunCommandEnsureResumed,
-		events.TopicDecisionCommandEnsureTicket,
-		events.TopicDecisionCommandEnsureResolved,
-		events.TopicApprovalCommandEnsure,
-		events.TopicApprovalCommandEnsureApproved,
-		events.TopicApprovalCommandEnsureRejected,
+		workspaceevents.TopicWorkspaceCommandEnsure,
+		runevents.TopicRunCommandEnsure,
+		runevents.TopicRunCommandStart,
+		orchestratorevents.TopicOrchestratorCommandBlockDecision,
+		orchestratorevents.TopicOrchestratorCommandBlockApproval,
+		runevents.TopicRunCommandEnsureResumed,
+		decisionevents.TopicDecisionCommandEnsureTicket,
+		decisionevents.TopicDecisionCommandEnsureResolved,
+		approvalevents.TopicApprovalCommandEnsure,
+		approvalevents.TopicApprovalCommandEnsureApproved,
+		approvalevents.TopicApprovalCommandEnsureRejected,
 	}
 	for _, topic := range wantTopics {
 		topic := topic

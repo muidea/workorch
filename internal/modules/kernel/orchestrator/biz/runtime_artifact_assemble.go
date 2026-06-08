@@ -6,10 +6,11 @@ import (
 	"sort"
 	"strings"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -86,7 +87,7 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 		if err := o.evidence.ArtifactContinuations.SavePlan(ctx, item.ID, artifact); err != nil {
 			return err
 		}
-		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationCreated, nil); err != nil {
+		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationCreated, nil); err != nil {
 			return err
 		}
 		created = append(created, artifactContinuationOutputSummary(item))
@@ -165,7 +166,7 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
 		return err
 	}
-	if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationChunkRecorded, nil); err != nil {
+	if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationChunkRecorded, nil); err != nil {
 		return err
 	}
 	output["artifactContinuationContext"] = artifactContinuationContext(item)
@@ -219,7 +220,7 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.
 		if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationFailed, fmt.Errorf("%s", stringFromMap(repair, "failureReason")))
+		return o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationFailed, fmt.Errorf("%s", stringFromMap(repair, "failureReason")))
 	}
 	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
 		return err
@@ -257,7 +258,7 @@ func (o *RuntimeOrchestrator) publishArtifactContinuationRejected(ctx context.Co
 	if err := o.evidence.ArtifactContinuations.Update(ctx, item); err != nil {
 		return err
 	}
-	return o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationChunkRejected, cause)
+	return o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationChunkRejected, cause)
 }
 
 func (o *RuntimeOrchestrator) resumeArtifactContinuationAfterContextGraph(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any, workspace *workspaceModel.Workspace) (bool, error) {
@@ -320,7 +321,7 @@ func (o *RuntimeOrchestrator) completeArtifactContinuationLLMStep(ctx context.Co
 	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
-	return o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged)
+	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 }
 
 func assembleArtifactContinuation(ctx context.Context, repo repository.ArtifactContinuationRepository, item *orchestratormodel.ArtifactContinuation) (*orchestratormodel.ArtifactContinuationAssembledMetadata, string, error) {
@@ -779,14 +780,14 @@ func (o *RuntimeOrchestrator) dispatchInternalArtifactContinuationStep(
 		metadata, _, err := assembleArtifactContinuation(ctx, o.evidence.ArtifactContinuations, item)
 		if err != nil {
 			output = artifactContinuationStepFailureOutput(step.Kind, item, err)
-			_ = o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationFailed, err)
+			_ = o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationFailed, err)
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "artifact continuation assemble failed", err)
 		}
 		fresh, _ := o.evidence.ArtifactContinuations.Get(ctx, item.ID)
 		if fresh != nil {
 			item = fresh
 		}
-		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationAssembled, nil); err != nil {
+		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationAssembled, nil); err != nil {
 			return true, err
 		}
 		output["artifactContinuationAssemble"] = map[string]any{
@@ -813,14 +814,14 @@ func (o *RuntimeOrchestrator) dispatchInternalArtifactContinuationStep(
 			if fresh != nil {
 				item = fresh
 			}
-			_ = o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationFailed, err)
+			_ = o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationFailed, err)
 			return true, o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "artifact continuation apply failed", err)
 		}
 		fresh, _ := o.evidence.ArtifactContinuations.Get(ctx, item.ID)
 		if fresh != nil {
 			item = fresh
 		}
-		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationApplied, nil); err != nil {
+		if err := o.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationApplied, nil); err != nil {
 			return true, err
 		}
 		output = cloneStepPayload(step.Output)
@@ -870,7 +871,7 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
-	if err := o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
+	if err := o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged); err != nil {
 		return err
 	}
 	if step.Kind == artifactAssembleStepKind {

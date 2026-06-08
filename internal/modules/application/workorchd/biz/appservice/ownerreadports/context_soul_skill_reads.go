@@ -3,6 +3,9 @@ package ownerreadports
 import (
 	"context"
 
+	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -13,7 +16,7 @@ func ReadSoulByOwnerCommand(ctx context.Context, hub events.Hub, soulID common.S
 	if hub == nil || soulID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSoulCommandGet, "soul", string(soulID), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, soulevents.TopicSoulCommandGet, "soul", string(soulID), "", "", map[string]any{
 		events.PayloadKeySoulID: string(soulID),
 	})
 	if err != nil {
@@ -30,7 +33,7 @@ func ReadSkillByOwnerCommand(ctx context.Context, hub events.Hub, skillID common
 	if hub == nil || skillID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSkillCommandGet, "skill", string(skillID), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandGet, "skill", string(skillID), "", "", map[string]any{
 		events.PayloadKeySkillID: string(skillID),
 	})
 	if err != nil {
@@ -47,7 +50,7 @@ func ListSkillsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*skillmode
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSkillCommandList, "skill", "all", "", "", nil)
+	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandList, "skill", "all", "", "", nil)
 	if err != nil {
 		return nil, err
 	}

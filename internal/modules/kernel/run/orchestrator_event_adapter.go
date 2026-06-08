@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runbiz "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -18,43 +19,43 @@ func NewEventOrchestrator(hub events.Hub) runbiz.Orchestrator {
 }
 
 func (o eventOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandStartRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandStartRun, runID, nil)
 }
 
 func (o eventOrchestrator) BlockOnDecision(ctx context.Context, runID common.RunID, ticketID common.TicketID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandBlockDecision, runID, map[string]any{events.PayloadKeyBlockingTicketID: string(ticketID)})
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandBlockDecision, runID, map[string]any{events.PayloadKeyBlockingTicketID: string(ticketID)})
 }
 
 func (o eventOrchestrator) BlockOnApproval(ctx context.Context, runID common.RunID, approvalID common.ApprovalID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandBlockApproval, runID, map[string]any{events.PayloadKeyBlockingApprovalID: string(approvalID)})
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandBlockApproval, runID, map[string]any{events.PayloadKeyBlockingApprovalID: string(approvalID)})
 }
 
 func (o eventOrchestrator) ResumeRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandResumeRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, runID, nil)
 }
 
 func (o eventOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, patch map[string]any) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandResumeRun, runID, map[string]any{events.PayloadKeyExecutionContextPatch: patch})
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandResumeRun, runID, map[string]any{events.PayloadKeyExecutionContextPatch: patch})
 }
 
 func (o eventOrchestrator) ValidateRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandValidateRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandValidateRun, runID, nil)
 }
 
 func (o eventOrchestrator) CompleteRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandCompleteRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandCompleteRun, runID, nil)
 }
 
 func (o eventOrchestrator) CancelRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandCancelRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandCancelRun, runID, nil)
 }
 
 func (o eventOrchestrator) SupersedeRun(ctx context.Context, runID common.RunID) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandSupersedeRun, runID, nil)
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandSupersedeRun, runID, nil)
 }
 
 func (o eventOrchestrator) FailRun(ctx context.Context, runID common.RunID, reason string) error {
-	return o.publish(ctx, events.TopicOrchestratorCommandFailRun, runID, map[string]any{events.PayloadKeyFailureReason: reason})
+	return o.publish(ctx, orchestratorevents.TopicOrchestratorCommandFailRun, runID, map[string]any{events.PayloadKeyFailureReason: reason})
 }
 
 func (o eventOrchestrator) publish(ctx context.Context, topic string, runID common.RunID, payload map[string]any) error {

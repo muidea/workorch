@@ -3,6 +3,8 @@ package contextregistryports
 import (
 	"context"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -17,7 +19,7 @@ func DeleteMemoryItemWithLifecycleEvent(ctx context.Context, hub events.Hub, mem
 	if err := DeleteMemoryItem(ctx, hub, memoryID); err != nil {
 		return err
 	}
-	return PublishMemoryEvent(ctx, hub, events.TopicMemoryDeleted, item)
+	return PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryDeleted, item)
 }
 
 func PublishMemoryEvent(ctx context.Context, hub events.Hub, topic string, item *memorymodel.MemoryItem) error {

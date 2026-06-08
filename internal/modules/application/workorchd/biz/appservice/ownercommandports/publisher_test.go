@@ -2,7 +2,11 @@ package ownercommandports
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -10,10 +14,19 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
+func TestPublishRejectsReadTopic(t *testing.T) {
+	err := Publish(context.Background(), events.NewMemoryHub(), runevents.TopicRunCommandGet, "run", "run-001", "", "run-001", map[string]any{
+		events.PayloadKeyRunID: "run-001",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("Publish err = %v, want invalid argument for read topic", err)
+	}
+}
+
 func TestPublishMemoryRecallTraceUpsertPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicMemoryRecallTraceCommandUpsert, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 	trace := &memorymodel.MemoryRecallTrace{

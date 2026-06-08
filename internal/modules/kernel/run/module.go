@@ -6,6 +6,7 @@ import (
 	runbiz "github.com/muidea/workorch/internal/modules/kernel/run/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	runservice "github.com/muidea/workorch/internal/modules/kernel/run/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -97,21 +98,21 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicRunCommandEnsureResumed, m.handleEnsureResumedCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandEnsure, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandCreate, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandGet, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandList, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandListByWorkspace, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandGetStep, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandListStepsByRun, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandGetRuntimeCheckpoint, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandListCheckpointsByRun, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandUpdate, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandDelete, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandStart, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandSupersede, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(events.TopicRunCommandFail, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandEnsureResumed, m.handleEnsureResumedCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandEnsure, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandCreate, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandGet, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandList, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandListByWorkspace, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandGetStep, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandListStepsByRun, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandGetRuntimeCheckpoint, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandUpdate, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandDelete, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandStart, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandSupersede, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandFail, m.handleRunQueryCommand),
 	)
 	return nil
 }
@@ -165,7 +166,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicRunCommandEnsure:
+	case runevents.TopicRunCommandEnsure:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand)
 		if !ok {
 			cmd = runcontracts.CreateRunCommand{
@@ -183,7 +184,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandCreate:
+	case runevents.TopicRunCommandCreate:
 		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand); ok {
 			if err := m.servicePtr.CreateRun(ctx, cmd); err != nil {
 				return err
@@ -198,7 +199,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandGet:
+	case runevents.TopicRunCommandGet:
 		runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
 		if runID == "" {
 			runID = common.RunID(envelope.RunID)
@@ -215,19 +216,19 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return common.ErrNotFound
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRun: item})
-	case events.TopicRunCommandList:
+	case runevents.TopicRunCommandList:
 		items, err := m.runs.List(ctx)
 		if err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRuns: items})
-	case events.TopicRunCommandListByWorkspace:
+	case runevents.TopicRunCommandListByWorkspace:
 		items, err := m.runs.ListByWorkspaceID(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
 		if err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyRuns: items})
-	case events.TopicRunCommandGetStep:
+	case runevents.TopicRunCommandGetStep:
 		if m.steps == nil {
 			return common.ErrInvalidArgument
 		}
@@ -243,7 +244,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyStep: item})
-	case events.TopicRunCommandListStepsByRun:
+	case runevents.TopicRunCommandListStepsByRun:
 		if m.steps == nil {
 			return common.ErrInvalidArgument
 		}
@@ -256,7 +257,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeySteps: items})
-	case events.TopicRunCommandGetRuntimeCheckpoint:
+	case runevents.TopicRunCommandGetRuntimeCheckpoint:
 		if m.checkpoints == nil {
 			return common.ErrInvalidArgument
 		}
@@ -269,7 +270,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyCheckpoint: item})
-	case events.TopicRunCommandListCheckpointsByRun:
+	case runevents.TopicRunCommandListCheckpointsByRun:
 		if m.checkpoints == nil {
 			return common.ErrInvalidArgument
 		}
@@ -282,7 +283,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyCheckpoints: items})
-	case events.TopicRunCommandUpdate:
+	case runevents.TopicRunCommandUpdate:
 		var item *runmodel.Run
 		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.UpdateRunCommand); ok {
 			item = runFromUpdateCommand(cmd)
@@ -297,13 +298,13 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandDelete:
+	case runevents.TopicRunCommandDelete:
 		runID := deleteRunIDFromPayload(envelope.Payload, envelope.RunID)
 		if err := m.runs.Delete(ctx, runID); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandStart:
+	case runevents.TopicRunCommandStart:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.StartRunCommand)
 		if !ok {
 			cmd = runcontracts.StartRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
@@ -312,7 +313,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandSupersede:
+	case runevents.TopicRunCommandSupersede:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.SupersedeRunCommand)
 		if !ok {
 			cmd = runcontracts.SupersedeRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
@@ -321,7 +322,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return runCommandResponse(envelope, nil)
-	case events.TopicRunCommandFail:
+	case runevents.TopicRunCommandFail:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.FailRunCommand)
 		if !ok {
 			cmd = runcontracts.FailRunCommand{

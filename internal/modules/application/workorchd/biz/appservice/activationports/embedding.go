@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,7 +17,7 @@ func GenerateEmbedding(ctx context.Context, hub events.Hub, providerID string, i
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicLLMCommandGenerateEmbedding,
+		Topic:        llmevents.TopicLLMCommandGenerateEmbedding,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "llm_embedding",
 		SubjectID:    strings.TrimSpace(providerID),

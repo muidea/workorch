@@ -6,6 +6,14 @@ import (
 	"testing"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -34,12 +42,12 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 	var sawCommand, sawResult bool
 	for _, envelope := range publishedHub.Published() {
 		switch envelope.Topic {
-		case events.TopicCLICommand:
+		case workorchdevents.TopicCLICommand:
 			command, ok := events.DecodeCLICommandPayload(envelope.Payload)
 			if ok && command.Command == events.CommandWorkspaceCreate {
 				sawCommand = true
 			}
-		case events.TopicCLIResult:
+		case workorchdevents.TopicCLIResult:
 			result, ok := events.DecodeCLIResultPayload(envelope.Payload)
 			if ok && result.OK && result.CommandID != "" {
 				sawResult = true
@@ -165,7 +173,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 		t.Fatal("event hub does not expose published envelopes")
 	}
 	for _, envelope := range publishedHub.Published() {
-		if envelope.Topic != events.TopicCLICommand {
+		if envelope.Topic != workorchdevents.TopicCLICommand {
 			continue
 		}
 		command, ok := events.DecodeCLICommandPayload(envelope.Payload)
@@ -178,7 +186,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 	goalEvent := convertEnvelope(events.Envelope{
-		Topic:       events.TopicGoalDefined,
+		Topic:       workspaceevents.TopicGoalDefined,
 		SubjectID:   "goal-1",
 		WorkspaceID: "ws-1",
 		Payload:     events.GoalPayload("updated goal", "", "", "", ""),
@@ -187,7 +195,7 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 		t.Fatalf("goal event = %+v, want converted goal definition event", goalEvent)
 	}
 	dodEvent := convertEnvelope(events.Envelope{
-		Topic:       events.TopicDoDDefined,
+		Topic:       workspaceevents.TopicDoDDefined,
 		SubjectID:   "dod-1",
 		WorkspaceID: "ws-1",
 		Payload:     events.DoDPayload([]string{"tests pass"}, common.DoDStateReady, "", "", "", ""),
@@ -227,11 +235,11 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	var sawUpdatedGoal, sawUpdatedDoD bool
 	for _, envelope := range publishedHub.Published() {
 		switch envelope.Topic {
-		case events.TopicGoalDefined:
+		case workspaceevents.TopicGoalDefined:
 			if envelope.SubjectID == string(goal.ID) && envelope.WorkspaceID == string(ws.ID) && envelope.Payload[events.PayloadKeyText] == "- updated goal" {
 				sawUpdatedGoal = true
 			}
-		case events.TopicDoDDefined:
+		case workspaceevents.TopicDoDDefined:
 			items, _ := envelope.Payload[events.PayloadKeyItems].([]string)
 			if envelope.SubjectID == string(dod.ID) && envelope.WorkspaceID == string(ws.ID) && len(items) == 1 && items[0] == "updated dod" {
 				sawUpdatedDoD = true
@@ -317,11 +325,11 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	var sawCreate, sawUpdate, sawDelete bool
 	for _, envelope := range publishedHub.Published() {
 		switch envelope.Topic {
-		case events.TopicMemoryCreated:
+		case memoryevents.TopicMemoryCreated:
 			sawCreate = true
-		case events.TopicMemoryUpdated:
+		case memoryevents.TopicMemoryUpdated:
 			sawUpdate = true
-		case events.TopicMemoryDeleted:
+		case memoryevents.TopicMemoryDeleted:
 			sawDelete = true
 		}
 	}
@@ -351,7 +359,7 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 
 func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	created := convertEnvelope(events.Envelope{
-		Topic:       events.TopicWorkspaceCreated,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created",
 		Payload:     events.WorkspacePayload("created", "", "/tmp/created", "", "active", ""),
 	})
@@ -360,7 +368,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	deleted := convertEnvelope(events.Envelope{
-		Topic:       events.TopicWorkspaceDeleted,
+		Topic:       workspaceevents.TopicWorkspaceDeleted,
 		WorkspaceID: "ws-deleted",
 		Payload:     events.WorkspacePayload("deleted", "", "/tmp/deleted", "", "active", ""),
 	})
@@ -369,7 +377,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	decision := convertEnvelope(events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectID:   "ticket-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
@@ -380,7 +388,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	approval := convertEnvelope(events.Envelope{
-		Topic:       events.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectID:   "approval-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
@@ -391,7 +399,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	governance := convertEnvelope(events.Envelope{
-		Topic:       events.TopicGovernanceAutoResolved,
+		Topic:       governanceevents.TopicGovernanceAutoResolved,
 		SubjectID:   "trace-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",
@@ -407,7 +415,7 @@ func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {
 	}
 
 	artifact := convertEnvelope(events.Envelope{
-		Topic:       events.TopicArtifactContinuationChunkRecorded,
+		Topic:       orchestratorevents.TopicArtifactContinuationChunkRecorded,
 		SubjectID:   "artifact-continuation-1",
 		WorkspaceID: "ws-1",
 		RunID:       "run-1",

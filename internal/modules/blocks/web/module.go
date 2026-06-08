@@ -8,6 +8,7 @@ import (
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
 	webmodels "github.com/muidea/workorch/internal/modules/blocks/web/pkg/models"
 	webproviderconfig "github.com/muidea/workorch/internal/modules/blocks/web/pkg/providerconfig"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -81,7 +82,7 @@ func (g webApprovalGetter) GetForRun(ctx context.Context, id common.ApprovalID, 
 		return nil, common.ErrInvalidArgument
 	}
 	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicApprovalCommandGet,
+		Topic:        approvalevents.TopicApprovalCommandGet,
 		SourceModule: ModuleID,
 		SubjectType:  "approval",
 		SubjectID:    string(id),

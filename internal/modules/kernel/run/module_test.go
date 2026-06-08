@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -38,7 +40,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicRunCommandGet,
+		Topic:       runevents.TopicRunCommandGet,
 		WorkspaceID: "ws-run-owner-b",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -51,7 +53,7 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicRunCommandGet,
+		Topic:       runevents.TopicRunCommandGet,
 		WorkspaceID: "ws-run-owner-a",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -98,7 +100,7 @@ func TestRunCommandEnsureResumedHonorsWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicRunCommandEnsureResumed,
+		Topic:       runevents.TopicRunCommandEnsureResumed,
 		WorkspaceID: "ws-run-resume-b",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -114,7 +116,7 @@ func TestRunCommandEnsureResumedHonorsWorkspaceScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicRunCommandEnsureResumed,
+		Topic:       runevents.TopicRunCommandEnsureResumed,
 		WorkspaceID: "ws-run-resume-a",
 		RunID:       string(runID),
 		Payload: map[string]any{

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -188,8 +190,8 @@ func TestGoalDoDManager_CreateWorkspace_PublishesWorkspaceCreatedEvent(t *testin
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic != events.TopicWorkspaceCreated {
-		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCreated)
+	if published[0].Topic != workspaceevents.TopicWorkspaceCreated {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, workspaceevents.TopicWorkspaceCreated)
 	}
 	if published[0].Version != events.WorkorchEventVersion {
 		t.Fatalf("version = %s, want %s", published[0].Version, events.WorkorchEventVersion)
@@ -344,8 +346,8 @@ func TestGoalDoDManager_EnsureWorkspaceResetsWorkspaceAndPublishesStateChanged(t
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic != events.TopicWorkspaceStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicWorkspaceStateChanged)
+	if published[0].Topic != workspaceevents.TopicWorkspaceStateChanged {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, workspaceevents.TopicWorkspaceStateChanged)
 	}
 	if published[0].Payload[events.PayloadKeyTitle] != "workorch reset workspace" {
 		t.Fatalf("title payload = %v, want workorch reset workspace", published[0].Payload[events.PayloadKeyTitle])
@@ -419,7 +421,7 @@ func TestGoalDoDManager_DefinitionChangeReopensTerminalWorkspace(t *testing.T) {
 			if len(published) < 2 {
 				t.Fatalf("published = %+v, want state change and definition event", published)
 			}
-			if published[0].Topic != events.TopicWorkspaceStateChanged {
+			if published[0].Topic != workspaceevents.TopicWorkspaceStateChanged {
 				t.Fatalf("first topic = %s, want workspace state changed", published[0].Topic)
 			}
 			if published[0].Payload[events.PayloadKeyState] != string(common.WorkspaceStateActive) ||

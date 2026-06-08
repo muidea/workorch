@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+
 	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -13,7 +15,7 @@ func ListArtifactsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, w
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: resultcontracts.ListArtifactsByWorkspaceCommand{WorkspaceID: workspaceID},
 	})
 	if err != nil {
@@ -30,7 +32,7 @@ func ListArtifactsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicArtifactCommandListByRun, "run", string(runID), "", runID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByRun, "run", string(runID), "", runID, map[string]any{
 		events.PayloadKeyCommand: resultcontracts.ListArtifactsByRunCommand{RunID: runID},
 	})
 	if err != nil {

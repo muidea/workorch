@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+
 	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -22,7 +24,7 @@ func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing
 		ResultID:    "result-result-event-adapter",
 		State:       common.ArtifactStateAvailable,
 	}
-	hub.Subscribe(events.TopicArtifactCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(resultevents.TopicArtifactCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		captured = envelope
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(resultcontracts.CreateArtifactCommand)
 		if !ok || cmd.Artifact != artifact {
@@ -42,8 +44,8 @@ func TestResultEventArtifactRepositoryPublishesArtifactScopedCommands(t *testing
 	if err := repo.Create(ctx, artifact); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if captured.Topic != events.TopicArtifactCommandCreate {
-		t.Fatalf("topic = %q, want %q", captured.Topic, events.TopicArtifactCommandCreate)
+	if captured.Topic != resultevents.TopicArtifactCommandCreate {
+		t.Fatalf("topic = %q, want %q", captured.Topic, resultevents.TopicArtifactCommandCreate)
 	}
 	if captured.SourceModule != ModuleID {
 		t.Fatalf("source module = %q, want %q", captured.SourceModule, ModuleID)
@@ -88,7 +90,7 @@ func TestResultEventRepositoriesDecodeOwnerResponses(t *testing.T) {
 		ResultID:    result.ID,
 		State:       common.ArtifactStateAvailable,
 	}
-	hub.Subscribe(events.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		if envelope.SubjectType != "workspace" || envelope.SubjectID != string(result.WorkspaceID) {
 			t.Fatalf("result list subject = %q/%q, want workspace/%s", envelope.SubjectType, envelope.SubjectID, result.WorkspaceID)
 		}
@@ -97,7 +99,7 @@ func TestResultEventRepositoriesDecodeOwnerResponses(t *testing.T) {
 			Payload: map[string]any{events.PayloadKeyItems: []*resultmodel.Result{result}},
 		})
 	})
-	hub.Subscribe(events.TopicArtifactCommandListByResult, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(resultevents.TopicArtifactCommandListByResult, func(_ context.Context, envelope events.Envelope) error {
 		if envelope.SubjectType != "result" || envelope.SubjectID != string(result.ID) {
 			t.Fatalf("artifact list subject = %q/%q, want result/%s", envelope.SubjectType, envelope.SubjectID, result.ID)
 		}

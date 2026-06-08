@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -78,7 +78,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return common.ErrConflict
 	}
 	o.enrichLLMStepInputContext(ctx, run, step, workspace)
-	if err := o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepDispatched); err != nil {
+	if err := o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepDispatched); err != nil {
 		return err
 	}
 	toolCall, err := o.recordStepDispatchEvidence(ctx, run, step)
@@ -171,7 +171,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err := o.persistCompletedStepState(ctx, run, step); err != nil {
 		return err
 	}
-	if err := o.eventPublisher().publishStepState(ctx, run, step, events.TopicStepStateChanged); err != nil {
+	if err := o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged); err != nil {
 		return err
 	}
 

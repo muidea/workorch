@@ -12,6 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -1856,7 +1860,7 @@ func (s *serverState) registerReplanContinuationWatcher() {
 	if s == nil || s.eventHub == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe(events.TopicRunStateChanged, func(context.Context, events.Envelope) error {
+	unsubscribe := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(context.Context, events.Envelope) error {
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
@@ -1877,7 +1881,7 @@ func (s *serverState) registerAutoGovernanceResumeWatcher() {
 	if s == nil || s.eventHub == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe(events.TopicGovernanceAutoResolved, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribe := s.eventHub.Subscribe(governanceevents.TopicGovernanceAutoResolved, func(_ context.Context, envelope events.Envelope) error {
 		if strings.TrimSpace(envelope.RunID) == "" {
 			return nil
 		}
@@ -1918,9 +1922,9 @@ func enqueueEventStreamEnvelope(ch chan events.Envelope, envelope events.Envelop
 
 func isEventStreamCriticalTopic(topic string) bool {
 	switch topic {
-	case events.TopicWorkspaceCreated,
-		events.TopicWorkspaceDeleted,
-		events.TopicWorkspaceStateChanged:
+	case workspaceevents.TopicWorkspaceCreated,
+		workspaceevents.TopicWorkspaceDeleted,
+		workspaceevents.TopicWorkspaceStateChanged:
 		return true
 	default:
 		return false

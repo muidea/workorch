@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,7 +21,7 @@ func ReadRunByOwnerCommand(ctx context.Context, hub events.Hub, runID common.Run
 	if workspaceID != "" {
 		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicRunCommandGet, "run", string(runID), workspaceID, runID, payload)
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGet, "run", string(runID), workspaceID, runID, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +36,7 @@ func ListRunsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*runmodel.Ru
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicRunCommandList, "run", "all", "", "", nil)
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +51,7 @@ func ListRunsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, worksp
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {

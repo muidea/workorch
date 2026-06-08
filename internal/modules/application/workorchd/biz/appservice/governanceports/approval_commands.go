@@ -3,6 +3,8 @@ package governanceports
 import (
 	"context"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -11,11 +13,11 @@ import (
 )
 
 func ApproveApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, events.TopicApprovalCommandEnsureApproved, approvalID)
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalID)
 }
 
 func RejectApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, events.TopicApprovalCommandEnsureRejected, approvalID)
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, approvalID)
 }
 
 func resolveApproval(ctx context.Context, hub events.Hub, topic string, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {

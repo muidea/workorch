@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -48,7 +50,7 @@ func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
 func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 	run := &runmodel.Run{ID: "run-resume-command", WorkspaceID: "ws-resume-command"}

@@ -10,8 +10,12 @@ import (
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -56,7 +60,7 @@ func (e *eventSubsystem) publishRunCreated(ctx context.Context, run *runModel.Ru
 	}
 	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunCreated,
+		Topic:        runevents.TopicRunCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "run",
 		SubjectID:    string(run.ID),
@@ -82,7 +86,7 @@ func (e *eventSubsystem) publishRunStateChangedAtStep(ctx context.Context, run *
 	}
 	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunStateChanged,
+		Topic:        runevents.TopicRunStateChanged,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "run",
 		SubjectID:    string(run.ID),
@@ -135,11 +139,11 @@ func (e *eventSubsystem) publishResultAccepted(ctx context.Context, item *result
 func resultEventTopic(state common.ResultState) string {
 	switch state {
 	case common.ResultStateRejected:
-		return events.TopicResultRejected
+		return resultevents.TopicResultRejected
 	case common.ResultStateSuperseded:
-		return events.TopicResultSuperseded
+		return resultevents.TopicResultSuperseded
 	default:
-		return events.TopicResultAccepted
+		return resultevents.TopicResultAccepted
 	}
 }
 
@@ -167,7 +171,7 @@ func (e *eventSubsystem) publishArtifactCreated(ctx context.Context, item *resul
 	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/created", item.ID),
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicArtifactCreated,
+		Topic:        resultevents.TopicArtifactCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "artifact",
 		SubjectID:    string(item.ID),
@@ -211,7 +215,7 @@ func (e *eventSubsystem) publishPatchChanged(ctx context.Context, run *runModel.
 	addedLines, deletedLines := patchLineStats(patch)
 	contentHash, diffHash := patchContentHashes(patch)
 	approvalID := patch.ApprovalID
-	if topic == events.TopicPatchReverted && patch.RevertApprovalID != "" {
+	if topic == orchestratorevents.TopicPatchReverted && patch.RevertApprovalID != "" {
 		approvalID = patch.RevertApprovalID
 	}
 	errText := ""
@@ -299,17 +303,17 @@ func (e *eventSubsystem) publishArtifactContinuationChanged(ctx context.Context,
 
 func artifactContinuationEventName(topic string) string {
 	switch topic {
-	case events.TopicArtifactContinuationCreated:
+	case orchestratorevents.TopicArtifactContinuationCreated:
 		return "created"
-	case events.TopicArtifactContinuationChunkRecorded:
+	case orchestratorevents.TopicArtifactContinuationChunkRecorded:
 		return "chunk-recorded"
-	case events.TopicArtifactContinuationChunkRejected:
+	case orchestratorevents.TopicArtifactContinuationChunkRejected:
 		return "chunk-rejected"
-	case events.TopicArtifactContinuationAssembled:
+	case orchestratorevents.TopicArtifactContinuationAssembled:
 		return "assembled"
-	case events.TopicArtifactContinuationApplied:
+	case orchestratorevents.TopicArtifactContinuationApplied:
 		return "applied"
-	case events.TopicArtifactContinuationFailed:
+	case orchestratorevents.TopicArtifactContinuationFailed:
 		return "failed"
 	default:
 		return "changed"
@@ -330,7 +334,7 @@ func (e *eventSubsystem) publishPatchPreview(ctx context.Context, run *runModel.
 	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/patch-previewed", subjectID),
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicPatchPreviewed,
+		Topic:        orchestratorevents.TopicPatchPreviewed,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "patch",
 		SubjectID:    subjectID,
@@ -446,7 +450,7 @@ func (e *eventSubsystem) publishWorkspaceStateChanged(ctx context.Context, works
 	}
 	return e.hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicWorkspaceStateChanged,
+		Topic:        workspaceevents.TopicWorkspaceStateChanged,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "workspace",
 		SubjectID:    string(workspace.ID),
@@ -473,7 +477,7 @@ func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run
 	}); err != nil {
 		return err
 	}
-	if topic == events.TopicStepStateChanged {
+	if topic == runevents.TopicStepStateChanged {
 		if err := e.publishLLMStreamProgressFromStep(ctx, run, step); err != nil {
 			return err
 		}
@@ -560,7 +564,7 @@ func (e *eventSubsystem) publishLLMStreamProgressFromStep(ctx context.Context, r
 	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-stream-progress", step.ID),
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunLLMStreamProgress,
+		Topic:        runevents.TopicRunLLMStreamProgress,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "llm_stream_progress",
 		SubjectID:    string(step.ID),
@@ -664,7 +668,7 @@ func (e *eventSubsystem) publishLLMUsageFromStep(ctx context.Context, run *runMo
 	return e.hub.Publish(ctx, events.Envelope{
 		ID:           fmt.Sprintf("%s/event/llm-usage-recorded", step.ID),
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunLLMUsageRecorded,
+		Topic:        runevents.TopicRunLLMUsageRecorded,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "llm_usage",
 		SubjectID:    string(step.ID),

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -41,7 +43,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCommandGet,
+		Topic:       approvalevents.TopicApprovalCommandGet,
 		WorkspaceID: "ws-approval-owner-b",
 		RunID:       "run-approval-owner-a",
 		StepID:      "step-approval-owner-a",
@@ -57,7 +59,7 @@ func TestApprovalCommandGetHonorsScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCommandGet,
+		Topic:       approvalevents.TopicApprovalCommandGet,
 		WorkspaceID: "ws-approval-owner-a",
 		RunID:       "run-approval-owner-a",
 		StepID:      "step-approval-owner-a",
@@ -118,7 +120,7 @@ func TestApprovalCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCommandListByRun,
+		Topic:       approvalevents.TopicApprovalCommandListByRun,
 		WorkspaceID: "ws-approval-list-a",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -165,7 +167,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCommandEnsureApproved,
+		Topic:       approvalevents.TopicApprovalCommandEnsureApproved,
 		WorkspaceID: "ws-approval-mutate-b",
 		RunID:       "run-approval-mutate-a",
 		Payload: map[string]any{
@@ -186,7 +188,7 @@ func TestApprovalMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCommandDelete,
+		Topic:       approvalevents.TopicApprovalCommandDelete,
 		WorkspaceID: "ws-approval-mutate-b",
 		RunID:       "run-approval-mutate-a",
 		Payload: map[string]any{

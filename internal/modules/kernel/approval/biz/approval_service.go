@@ -8,6 +8,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -49,7 +50,7 @@ func (s *Service) CreateApproval(ctx context.Context, cmd approvalcontracts.Crea
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicApprovalCreated,
+		Topic:        approvalevents.TopicApprovalCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "approval",
 		SubjectID:    string(item.ID),
@@ -176,7 +177,7 @@ func (s *Service) resolveItem(ctx context.Context, item *approvalModel.Approval,
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicApprovalResolved,
+		Topic:        approvalevents.TopicApprovalResolved,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "approval",
 		SubjectID:    string(item.ID),

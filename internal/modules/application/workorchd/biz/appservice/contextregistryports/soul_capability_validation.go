@@ -3,6 +3,8 @@ package contextregistryports
 import (
 	"context"
 
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -16,7 +18,7 @@ func ValidateSoulCapabilitySelection(ctx context.Context, hub events.Hub, soulID
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	return PublishCommand(ctx, hub, events.TopicSoulCommandValidateCapability, "soul", string(soulID), map[string]any{
+	return PublishCommand(ctx, hub, soulevents.TopicSoulCommandValidateCapability, "soul", string(soulID), map[string]any{
 		events.PayloadKeyCommand: soulcontracts.ValidateCapabilitySelectionCommand{
 			SoulID:               soulID,
 			SkillRefs:            contextregistrycore.CloneStrings(skillIDs),

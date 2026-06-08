@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -14,7 +17,7 @@ func TestCollectorCollectsSubscribedWorkorchEvents(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
 		SubjectID:   "run-1",
 		RunID:       "run-1",
@@ -35,8 +38,8 @@ func TestCollectorCollectsSubscribedWorkorchEvents(t *testing.T) {
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic() != events.TopicRunStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].Topic(), events.TopicRunStateChanged)
+	if published[0].Topic() != runevents.TopicRunStateChanged {
+		t.Fatalf("topic = %s, want %s", published[0].Topic(), runevents.TopicRunStateChanged)
 	}
 	if published[0].Envelope().Payload[events.PayloadKeyState] != "running" {
 		t.Fatalf("payload state = %v, want running", published[0].Envelope().Payload[events.PayloadKeyState])
@@ -50,7 +53,7 @@ func TestCollectorCloseStopsFurtherCollection(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectType: "approval",
 		SubjectID:   "approval-1",
 		Payload:     map[string]any{events.PayloadKeyState: "pending"},
@@ -70,7 +73,7 @@ func TestCollectorSkipsInvalidWorkorchPayload(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
 		SubjectID:   "run-1",
 		RunID:       "run-1",
@@ -93,7 +96,7 @@ func TestCollectorPublishedWorkorchEventsReturnsDeepClonedPayloads(t *testing.T)
 
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicStepStateChanged,
+		Topic:       runevents.TopicStepStateChanged,
 		SubjectType: "step",
 		SubjectID:   "run-1/step-1",
 		RunID:       "run-1",

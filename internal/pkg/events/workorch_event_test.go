@@ -4,13 +4,19 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicRunCreated,
+		Topic:   runevents.TopicRunCreated,
 		RunID:   "run-1",
 		Payload: map[string]any{
 			PayloadKeyGoalID:             "goal-1",
@@ -45,7 +51,7 @@ func TestDecodeWorkorchEventReturnsTypedRunEvent(t *testing.T) {
 func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicPatchApplied,
+		Topic:   orchestratorevents.TopicPatchApplied,
 		RunID:   "run-1",
 		StepID:  "run-1/step-1",
 		Payload: PatchPayload(
@@ -83,7 +89,7 @@ func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
 func TestDecodeWorkorchEventReturnsTypedRejectedResultEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicResultRejected,
+		Topic:   resultevents.TopicResultRejected,
 		RunID:   "run-1",
 		Payload: ResultPayload(
 			common.GoalID("goal-1"),
@@ -104,7 +110,7 @@ func TestDecodeWorkorchEventReturnsTypedRejectedResultEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want ResultEvent", event)
 	}
-	if resultEvent.Envelope().Topic != TopicResultRejected || resultEvent.Data.State != common.ResultStateRejected {
+	if resultEvent.Envelope().Topic != resultevents.TopicResultRejected || resultEvent.Data.State != common.ResultStateRejected {
 		t.Fatalf("result event = %+v topic=%s, want rejected result topic/state", resultEvent.Data, resultEvent.Envelope().Topic)
 	}
 }
@@ -112,7 +118,7 @@ func TestDecodeWorkorchEventReturnsTypedRejectedResultEvent(t *testing.T) {
 func TestDecodeWorkorchEventReturnsTypedLLMStreamProgressEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicRunLLMStreamProgress,
+		Topic:   runevents.TopicRunLLMStreamProgress,
 		RunID:   "run-1",
 		StepID:  "run-1/step-1",
 		Payload: LLMStreamProgressPayload(
@@ -149,7 +155,7 @@ func TestDecodeWorkorchEventReturnsTypedLLMStreamProgressEvent(t *testing.T) {
 func TestDecodeWorkorchEventReturnsTypedLLMUsageEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicRunLLMUsageRecorded,
+		Topic:   runevents.TopicRunLLMUsageRecorded,
 		RunID:   "run-1",
 		StepID:  "run-1/step-1",
 		Payload: LLMUsagePayload(LLMUsagePayloadData{
@@ -186,7 +192,7 @@ func TestDecodeWorkorchEventReturnsTypedLLMUsageEvent(t *testing.T) {
 func TestDecodeWorkorchEventRejectsIncompatibleVersion(t *testing.T) {
 	_, ok := DecodeWorkorchEvent(Envelope{
 		Version: "workorch.event.v2",
-		Topic:   TopicRunCreated,
+		Topic:   runevents.TopicRunCreated,
 		RunID:   "run-1",
 		Payload: RunPayload("goal-1", "dod-1", common.RunStateRunning, "", "", ""),
 	})
@@ -212,7 +218,7 @@ func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicStepStateChanged,
+		Topic:   runevents.TopicStepStateChanged,
 		StepID:  "run-1/step-1",
 		Payload: map[string]any{PayloadKeyState: "completed"},
 	}); err != nil {
@@ -220,7 +226,7 @@ func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 	}
 	if err := hub.Publish(context.Background(), Envelope{
 		Version:   WorkorchEventVersion,
-		Topic:     TopicApprovalResolved,
+		Topic:     approvalevents.TopicApprovalResolved,
 		RunID:     "run-1",
 		SubjectID: "approval-1",
 		Payload:   ApprovalPayload("gate", "deploy", map[string]any{"risk": "external"}, common.ApprovalStateApproved),
@@ -236,7 +242,7 @@ func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
 	envelope, ok := NormalizeWorkorchEnvelope(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicTicketResolved,
+		Topic:   decisionevents.TopicTicketResolved,
 		Payload: map[string]any{
 			PayloadKeyReason:       "manual gate",
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),
@@ -260,7 +266,7 @@ func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
 
 	envelope2, ok := NormalizeWorkorchEnvelope(Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicTicketResolved,
+		Topic:   decisionevents.TopicTicketResolved,
 		Payload: map[string]any{
 			PayloadKeyReason:       "manual gate",
 			PayloadKeyState:        string(common.DecisionTicketStateResolved),

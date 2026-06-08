@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -43,7 +45,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandGetTicket,
+		Topic:       decisionevents.TopicDecisionCommandGetTicket,
 		WorkspaceID: "ws-ticket-owner-b",
 		RunID:       "run-ticket-owner-a",
 		StepID:      "step-ticket-owner-a",
@@ -59,7 +61,7 @@ func TestDecisionTicketCommandGetHonorsScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandGetTicket,
+		Topic:       decisionevents.TopicDecisionCommandGetTicket,
 		WorkspaceID: "ws-ticket-owner-a",
 		RunID:       "run-ticket-owner-a",
 		StepID:      "step-ticket-owner-a",
@@ -121,7 +123,7 @@ func TestDecisionTicketCommandListByRunHonorsWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandListTicketsByRun,
+		Topic:       decisionevents.TopicDecisionCommandListTicketsByRun,
 		WorkspaceID: "ws-ticket-list-a",
 		RunID:       string(runID),
 		Payload: map[string]any{
@@ -169,7 +171,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandEnsureResolved,
+		Topic:       decisionevents.TopicDecisionCommandEnsureResolved,
 		WorkspaceID: "ws-ticket-mutate-b",
 		RunID:       "run-ticket-mutate-a",
 		Payload: map[string]any{
@@ -192,7 +194,7 @@ func TestDecisionMutationCommandsHonorWorkspaceScope(t *testing.T) {
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandDeleteTicket,
+		Topic:       decisionevents.TopicDecisionCommandDeleteTicket,
 		WorkspaceID: "ws-ticket-mutate-b",
 		RunID:       "run-ticket-mutate-a",
 		Payload: map[string]any{
@@ -232,7 +234,7 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 
 	ticketID := common.TicketID("ticket-resolution-contract")
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicDecisionCommandCreateResolution,
+		Topic:       decisionevents.TopicDecisionCommandCreateResolution,
 		SubjectType: "decision_resolution",
 		SubjectID:   "resolution-contract",
 		Payload: map[string]any{

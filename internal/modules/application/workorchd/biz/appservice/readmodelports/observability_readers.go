@@ -3,6 +3,8 @@ package readmodelports
 import (
 	"context"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
@@ -27,7 +29,7 @@ func (r MemoryRecallTraceReader) List(ctx context.Context, query repository.Memo
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, events.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
+	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
 		events.PayloadKeyMemoryRecallTraceQuery: query,
 	})
 	if err != nil {

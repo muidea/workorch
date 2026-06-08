@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -53,7 +55,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 	}
 	publishedEvent, ok := events.DecodeWorkorchEvent(events.Envelope{
 		Version: events.WorkorchEventVersion,
-		Topic:   events.TopicRunCreated,
+		Topic:   runevents.TopicRunCreated,
 		RunID:   "run-001",
 		Payload: map[string]any{
 			events.PayloadKeyGoalID:             "goal-001",
@@ -87,7 +89,7 @@ func TestOwnerReadersBuildsSnapshotAndStatusReaderBundles(t *testing.T) {
 		runReaders.AutoGovernanceTraces != readers.AutoGovernanceTraces ||
 		runReaders.MCPCapabilities != readers.MCPCapabilities ||
 		len(runReaders.Published) != 1 ||
-		runReaders.Published[0].Topic() != events.TopicRunCreated {
+		runReaders.Published[0].Topic() != runevents.TopicRunCreated {
 		t.Fatalf("RunSnapshotReaders did not preserve owner readers and published events")
 	}
 

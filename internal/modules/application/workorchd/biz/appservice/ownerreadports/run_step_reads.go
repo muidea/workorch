@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -12,7 +14,7 @@ func ReadStepByOwnerCommand(ctx context.Context, hub events.Hub, stepID common.S
 	if hub == nil || stepID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicRunCommandGetStep, "step", string(stepID), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGetStep, "step", string(stepID), "", "", map[string]any{
 		events.PayloadKeyStepID: string(stepID),
 	})
 	if err != nil {
@@ -29,7 +31,7 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID commo
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicRunCommandListStepsByRun, "run", string(runID), "", runID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepsByRun, "run", string(runID), "", runID, map[string]any{
 		events.PayloadKeyRunID: string(runID),
 	})
 	if err != nil {

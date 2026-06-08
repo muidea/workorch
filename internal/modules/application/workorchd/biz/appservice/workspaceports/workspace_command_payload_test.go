@@ -4,6 +4,15 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
@@ -24,7 +33,7 @@ import (
 func TestCreateWorkspaceRecordPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicWorkspaceCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 
@@ -53,9 +62,9 @@ func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	for _, topic := range []string{
-		events.TopicWorkspaceTemplateCommandCreate,
-		events.TopicWorkspaceTemplateCommandUpdate,
-		events.TopicWorkspaceTemplateCommandDelete,
+		workspaceevents.TopicWorkspaceTemplateCommandCreate,
+		workspaceevents.TopicWorkspaceTemplateCommandUpdate,
+		workspaceevents.TopicWorkspaceTemplateCommandDelete,
 	} {
 		hub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
 			return events.Response(envelope)
@@ -82,7 +91,7 @@ func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
 		t.Fatalf("DeleteWorkspaceTemplateRecord: %v", err)
 	}
 
-	createEnvelope := publishedByTopic(t, hub, events.TopicWorkspaceTemplateCommandCreate)
+	createEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate)
 	createCmd, ok := createEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.CreateWorkspaceTemplateCommand)
 	if !ok {
 		t.Fatalf("create payload command = %T, want CreateWorkspaceTemplateCommand", createEnvelope.Payload[events.PayloadKeyCommand])
@@ -92,7 +101,7 @@ func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
 	}
 	assertNoWorkspaceTemplateLegacyPayload(t, createEnvelope)
 
-	updateEnvelope := publishedByTopic(t, hub, events.TopicWorkspaceTemplateCommandUpdate)
+	updateEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate)
 	updateCmd, ok := updateEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateWorkspaceTemplateCommand)
 	if !ok {
 		t.Fatalf("update payload command = %T, want UpdateWorkspaceTemplateCommand", updateEnvelope.Payload[events.PayloadKeyCommand])
@@ -102,7 +111,7 @@ func TestWorkspaceTemplateRecordsPublishCommandPayloads(t *testing.T) {
 	}
 	assertNoWorkspaceTemplateLegacyPayload(t, updateEnvelope)
 
-	deleteEnvelope := publishedByTopic(t, hub, events.TopicWorkspaceTemplateCommandDelete)
+	deleteEnvelope := publishedByTopic(t, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete)
 	deleteCmd, ok := deleteEnvelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteWorkspaceTemplateCommand)
 	if !ok || deleteCmd.TemplateID != template.ID {
 		t.Fatalf("delete payload command = %#v, want DeleteWorkspaceTemplateCommand(%s)", deleteEnvelope.Payload[events.PayloadKeyCommand], template.ID)
@@ -119,45 +128,45 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 	ticketID := common.TicketID("ticket-purge-command-payload")
 	approvalID := common.ApprovalID("approval-purge-command-payload")
 
-	hub.Subscribe(events.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(runevents.TopicRunCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyRuns: []*runmodel.Run{{ID: runID, WorkspaceID: workspaceID}},
 		}})
 	})
-	hub.Subscribe(events.TopicOrchestratorCommandPurgeRun, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
-	hub.Subscribe(events.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{{ID: memoryID, WorkspaceID: workspaceID, RunID: runID}},
 		}})
 	})
-	hub.Subscribe(events.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByWS, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyTickets: []*decisionmodel.Ticket{{ID: ticketID, WorkspaceID: workspaceID, RunID: runID}},
 		}})
 	})
-	hub.Subscribe(events.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyItems: []*approvalmodel.Approval{{ID: approvalID, WorkspaceID: workspaceID, RunID: runID}},
 		}})
 	})
-	hub.Subscribe(events.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyItems: []*resultmodel.Artifact{},
 		}})
 	})
-	hub.Subscribe(events.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(resultevents.TopicResultCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{Payload: map[string]any{
 			events.PayloadKeyItems: []*resultmodel.Result{},
 		}})
 	})
 	for _, topic := range []string{
-		events.TopicMemoryCommandDelete,
-		events.TopicDecisionCommandDeleteResolution,
-		events.TopicDecisionCommandDeleteTicket,
-		events.TopicApprovalCommandDelete,
-		events.TopicRunCommandDelete,
+		memoryevents.TopicMemoryCommandDelete,
+		decisionevents.TopicDecisionCommandDeleteResolution,
+		decisionevents.TopicDecisionCommandDeleteTicket,
+		approvalevents.TopicApprovalCommandDelete,
+		runevents.TopicRunCommandDelete,
 	} {
 		hub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
 			return events.Response(envelope)
@@ -168,7 +177,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("PurgeWorkspaceRecords: %v", err)
 	}
 
-	orchestratorPurge := publishedByTopic(t, hub, events.TopicOrchestratorCommandPurgeRun)
+	orchestratorPurge := publishedByTopic(t, hub, orchestratorevents.TopicOrchestratorCommandPurgeRun)
 	orchestratorCmd, ok := orchestratorPurge.Payload[events.PayloadKeyCommand].(orchestratorcontracts.PurgeRunCommand)
 	if !ok || orchestratorCmd.RunID != runID {
 		t.Fatalf("orchestrator purge command = %#v, want PurgeRunCommand(%s)", orchestratorPurge.Payload[events.PayloadKeyCommand], runID)
@@ -177,7 +186,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("orchestrator purge payload contains legacy runId field")
 	}
 
-	memoryDelete := publishedByTopic(t, hub, events.TopicMemoryCommandDelete)
+	memoryDelete := publishedByTopic(t, hub, memoryevents.TopicMemoryCommandDelete)
 	memoryCmd, ok := memoryDelete.Payload[events.PayloadKeyCommand].(memorycontracts.DeleteMemoryItemCommand)
 	if !ok || memoryCmd.MemoryID != memoryID {
 		t.Fatalf("memory delete command = %#v, want DeleteMemoryItemCommand(%s)", memoryDelete.Payload[events.PayloadKeyCommand], memoryID)
@@ -186,7 +195,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("memory delete payload contains legacy memoryId field")
 	}
 
-	resolutionDelete := publishedByTopic(t, hub, events.TopicDecisionCommandDeleteResolution)
+	resolutionDelete := publishedByTopic(t, hub, decisionevents.TopicDecisionCommandDeleteResolution)
 	resolutionCmd, ok := resolutionDelete.Payload[events.PayloadKeyCommand].(decisioncontracts.DeleteResolutionCommand)
 	if !ok || resolutionCmd.TicketID != ticketID {
 		t.Fatalf("resolution delete command = %#v, want DeleteResolutionCommand(%s)", resolutionDelete.Payload[events.PayloadKeyCommand], ticketID)
@@ -195,7 +204,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("resolution delete payload contains legacy blockingTicketId field")
 	}
 
-	ticketDelete := publishedByTopic(t, hub, events.TopicDecisionCommandDeleteTicket)
+	ticketDelete := publishedByTopic(t, hub, decisionevents.TopicDecisionCommandDeleteTicket)
 	ticketCmd, ok := ticketDelete.Payload[events.PayloadKeyCommand].(decisioncontracts.DeleteTicketCommand)
 	if !ok || ticketCmd.TicketID != ticketID {
 		t.Fatalf("ticket delete command = %#v, want DeleteTicketCommand(%s)", ticketDelete.Payload[events.PayloadKeyCommand], ticketID)
@@ -204,7 +213,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("ticket delete payload contains legacy blockingTicketId field")
 	}
 
-	approvalDelete := publishedByTopic(t, hub, events.TopicApprovalCommandDelete)
+	approvalDelete := publishedByTopic(t, hub, approvalevents.TopicApprovalCommandDelete)
 	approvalCmd, ok := approvalDelete.Payload[events.PayloadKeyCommand].(approvalcontracts.DeleteApprovalCommand)
 	if !ok || approvalCmd.ApprovalID != approvalID {
 		t.Fatalf("approval delete command = %#v, want DeleteApprovalCommand(%s)", approvalDelete.Payload[events.PayloadKeyCommand], approvalID)
@@ -213,7 +222,7 @@ func TestPurgeWorkspaceRecordsPublishesDeleteCommandPayloads(t *testing.T) {
 		t.Fatalf("approval delete payload contains legacy approvalId field")
 	}
 
-	runDelete := publishedByTopic(t, hub, events.TopicRunCommandDelete)
+	runDelete := publishedByTopic(t, hub, runevents.TopicRunCommandDelete)
 	runCmd, ok := runDelete.Payload[events.PayloadKeyCommand].(runcontracts.DeleteRunCommand)
 	if !ok || runCmd.RunID != runID {
 		t.Fatalf("run delete command = %#v, want DeleteRunCommand(%s)", runDelete.Payload[events.PayloadKeyCommand], runID)
@@ -247,7 +256,7 @@ func publishedByTopic(t *testing.T, hub *events.MemoryHub, topic string) events.
 func TestDeleteWorkspaceRecordPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicWorkspaceCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDelete, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 
@@ -275,7 +284,7 @@ func TestDeleteWorkspaceRecordPublishesCommandPayload(t *testing.T) {
 func TestPurgeWorkspaceEventStreamPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -1655,7 +1656,7 @@ func (o *RuntimeOrchestrator) recordLLMStepInputMemoryRecallTrace(ctx context.Co
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicMemoryRecallRecorded,
+		Topic:        memoryevents.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,
 		SourceModule: "kernel/orchestrator",
 		SubjectType:  "memory_recall",

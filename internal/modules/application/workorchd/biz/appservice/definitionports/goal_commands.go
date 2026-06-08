@@ -3,6 +3,8 @@ package definitionports
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
@@ -20,7 +22,7 @@ func ListGoalsByWorkspace(ctx context.Context, hub events.Hub, workspaceID commo
 }
 
 func DefineGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandDefineGoal, "goal", string(goalID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DefineGoalCommand{
 			GoalID:      goalID,
 			WorkspaceID: workspaceID,
@@ -38,7 +40,7 @@ func DefineGoal(ctx context.Context, hub events.Hub, workspaceID common.Workspac
 }
 
 func UpdateGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.UpdateGoalCommand{
 			GoalID: goalID,
 			Text:   text,
@@ -55,7 +57,7 @@ func UpdateGoal(ctx context.Context, hub events.Hub, workspaceID common.Workspac
 }
 
 func DeleteGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID) error {
-	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", map[string]any{
+	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DeleteGoalCommand{GoalID: goalID},
 	})
 }

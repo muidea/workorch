@@ -6,6 +6,7 @@ import (
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	workspaceservice "github.com/muidea/workorch/internal/modules/kernel/workspace/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -77,28 +78,28 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandCreate, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandEnsure, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandGet, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandList, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandUpdate, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandDelete, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandPurge, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandDefineGoal, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandUpdateGoal, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandDeleteGoal, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandGetGoal, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandListGoalsByWS, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandDefineDoD, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandUpdateDoD, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandDeleteDoD, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandGetDoD, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceCommandListDoDsByWS, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandCreate, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandGet, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandList, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandUpdate, m.handleWorkspaceQueryCommand),
-		m.eventHub.Subscribe(events.TopicWorkspaceTemplateCommandDelete, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandCreate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandEnsure, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandList, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandDelete, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandPurge, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandDefineGoal, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandGetGoal, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandListGoalsByWS, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandDefineDoD, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandGetDoD, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceCommandListDoDsByWS, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceTemplateCommandCreate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceTemplateCommandGet, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceTemplateCommandList, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceTemplateCommandUpdate, m.handleWorkspaceQueryCommand),
+		m.eventHub.Subscribe(workspaceevents.TopicWorkspaceTemplateCommandDelete, m.handleWorkspaceQueryCommand),
 	)
 	return nil
 }
@@ -130,7 +131,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicWorkspaceCommandCreate:
+	case workspaceevents.TopicWorkspaceCommandCreate:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -158,7 +159,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandEnsure:
+	case workspaceevents.TopicWorkspaceCommandEnsure:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -179,7 +180,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandGet:
+	case workspaceevents.TopicWorkspaceCommandGet:
 		if m.workspaces == nil {
 			return common.ErrInvalidArgument
 		}
@@ -188,7 +189,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspace: item})
-	case events.TopicWorkspaceCommandList:
+	case workspaceevents.TopicWorkspaceCommandList:
 		if m.workspaces == nil {
 			return common.ErrInvalidArgument
 		}
@@ -197,7 +198,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaces: items})
-	case events.TopicWorkspaceCommandUpdate:
+	case workspaceevents.TopicWorkspaceCommandUpdate:
 		if m.workspaces == nil {
 			return common.ErrInvalidArgument
 		}
@@ -215,7 +216,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandDelete:
+	case workspaceevents.TopicWorkspaceCommandDelete:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -224,7 +225,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandPurge:
+	case workspaceevents.TopicWorkspaceCommandPurge:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -233,7 +234,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandDefineGoal:
+	case workspaceevents.TopicWorkspaceCommandDefineGoal:
 		if m.servicePtr == nil || m.goals == nil {
 			return common.ErrInvalidArgument
 		}
@@ -256,7 +257,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyGoal: item})
-	case events.TopicWorkspaceCommandUpdateGoal:
+	case workspaceevents.TopicWorkspaceCommandUpdateGoal:
 		if m.servicePtr == nil || m.goals == nil {
 			return common.ErrInvalidArgument
 		}
@@ -275,7 +276,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyGoal: item})
-	case events.TopicWorkspaceCommandDeleteGoal:
+	case workspaceevents.TopicWorkspaceCommandDeleteGoal:
 		if m.goals == nil {
 			return common.ErrInvalidArgument
 		}
@@ -283,7 +284,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandGetGoal:
+	case workspaceevents.TopicWorkspaceCommandGetGoal:
 		if m.goals == nil {
 			return common.ErrInvalidArgument
 		}
@@ -292,7 +293,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyGoal: item})
-	case events.TopicWorkspaceCommandListGoalsByWS:
+	case workspaceevents.TopicWorkspaceCommandListGoalsByWS:
 		if m.goals == nil {
 			return common.ErrInvalidArgument
 		}
@@ -301,7 +302,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyGoals: items})
-	case events.TopicWorkspaceCommandDefineDoD:
+	case workspaceevents.TopicWorkspaceCommandDefineDoD:
 		if m.servicePtr == nil || m.dods == nil {
 			return common.ErrInvalidArgument
 		}
@@ -324,7 +325,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyDoD: item})
-	case events.TopicWorkspaceCommandUpdateDoD:
+	case workspaceevents.TopicWorkspaceCommandUpdateDoD:
 		if m.servicePtr == nil || m.dods == nil {
 			return common.ErrInvalidArgument
 		}
@@ -343,7 +344,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyDoD: item})
-	case events.TopicWorkspaceCommandDeleteDoD:
+	case workspaceevents.TopicWorkspaceCommandDeleteDoD:
 		if m.dods == nil {
 			return common.ErrInvalidArgument
 		}
@@ -351,7 +352,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, nil)
-	case events.TopicWorkspaceCommandGetDoD:
+	case workspaceevents.TopicWorkspaceCommandGetDoD:
 		if m.dods == nil {
 			return common.ErrInvalidArgument
 		}
@@ -360,7 +361,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyDoD: item})
-	case events.TopicWorkspaceCommandListDoDsByWS:
+	case workspaceevents.TopicWorkspaceCommandListDoDsByWS:
 		if m.dods == nil {
 			return common.ErrInvalidArgument
 		}
@@ -369,7 +370,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyDoDs: items})
-	case events.TopicWorkspaceTemplateCommandCreate:
+	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
 		if m.templates == nil {
 			return common.ErrInvalidArgument
 		}
@@ -381,7 +382,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
-	case events.TopicWorkspaceTemplateCommandGet:
+	case workspaceevents.TopicWorkspaceTemplateCommandGet:
 		if m.templates == nil {
 			return common.ErrInvalidArgument
 		}
@@ -390,7 +391,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
-	case events.TopicWorkspaceTemplateCommandList:
+	case workspaceevents.TopicWorkspaceTemplateCommandList:
 		if m.templates == nil {
 			return common.ErrInvalidArgument
 		}
@@ -399,7 +400,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplates: items})
-	case events.TopicWorkspaceTemplateCommandUpdate:
+	case workspaceevents.TopicWorkspaceTemplateCommandUpdate:
 		if m.templates == nil {
 			return common.ErrInvalidArgument
 		}
@@ -411,7 +412,7 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 			return err
 		}
 		return workspaceCommandResponse(envelope, map[string]any{events.PayloadKeyWorkspaceTemplate: item})
-	case events.TopicWorkspaceTemplateCommandDelete:
+	case workspaceevents.TopicWorkspaceTemplateCommandDelete:
 		if m.templates == nil {
 			return common.ErrInvalidArgument
 		}

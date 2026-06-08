@@ -3,6 +3,8 @@ package readmodelports
 import (
 	"context"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -17,7 +19,7 @@ func (r MCPCapabilityReader) List(ctx context.Context) ([]*mcpmodel.Capability, 
 	if r.Hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, events.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", map[string]any{})
+	response, err := ownerreadports.PublishCommandWithResponse(ctx, r.Hub, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", "", "", map[string]any{})
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,7 +21,7 @@ func ReadDecisionTicketByOwnerCommand(ctx context.Context, hub events.Hub, ticke
 	if workspaceID != "" {
 		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicDecisionCommandGetTicket, "decision_ticket", string(ticketID), workspaceID, "", payload)
+	response, err := PublishCommandWithResponse(ctx, hub, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(ticketID), workspaceID, "", payload)
 	if err != nil {
 		return nil, err
 	}

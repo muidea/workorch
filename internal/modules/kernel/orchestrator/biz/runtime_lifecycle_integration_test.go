@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -71,7 +73,7 @@ func TestRuntimeOrchestrator_RuntimeFailurePublishesWorkspaceReleaseEvent(t *tes
 		t.Fatalf("published events = %d, want at least 5", len(published))
 	}
 	last := published[len(published)-1]
-	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload["activeRunId"] != "" {
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload["activeRunId"] != "" {
 		t.Fatalf("last event = %#v, want workspace release event", last)
 	}
 }
@@ -566,7 +568,7 @@ func TestRuntimeOrchestrator_ValidateRunProjectsWorkspaceState(t *testing.T) {
 		t.Fatalf("published events = %d, want run and workspace state events", len(published))
 	}
 	last := published[len(published)-1]
-	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyState] != string(common.WorkspaceStateValidating) {
 		t.Fatalf("last event = %#v, want workspace validating event", last)
 	}
 }

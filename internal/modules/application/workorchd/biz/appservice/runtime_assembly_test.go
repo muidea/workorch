@@ -3,6 +3,8 @@ package appservice
 import (
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -17,7 +19,7 @@ func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T)
 
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "run",
 		SubjectID:   "run-assembly",
 		RunID:       "run-assembly",
@@ -30,8 +32,8 @@ func TestManagedRuntimeFromEventHubBuildsRuntimeWithEventCollector(t *testing.T)
 	if len(published) != 1 {
 		t.Fatalf("len(published) = %d, want 1", len(published))
 	}
-	if published[0].Topic() != events.TopicRunStateChanged {
-		t.Fatalf("topic = %s, want %s", published[0].Topic(), events.TopicRunStateChanged)
+	if published[0].Topic() != runevents.TopicRunStateChanged {
+		t.Fatalf("topic = %s, want %s", published[0].Topic(), runevents.TopicRunStateChanged)
 	}
 }
 

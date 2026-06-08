@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
@@ -198,8 +200,8 @@ func TestService_CreateRun_PublishesRunCreatedEvent(t *testing.T) {
 	if len(published) != 1 {
 		t.Fatalf("published events = %d, want 1", len(published))
 	}
-	if published[0].Topic != events.TopicRunCreated {
-		t.Fatalf("topic = %s, want %s", published[0].Topic, events.TopicRunCreated)
+	if published[0].Topic != runevents.TopicRunCreated {
+		t.Fatalf("topic = %s, want %s", published[0].Topic, runevents.TopicRunCreated)
 	}
 	if published[0].Payload[events.PayloadKeyGoalID] != "goal-created-event" || published[0].Payload[events.PayloadKeyDoDID] != "dod-created-event" {
 		t.Fatalf("payload = %#v, want goalId/doDId", published[0].Payload)
@@ -814,7 +816,7 @@ func TestService_CompleteRun_WithoutOrchestrator(t *testing.T) {
 		t.Fatalf("published events = %d, want 2", len(published))
 	}
 	last := published[len(published)-1]
-	if last.Topic != events.TopicRunStateChanged || last.Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
+	if last.Topic != runevents.TopicRunStateChanged || last.Payload[events.PayloadKeyState] != string(common.RunStateCompleted) {
 		t.Fatalf("last event = %#v, want run completed", last)
 	}
 }
@@ -983,7 +985,7 @@ func TestService_FailRun_WithoutOrchestrator(t *testing.T) {
 		t.Fatalf("published events = %d, want 2", len(published))
 	}
 	last := published[len(published)-1]
-	if last.Topic != events.TopicRunStateChanged || last.Payload[events.PayloadKeyFailureReason] != "manual fail" {
+	if last.Topic != runevents.TopicRunStateChanged || last.Payload[events.PayloadKeyFailureReason] != "manual fail" {
 		t.Fatalf("last event = %#v, want failure reason", last)
 	}
 }

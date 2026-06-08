@@ -3,6 +3,8 @@ package ownercommandports
 import (
 	"context"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
 	modulecommon "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/common"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -13,7 +15,7 @@ func PublishMemoryRecallTraceUpsert(ctx context.Context, hub events.Hub, trace *
 	if trace == nil {
 		return common.ErrInvalidArgument
 	}
-	return Publish(ctx, hub, events.TopicMemoryRecallTraceCommandUpsert, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, map[string]any{
+	return Publish(ctx, hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall", string(trace.ID), trace.WorkspaceID, trace.RunID, map[string]any{
 		events.PayloadKeyCommand: memoryRecallTraceCommandFromModel(trace),
 	})
 }
@@ -27,7 +29,7 @@ func RecordMemoryRecallTrace(ctx context.Context, hub events.Hub, trace *memorym
 	}
 	return hub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicMemoryRecallRecorded,
+		Topic:        memoryevents.TopicMemoryRecallRecorded,
 		OccurredAt:   trace.OccurredAt,
 		SourceModule: modulecommon.EventSourceModuleID,
 		SubjectType:  "memory_recall",

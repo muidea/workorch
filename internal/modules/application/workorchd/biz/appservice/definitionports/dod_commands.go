@@ -3,6 +3,8 @@ package definitionports
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
@@ -20,7 +22,7 @@ func ListDoDsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common
 }
 
 func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", map[string]any{
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandDefineDoD, "dod", string(dodID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DefineDoDCommand{
 			DoDID:       dodID,
 			WorkspaceID: workspaceID,
@@ -38,7 +40,7 @@ func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 }
 
 func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", map[string]any{
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.UpdateDoDCommand{
 			DoDID: dodID,
 			Items: append([]string(nil), items...),
@@ -55,7 +57,7 @@ func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 }
 
 func DeleteDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {
-	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", map[string]any{
+	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DeleteDoDCommand{DoDID: dodID},
 	})
 }

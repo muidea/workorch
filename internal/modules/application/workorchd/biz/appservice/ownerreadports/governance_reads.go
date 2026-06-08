@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -13,7 +15,7 @@ func ListAutoGovernanceTracesByOwnerCommand(ctx context.Context, hub events.Hub,
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicGovernanceAutoCommandListTraces, "auto_governance_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, governanceevents.TopicGovernanceAutoCommandListTraces, "auto_governance_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
 		events.PayloadKeyQuery: query,
 	})
 	if err != nil {

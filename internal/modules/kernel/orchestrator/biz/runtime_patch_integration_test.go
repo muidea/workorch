@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -236,7 +238,7 @@ func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 		t.Fatalf("publish patch preview: %v", err)
 	}
 	published := hub.Published()
-	if len(published) != 1 || published[0].Topic != events.TopicPatchPreviewed || published[0].Payload[events.PayloadKeyTargetRef] != "preview.txt" {
+	if len(published) != 1 || published[0].Topic != orchestratorevents.TopicPatchPreviewed || published[0].Payload[events.PayloadKeyTargetRef] != "preview.txt" {
 		t.Fatalf("published = %+v, want patch preview event", published)
 	}
 }
@@ -274,7 +276,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	}, deliverableDirectory); err != nil {
 		t.Fatalf("apply patch: %v", err)
 	}
-	if !publishedTopicForTarget(hub.Published(), events.TopicPatchApplied, "applied.txt") {
+	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchApplied, "applied.txt") {
 		t.Fatalf("published = %+v, want patch applied event", hub.Published())
 	}
 
@@ -290,7 +292,7 @@ func TestRuntimeOrchestratorApplyRuntimePatchesPublishesAppliedAndFailedEvents(t
 	if err == nil {
 		t.Fatalf("apply invalid diff should fail")
 	}
-	if !publishedTopicForTarget(hub.Published(), events.TopicPatchFailed, "main.go") {
+	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchFailed, "main.go") {
 		t.Fatalf("published = %+v, want patch failed event", hub.Published())
 	}
 }
@@ -314,11 +316,11 @@ func TestRuntimeOrchestratorPublishesArtifactContinuationMetadataEvent(t *testin
 		Metadata:          map[string]any{"content": "must not be published"},
 	}
 
-	if err := orch.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, events.TopicArtifactContinuationAssembled, nil); err != nil {
+	if err := orch.eventPublisher().publishArtifactContinuationChanged(ctx, run, step, item, orchestratorevents.TopicArtifactContinuationAssembled, nil); err != nil {
 		t.Fatalf("publish artifact continuation event: %v", err)
 	}
 	published := hub.Published()
-	if len(published) != 1 || published[0].Topic != events.TopicArtifactContinuationAssembled {
+	if len(published) != 1 || published[0].Topic != orchestratorevents.TopicArtifactContinuationAssembled {
 		t.Fatalf("published = %+v, want artifact continuation assembled event", published)
 	}
 	payload := published[0].Payload
@@ -389,7 +391,7 @@ func TestRuntimeOrchestratorRevertsAppliedPatch(t *testing.T) {
 	if patch.State != common.PatchStateReverted || patch.RevertedAt == "" {
 		t.Fatalf("patch = %+v, want reverted state", patch)
 	}
-	if !publishedTopicForTarget(hub.Published(), events.TopicPatchReverted, "main.go") {
+	if !publishedTopicForTarget(hub.Published(), orchestratorevents.TopicPatchReverted, "main.go") {
 		t.Fatalf("published = %+v, want patch reverted event", hub.Published())
 	}
 }

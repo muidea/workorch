@@ -6,19 +6,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// ── CLI Event Topics ──
-
-const (
-	// Command topics — CLI publishes these to request business operations.
-	TopicCLICommand = "/cli/command"
-
-	// Result topic — runtime publishes command results back to CLI.
-	TopicCLIResult = "/cli/result"
-
-	// Progress topics — runtime publishes state changes.
-	TopicCLIProgress = "/cli/progress"
-)
-
 // ── Command Envelope ──
 
 // CLICommandPayload carries a typed CLI command through the EventHub.

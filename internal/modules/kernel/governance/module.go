@@ -6,6 +6,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
@@ -110,7 +111,7 @@ func (m *Module) Start() error {
 	if err := m.bizPtr.Start(); err != nil {
 		return err
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicGovernanceAutoCommandListTraces, m.handleListTracesCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(governanceevents.TopicGovernanceAutoCommandListTraces, m.handleListTracesCommand))
 	return nil
 }
 

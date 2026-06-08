@@ -11,13 +11,15 @@ import (
 	"testing"
 	"time"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 	envelope := events.Envelope{
-		Topic:       events.TopicWorkspaceStateChanged,
+		Topic:       workspaceevents.TopicWorkspaceStateChanged,
 		WorkspaceID: "ws-remote",
 		Payload:     events.WorkspacePayload("remote workspace", "", "/tmp/remote", "", common.WorkspaceStateRunning, "run-remote"),
 	}
@@ -75,7 +77,7 @@ func TestRemoteEventsBackendReconnectsAndSignalsWorkspaceListRefresh(t *testing.
 	var requests atomic.Int32
 	envelope := events.Envelope{
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicWorkspaceCreated,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
 		WorkspaceID: "ws-created-after-reconnect",
 		Payload:     events.WorkspacePayload("created after reconnect", "", "/tmp/reconnect", "", common.WorkspaceStateActive, ""),
 	}

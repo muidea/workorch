@@ -11,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
@@ -326,9 +330,9 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			events.PayloadKeyState:  "running",
 			events.PayloadKeyOutput: map[string]any{"raw": strings.Repeat("x", eventPayloadStringLimit*8)},
 		}
-		topic := events.TopicRunStateChanged
+		topic := runevents.TopicRunStateChanged
 		if i == readModelEventRecordLimit+20 {
-			topic = events.TopicRunLLMUsageRecorded
+			topic = runevents.TopicRunLLMUsageRecorded
 			payload = events.LLMUsagePayload(events.LLMUsagePayloadData{
 				WorkspaceID:  workspaceID,
 				RunID:        runID,
@@ -1746,7 +1750,7 @@ func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
 		Run:       Run{ID: "run-observability-patch-event", WorkspaceID: "ws-observability-patch-event", State: string(common.RunStateCompleted)},
 		EventRecords: []EventRecord{{
 			ID:          "event-patch-applied",
-			Topic:       events.TopicPatchApplied,
+			Topic:       orchestratorevents.TopicPatchApplied,
 			SubjectType: "patch",
 			SubjectID:   "patch-observability-event",
 			WorkspaceID: "ws-observability-patch-event",
@@ -1774,7 +1778,7 @@ func TestMapRunObservabilityProjectsPatchEventsIntoTimeline(t *testing.T) {
 
 	observability := readmodelprojection.MapRunObservability(snapshot)
 
-	if observability.Evidence.EventTotal != 1 || !timelineContainsPersistedEvent(observability.Timeline, events.TopicPatchApplied) {
+	if observability.Evidence.EventTotal != 1 || !timelineContainsPersistedEvent(observability.Timeline, orchestratorevents.TopicPatchApplied) {
 		t.Fatalf("observability = %+v, want patch event in timeline", observability)
 	}
 }
@@ -1865,7 +1869,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 		}},
 		EventRecords: []EventRecord{{
 			ID:          "event-web-step-completed",
-			Topic:       events.TopicStepStateChanged,
+			Topic:       runevents.TopicStepStateChanged,
 			SubjectType: "step",
 			SubjectID:   stepID,
 			WorkspaceID: "ws-web-event",
@@ -1897,7 +1901,7 @@ func TestRuntimeTimelineProjectsPersistedWebStepEvents(t *testing.T) {
 	if observability.Evidence.EventTotal != 1 || len(observability.WebSources) != 1 {
 		t.Fatalf("observability = %+v, want event count and web source projection", observability)
 	}
-	if !timelineContainsPersistedEvent(observability.Timeline, events.TopicStepStateChanged) ||
+	if !timelineContainsPersistedEvent(observability.Timeline, runevents.TopicStepStateChanged) ||
 		!timelineContainsStepOccurredAt(observability.Timeline, "step", stepID, "2026-05-05T00:00:02Z") {
 		t.Fatalf("timeline = %+v, want persisted web step event and step occurrence", observability.Timeline)
 	}
@@ -2301,7 +2305,7 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunStateChanged,
+		Topic:        runevents.TopicRunStateChanged,
 		SourceModule: "test",
 		SubjectType:  "run",
 		SubjectID:    string(runID),
@@ -2313,7 +2317,7 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunLLMStreamProgress,
+		Topic:        runevents.TopicRunLLMStreamProgress,
 		SourceModule: "test",
 		SubjectType:  "llm_stream_progress",
 		SubjectID:    string(stepID),
@@ -2337,7 +2341,7 @@ func TestReadRunObservabilityWithSessionReturnsDerivedRuntimeProgress(t *testing
 	}
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunLLMUsageRecorded,
+		Topic:        runevents.TopicRunLLMUsageRecorded,
 		SourceModule: "test",
 		SubjectType:  "llm_usage",
 		SubjectID:    string(stepID),
@@ -2442,7 +2446,7 @@ func TestRuntimeTimelineUsesStepStateForStreamItemsWhenRunBlockedOnDecision(t *t
 		}},
 		EventRecords: []EventRecord{{
 			ID:          "evt-stream-progress",
-			Topic:       events.TopicRunLLMStreamProgress,
+			Topic:       runevents.TopicRunLLMStreamProgress,
 			SubjectType: "llm_stream_progress",
 			SubjectID:   stepID,
 			WorkspaceID: string(workspaceID),
@@ -2672,7 +2676,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 	records := []EventRecord{
 		{
 			ID:         "evt-1",
-			Topic:      events.TopicRunLLMUsageRecorded,
+			Topic:      runevents.TopicRunLLMUsageRecorded,
 			OccurredAt: "2026-05-07T10:00:00Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-1",
@@ -2702,7 +2706,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 		},
 		{
 			ID:         "evt-2",
-			Topic:      events.TopicRunLLMUsageRecorded,
+			Topic:      runevents.TopicRunLLMUsageRecorded,
 			OccurredAt: "2026-05-07T10:00:01Z",
 			RunID:      "run-1",
 			StepID:     "run-1/step-2",
@@ -2786,7 +2790,7 @@ func TestMapLLMUsageTracesFromEventRecordsNormalizesUsageAndCostSemantics(t *tes
 func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 	items := []*eventstreammodel.EventRecord{{
 		ID:          common.EventRecordID("event-projection"),
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		OccurredAt:  "2026-05-16T10:00:00Z",
 		WorkspaceID: common.WorkspaceID("ws-projection"),
 		RunID:       common.RunID("run-projection"),
@@ -2828,7 +2832,7 @@ func TestMapProjectedEventRecordsKeepsBoundedMetadataPayload(t *testing.T) {
 func TestMapEventRecordsCanonicalizesWorkspacePlanStepPayload(t *testing.T) {
 	items := []*eventstreammodel.EventRecord{{
 		ID:          common.EventRecordID("event-step-alias"),
-		Topic:       events.TopicStepStateChanged,
+		Topic:       runevents.TopicStepStateChanged,
 		OccurredAt:  "2026-05-16T10:00:00Z",
 		WorkspaceID: common.WorkspaceID("ws-step-alias"),
 		RunID:       common.RunID("run-step-alias"),
@@ -3699,7 +3703,7 @@ func timelineContainsPersistedEvent(items []RuntimeTimelineItem, topic string) b
 
 func timelineContainsLLMStreamProgressEvent(items []RuntimeTimelineItem, stepID string, status string, chunkCount int, receivedBytes int) bool {
 	for _, item := range items {
-		if item.Source != "llm_stream_progress_event" || item.Topic != events.TopicRunLLMStreamProgress || item.StepID != stepID {
+		if item.Source != "llm_stream_progress_event" || item.Topic != runevents.TopicRunLLMStreamProgress || item.StepID != stepID {
 			continue
 		}
 		if item.Type != status {
@@ -3822,7 +3826,7 @@ func TestReadWorkspaceSnapshotWithBackendReturnsPersistedEventRecords(t *testing
 	if len(item.EventRecords) == 0 {
 		t.Fatalf("eventRecords = %+v, want persisted workspace event", item.EventRecords)
 	}
-	if item.EventRecords[0].WorkspaceID != workspaceID || item.EventRecords[0].Topic != events.TopicWorkspaceCreated {
+	if item.EventRecords[0].WorkspaceID != workspaceID || item.EventRecords[0].Topic != workspaceevents.TopicWorkspaceCreated {
 		t.Fatalf("eventRecords = %+v, want workspace-created event", item.EventRecords)
 	}
 }
@@ -4459,7 +4463,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-run-completed-created"),
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunCreated,
+		Topic:       runevents.TopicRunCreated,
 		OccurredAt:  "2026-04-29T10:00:00Z",
 		SubjectType: "run",
 		SubjectID:   string(completedRunID),
@@ -4472,7 +4476,7 @@ func TestReadWorkspaceSnapshotProjectsLatestRunFailureOverHistoricalAcceptedResu
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-run-latest-failed"),
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		OccurredAt:  "2026-04-30T10:00:00Z",
 		SubjectType: "run",
 		SubjectID:   string(failedRunID),
@@ -4562,7 +4566,7 @@ func TestReadWorkspaceSnapshotTaskProgressUsesLatestTerminalRejectedResult(t *te
 	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
 		ID:          common.EventRecordID("evt-old-failed-before-current-result"),
 		Version:     events.WorkorchEventVersion,
-		Topic:       events.TopicRunStateChanged,
+		Topic:       runevents.TopicRunStateChanged,
 		OccurredAt:  "2026-05-17T12:30:00Z",
 		SubjectType: "run",
 		SubjectID:   string(oldRunID),
@@ -4630,14 +4634,14 @@ func TestMapWorkspaceOutcomePrefersLatestTerminalRunOverStaleTaskProgress(t *tes
 		EventRecords: []EventRecord{
 			{
 				ID:          "evt-older",
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-05-08T10:00:00Z",
 				WorkspaceID: "ws-latest-outcome",
 				RunID:       olderRunID,
 			},
 			{
 				ID:          "evt-latest",
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-05-08T11:00:00Z",
 				WorkspaceID: "ws-latest-outcome",
 				RunID:       latestRunID,
@@ -4876,14 +4880,14 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 		EventRecords: []EventRecord{
 			{
 				ID:          "evt-accepted",
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-05-17T07:00:00Z",
 				WorkspaceID: "ws-latest-run-event",
 				RunID:       "run-accepted",
 			},
 			{
 				ID:          "evt-latest-failed",
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-05-17T08:00:00Z",
 				WorkspaceID: "ws-latest-run-event",
 				RunID:       "run-latest-failed",
@@ -4943,7 +4947,7 @@ func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing
 		EventRecords: []EventRecord{
 			{
 				ID:          "evt-old-run-state",
-				Topic:       events.TopicRunStateChanged,
+				Topic:       runevents.TopicRunStateChanged,
 				OccurredAt:  "2026-05-17T07:01:03Z",
 				WorkspaceID: "ws-newer-terminal-result",
 				RunID:       "run-old-failed",

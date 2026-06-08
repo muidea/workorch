@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -15,7 +17,7 @@ func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	approvalID := common.ApprovalID("approval-web-scope")
 	runID := common.RunID("run-web-scope")
 	var captured events.Envelope
-	hub.Subscribe(events.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
 		captured = envelope
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
@@ -36,8 +38,8 @@ func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	if item == nil || item.ID != approvalID {
 		t.Fatalf("approval = %+v, want %s", item, approvalID)
 	}
-	if captured.Topic != events.TopicApprovalCommandGet {
-		t.Fatalf("topic = %q, want %q", captured.Topic, events.TopicApprovalCommandGet)
+	if captured.Topic != approvalevents.TopicApprovalCommandGet {
+		t.Fatalf("topic = %q, want %q", captured.Topic, approvalevents.TopicApprovalCommandGet)
 	}
 	if captured.SourceModule != ModuleID || captured.SubjectType != "approval" || captured.SubjectID != string(approvalID) {
 		t.Fatalf("envelope source/subject = %q %q/%q", captured.SourceModule, captured.SubjectType, captured.SubjectID)

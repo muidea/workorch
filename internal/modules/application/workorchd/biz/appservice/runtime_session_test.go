@@ -9,6 +9,9 @@ import (
 	"testing"
 	"unsafe"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimeports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
@@ -53,14 +56,14 @@ func TestBackendSessionUsesEventHubFromContext(t *testing.T) {
 	if len(published) != 3 {
 		t.Fatalf("len(published) = %d, want 3", len(published))
 	}
-	if published[0].Topic != events.TopicWorkspaceCommandCreate {
-		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicWorkspaceCommandCreate)
+	if published[0].Topic != workspaceevents.TopicWorkspaceCommandCreate {
+		t.Fatalf("first topic = %s, want %s", published[0].Topic, workspaceevents.TopicWorkspaceCommandCreate)
 	}
-	if published[1].Topic != events.TopicWorkspaceCreated {
-		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicWorkspaceCreated)
+	if published[1].Topic != workspaceevents.TopicWorkspaceCreated {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, workspaceevents.TopicWorkspaceCreated)
 	}
-	if published[2].Topic != events.TopicWorkspaceCommandGet {
-		t.Fatalf("third topic = %s, want %s", published[2].Topic, events.TopicWorkspaceCommandGet)
+	if published[2].Topic != workspaceevents.TopicWorkspaceCommandGet {
+		t.Fatalf("third topic = %s, want %s", published[2].Topic, workspaceevents.TopicWorkspaceCommandGet)
 	}
 }
 
@@ -309,7 +312,7 @@ func TestRuntimeSessionWithBackendPublishesOrchestratorCommand(t *testing.T) {
 		t.Fatalf("Exports: %v", err)
 	}
 	err = exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
-		Topic: events.TopicOrchestratorCommandCancelRun,
+		Topic: orchestratorevents.TopicOrchestratorCommandCancelRun,
 		Payload: map[string]any{
 			events.PayloadKeyRunID: "run-missing",
 		},
@@ -375,7 +378,7 @@ func TestNewRuntimeSessionWithBackendFileUsesDefaultDataRootWhenUnset(t *testing
 		t.Fatalf("exports: %v", err)
 	}
 	if err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
-		Topic:        events.TopicWorkspaceCommandCreate,
+		Topic:        workspaceevents.TopicWorkspaceCommandCreate,
 		SourceModule: "workorchd/appservice/runtime-session-test",
 		SubjectType:  "workspace",
 		SubjectID:    "ws-runtime-session-default-file",

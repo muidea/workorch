@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -12,7 +14,7 @@ import (
 func TestDecisionResolutionEventRepositoryPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicDecisionCommandCreateResolution, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(decisionevents.TopicDecisionCommandCreateResolution, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 	repo := decisionEventResolutionRepository{hub: hub}

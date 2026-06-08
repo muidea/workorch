@@ -6,6 +6,7 @@ import (
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -110,20 +111,20 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandStartRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandBlockDecision, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandBlockApproval, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandResumeRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandValidateRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandCompleteRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandCancelRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandSupersedeRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandFailRun, m.handleCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandPurgeRun, m.handlePurgeRunCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandListToolCallsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandListPatchesByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandListValidationResultsByRun, m.handleEvidenceReadCommand),
-		m.eventHub.Subscribe(events.TopicOrchestratorCommandListArtifactContinuationsByRun, m.handleEvidenceReadCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandStartRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockDecision, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockApproval, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandValidateRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandCompleteRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandCancelRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandSupersedeRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandFailRun, m.handleCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, m.handlePurgeRunCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, m.handleEvidenceReadCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, m.handleEvidenceReadCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, m.handleEvidenceReadCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, m.handleEvidenceReadCommand),
 	)
 	return nil
 }
@@ -158,9 +159,9 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 	}
 	var err error
 	switch envelope.Topic {
-	case events.TopicOrchestratorCommandStartRun:
+	case orchestratorevents.TopicOrchestratorCommandStartRun:
 		err = m.servicePtr.StartRun(ctx, runID)
-	case events.TopicOrchestratorCommandBlockDecision:
+	case orchestratorevents.TopicOrchestratorCommandBlockDecision:
 		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
 		if !ok {
 			cmd = runcontracts.BlockOnDecisionCommand{RunID: runID, TicketID: common.TicketID(stringPayload(payload, events.PayloadKeyBlockingTicketID))}
@@ -169,7 +170,7 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 			cmd.RunID = runID
 		}
 		err = m.servicePtr.BlockOnDecision(ctx, cmd.RunID, cmd.TicketID)
-	case events.TopicOrchestratorCommandBlockApproval:
+	case orchestratorevents.TopicOrchestratorCommandBlockApproval:
 		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnApprovalCommand)
 		if !ok {
 			cmd = runcontracts.BlockOnApprovalCommand{RunID: runID, ApprovalID: common.ApprovalID(stringPayload(payload, events.PayloadKeyBlockingApprovalID))}
@@ -178,7 +179,7 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 			cmd.RunID = runID
 		}
 		err = m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
-	case events.TopicOrchestratorCommandResumeRun:
+	case orchestratorevents.TopicOrchestratorCommandResumeRun:
 		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
 		var patch map[string]any
 		if ok {
@@ -194,15 +195,15 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 		} else {
 			err = m.servicePtr.ResumeRun(ctx, runID)
 		}
-	case events.TopicOrchestratorCommandValidateRun:
+	case orchestratorevents.TopicOrchestratorCommandValidateRun:
 		err = m.servicePtr.ValidateRun(ctx, runID)
-	case events.TopicOrchestratorCommandCompleteRun:
+	case orchestratorevents.TopicOrchestratorCommandCompleteRun:
 		err = m.servicePtr.CompleteRun(ctx, runID)
-	case events.TopicOrchestratorCommandCancelRun:
+	case orchestratorevents.TopicOrchestratorCommandCancelRun:
 		err = m.servicePtr.CancelRun(ctx, runID)
-	case events.TopicOrchestratorCommandSupersedeRun:
+	case orchestratorevents.TopicOrchestratorCommandSupersedeRun:
 		err = m.servicePtr.SupersedeRun(ctx, runID)
-	case events.TopicOrchestratorCommandFailRun:
+	case orchestratorevents.TopicOrchestratorCommandFailRun:
 		err = m.servicePtr.FailRun(ctx, runID, stringPayload(payload, events.PayloadKeyFailureReason))
 	default:
 		return common.ErrInvalidArgument
@@ -280,22 +281,22 @@ func (m *Module) handleEvidenceReadCommand(ctx context.Context, envelope events.
 	var items any
 	var err error
 	switch envelope.Topic {
-	case events.TopicOrchestratorCommandListToolCallsByRun:
+	case orchestratorevents.TopicOrchestratorCommandListToolCallsByRun:
 		if evidence.ToolCalls == nil {
 			return common.ErrInvalidArgument
 		}
 		items, err = evidence.ToolCalls.ListByRun(ctx, runID)
-	case events.TopicOrchestratorCommandListPatchesByRun:
+	case orchestratorevents.TopicOrchestratorCommandListPatchesByRun:
 		if evidence.Patches == nil {
 			return common.ErrInvalidArgument
 		}
 		items, err = evidence.Patches.ListByRun(ctx, runID)
-	case events.TopicOrchestratorCommandListValidationResultsByRun:
+	case orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun:
 		if evidence.ValidationResults == nil {
 			return common.ErrInvalidArgument
 		}
 		items, err = evidence.ValidationResults.ListByRun(ctx, runID)
-	case events.TopicOrchestratorCommandListArtifactContinuationsByRun:
+	case orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun:
 		if evidence.ArtifactContinuations == nil {
 			return common.ErrInvalidArgument
 		}

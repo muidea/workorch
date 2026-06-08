@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -12,7 +14,7 @@ func ReadMCPServerByOwnerCommand(ctx context.Context, hub events.Hub, id common.
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandGetServer, "mcp_server", string(id), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetServer, "mcp_server", string(id), "", "", map[string]any{
 		events.PayloadKeyServerID: string(id),
 	})
 	if err != nil {
@@ -29,7 +31,7 @@ func ReadMCPCapabilityByOwnerCommand(ctx context.Context, hub events.Hub, id com
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandGetCapability, "mcp_capability", string(id), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", string(id), "", "", map[string]any{
 		events.PayloadKeyCapabilityID: string(id),
 	})
 	if err != nil {

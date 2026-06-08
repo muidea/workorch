@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -23,7 +24,7 @@ func (a eventRuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request run
 		return runtimemodel.StepExecutionResult{}, common.ErrInvalidArgument
 	}
 	err := a.hub.Publish(ctx, events.Envelope{
-		Topic:        events.RuntimeBlockExecuteTopic(request.Kind),
+		Topic:        runtimeevent.RuntimeBlockExecuteTopic(request.Kind),
 		SourceModule: ModuleID,
 		SubjectType:  "runtime_step",
 		SubjectID:    string(request.StepID),

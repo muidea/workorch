@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+
 	magictask "github.com/muidea/magicCommon/task"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -150,10 +154,10 @@ func TestPublishGovernanceEventCarriesTraceScope(t *testing.T) {
 		Reason:            "scope contract",
 	}
 	for _, topic := range []string{
-		events.TopicGovernanceAutoEvaluated,
-		events.TopicGovernanceAutoResolved,
-		events.TopicGovernanceAutoEscalated,
-		events.TopicGovernanceAutoBlocked,
+		governanceevents.TopicGovernanceAutoEvaluated,
+		governanceevents.TopicGovernanceAutoResolved,
+		governanceevents.TopicGovernanceAutoEscalated,
+		governanceevents.TopicGovernanceAutoBlocked,
 	} {
 		if err := svc.publishGovernanceEvent(ctx, topic, trace, "manual_escalation"); err != nil {
 			t.Fatalf("publish %s: %v", topic, err)
@@ -253,7 +257,7 @@ func TestServiceAutoResolvesTicketFromMemoryStructuredContext(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -348,7 +352,7 @@ func TestServiceEscalatesTicketWhenContextInsufficient(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -458,7 +462,7 @@ func TestServiceAutoReplansRuntimeRepairExhaustionTicket(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -562,7 +566,7 @@ func TestServiceAutoResolvesReplanDecisionTicketWithoutMissingFields(t *testing.
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -652,7 +656,7 @@ func TestServiceEscalatesReplanDecisionTicketWhenMissingFieldsRemain(t *testing.
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -731,7 +735,7 @@ func TestServiceEscalatesRuntimeRepairExhaustionWhenExternalRecoveryRequired(t *
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -909,7 +913,7 @@ func TestServiceAutoResolvesTicketFromStructuredCandidateContext(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -1044,7 +1048,7 @@ func TestServiceEscalatesTicketWhenStructuredCandidateRequiresHuman(t *testing.T
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),
@@ -1127,7 +1131,7 @@ func TestServiceAutoApprovesReadOnlyApproval(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectType: "approval",
 		SubjectID:   string(approvalID),
 		WorkspaceID: string(workspaceID),
@@ -1323,7 +1327,7 @@ func TestServiceAutoApprovesLowRiskWorkspaceDependencyMetadataApproval(t *testin
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectType: "approval",
 		SubjectID:   string(approvalID),
 		WorkspaceID: string(workspaceID),
@@ -1551,7 +1555,7 @@ func TestServiceEscalatesHighRiskApproval(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicApprovalCreated,
+		Topic:       approvalevents.TopicApprovalCreated,
 		SubjectType: "approval",
 		SubjectID:   string(approvalID),
 		WorkspaceID: string(workspaceID),
@@ -1685,7 +1689,7 @@ func TestServiceEscalatesTicketWhenRepeatedPromptBudgetExhausted(t *testing.T) {
 	defer svc.Stop()
 
 	mustNoErr(t, hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicTicketCreated,
+		Topic:       decisionevents.TopicTicketCreated,
 		SubjectType: "ticket",
 		SubjectID:   string(ticketID),
 		WorkspaceID: string(workspaceID),

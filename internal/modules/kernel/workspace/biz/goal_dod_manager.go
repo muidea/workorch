@@ -11,6 +11,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -44,7 +45,7 @@ func (m *GoalDoDManager) CreateWorkspace(ctx context.Context, cmd workspacecontr
 	if err := m.workspaces.Create(ctx, workspace); err != nil {
 		return err
 	}
-	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceCreated, workspace)
+	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceCreated, workspace)
 }
 
 func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspacecontracts.EnsureWorkspaceCommand) error {
@@ -97,7 +98,7 @@ func (m *GoalDoDManager) EnsureWorkspace(ctx context.Context, cmd workspacecontr
 	if err := m.workspaces.Update(ctx, workspace); err != nil {
 		return err
 	}
-	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceStateChanged, workspace)
+	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceStateChanged, workspace)
 }
 
 func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.WorkspaceID) error {
@@ -135,7 +136,7 @@ func (m *GoalDoDManager) DeleteWorkspace(ctx context.Context, id common.Workspac
 	if err := m.workspaces.Delete(ctx, id); err != nil {
 		return err
 	}
-	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceDeleted, workspace)
+	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceDeleted, workspace)
 }
 
 func (m *GoalDoDManager) DefineGoal(ctx context.Context, cmd workspacecontracts.DefineGoalCommand) error {
@@ -271,7 +272,7 @@ func (m *GoalDoDManager) markWorkspaceDefinitionsChanged(ctx context.Context, wo
 	if err := m.workspaces.Update(ctx, workspace); err != nil {
 		return err
 	}
-	return m.publishWorkspaceEvent(ctx, events.TopicWorkspaceStateChanged, workspace)
+	return m.publishWorkspaceEvent(ctx, workspaceevents.TopicWorkspaceStateChanged, workspace)
 }
 
 func (m *GoalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string, workspace *workspaceModel.Workspace) error {
@@ -295,7 +296,7 @@ func (m *GoalDoDManager) publishGoalEvent(ctx context.Context, goal *workspaceMo
 	}
 	return m.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicGoalDefined,
+		Topic:        workspaceevents.TopicGoalDefined,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "goal",
 		SubjectID:    string(goal.ID),
@@ -388,7 +389,7 @@ func (m *GoalDoDManager) publishDoDEvent(ctx context.Context, dod *workspaceMode
 	}
 	return m.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicDoDDefined,
+		Topic:        workspaceevents.TopicDoDDefined,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "dod",
 		SubjectID:    string(dod.ID),

@@ -4,7 +4,7 @@ Status: active
 
 Type: verification-checklist
 
-Last Updated: 2026-06-03
+Last Updated: 2026-06-08
 
 ## Purpose
 
@@ -126,8 +126,12 @@ Last Updated: 2026-06-03
 - 状态机关键事件应使用同步 `Publish`，由 `MagicHub` 映射到 magicCommon `Send`。
 - 纯通知或 UI/observability 类事件可使用 `PublishAsync`，由 `MagicHub` 映射到 magicCommon `Post`。
 - 每个 workspace-scoped 事件必须包含 `WorkspaceID`；run/step 事件还必须包含 `RunID` / `StepID`。
-- 同一 workspace 的普通事件应落在 workspace lane，保持状态投影顺序一致。
-- run-scoped 事件携带 `RunID` 时优先落在 `run/<runID>` lane，再退回 workspace lane；这样 run 状态机命令保持 run 内串行，同时避免 run command handler 内同步读取 workspace owner command 时发生同 lane 嵌套等待。
+- lane 表达一致性边界，不直接表达业务作用域；`RunID` / `WorkspaceID` 只是 scope，不能自动决定串行队列。
+- owner read/query command 应落在 query lane，不与 state write lane 共队列。
+- run 状态机写入、状态转换和 formal evidence 绑定应落在 `state/run/<runID>` lane；workspace owner 写入应落在 `state/workspace/<workspaceID>` lane。
+- block execution 使用 execute/resource lane，例如 `exec/block/<kind>/<stepID>`，不因携带 `RunID` 默认进入 run state lane。
+- CLI/TUI facade、progress、notification 和 observability 事件按契约使用 topic lane 或异步通知 lane。
+- 详细规则以 `../30-module-architecture/eventhub-lane-policy-and-module-event-contract-plan.md` 为准。
 - 事件 handler 不应做长耗时工作；若需要 resume、recovery、batch scan，应转交 scheduler/background task。
 - 所有 `Subscribe` 返回的 unsubscribe 必须在 `Stop` / `Teardown` / `Shutdown` 中调用。
 - command topic 必须使用同步 `Publish`/`Send` 路径，并要求收到 `events.Response`；无 response 视为装配或生命周期错误。
@@ -254,6 +258,10 @@ Last Updated: 2026-06-03
   - `go test ./internal/modules/application/workorchd/biz/appservice -run 'TestPublishActivationRunCommandRequiresResponse|TestActivateWorkspaceExecution' -count=1` passed after fixing activation run command missing-response handling.
   - `go test ./internal/modules/application/workorchd/biz/appservice -count=1` passed after the command response audit update.
   - `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` passed after the command response audit update.
+  - `rg -n "\bevents\.Topic[A-Za-z0-9]+" internal application -g '*.go'` returns no matches after owner event package migration.
+  - `rg -n "Topic[A-Za-z0-9]+\s*=\s*\"/" internal/pkg/events -g '*.go'` returns no matches after removing business topic definitions and aliases from the shared EventHub package.
+  - `go test ./... -count=1` passed after the owner-owned event definition and contract metadata split.
+  - `make verify-managed-full` passed with an automatically managed WorkOrch service at `http://127.0.0.1:58166`. The run covered fmt-check, console build, vet, full Go tests, HTTP/workspace/template/soul checks, LLM workspace execution, incremental artifact e2e, MCP stdio, SkillHub execution, auto-governance ticket/approval, software-dev goal/DoD, software requirement development orchestration, workspace file/diff/patch, web search, weather governance mock, TUI agent acceptance, and TUI long-output e2e.
   - `go test ./application/workorch -count=1` passed after the command response audit update.
   - `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` passed against a local file-backend service started by `make run-file` after the command response audit update. HTTP, workspace template/soul, LLM workspace execution, and MCP stdio workspace execution passed; MCP stdio completed `workspaceId=ws-2196db8036940a76`, `runId=run-001`, `runState=completed`, `steps=4`, `toolCalls=4`, `validations=4`, `runtimeCheckpoints=11`.
   - `git diff --check` passed after the command response audit update.

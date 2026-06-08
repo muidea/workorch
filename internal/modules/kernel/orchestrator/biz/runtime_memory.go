@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 type runtimeMemoryWriteRequest struct {
@@ -64,7 +64,7 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 		}
 		refs[idx] = string(memoryID)
 		tasks = append(tasks, func() error {
-			topic := events.TopicMemoryCreated
+			topic := memoryevents.TopicMemoryCreated
 			if err := o.evidence.MemoryItems.Create(ctx, item); err != nil {
 				if err != common.ErrConflict {
 					return err
@@ -72,7 +72,7 @@ func (o *RuntimeOrchestrator) recordMemoryWrites(
 				if err := o.evidence.MemoryItems.Update(ctx, item); err != nil {
 					return err
 				}
-				topic = events.TopicMemoryUpdated
+				topic = memoryevents.TopicMemoryUpdated
 			}
 			return o.eventPublisher().publishMemoryChanged(ctx, topic, item)
 		})

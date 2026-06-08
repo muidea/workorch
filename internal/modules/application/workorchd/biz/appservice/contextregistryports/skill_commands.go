@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 
+	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateSkill(ctx context.Context, hub events.Hub, cmd contextregistrycore.Skill) (contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSkillCommandCreate, "skill", cmd.ID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandCreate, "skill", cmd.ID, map[string]any{
 		events.PayloadKeyCommand: skillCommandFromView(cmd),
 	})
 	if err != nil {
@@ -20,7 +22,7 @@ func CreateSkill(ctx context.Context, hub events.Hub, cmd contextregistrycore.Sk
 }
 
 func ReadSkill(ctx context.Context, hub events.Hub, skillID string) (contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSkillCommandGet, "skill", skillID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandGet, "skill", skillID, map[string]any{
 		events.PayloadKeySkillID: skillID,
 	})
 	if err != nil {
@@ -41,7 +43,7 @@ func ReadSkillView(ctx context.Context, hub events.Hub, skillID string, query co
 }
 
 func ListSkills(ctx context.Context, hub events.Hub) ([]contextregistrycore.Skill, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicSkillCommandList, "skill", "all", nil)
+	response, err := PublishCommandWithResponse(ctx, hub, skillevents.TopicSkillCommandList, "skill", "all", nil)
 	if err != nil {
 		return nil, err
 	}

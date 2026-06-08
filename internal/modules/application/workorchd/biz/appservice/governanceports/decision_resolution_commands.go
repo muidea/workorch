@@ -3,6 +3,8 @@ package governanceports
 import (
 	"context"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -16,7 +18,7 @@ func ResolveDecision(ctx context.Context, hub events.Hub, ticket *decisionmodel.
 	}
 	ticketID := string(ticket.ID)
 	resolutionID := "resolution-" + string(ticket.WorkspaceID) + "-" + ticketID + "-" + resolutionType
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
 		events.PayloadKeyCommand: decisioncontracts.ResolveTicketCommand{
 			ResolutionID: common.ResolutionID(resolutionID),
 			TicketID:     ticket.ID,

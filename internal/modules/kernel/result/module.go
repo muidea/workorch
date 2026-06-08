@@ -6,6 +6,7 @@ import (
 	resultbiz "github.com/muidea/workorch/internal/modules/kernel/result/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	resultservice "github.com/muidea/workorch/internal/modules/kernel/result/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -66,19 +67,19 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicResultCommandCreate, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicResultCommandGet, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicResultCommandListByWorkspace, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicResultCommandListByRun, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicResultCommandUpdate, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicResultCommandDelete, m.handleResultCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandCreate, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandGet, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandListByWorkspace, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandListByRun, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandListByResult, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandUpdate, m.handleArtifactCommand),
-		m.eventHub.Subscribe(events.TopicArtifactCommandDelete, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandCreate, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandGet, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandListByWorkspace, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandListByRun, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandUpdate, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicResultCommandDelete, m.handleResultCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandCreate, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandGet, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandListByWorkspace, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandListByRun, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandListByResult, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandUpdate, m.handleArtifactCommand),
+		m.eventHub.Subscribe(resultevents.TopicArtifactCommandDelete, m.handleArtifactCommand),
 	)
 	return nil
 }
@@ -109,7 +110,7 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicResultCommandCreate:
+	case resultevents.TopicResultCommandCreate:
 		cmd, err := createResultCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -118,28 +119,28 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
-	case events.TopicResultCommandGet:
+	case resultevents.TopicResultCommandGet:
 		cmd := getResultCommandFromPayload(envelope.Payload)
 		item, err := m.servicePtr.GetResult(ctx, cmd.ResultID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyResult: item})
-	case events.TopicResultCommandListByWorkspace:
+	case resultevents.TopicResultCommandListByWorkspace:
 		cmd := listResultsByWorkspaceCommandFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListResultsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicResultCommandListByRun:
+	case resultevents.TopicResultCommandListByRun:
 		cmd := listResultsByRunCommandFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListResultsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicResultCommandUpdate:
+	case resultevents.TopicResultCommandUpdate:
 		cmd, err := updateResultCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -148,7 +149,7 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
-	case events.TopicResultCommandDelete:
+	case resultevents.TopicResultCommandDelete:
 		cmd := deleteResultCommandFromPayload(envelope.Payload)
 		if err := m.servicePtr.DeleteResult(ctx, cmd.ResultID); err != nil {
 			return err
@@ -164,7 +165,7 @@ func (m *Module) handleArtifactCommand(ctx context.Context, envelope events.Enve
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicArtifactCommandCreate:
+	case resultevents.TopicArtifactCommandCreate:
 		cmd, err := createArtifactCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -173,35 +174,35 @@ func (m *Module) handleArtifactCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
-	case events.TopicArtifactCommandGet:
+	case resultevents.TopicArtifactCommandGet:
 		cmd := getArtifactCommandFromPayload(envelope.Payload)
 		item, err := m.servicePtr.GetArtifact(ctx, cmd.ArtifactID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyArtifact: item})
-	case events.TopicArtifactCommandListByWorkspace:
+	case resultevents.TopicArtifactCommandListByWorkspace:
 		cmd := listArtifactsByWorkspaceCommandFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListArtifactsByWorkspace(ctx, cmd.WorkspaceID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicArtifactCommandListByRun:
+	case resultevents.TopicArtifactCommandListByRun:
 		cmd := listArtifactsByRunCommandFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListArtifactsByRun(ctx, cmd.RunID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicArtifactCommandListByResult:
+	case resultevents.TopicArtifactCommandListByResult:
 		cmd := listArtifactsByResultCommandFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListArtifactsByResult(ctx, cmd.ResultID)
 		if err != nil {
 			return err
 		}
 		return resultCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicArtifactCommandUpdate:
+	case resultevents.TopicArtifactCommandUpdate:
 		cmd, err := updateArtifactCommandFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -210,7 +211,7 @@ func (m *Module) handleArtifactCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return resultCommandResponse(envelope, nil)
-	case events.TopicArtifactCommandDelete:
+	case resultevents.TopicArtifactCommandDelete:
 		cmd := deleteArtifactCommandFromPayload(envelope.Payload)
 		if err := m.servicePtr.DeleteArtifact(ctx, cmd.ArtifactID); err != nil {
 			return err

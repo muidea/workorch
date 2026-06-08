@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+
 	memorymodule "github.com/muidea/workorch/internal/modules/kernel/memory"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
@@ -154,7 +156,7 @@ func TestPurgeRunCommandAcceptsContractPayload(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicOrchestratorCommandPurgeRun,
+		Topic:       orchestratorevents.TopicOrchestratorCommandPurgeRun,
 		SubjectType: "run",
 		SubjectID:   string(runID),
 		Payload: map[string]any{

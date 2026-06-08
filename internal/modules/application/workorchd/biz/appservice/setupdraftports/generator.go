@@ -3,6 +3,8 @@ package setupdraftports
 import (
 	"context"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraftcore"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,7 +27,7 @@ func (g EventHubGenerator) GenerateWorkspaceSetupDraft(ctx context.Context, requ
 		"outputSchema": setupdraftcore.OutputSchema(),
 	}
 	err := g.EventHub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicLLMCommandCompleteProvider,
+		Topic:        llmevents.TopicLLMCommandCompleteProvider,
 		SourceModule: "application/workorchd/appservice",
 		SubjectType:  "workspace_setup_draft",
 		Payload: map[string]any{

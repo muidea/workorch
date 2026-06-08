@@ -7,6 +7,16 @@ import (
 	"sync"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchdeps"
@@ -66,7 +76,7 @@ func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID 
 	correlationID := fmt.Sprintf("corr-%d", time.Now().UTC().UnixNano())
 	resultCh := make(chan events.CLIResultPayload, 1)
 
-	unsubscribe := b.eventHub.Subscribe(events.TopicCLIResult, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribe := b.eventHub.Subscribe(workorchdevents.TopicCLIResult, func(_ context.Context, envelope events.Envelope) error {
 		result, ok := events.DecodeCLIResultPayload(envelope.Payload)
 		if !ok || result.CorrelationID != correlationID {
 			return nil
@@ -92,7 +102,7 @@ func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID 
 		Payload:       payload,
 	}
 	commandEnvelope := events.Envelope{
-		Topic:        events.TopicCLICommand,
+		Topic:        workorchdevents.TopicCLICommand,
 		SourceModule: "workorch-cli",
 		SubjectType:  subjectType,
 		SubjectID:    subjectID,
@@ -161,64 +171,64 @@ func convertEnvelope(envelope events.Envelope) (ret Event) {
 		}
 	}()
 	switch envelope.Topic {
-	case events.TopicWorkspaceCreated:
+	case workspaceevents.TopicWorkspaceCreated:
 		return Event{Type: EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
-	case events.TopicWorkspaceStateChanged:
+	case workspaceevents.TopicWorkspaceStateChanged:
 		return Event{Type: EventWorkspaceStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
-	case events.TopicWorkspaceDeleted:
+	case workspaceevents.TopicWorkspaceDeleted:
 		return Event{Type: EventWorkspaceDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
-	case events.TopicGoalDefined:
+	case workspaceevents.TopicGoalDefined:
 		return Event{Type: EventGoalDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "goalId", envelope.SubjectID)}
-	case events.TopicDoDDefined:
+	case workspaceevents.TopicDoDDefined:
 		return Event{Type: EventDoDDefined, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: enrichSubjectPayload(envelope.Payload, "doDId", envelope.SubjectID)}
-	case events.TopicRunCreated, events.TopicRunStateChanged:
+	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		return Event{Type: EventRunStateChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case events.TopicStepDispatched:
+	case runevents.TopicStepDispatched:
 		return Event{Type: EventStepDispatched, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case events.TopicStepStateChanged:
+	case runevents.TopicStepStateChanged:
 		return Event{Type: EventStepCompleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case events.TopicTicketCreated:
+	case decisionevents.TopicTicketCreated:
 		return Event{Type: EventDecisionCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
-	case events.TopicTicketResolved:
+	case decisionevents.TopicTicketResolved:
 		return Event{Type: EventDecisionResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "ticketId", envelope.SubjectID)}
-	case events.TopicApprovalCreated:
+	case approvalevents.TopicApprovalCreated:
 		return Event{Type: EventApprovalCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
-	case events.TopicApprovalResolved:
+	case approvalevents.TopicApprovalResolved:
 		return Event{Type: EventApprovalResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "approvalId", envelope.SubjectID)}
-	case events.TopicResultAccepted, events.TopicResultRejected, events.TopicResultSuperseded:
+	case resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded:
 		return Event{Type: EventResultAccepted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case events.TopicMemoryCreated:
+	case memoryevents.TopicMemoryCreated:
 		return Event{Type: EventMemoryCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
-	case events.TopicMemoryUpdated:
+	case memoryevents.TopicMemoryUpdated:
 		return Event{Type: EventMemoryUpdated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
-	case events.TopicMemoryDeleted:
+	case memoryevents.TopicMemoryDeleted:
 		return Event{Type: EventMemoryDeleted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "memoryId", envelope.SubjectID)}
-	case events.TopicMemoryRecallRecorded:
+	case memoryevents.TopicMemoryRecallRecorded:
 		return Event{Type: EventMemoryRecallRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case events.TopicRunLLMUsageRecorded:
+	case runevents.TopicRunLLMUsageRecorded:
 		return Event{Type: EventLLMUsageRecorded, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: envelope.Payload}
-	case events.TopicPatchPreviewed:
+	case orchestratorevents.TopicPatchPreviewed:
 		return Event{Type: EventPatchPreviewed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case events.TopicPatchApplied:
+	case orchestratorevents.TopicPatchApplied:
 		return Event{Type: EventPatchApplied, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case events.TopicPatchFailed:
+	case orchestratorevents.TopicPatchFailed:
 		return Event{Type: EventPatchFailed, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case events.TopicPatchReverted:
+	case orchestratorevents.TopicPatchReverted:
 		return Event{Type: EventPatchReverted, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "patchId", envelope.SubjectID)}
-	case events.TopicArtifactContinuationCreated,
-		events.TopicArtifactContinuationChunkRecorded,
-		events.TopicArtifactContinuationChunkRejected,
-		events.TopicArtifactContinuationAssembled,
-		events.TopicArtifactContinuationApplied,
-		events.TopicArtifactContinuationFailed:
+	case orchestratorevents.TopicArtifactContinuationCreated,
+		orchestratorevents.TopicArtifactContinuationChunkRecorded,
+		orchestratorevents.TopicArtifactContinuationChunkRejected,
+		orchestratorevents.TopicArtifactContinuationAssembled,
+		orchestratorevents.TopicArtifactContinuationApplied,
+		orchestratorevents.TopicArtifactContinuationFailed:
 		return Event{Type: EventArtifactContinuationChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "artifactContinuationId", envelope.SubjectID)}
-	case events.TopicGovernanceAutoEvaluated:
+	case governanceevents.TopicGovernanceAutoEvaluated:
 		return Event{Type: EventGovernanceEvaluated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case events.TopicGovernanceAutoResolved:
+	case governanceevents.TopicGovernanceAutoResolved:
 		return Event{Type: EventGovernanceResolved, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case events.TopicGovernanceAutoEscalated:
+	case governanceevents.TopicGovernanceAutoEscalated:
 		return Event{Type: EventGovernanceEscalated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
-	case events.TopicGovernanceAutoBlocked:
+	case governanceevents.TopicGovernanceAutoBlocked:
 		return Event{Type: EventGovernanceBlocked, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), RunID: common.RunID(envelope.RunID), Payload: enrichSubjectPayload(envelope.Payload, "traceId", envelope.SubjectID)}
 	default:
 		return Event{}

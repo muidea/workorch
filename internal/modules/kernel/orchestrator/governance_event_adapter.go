@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -20,14 +22,14 @@ func (r decisionEventTicketRepository) Create(ctx context.Context, item *decisio
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandCreateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandCreateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
 		events.PayloadKeyCommand: createTicketCommandFromModel(item),
 	})
 	return err
 }
 
 func (r decisionEventTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandGetTicket, "decision_ticket", string(id), "", "", "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), "", "", "", map[string]any{
 		events.PayloadKeyBlockingTicketID: string(id),
 	})
 	if err != nil {
@@ -41,7 +43,7 @@ func (r decisionEventTicketRepository) Get(ctx context.Context, id common.Ticket
 }
 
 func (r decisionEventTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandListTickets, "decision_ticket", "all", "", "", "", nil)
+	response, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandListTickets, "decision_ticket", "all", "", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +55,7 @@ func (r decisionEventTicketRepository) List(ctx context.Context) ([]*decisionmod
 }
 
 func (r decisionEventTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandListTicketsByRun, "run", string(runID), "", runID, "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandListTicketsByRun, "run", string(runID), "", runID, "", map[string]any{
 		events.PayloadKeyRunID: string(runID),
 	})
 	if err != nil {
@@ -67,7 +69,7 @@ func (r decisionEventTicketRepository) ListByRunID(ctx context.Context, runID co
 }
 
 func (r decisionEventTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandListTicketsByWS, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
@@ -84,14 +86,14 @@ func (r decisionEventTicketRepository) Update(ctx context.Context, item *decisio
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandUpdateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandUpdateTicket, "decision_ticket", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
 		events.PayloadKeyCommand: updateTicketCommandFromModel(item),
 	})
 	return err
 }
 
 func (r decisionEventTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandDeleteTicket, "decision_ticket", string(id), "", "", "", map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandDeleteTicket, "decision_ticket", string(id), "", "", "", map[string]any{
 		events.PayloadKeyCommand: decisioncontracts.DeleteTicketCommand{TicketID: id},
 	})
 	return err
@@ -105,14 +107,14 @@ func (r decisionEventResolutionRepository) Create(ctx context.Context, item *dec
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandCreateResolution, "decision_resolution", string(item.ID), "", "", "", map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandCreateResolution, "decision_resolution", string(item.ID), "", "", "", map[string]any{
 		events.PayloadKeyCommand: createResolutionCommandFromModel(item),
 	})
 	return err
 }
 
 func (r decisionEventResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), "", "", "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), "", "", "", map[string]any{
 		events.PayloadKeyBlockingTicketID: string(ticketID),
 	})
 	if err != nil {
@@ -126,7 +128,7 @@ func (r decisionEventResolutionRepository) GetByTicketID(ctx context.Context, ti
 }
 
 func (r decisionEventResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicDecisionCommandDeleteResolution, "decision_ticket", string(ticketID), "", "", "", map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, decisionevents.TopicDecisionCommandDeleteResolution, "decision_ticket", string(ticketID), "", "", "", map[string]any{
 		events.PayloadKeyCommand: decisioncontracts.DeleteResolutionCommand{TicketID: ticketID},
 	})
 	return err
@@ -140,14 +142,14 @@ func (r approvalEventRepository) Create(ctx context.Context, item *approvalmodel
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandCreate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandCreate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
 		events.PayloadKeyCommand: createApprovalCommandFromModel(item),
 	})
 	return err
 }
 
 func (r approvalEventRepository) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandGet, "approval", string(id), "", "", "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandGet, "approval", string(id), "", "", "", map[string]any{
 		events.PayloadKeyApprovalID: string(id),
 	})
 	if err != nil {
@@ -161,7 +163,7 @@ func (r approvalEventRepository) Get(ctx context.Context, id common.ApprovalID) 
 }
 
 func (r approvalEventRepository) List(ctx context.Context) ([]*approvalmodel.Approval, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandList, "approval", "all", "", "", "", nil)
+	response, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandList, "approval", "all", "", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +175,7 @@ func (r approvalEventRepository) List(ctx context.Context) ([]*approvalmodel.App
 }
 
 func (r approvalEventRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approvalmodel.Approval, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandListByRun, "run", string(runID), "", runID, "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandListByRun, "run", string(runID), "", runID, "", map[string]any{
 		events.PayloadKeyRunID: string(runID),
 	})
 	if err != nil {
@@ -187,7 +189,7 @@ func (r approvalEventRepository) ListByRunID(ctx context.Context, runID common.R
 }
 
 func (r approvalEventRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*approvalmodel.Approval, error) {
-	response, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
+	response, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
@@ -204,14 +206,14 @@ func (r approvalEventRepository) Update(ctx context.Context, item *approvalmodel
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandUpdate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandUpdate, "approval", string(item.ID), item.WorkspaceID, item.RunID, item.StepID, map[string]any{
 		events.PayloadKeyCommand: updateApprovalCommandFromModel(item),
 	})
 	return err
 }
 
 func (r approvalEventRepository) Delete(ctx context.Context, id common.ApprovalID) error {
-	_, err := publishGovernanceEventCommand(ctx, r.hub, events.TopicApprovalCommandDelete, "approval", string(id), "", "", "", map[string]any{
+	_, err := publishGovernanceEventCommand(ctx, r.hub, approvalevents.TopicApprovalCommandDelete, "approval", string(id), "", "", "", map[string]any{
 		events.PayloadKeyCommand: approvalcontracts.DeleteApprovalCommand{ApprovalID: id},
 	})
 	return err

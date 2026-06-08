@@ -5,10 +5,13 @@ import (
 	"fmt"
 
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -23,14 +26,14 @@ func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) erro
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandCreate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: createRunCommandFromModel(item),
 	})
 	return err
 }
 
 func (r runEventRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
 		events.PayloadKeyRunID: string(id),
 	})
 	if err != nil {
@@ -44,7 +47,7 @@ func (r runEventRepository) Get(ctx context.Context, id common.RunID) (*runmodel
 }
 
 func (r runEventRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandList, "run", "all", "", "", nil)
+	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +59,7 @@ func (r runEventRepository) List(ctx context.Context) ([]*runmodel.Run, error) {
 }
 
 func (r runEventRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
@@ -73,14 +76,14 @@ func (r runEventRepository) Update(ctx context.Context, item *runmodel.Run) erro
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandUpdate, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
 		events.PayloadKeyCommand: updateRunCommandFromModel(item),
 	})
 	return err
 }
 
 func (r runEventRepository) Delete(ctx context.Context, id common.RunID) error {
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicRunCommandDelete, "run", string(id), "", id, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandDelete, "run", string(id), "", id, map[string]any{
 		events.PayloadKeyCommand: runcontracts.DeleteRunCommand{RunID: id},
 	})
 	return err
@@ -94,14 +97,14 @@ func (r workspaceEventRepository) Create(ctx context.Context, item *workspacemod
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicWorkspaceCommandCreate, "workspace", string(item.ID), item.ID, "", map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(item.ID), item.ID, "", map[string]any{
 		events.PayloadKeyCommand: createWorkspaceCommandFromModel(item),
 	})
 	return err
 }
 
 func (r workspaceEventRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicWorkspaceCommandGet, "workspace", string(id), id, "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGet, "workspace", string(id), id, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(id),
 	})
 	if err != nil {
@@ -115,7 +118,7 @@ func (r workspaceEventRepository) Get(ctx context.Context, id common.WorkspaceID
 }
 
 func (r workspaceEventRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicWorkspaceCommandList, "workspace", "all", "", "", nil)
+	response, err := publishStateEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandList, "workspace", "all", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -130,14 +133,14 @@ func (r workspaceEventRepository) Update(ctx context.Context, item *workspacemod
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandUpdate, "workspace", string(item.ID), item.ID, item.ActiveRunID, map[string]any{
 		events.PayloadKeyCommand: updateWorkspaceCommandFromModel(item),
 	})
 	return err
 }
 
 func (r workspaceEventRepository) Delete(ctx context.Context, id common.WorkspaceID) error {
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicWorkspaceCommandDelete, "workspace", string(id), id, "", map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandDelete, "workspace", string(id), id, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DeleteWorkspaceCommand{WorkspaceID: id},
 	})
 	return err
@@ -151,14 +154,14 @@ func (r memoryEventRepository) Create(ctx context.Context, item *memorymodel.Mem
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandCreate, "memory", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandCreate, "memory", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
 		events.PayloadKeyCommand: memoryCommandFromModel(item),
 	})
 	return err
 }
 
 func (r memoryEventRepository) Get(ctx context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandGet, "memory", string(id), "", "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandGet, "memory", string(id), "", "", map[string]any{
 		events.PayloadKeyMemoryID: string(id),
 	})
 	if err != nil {
@@ -172,7 +175,7 @@ func (r memoryEventRepository) Get(ctx context.Context, id common.MemoryID) (*me
 }
 
 func (r memoryEventRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
@@ -186,7 +189,7 @@ func (r memoryEventRepository) ListByWorkspaceID(ctx context.Context, workspaceI
 }
 
 func (r memoryEventRepository) Search(ctx context.Context, query repository.MemorySearchQuery) ([]*memorymodel.MemoryItem, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandSearch, "workspace", string(query.WorkspaceID), query.WorkspaceID, "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandSearch, "workspace", string(query.WorkspaceID), query.WorkspaceID, "", map[string]any{
 		events.PayloadKeyMemorySearchQuery: query,
 	})
 	if err != nil {
@@ -203,14 +206,14 @@ func (r memoryEventRepository) Update(ctx context.Context, item *memorymodel.Mem
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandUpdate, "memory", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandUpdate, "memory", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
 		events.PayloadKeyCommand: memoryCommandFromModel(item),
 	})
 	return err
 }
 
 func (r memoryEventRepository) Delete(ctx context.Context, id common.MemoryID) error {
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryCommandDelete, "memory", string(id), "", "", map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryCommandDelete, "memory", string(id), "", "", map[string]any{
 		events.PayloadKeyCommand: memorycontracts.DeleteMemoryItemCommand{MemoryID: id},
 	})
 	return err
@@ -228,14 +231,14 @@ func (r memoryRecallTraceEventRepository) Upsert(ctx context.Context, item *memo
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryRecallTraceCommandUpsert, "memory_recall_trace", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryRecallTraceCommandUpsert, "memory_recall_trace", string(item.ID), item.WorkspaceID, item.RunID, map[string]any{
 		events.PayloadKeyCommand: memoryRecallTraceCommandFromModel(item),
 	})
 	return err
 }
 
 func (r memoryRecallTraceEventRepository) Get(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryRecallTraceCommandGet, "memory_recall_trace", string(id), "", "", map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryRecallTraceCommandGet, "memory_recall_trace", string(id), "", "", map[string]any{
 		events.PayloadKeyTraceID: string(id),
 	})
 	if err != nil {
@@ -249,7 +252,7 @@ func (r memoryRecallTraceEventRepository) Get(ctx context.Context, id common.Mem
 }
 
 func (r memoryRecallTraceEventRepository) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
+	response, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryRecallTraceCommandList, "memory_recall_trace", "list", query.WorkspaceID, query.RunID, map[string]any{
 		events.PayloadKeyMemoryRecallTraceQuery: query,
 	})
 	if err != nil {
@@ -263,7 +266,7 @@ func (r memoryRecallTraceEventRepository) List(ctx context.Context, query reposi
 }
 
 func (r memoryRecallTraceEventRepository) Delete(ctx context.Context, id common.MemoryRecallTraceID) error {
-	_, err := publishStateEventCommand(ctx, r.hub, events.TopicMemoryRecallTraceCommandDelete, "memory_recall_trace", string(id), "", "", map[string]any{
+	_, err := publishStateEventCommand(ctx, r.hub, memoryevents.TopicMemoryRecallTraceCommandDelete, "memory_recall_trace", string(id), "", "", map[string]any{
 		events.PayloadKeyCommand: memorycontracts.DeleteMemoryRecallTraceCommand{TraceID: id},
 	})
 	return err

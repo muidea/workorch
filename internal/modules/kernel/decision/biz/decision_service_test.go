@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	decisionservice "github.com/muidea/workorch/internal/modules/kernel/decision/service"
@@ -520,14 +522,14 @@ func TestService_CreateAndResolveTicket_PublishesEvents(t *testing.T) {
 	if len(published) != 2 {
 		t.Fatalf("len(published) = %d, want 2", len(published))
 	}
-	if published[0].Topic != events.TopicTicketCreated {
-		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicTicketCreated)
+	if published[0].Topic != decisionevents.TopicTicketCreated {
+		t.Fatalf("first topic = %s, want %s", published[0].Topic, decisionevents.TopicTicketCreated)
 	}
 	if published[0].Version != events.WorkorchEventVersion || published[1].Version != events.WorkorchEventVersion {
 		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.WorkorchEventVersion)
 	}
-	if published[1].Topic != events.TopicTicketResolved {
-		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicTicketResolved)
+	if published[1].Topic != decisionevents.TopicTicketResolved {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, decisionevents.TopicTicketResolved)
 	}
 	if published[1].Payload[events.PayloadKeyType] != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("resolved type payload = %v, want %s", published[1].Payload[events.PayloadKeyType], decisioncommon.ResolutionTypeProvideMissingInfo)

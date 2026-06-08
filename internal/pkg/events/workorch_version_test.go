@@ -1,18 +1,23 @@
 package events
 
-import "testing"
+import (
+	"testing"
+
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+)
 
 func TestValidateWorkorchEventVersionUsesTopicMatrix(t *testing.T) {
-	if !ValidateWorkorchEventVersion(TopicRunStateChanged, WorkorchEventVersion) {
+	if !ValidateWorkorchEventVersion(runevents.TopicRunStateChanged, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should accept exact current version")
 	}
-	if !ValidateWorkorchEventVersion(TopicGovernanceAutoEvaluated, WorkorchEventVersion) {
+	if !ValidateWorkorchEventVersion(governanceevents.TopicGovernanceAutoEvaluated, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should include governance auto topics")
 	}
-	if !ValidateWorkorchEventVersion(TopicRunLLMStreamProgress, WorkorchEventVersion) {
+	if !ValidateWorkorchEventVersion(runevents.TopicRunLLMStreamProgress, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should include llm stream progress topic")
 	}
-	if !ValidateWorkorchEventVersion(TopicRunLLMUsageRecorded, WorkorchEventVersion) {
+	if !ValidateWorkorchEventVersion(runevents.TopicRunLLMUsageRecorded, WorkorchEventVersion) {
 		t.Fatalf("ValidateWorkorchEventVersion should include llm usage topic")
 	}
 }

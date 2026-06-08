@@ -6,6 +6,7 @@ import (
 	memorybiz "github.com/muidea/workorch/internal/modules/kernel/memory/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	memoryservice "github.com/muidea/workorch/internal/modules/kernel/memory/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -65,16 +66,16 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicMemoryCommandCreate, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryCommandGet, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryCommandListByWorkspace, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryCommandSearch, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryCommandUpdate, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryCommandDelete, m.handleMemoryQueryCommand),
-		m.eventHub.Subscribe(events.TopicMemoryRecallTraceCommandUpsert, m.handleMemoryRecallTraceCommand),
-		m.eventHub.Subscribe(events.TopicMemoryRecallTraceCommandGet, m.handleMemoryRecallTraceCommand),
-		m.eventHub.Subscribe(events.TopicMemoryRecallTraceCommandList, m.handleMemoryRecallTraceCommand),
-		m.eventHub.Subscribe(events.TopicMemoryRecallTraceCommandDelete, m.handleMemoryRecallTraceCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandCreate, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandGet, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandSearch, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandUpdate, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryCommandDelete, m.handleMemoryQueryCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandUpsert, m.handleMemoryRecallTraceCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandGet, m.handleMemoryRecallTraceCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandList, m.handleMemoryRecallTraceCommand),
+		m.eventHub.Subscribe(memoryevents.TopicMemoryRecallTraceCommandDelete, m.handleMemoryRecallTraceCommand),
 	)
 	return nil
 }
@@ -102,7 +103,7 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicMemoryCommandCreate:
+	case memoryevents.TopicMemoryCommandCreate:
 		var cmd memorycontracts.CreateMemoryItemCommand
 		if payloadCommand, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.CreateMemoryItemCommand); ok {
 			cmd = payloadCommand
@@ -117,19 +118,19 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
-	case events.TopicMemoryCommandGet:
+	case memoryevents.TopicMemoryCommandGet:
 		item, err := m.servicePtr.GetMemoryItem(ctx, common.MemoryID(stringPayload(envelope.Payload, events.PayloadKeyMemoryID)))
 		if err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryItem: item})
-	case events.TopicMemoryCommandListByWorkspace:
+	case memoryevents.TopicMemoryCommandListByWorkspace:
 		items, err := m.servicePtr.ListMemoryByWorkspace(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
 		if err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryItems: items})
-	case events.TopicMemoryCommandSearch:
+	case memoryevents.TopicMemoryCommandSearch:
 		query, ok := envelope.Payload[events.PayloadKeyMemorySearchQuery].(repository.MemorySearchQuery)
 		if !ok {
 			return common.ErrInvalidArgument
@@ -139,7 +140,7 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 			return err
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryItems: items})
-	case events.TopicMemoryCommandUpdate:
+	case memoryevents.TopicMemoryCommandUpdate:
 		var cmd memorycontracts.UpdateMemoryItemCommand
 		if payloadCommand, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.UpdateMemoryItemCommand); ok {
 			cmd = payloadCommand
@@ -154,7 +155,7 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
-	case events.TopicMemoryCommandDelete:
+	case memoryevents.TopicMemoryCommandDelete:
 		if err := m.servicePtr.DeleteMemoryItem(ctx, deleteMemoryIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
@@ -169,7 +170,7 @@ func (m *Module) handleMemoryRecallTraceCommand(ctx context.Context, envelope ev
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicMemoryRecallTraceCommandUpsert:
+	case memoryevents.TopicMemoryRecallTraceCommandUpsert:
 		trace, err := memoryRecallTraceFromPayload(envelope.Payload)
 		if err != nil {
 			return err
@@ -178,13 +179,13 @@ func (m *Module) handleMemoryRecallTraceCommand(ctx context.Context, envelope ev
 			return err
 		}
 		return memoryCommandResponse(envelope, nil)
-	case events.TopicMemoryRecallTraceCommandGet:
+	case memoryevents.TopicMemoryRecallTraceCommandGet:
 		item, err := m.servicePtr.GetMemoryRecallTrace(ctx, common.MemoryRecallTraceID(stringPayload(envelope.Payload, events.PayloadKeyTraceID)))
 		if err != nil {
 			return err
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryRecallTrace: item})
-	case events.TopicMemoryRecallTraceCommandList:
+	case memoryevents.TopicMemoryRecallTraceCommandList:
 		query, ok := envelope.Payload[events.PayloadKeyMemoryRecallTraceQuery].(repository.MemoryRecallTraceQuery)
 		if !ok {
 			return common.ErrInvalidArgument
@@ -194,7 +195,7 @@ func (m *Module) handleMemoryRecallTraceCommand(ctx context.Context, envelope ev
 			return err
 		}
 		return memoryCommandResponse(envelope, map[string]any{events.PayloadKeyMemoryRecallTraces: items})
-	case events.TopicMemoryRecallTraceCommandDelete:
+	case memoryevents.TopicMemoryRecallTraceCommandDelete:
 		if err := m.servicePtr.DeleteMemoryRecallTrace(ctx, deleteMemoryRecallTraceIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}

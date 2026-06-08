@@ -14,12 +14,16 @@ import (
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -151,19 +155,19 @@ func (s *Service) Start() error {
 		workCancel()
 		return err
 	}
-	unsubTicket := s.eventHub.Subscribe(events.TopicTicketCreated, func(ctx context.Context, envelope events.Envelope) error {
+	unsubTicket := s.eventHub.Subscribe(decisionevents.TopicTicketCreated, func(ctx context.Context, envelope events.Envelope) error {
 		s.enqueueGovernanceWork(func(workCtx context.Context) {
 			s.processTicketCreated(workCtx, envelope)
 		})
 		return nil
 	})
-	unsubApproval := s.eventHub.Subscribe(events.TopicApprovalCreated, func(ctx context.Context, envelope events.Envelope) error {
+	unsubApproval := s.eventHub.Subscribe(approvalevents.TopicApprovalCreated, func(ctx context.Context, envelope events.Envelope) error {
 		s.enqueueGovernanceWork(func(workCtx context.Context) {
 			s.processApprovalCreated(workCtx, envelope)
 		})
 		return nil
 	})
-	unsubRunState := s.eventHub.Subscribe(events.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
+	unsubRunState := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(ctx context.Context, envelope events.Envelope) error {
 		s.enqueueGovernanceWork(func(workCtx context.Context) {
 			s.processRunStateChanged(workCtx, envelope)
 		})
@@ -348,14 +352,14 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		OccurredAt:         nowUTC(),
 	}
 	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoEvaluated, trace, "")
+	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, "")
 
 	if !eval.canAutoResolve {
 		trace.Status = "escalated"
 		trace.Action = "escalate"
 		trace.OccurredAt = nowUTC()
 		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
+		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 		return
 	}
 	payload := map[string]any{
@@ -388,7 +392,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 		trace.Reason = err.Error()
 		trace.OccurredAt = nowUTC()
 		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoBlocked, trace, "resolve_failed")
+		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
 		return
 	}
 	trace.Status = "resolved"
@@ -399,7 +403,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	trace.Reason = eval.reason
 	trace.OccurredAt = nowUTC()
 	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoResolved, trace, "")
+	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
 	_ = s.resume(scopedCtx, ticket.RunID)
 }
@@ -458,14 +462,14 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 		OccurredAt:         nowUTC(),
 	}
 	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoEvaluated, trace, "")
+	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEvaluated, trace, "")
 
 	if !eval.canAutoApprove {
 		trace.Status = "escalated"
 		trace.Action = "escalate"
 		trace.OccurredAt = nowUTC()
 		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
+		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoEscalated, trace, eval.policyBlocked)
 		return
 	}
 
@@ -477,7 +481,7 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 		trace.Reason = err.Error()
 		trace.OccurredAt = nowUTC()
 		_ = s.traces.Upsert(ctx, trace)
-		_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoBlocked, trace, "resolve_failed")
+		_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoBlocked, trace, "resolve_failed")
 		return
 	}
 
@@ -489,7 +493,7 @@ func (s *Service) processPendingApproval(ctx context.Context, approvalID common.
 	trace.Reason = eval.reason
 	trace.OccurredAt = nowUTC()
 	_ = s.traces.Upsert(ctx, trace)
-	_ = s.publishGovernanceEvent(ctx, events.TopicGovernanceAutoResolved, trace, "")
+	_ = s.publishGovernanceEvent(ctx, governanceevents.TopicGovernanceAutoResolved, trace, "")
 
 	_ = s.resume(scopedCtx, approval.RunID)
 }

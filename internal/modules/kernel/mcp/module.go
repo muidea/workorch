@@ -6,6 +6,7 @@ import (
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/common"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -63,14 +64,14 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicMCPCommandCreateServer, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandGetServer, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandListServers, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandUpdateServer, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandCreateCapability, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandGetCapability, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandListCapabilities, m.handleMCPCommand),
-		m.eventHub.Subscribe(events.TopicMCPCommandUpdateCapability, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandCreateServer, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandGetServer, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandListServers, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandUpdateServer, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandCreateCapability, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandGetCapability, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandListCapabilities, m.handleMCPCommand),
+		m.eventHub.Subscribe(mcpevents.TopicMCPCommandUpdateCapability, m.handleMCPCommand),
 	)
 	return nil
 }
@@ -98,7 +99,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicMCPCommandCreateServer:
+	case mcpevents.TopicMCPCommandCreateServer:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateServerCommand)
 		if !ok {
 			var err error
@@ -115,19 +116,19 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServer: server})
-	case events.TopicMCPCommandGetServer:
+	case mcpevents.TopicMCPCommandGetServer:
 		server, err := m.servicePtr.GetServer(ctx, common.MCPServerID(stringPayload(envelope.Payload, events.PayloadKeyServerID)))
 		if err != nil {
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServer: server})
-	case events.TopicMCPCommandListServers:
+	case mcpevents.TopicMCPCommandListServers:
 		servers, err := m.servicePtr.ListServers(ctx)
 		if err != nil {
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServers: servers})
-	case events.TopicMCPCommandUpdateServer:
+	case mcpevents.TopicMCPCommandUpdateServer:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.UpdateServerCommand)
 		if !ok {
 			var err error
@@ -144,7 +145,7 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyServer: server})
-	case events.TopicMCPCommandCreateCapability:
+	case mcpevents.TopicMCPCommandCreateCapability:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateCapabilityCommand)
 		if !ok {
 			var err error
@@ -158,20 +159,20 @@ func (m *Module) handleMCPCommand(ctx context.Context, envelope events.Envelope)
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyCapability: item})
-	case events.TopicMCPCommandGetCapability:
+	case mcpevents.TopicMCPCommandGetCapability:
 		item, err := m.servicePtr.GetCapability(ctx, common.MCPCapabilityID(stringPayload(envelope.Payload, events.PayloadKeyCapabilityID)))
 		if err != nil {
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyCapability: item})
-	case events.TopicMCPCommandListCapabilities:
+	case mcpevents.TopicMCPCommandListCapabilities:
 		query := capabilityQueryFromPayload(envelope.Payload)
 		items, err := m.servicePtr.ListCapabilities(ctx, query)
 		if err != nil {
 			return err
 		}
 		return mcpCommandResponse(envelope, map[string]any{events.PayloadKeyCapabilities: items})
-	case events.TopicMCPCommandUpdateCapability:
+	case mcpevents.TopicMCPCommandUpdateCapability:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.UpdateCapabilityCommand)
 		if !ok {
 			var err error

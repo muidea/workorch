@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -494,7 +497,7 @@ func TestRuntimeOrchestrator_ResumeRunRejectsDecisionWithoutDispatchingStep(t *t
 		t.Fatalf("runtime calls = %#v, want none", runtime.calls)
 	}
 	last := hub.Published()[len(hub.Published())-1]
-	if last.Topic != events.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
+	if last.Topic != workspaceevents.TopicWorkspaceStateChanged || last.Payload[events.PayloadKeyActiveRunID] != "" {
 		t.Fatalf("last event = %#v, want workspace release event", last)
 	}
 }
@@ -855,7 +858,7 @@ func TestRuntimeOrchestrator_ResumeRunLegacyRepairResolutionPayloadReplans(t *te
 
 func publishedRunCreatedFor(items []events.Envelope, runID common.RunID) bool {
 	for _, item := range items {
-		if item.Topic == events.TopicRunCreated && item.RunID == string(runID) {
+		if item.Topic == runevents.TopicRunCreated && item.RunID == string(runID) {
 			return true
 		}
 	}

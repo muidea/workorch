@@ -6,6 +6,7 @@ import (
 	soulbiz "github.com/muidea/workorch/internal/modules/kernel/soul/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/common"
 	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	soulservice "github.com/muidea/workorch/internal/modules/kernel/soul/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -64,12 +65,12 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicSoulCommandCreate, m.handleSoulCommand),
-		m.eventHub.Subscribe(events.TopicSoulCommandGet, m.handleSoulCommand),
-		m.eventHub.Subscribe(events.TopicSoulCommandList, m.handleSoulCommand),
-		m.eventHub.Subscribe(events.TopicSoulCommandUpdate, m.handleSoulCommand),
-		m.eventHub.Subscribe(events.TopicSoulCommandDelete, m.handleSoulCommand),
-		m.eventHub.Subscribe(events.TopicSoulCommandValidateCapability, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandCreate, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandGet, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandList, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandUpdate, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandDelete, m.handleSoulCommand),
+		m.eventHub.Subscribe(soulevents.TopicSoulCommandValidateCapability, m.handleSoulCommand),
 	)
 	return nil
 }
@@ -97,7 +98,7 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicSoulCommandCreate:
+	case soulevents.TopicSoulCommandCreate:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.CreateSoulCommand)
 		if !ok {
 			var err error
@@ -114,19 +115,19 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 			return err
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
-	case events.TopicSoulCommandGet:
+	case soulevents.TopicSoulCommandGet:
 		item, err := m.servicePtr.GetSoul(ctx, common.SoulID(stringPayload(envelope.Payload, events.PayloadKeySoulID)))
 		if err != nil {
 			return err
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
-	case events.TopicSoulCommandList:
+	case soulevents.TopicSoulCommandList:
 		items, err := m.servicePtr.ListSouls(ctx)
 		if err != nil {
 			return err
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySouls: items})
-	case events.TopicSoulCommandUpdate:
+	case soulevents.TopicSoulCommandUpdate:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.UpdateSoulCommand)
 		if !ok {
 			var err error
@@ -143,12 +144,12 @@ func (m *Module) handleSoulCommand(ctx context.Context, envelope events.Envelope
 			return err
 		}
 		return soulCommandResponse(envelope, map[string]any{events.PayloadKeySoul: item})
-	case events.TopicSoulCommandDelete:
+	case soulevents.TopicSoulCommandDelete:
 		if err := m.servicePtr.DeleteSoul(ctx, deleteSoulIDFromPayload(envelope.Payload)); err != nil {
 			return err
 		}
 		return soulCommandResponse(envelope, nil)
-	case events.TopicSoulCommandValidateCapability:
+	case soulevents.TopicSoulCommandValidateCapability:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.ValidateCapabilitySelectionCommand)
 		if !ok {
 			cmd = soulCapabilitySelectionCommandFromPayload(envelope.Payload)

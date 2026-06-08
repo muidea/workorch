@@ -12,6 +12,7 @@ import (
 	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
 	"github.com/muidea/magicCommon/task"
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
@@ -110,7 +111,7 @@ func TestModuleDoneCommandReturnsServerDoneChannel(t *testing.T) {
 
 	hub := workorchevents.NewMagicHubWithHubOwner(rawHub, "workorchd/module-test")
 	err := hub.Publish(context.Background(), workorchevents.Envelope{
-		Topic:        workorchevents.TopicWorkorchDCommandDone,
+		Topic:        workorchdevents.TopicWorkorchDCommandDone,
 		SourceModule: "test",
 		SubjectType:  "workorchd",
 		SubjectID:    "server",

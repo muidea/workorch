@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -1256,7 +1259,7 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 		}
 	}
 	for _, item := range hub.Published() {
-		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
 			t.Fatalf("published running run event before active writes were released: %+v", hub.Published())
 		}
 	}
@@ -1273,10 +1276,10 @@ func TestRuntimeOrchestrator_StartRunActiveWritesConcurrently(t *testing.T) {
 	var runningRunIndex = -1
 	var runningWorkspaceIndex = -1
 	for idx, item := range published {
-		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateRunning) {
 			runningRunIndex = idx
 		}
-		if item.Topic == events.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateRunning) {
+		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateRunning) {
 			runningWorkspaceIndex = idx
 		}
 	}

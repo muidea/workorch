@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
+
 	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -81,7 +83,7 @@ func TestPurgeWorkspaceCommandAcceptsContractPayload(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicEventStreamCommandPurgeWorkspace,
+		Topic:       eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
 		SubjectType: "workspace",
 		SubjectID:   string(workspaceID),
 		Payload: map[string]any{

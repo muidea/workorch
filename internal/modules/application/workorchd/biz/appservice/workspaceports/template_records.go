@@ -3,6 +3,8 @@ package workspaceports
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
@@ -23,7 +25,7 @@ func CreateWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, item *re
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", map[string]any{
+	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandCreate, "workspace_template", item.ID, "", "", map[string]any{
 		events.PayloadKeyCommand: workspaceTemplateCommandFromRepository(item),
 	})
 }
@@ -32,7 +34,7 @@ func UpdateWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, item *re
 	if item == nil {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", map[string]any{
+	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandUpdate, "workspace_template", item.ID, "", "", map[string]any{
 		events.PayloadKeyCommand: workspaceTemplateCommandFromRepository(item),
 	})
 }
@@ -41,7 +43,7 @@ func DeleteWorkspaceTemplateRecord(ctx context.Context, hub events.Hub, template
 	if templateID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, events.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", map[string]any{
+	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceTemplateCommandDelete, "workspace_template", templateID, "", "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.DeleteWorkspaceTemplateCommand{TemplateID: templateID},
 	})
 }

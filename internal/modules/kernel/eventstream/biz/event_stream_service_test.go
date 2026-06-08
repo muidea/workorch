@@ -5,6 +5,9 @@ import (
 	"sync"
 	"testing"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -60,7 +63,7 @@ func TestServicePersistsWorkorchEventsFromHub(t *testing.T) {
 	if err := hub.Publish(ctx, events.Envelope{
 		ID:           "event-stream-run-created",
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunCreated,
+		Topic:        runevents.TopicRunCreated,
 		SourceModule: "kernel/run",
 		SubjectType:  "run",
 		SubjectID:    "run-event-stream",
@@ -101,7 +104,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	if err := hub.Publish(ctx, events.Envelope{
 		ID:           "event-stream-idempotent-start",
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunCreated,
+		Topic:        runevents.TopicRunCreated,
 		WorkspaceID:  "ws-event-stream-idempotent",
 		RunID:        "run-event-stream-idempotent",
 		SourceModule: "kernel/run",
@@ -124,7 +127,7 @@ func TestServiceStartIsIdempotentAndStopReleasesSubscription(t *testing.T) {
 	if err := hub.Publish(ctx, events.Envelope{
 		ID:           "event-stream-after-stop",
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicRunCreated,
+		Topic:        runevents.TopicRunCreated,
 		WorkspaceID:  "ws-event-stream-idempotent",
 		RunID:        "run-event-stream-idempotent",
 		SourceModule: "kernel/run",
@@ -157,7 +160,7 @@ func TestServicePersistsPatchEventsFromHub(t *testing.T) {
 	if err := hub.Publish(ctx, events.Envelope{
 		ID:           "event-stream-patch-applied",
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicPatchApplied,
+		Topic:        orchestratorevents.TopicPatchApplied,
 		SourceModule: "kernel/orchestrator",
 		SubjectType:  "patch",
 		SubjectID:    "patch-event-stream",
@@ -188,7 +191,7 @@ func TestServicePersistsPatchEventsFromHub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}
-	if len(records) != 1 || records[0].Topic != events.TopicPatchApplied || records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" {
+	if len(records) != 1 || records[0].Topic != orchestratorevents.TopicPatchApplied || records[0].Payload[events.PayloadKeyTargetRef] != "result.txt" {
 		t.Fatalf("records = %+v, want persisted patch event", records)
 	}
 }
@@ -227,9 +230,9 @@ func TestServicePurgeWorkspaceEventsDeletesOnlyWorkspaceRecords(t *testing.T) {
 	repo := memory.NewEventRecordRepository()
 	service := NewService(repo, events.NewMemoryHub())
 	for _, envelope := range []events.Envelope{
-		{ID: "event-purge-1", Topic: events.TopicRunCreated, WorkspaceID: "ws-purge", RunID: "run-purge"},
-		{ID: "event-purge-2", Topic: events.TopicRunStateChanged, WorkspaceID: "ws-purge", RunID: "run-purge"},
-		{ID: "event-keep", Topic: events.TopicRunCreated, WorkspaceID: "ws-keep", RunID: "run-keep"},
+		{ID: "event-purge-1", Topic: runevents.TopicRunCreated, WorkspaceID: "ws-purge", RunID: "run-purge"},
+		{ID: "event-purge-2", Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-purge", RunID: "run-purge"},
+		{ID: "event-keep", Topic: runevents.TopicRunCreated, WorkspaceID: "ws-keep", RunID: "run-keep"},
 	} {
 		if err := repo.Append(ctx, eventRecordFromEnvelope(envelope)); err != nil {
 			t.Fatalf("append event %s: %v", envelope.ID, err)

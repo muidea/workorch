@@ -3,6 +3,11 @@ package observed
 import (
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -49,7 +54,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, ticket, nil, approval, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicWorkspaceStateChanged,
+			Topic:        workspaceevents.TopicWorkspaceStateChanged,
 			OccurredAt:   "2026-04-21T08:00:00Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "workspace",
@@ -63,7 +68,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicRunStateChanged,
+			Topic:        runevents.TopicRunStateChanged,
 			OccurredAt:   "2026-04-21T08:00:01Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "run",
@@ -76,7 +81,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicStepStateChanged,
+			Topic:        runevents.TopicStepStateChanged,
 			OccurredAt:   "2026-04-21T08:00:02Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "step",
@@ -91,7 +96,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicTicketCreated,
+			Topic:        decisionevents.TopicTicketCreated,
 			OccurredAt:   "2026-04-21T08:00:03Z",
 			SourceModule: "kernel/decision",
 			SubjectType:  "decision_ticket",
@@ -106,7 +111,7 @@ func TestBuildWorkorchSnapshotIncludesExpectedPublishedTopics(t *testing.T) {
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicApprovalResolved,
+			Topic:        approvalevents.TopicApprovalResolved,
 			OccurredAt:   "2026-04-21T08:00:04Z",
 			SourceModule: "kernel/approval",
 			SubjectType:  "approval",
@@ -174,7 +179,7 @@ func TestBuildWorkorchSnapshotCanonicalizesWorkspacePlanStepKind(t *testing.T) {
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicStepStateChanged,
+			Topic:        runevents.TopicStepStateChanged,
 			OccurredAt:   "2026-04-21T08:00:02Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "step",
@@ -229,7 +234,7 @@ func TestBuildWorkorchSnapshotPublishedTicketIncludesResolvedTicketResolution(t 
 	items := BuildWorkorchSnapshot(ws, run, nil, ticket, resolution, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicTicketResolved,
+			Topic:        decisionevents.TopicTicketResolved,
 			OccurredAt:   "2026-04-21T08:05:00Z",
 			SourceModule: "kernel/decision",
 			SubjectType:  "decision_ticket",
@@ -287,7 +292,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicRunStateChanged,
+			Topic:        runevents.TopicRunStateChanged,
 			OccurredAt:   "2026-04-21T09:00:00Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "run",
@@ -304,7 +309,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunAndStepEvents(t *testing.T) {
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicStepStateChanged,
+			Topic:        runevents.TopicStepStateChanged,
 			OccurredAt:   "2026-04-21T09:00:01Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "step",
@@ -365,7 +370,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *test
 	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicRunCreated,
+			Topic:        runevents.TopicRunCreated,
 			OccurredAt:   "2026-04-21T09:05:00Z",
 			SourceModule: "kernel/run",
 			SubjectType:  "run",
@@ -382,7 +387,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedRunCreatedAndFailureReason(t *test
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicRunStateChanged,
+			Topic:        runevents.TopicRunStateChanged,
 			OccurredAt:   "2026-04-21T09:05:01Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "run",
@@ -447,7 +452,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 	items := BuildWorkorchSnapshot(ws, run, nil, ticket, nil, approval, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicWorkspaceCreated,
+			Topic:        workspaceevents.TopicWorkspaceCreated,
 			OccurredAt:   "2026-04-21T09:10:00Z",
 			SourceModule: "kernel/workspace",
 			SubjectType:  "workspace",
@@ -460,7 +465,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicTicketResolved,
+			Topic:        decisionevents.TopicTicketResolved,
 			OccurredAt:   "2026-04-21T09:10:01Z",
 			SourceModule: "kernel/decision",
 			SubjectType:  "decision_ticket",
@@ -478,7 +483,7 @@ func TestBuildWorkorchSnapshotPrefersPublishedWorkspaceTicketAndApprovalEvents(t
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicApprovalResolved,
+			Topic:        approvalevents.TopicApprovalResolved,
 			OccurredAt:   "2026-04-21T09:10:02Z",
 			SourceModule: "kernel/approval",
 			SubjectType:  "approval",
@@ -548,7 +553,7 @@ func TestBuildWorkorchSnapshotPrefersLatestWorkspaceStateChangedEvent(t *testing
 	items := BuildWorkorchSnapshot(ws, run, nil, nil, nil, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicWorkspaceCreated,
+			Topic:        workspaceevents.TopicWorkspaceCreated,
 			OccurredAt:   "2026-04-21T09:20:00Z",
 			SourceModule: "kernel/workspace",
 			SubjectType:  "workspace",
@@ -561,7 +566,7 @@ func TestBuildWorkorchSnapshotPrefersLatestWorkspaceStateChangedEvent(t *testing
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicWorkspaceStateChanged,
+			Topic:        workspaceevents.TopicWorkspaceStateChanged,
 			OccurredAt:   "2026-04-21T09:20:01Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "workspace",
@@ -615,7 +620,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 	items := BuildWorkorchSnapshot(ws, run, []*runmodel.Step{step}, nil, nil, nil, []events.WorkorchEvent{
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicRunStateChanged,
+			Topic:        runevents.TopicRunStateChanged,
 			OccurredAt:   "2026-04-21T09:30:00Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "run",
@@ -628,7 +633,7 @@ func TestBuildWorkorchSnapshotIgnoresPublishedEventsThatDoNotMatchCurrentObjects
 		}),
 		mustWorkorchEvent(t, events.Envelope{
 			Version:      events.WorkorchEventVersion,
-			Topic:        events.TopicStepStateChanged,
+			Topic:        runevents.TopicStepStateChanged,
 			OccurredAt:   "2026-04-21T09:30:01Z",
 			SourceModule: "kernel/orchestrator",
 			SubjectType:  "step",

@@ -7,6 +7,14 @@ import (
 	"testing"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	runtimeeventdefs "github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent/eventdefs"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	magicevent "github.com/muidea/magicCommon/event"
 )
 
@@ -15,14 +23,14 @@ func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
 	defer hub.Terminate(context.Background())
 
 	var received Envelope
-	unsubscribe := hub.Subscribe(TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
+	unsubscribe := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope Envelope) error {
 		received = envelope
 		return nil
 	})
 	defer unsubscribe()
 
 	err := hub.Publish(context.Background(), Envelope{
-		Topic: TopicRunStateChanged,
+		Topic: runevents.TopicRunStateChanged,
 		RunID: "run-1",
 		Payload: map[string]any{
 			PayloadKeyState: "completed",
@@ -31,8 +39,8 @@ func TestMagicHubPublishesThroughMagicCommonHub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish returned error: %v", err)
 	}
-	if received.Topic != TopicRunStateChanged {
-		t.Fatalf("received topic = %s, want %s", received.Topic, TopicRunStateChanged)
+	if received.Topic != runevents.TopicRunStateChanged {
+		t.Fatalf("received topic = %s, want %s", received.Topic, runevents.TopicRunStateChanged)
 	}
 	if received.ID == "" || received.OccurredAt == "" || received.Version == "" {
 		t.Fatalf("received envelope was not prepared: %+v", received)
@@ -43,16 +51,16 @@ func TestMagicHubAssignsWorkspaceRevision(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
 		t.Fatalf("publish first workspace event: %v", err)
 	}
-	if err := hub.PublishAsync(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-a"}); err != nil {
+	if err := hub.PublishAsync(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-a"}); err != nil {
 		t.Fatalf("publish second workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-b"}); err != nil {
 		t.Fatalf("publish other workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
 
@@ -81,10 +89,10 @@ func TestMagicHubSupportsWildcardSubscription(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated}); err != nil {
 		t.Fatalf("publish workspace event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicRunCreated}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicRunCreated}); err != nil {
 		t.Fatalf("publish run event: %v", err)
 	}
 	if len(topics) != 2 {
@@ -97,13 +105,13 @@ func TestMagicHubUnsubscribeStopsDelivery(t *testing.T) {
 	defer hub.Terminate(context.Background())
 
 	var calls int
-	unsubscribe := hub.Subscribe(TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
+	unsubscribe := hub.Subscribe(approvalevents.TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
 		calls++
 		return nil
 	})
 	unsubscribe()
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicApprovalResolved}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: approvalevents.TopicApprovalResolved}); err != nil {
 		t.Fatalf("publish after unsubscribe: %v", err)
 	}
 	if calls != 0 {
@@ -113,7 +121,7 @@ func TestMagicHubUnsubscribeStopsDelivery(t *testing.T) {
 
 func TestMagicHubUnsubscribeDoesNotBlockOnUnderlyingHub(t *testing.T) {
 	hub := NewMagicHubWithHub(blockingUnsubscribeHub{})
-	unsubscribe := hub.Subscribe(TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
+	unsubscribe := hub.Subscribe(approvalevents.TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
 		return nil
 	})
 
@@ -135,7 +143,7 @@ func TestMagicHubSubscribeDoesNotBlockOnUnderlyingHub(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		unsubscribe := hub.Subscribe(TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
+		unsubscribe := hub.Subscribe(approvalevents.TopicApprovalResolved, func(_ context.Context, _ Envelope) error {
 			return nil
 		})
 		unsubscribe()
@@ -154,12 +162,12 @@ func TestMagicHubReturnsHandlerError(t *testing.T) {
 	defer hub.Terminate(context.Background())
 
 	wantErr := errors.New("handler failed")
-	unsubscribe := hub.Subscribe(TopicTicketResolved, func(_ context.Context, _ Envelope) error {
+	unsubscribe := hub.Subscribe(decisionevents.TopicTicketResolved, func(_ context.Context, _ Envelope) error {
 		return wantErr
 	})
 	defer unsubscribe()
 
-	err := hub.Publish(context.Background(), Envelope{Topic: TopicTicketResolved})
+	err := hub.Publish(context.Background(), Envelope{Topic: decisionevents.TopicTicketResolved})
 	if err == nil {
 		t.Fatalf("Publish returned nil, want error")
 	}
@@ -172,18 +180,18 @@ func TestMagicHubPublishCanReturnHandlerResponse(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
-	want := Envelope{Topic: TopicCLIResult, Payload: map[string]any{"ok": true}}
-	unsubscribe := hub.Subscribe(TopicCLICommand, func(_ context.Context, _ Envelope) error {
+	want := Envelope{Topic: workorchdevents.TopicCLIResult, Payload: map[string]any{"ok": true}}
+	unsubscribe := hub.Subscribe(workorchdevents.TopicCLICommand, func(_ context.Context, _ Envelope) error {
 		return Response(want)
 	})
 	defer unsubscribe()
 
-	err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand})
+	err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand})
 	response, ok := ResponseEnvelope(err)
 	if !ok {
 		t.Fatalf("Publish err = %v, want response envelope", err)
 	}
-	if response.Topic != TopicCLIResult || response.Payload["ok"] != true {
+	if response.Topic != workorchdevents.TopicCLIResult || response.Payload["ok"] != true {
 		t.Fatalf("response = %+v, want CLI result payload", response)
 	}
 }
@@ -196,12 +204,12 @@ func TestMagicHubWildcardObserverDoesNotSwallowHandlerResponse(t *testing.T) {
 		return nil
 	})
 	defer unsubscribeAll()
-	unsubscribeCommand := hub.Subscribe(TopicOrchestratorCommandBlockApproval, func(_ context.Context, envelope Envelope) error {
+	unsubscribeCommand := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandBlockApproval, func(_ context.Context, envelope Envelope) error {
 		return Response(Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{"ok": true}})
 	})
 	defer unsubscribeCommand()
 
-	err := hub.Publish(context.Background(), Envelope{Topic: TopicOrchestratorCommandBlockApproval})
+	err := hub.Publish(context.Background(), Envelope{Topic: orchestratorevents.TopicOrchestratorCommandBlockApproval})
 	response, ok := ResponseEnvelope(err)
 	if !ok {
 		t.Fatalf("Publish err = %v, want response envelope", err)
@@ -269,27 +277,27 @@ func TestMagicHubPublishWithoutSubscribersSucceeds(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicStepDispatched}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicStepDispatched}); err != nil {
 		t.Fatalf("Publish without subscribers returned error: %v", err)
 	}
 	published := hub.Published()
-	if len(published) != 1 || published[0].Topic != TopicStepDispatched {
+	if len(published) != 1 || published[0].Topic != runevents.TopicStepDispatched {
 		t.Fatalf("published = %+v, want one step dispatched event", published)
 	}
 }
 
-func TestMagicHubUsesScopedLanesForWorkspaceAndRunEvents(t *testing.T) {
+func TestMagicHubUsesTopicLanesForScopedNotificationEvents(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-a"}); err != nil {
 		t.Fatalf("publish workspace a event: %v", err)
 	}
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish run event: %v", err)
 	}
-	if len(rawHub.lanes) != 2 || rawHub.lanes[0] != "workspace/ws-a" || rawHub.lanes[1] != "run/run-001" {
-		t.Fatalf("lanes = %v, want workspace and run scoped lanes", rawHub.lanes)
+	if len(rawHub.lanes) != 2 || rawHub.lanes[0] != "topic/"+workspaceevents.TopicWorkspaceStateChanged || rawHub.lanes[1] != "topic/"+runevents.TopicRunStateChanged {
+		t.Fatalf("lanes = %v, want topic lanes for scoped notifications", rawHub.lanes)
 	}
 }
 
@@ -297,10 +305,10 @@ func TestMagicHubFallsBackToTopicLaneForGlobalEvents(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLICommand, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLICommand, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish global event: %v", err)
 	}
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+TopicCLICommand {
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+workorchdevents.TopicCLICommand {
 		t.Fatalf("lanes = %v, want topic fallback lane", rawHub.lanes)
 	}
 }
@@ -309,11 +317,139 @@ func TestMagicHubUsesTopicLaneForCLIResultWithScope(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicCLIResult, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: workorchdevents.TopicCLIResult, WorkspaceID: "ws-a", RunID: "run-001"}); err != nil {
 		t.Fatalf("publish scoped CLI result event: %v", err)
 	}
-	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+TopicCLIResult {
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "topic/"+workorchdevents.TopicCLIResult {
 		t.Fatalf("lanes = %v, want CLI result topic lane", rawHub.lanes)
+	}
+}
+
+func TestMagicHubUsesQueryLaneForScopedReadCommands(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{
+		Topic:       runevents.TopicRunCommandListStepsByRun,
+		WorkspaceID: "ws-a",
+		RunID:       "run-001",
+	}); err != nil {
+		t.Fatalf("publish scoped read command: %v", err)
+	}
+	if len(rawHub.lanes) != 1 {
+		t.Fatalf("lanes = %v, want one query lane", rawHub.lanes)
+	}
+	want := "query/run/command/list-steps-by-run/run/run-001"
+	if rawHub.lanes[0] != want {
+		t.Fatalf("lane = %q, want %q", rawHub.lanes[0], want)
+	}
+}
+
+func TestMagicHubKeepsScopedWriteCommandsOnRunStateLane(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+		WorkspaceID: "ws-a",
+		RunID:       "run-001",
+	}); err != nil {
+		t.Fatalf("publish scoped write command: %v", err)
+	}
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != "state/run/run-001" {
+		t.Fatalf("lanes = %v, want run state write command lane", rawHub.lanes)
+	}
+}
+
+func TestMagicHubUsesExecuteLaneForRuntimeBlockCommands(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{
+		Topic:       runtimeeventdefs.RuntimeBlockExecuteTopic("mcp/tool_call"),
+		WorkspaceID: "ws-a",
+		RunID:       "run-001",
+		StepID:      "run-001-step-2",
+	}); err != nil {
+		t.Fatalf("publish runtime block command: %v", err)
+	}
+	want := "exec/block/mcp-tool-call/run-001-step-2"
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
+		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	}
+}
+
+func TestMagicHubReadCommandIsNotBlockedByActiveRunWriteLane(t *testing.T) {
+	hub := NewMagicHub()
+	defer hub.Terminate(context.Background())
+
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	unsubscribeWrite := hub.Subscribe(orchestratorevents.TopicOrchestratorCommandResumeRun, func(_ context.Context, envelope Envelope) error {
+		if envelope.RunID != "run-001" {
+			t.Fatalf("write run ID = %q, want run-001", envelope.RunID)
+		}
+		close(writeStarted)
+		<-releaseWrite
+		return Response(Envelope{Topic: envelope.Topic + "/response"})
+	})
+	defer unsubscribeWrite()
+	unsubscribeRead := hub.Subscribe(runevents.TopicRunCommandListStepsByRun, func(_ context.Context, envelope Envelope) error {
+		if envelope.RunID != "run-001" {
+			t.Fatalf("read run ID = %q, want run-001", envelope.RunID)
+		}
+		return Response(Envelope{
+			Topic:   envelope.Topic + "/response",
+			Payload: map[string]any{"ok": true},
+		})
+	})
+	defer unsubscribeRead()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- hub.Publish(context.Background(), Envelope{
+			Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+			WorkspaceID: "ws-a",
+			RunID:       "run-001",
+		})
+	}()
+
+	select {
+	case <-writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("write command did not start")
+	}
+
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- hub.Publish(context.Background(), Envelope{
+			Topic:       runevents.TopicRunCommandListStepsByRun,
+			WorkspaceID: "ws-a",
+			RunID:       "run-001",
+		})
+	}()
+
+	select {
+	case err := <-readDone:
+		response, ok := ResponseEnvelope(err)
+		if !ok {
+			t.Fatalf("read err = %v, want response envelope", err)
+		}
+		if response.Payload["ok"] != true {
+			t.Fatalf("read response = %+v, want ok payload", response)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("read command blocked behind active run write lane")
+	}
+
+	close(releaseWrite)
+	select {
+	case err := <-writeDone:
+		if _, ok := ResponseEnvelope(err); err != nil && !ok {
+			t.Fatalf("write command returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("write command did not finish")
 	}
 }
 
@@ -324,8 +460,8 @@ func TestMagicHubSupportsSubscribeWorkorch(t *testing.T) {
 	var calls int
 	unsubscribers := SubscribeWorkorch(hub, func(_ context.Context, event WorkorchEvent) error {
 		calls++
-		if event.Topic() != TopicRunStateChanged {
-			t.Fatalf("topic = %s, want %s", event.Topic(), TopicRunStateChanged)
+		if event.Topic() != runevents.TopicRunStateChanged {
+			t.Fatalf("topic = %s, want %s", event.Topic(), runevents.TopicRunStateChanged)
 		}
 		return nil
 	})
@@ -339,7 +475,7 @@ func TestMagicHubSupportsSubscribeWorkorch(t *testing.T) {
 
 	if err := hub.Publish(context.Background(), Envelope{
 		Version: WorkorchEventVersion,
-		Topic:   TopicRunStateChanged,
+		Topic:   runevents.TopicRunStateChanged,
 		RunID:   "run-1",
 		Payload: RunPayload("", "", "running", "", "", ""),
 	}); err != nil {
@@ -356,18 +492,18 @@ func TestMagicHubDeliversSameTopicToMultipleSubscribers(t *testing.T) {
 
 	var firstCalls int
 	var secondCalls int
-	unsubscribeFirst := hub.Subscribe(TopicRunStateChanged, func(_ context.Context, _ Envelope) error {
+	unsubscribeFirst := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, _ Envelope) error {
 		firstCalls++
 		return nil
 	})
 	defer unsubscribeFirst()
-	unsubscribeSecond := hub.Subscribe(TopicRunStateChanged, func(_ context.Context, _ Envelope) error {
+	unsubscribeSecond := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, _ Envelope) error {
 		secondCalls++
 		return nil
 	})
 	defer unsubscribeSecond()
 
-	if err := hub.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged}); err != nil {
+	if err := hub.Publish(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged}); err != nil {
 		t.Fatalf("publish event: %v", err)
 	}
 	if firstCalls != 1 || secondCalls != 1 {
@@ -383,17 +519,17 @@ func TestMagicHubPublishesAcrossWrappersSharingSameUnderlyingHub(t *testing.T) {
 	subscriber := NewMagicHubWithHubOwner(rawHub, "test/subscriber")
 
 	var received Envelope
-	unsubscribe := subscriber.Subscribe(TopicWorkspaceCreated, func(_ context.Context, envelope Envelope) error {
+	unsubscribe := subscriber.Subscribe(workspaceevents.TopicWorkspaceCreated, func(_ context.Context, envelope Envelope) error {
 		received = envelope
 		return nil
 	})
 	defer unsubscribe()
 
-	if err := publisher.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+	if err := publisher.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated}); err != nil {
 		t.Fatalf("publish across wrappers returned error: %v", err)
 	}
-	if received.Topic != TopicWorkspaceCreated {
-		t.Fatalf("received topic = %s, want %s", received.Topic, TopicWorkspaceCreated)
+	if received.Topic != workspaceevents.TopicWorkspaceCreated {
+		t.Fatalf("received topic = %s, want %s", received.Topic, workspaceevents.TopicWorkspaceCreated)
 	}
 }
 
@@ -404,10 +540,10 @@ func TestMagicHubRevisionIsSharedAcrossWrappers(t *testing.T) {
 	first := NewMagicHubWithHubOwner(rawHub, "test/revision-first")
 	second := NewMagicHubWithHubOwner(rawHub, "test/revision-second")
 
-	if err := first.Publish(context.Background(), Envelope{Topic: TopicWorkspaceStateChanged, WorkspaceID: "ws-shared"}); err != nil {
+	if err := first.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceStateChanged, WorkspaceID: "ws-shared"}); err != nil {
 		t.Fatalf("publish first wrapper event: %v", err)
 	}
-	if err := second.Publish(context.Background(), Envelope{Topic: TopicRunStateChanged, WorkspaceID: "ws-shared", RunID: "run-shared"}); err != nil {
+	if err := second.Publish(context.Background(), Envelope{Topic: runevents.TopicRunStateChanged, WorkspaceID: "ws-shared", RunID: "run-shared"}); err != nil {
 		t.Fatalf("publish second wrapper event: %v", err)
 	}
 
@@ -431,18 +567,18 @@ func TestMagicHubDeliversSameTopicAcrossMultipleWrappers(t *testing.T) {
 
 	var firstCalls int
 	var secondCalls int
-	unsubscribeFirst := first.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+	unsubscribeFirst := first.Subscribe(workspaceevents.TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
 		firstCalls++
 		return nil
 	})
 	defer unsubscribeFirst()
-	unsubscribeSecond := second.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+	unsubscribeSecond := second.Subscribe(workspaceevents.TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
 		secondCalls++
 		return nil
 	})
 	defer unsubscribeSecond()
 
-	if err := publisher.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+	if err := publisher.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated}); err != nil {
 		t.Fatalf("publish across wrappers returned error: %v", err)
 	}
 	if firstCalls != 1 || secondCalls != 1 {
@@ -470,7 +606,7 @@ func TestMagicHubWildcardSubscriptionsAreWrapperLocal(t *testing.T) {
 	})
 	defer unsubscribeSecond()
 
-	if err := first.Publish(context.Background(), Envelope{Topic: TopicWorkspaceCreated}); err != nil {
+	if err := first.Publish(context.Background(), Envelope{Topic: workspaceevents.TopicWorkspaceCreated}); err != nil {
 		t.Fatalf("publish local wildcard returned error: %v", err)
 	}
 	if firstCalls != 1 || secondCalls != 0 {
@@ -482,12 +618,12 @@ func TestMagicHubObserverIDUsesStableOwnerName(t *testing.T) {
 	hub := NewMagicHubWithOwner("workorchd/http")
 	defer hub.Terminate(context.Background())
 
-	unsubscribe := hub.Subscribe(TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
+	unsubscribe := hub.Subscribe(workspaceevents.TopicWorkspaceCreated, func(_ context.Context, _ Envelope) error {
 		return nil
 	})
 	defer unsubscribe()
 
-	observer := hub.observers[TopicWorkspaceCreated]
+	observer := hub.observers[workspaceevents.TopicWorkspaceCreated]
 	if observer == nil {
 		t.Fatal("workspace observer was not registered")
 	}

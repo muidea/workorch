@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -52,8 +54,8 @@ func (m *Module) Start() error {
 	if err := m.executor.Run(); err != nil {
 		return err
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicLLMCommandCompleteProvider, m.handleProviderCompleteCommand))
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicLLMCommandGenerateEmbedding, m.handleGenerateEmbeddingCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(llmevents.TopicLLMCommandCompleteProvider, m.handleProviderCompleteCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(llmevents.TopicLLMCommandGenerateEmbedding, m.handleGenerateEmbeddingCommand))
 	return nil
 }
 

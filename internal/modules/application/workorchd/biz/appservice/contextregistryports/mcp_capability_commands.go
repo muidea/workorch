@@ -4,13 +4,15 @@ import (
 	"context"
 	"strings"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func CreateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandCreateCapability, "mcp_capability", cmd.ID, map[string]any{
 		events.PayloadKeyCommand: mcpCapabilityCommandFromView(cmd),
 	})
 	if err != nil {
@@ -20,7 +22,7 @@ func CreateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistr
 }
 
 func UpdateMCPCapability(ctx context.Context, hub events.Hub, cmd contextregistrycore.MCPCapability) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandUpdateCapability, "mcp_capability", cmd.ID, map[string]any{
 		events.PayloadKeyCommand: mcpCapabilityCommandFromView(cmd),
 	})
 	if err != nil {
@@ -43,7 +45,7 @@ func UpdateMCPCapabilityByID(ctx context.Context, hub events.Hub, capabilityID s
 }
 
 func ReadMCPCapability(ctx context.Context, hub events.Hub, capabilityID string) (contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandGetCapability, "mcp_capability", capabilityID, map[string]any{
 		events.PayloadKeyCapabilityID: capabilityID,
 	})
 	if err != nil {
@@ -53,7 +55,7 @@ func ReadMCPCapability(ctx context.Context, hub events.Hub, capabilityID string)
 }
 
 func ListMCPCapabilities(ctx context.Context, hub events.Hub, query contextregistrycore.MCPCapabilityQuery) ([]contextregistrycore.MCPCapability, error) {
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicMCPCommandListCapabilities, "mcp_capability", "all", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, mcpevents.TopicMCPCommandListCapabilities, "mcp_capability", "all", map[string]any{
 		events.PayloadKeyCapabilityQuery: mcpCapabilityQueryFromView(query),
 	})
 	if err != nil {

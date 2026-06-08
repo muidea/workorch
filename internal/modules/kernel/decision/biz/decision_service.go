@@ -8,6 +8,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisioncontracts "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/contracts"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionModel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -51,7 +52,7 @@ func (s *Service) CreateTicket(ctx context.Context, cmd decisioncontracts.Create
 	}
 	return s.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicTicketCreated,
+		Topic:        decisionevents.TopicTicketCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "decision_ticket",
 		SubjectID:    string(item.ID),
@@ -138,7 +139,7 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	}
 	if err := s.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicTicketResolved,
+		Topic:        decisionevents.TopicTicketResolved,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "decision_ticket",
 		SubjectID:    string(ticket.ID),

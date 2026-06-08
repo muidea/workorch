@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -12,7 +14,7 @@ func ListApprovalsByOwnerCommand(ctx context.Context, hub events.Hub) ([]*approv
 	if hub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicApprovalCommandList, "approval", "all", "", "", map[string]any{})
+	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandList, "approval", "all", "", "", map[string]any{})
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +36,7 @@ func ListApprovalsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	if workspaceID != "" {
 		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicApprovalCommandListByRun, "run", string(runID), workspaceID, runID, payload)
+	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandListByRun, "run", string(runID), workspaceID, runID, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +51,7 @@ func ListApprovalsByWorkspaceOwnerCommand(ctx context.Context, hub events.Hub, w
 	if hub == nil || workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {

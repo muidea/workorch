@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	memorycommon "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/common"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 const runSummaryDoDGateVersionTag = "dod_gate_version:v2"
@@ -169,9 +169,9 @@ func (r *resultSubsystem) recordSkillFeedbackMemoryFromValidatedDoDAssessment(
 		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryUpdated, existing)
 	}
-	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryCreated, item)
 }
 
 func (r *resultSubsystem) recordRunSummaryMemoryFromValidatedDoDAssessment(
@@ -225,9 +225,9 @@ func (r *resultSubsystem) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryUpdated, existing)
 	}
-	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryCreated, item)
 }
 
 func (r *resultSubsystem) recordValidationCommandMemoriesFromValidatedDoDAssessment(
@@ -431,7 +431,7 @@ func (r *resultSubsystem) upsertRunMemoryItem(ctx context.Context, item *memorym
 		if err := r.evidence.MemoryItems.Update(ctx, existing); err != nil {
 			return err
 		}
-		return r.publishMemoryChanged(ctx, events.TopicMemoryUpdated, existing)
+		return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryUpdated, existing)
 	}
-	return r.publishMemoryChanged(ctx, events.TopicMemoryCreated, item)
+	return r.publishMemoryChanged(ctx, memoryevents.TopicMemoryCreated, item)
 }

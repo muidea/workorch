@@ -3,6 +3,8 @@ package contextregistryports
 import (
 	"context"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -19,35 +21,35 @@ func PublishMemoryItem(ctx context.Context, hub events.Hub, topic string, item *
 }
 
 func CreateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
-	if err := PublishMemoryItem(ctx, hub, events.TopicMemoryCommandCreate, item); err != nil {
+	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandCreate, item); err != nil {
 		return nil, err
 	}
 	created, err := ReadMemoryItem(ctx, hub, string(item.ID))
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, hub, events.TopicMemoryCreated, created); err != nil {
+	if err := PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryCreated, created); err != nil {
 		return nil, err
 	}
 	return created, nil
 }
 
 func UpdateMemoryItem(ctx context.Context, hub events.Hub, item *memorymodel.MemoryItem) (*memorymodel.MemoryItem, error) {
-	if err := PublishMemoryItem(ctx, hub, events.TopicMemoryCommandUpdate, item); err != nil {
+	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandUpdate, item); err != nil {
 		return nil, err
 	}
 	updated, err := ReadMemoryItem(ctx, hub, string(item.ID))
 	if err != nil {
 		return nil, err
 	}
-	if err := PublishMemoryEvent(ctx, hub, events.TopicMemoryUpdated, updated); err != nil {
+	if err := PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryUpdated, updated); err != nil {
 		return nil, err
 	}
 	return updated, nil
 }
 
 func DeleteMemoryItem(ctx context.Context, hub events.Hub, memoryID string) error {
-	return PublishCommand(ctx, hub, events.TopicMemoryCommandDelete, "memory", memoryID, map[string]any{
+	return PublishCommand(ctx, hub, memoryevents.TopicMemoryCommandDelete, "memory", memoryID, map[string]any{
 		events.PayloadKeyCommand: memorycontracts.DeleteMemoryItemCommand{MemoryID: common.MemoryID(memoryID)},
 	})
 }

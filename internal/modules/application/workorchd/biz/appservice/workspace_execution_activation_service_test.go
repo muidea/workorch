@@ -15,6 +15,13 @@ import (
 	"testing"
 	"time"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
@@ -589,7 +596,7 @@ func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Hand
 
 func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
 	hub := events.NewMemoryHub()
-	err := activationports.PublishRunCommand(context.Background(), hub, events.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
+	err := activationports.PublishRunCommand(context.Background(), hub, runevents.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
 		events.PayloadKeyRunID: "run-activation",
 	})
 	if err == nil {
@@ -1833,15 +1840,15 @@ func TestActivationContextUsesSelectedGoalAndDoDWithoutReload(t *testing.T) {
 	if _, err := buildWorkspaceExecutionContextWithDefinitions(ctx, borrowed, workspace, selectedGoal, selectedDoD, ActivateWorkspaceExecutionCommand{}); err != nil {
 		t.Fatalf("buildWorkspaceExecutionContextWithDefinitions: %v", err)
 	}
-	if countingHub.Count(events.TopicWorkspaceCommandListGoalsByWS) != 2 || countingHub.Count(events.TopicWorkspaceCommandListDoDsByWS) != 2 {
+	if countingHub.Count(workspaceevents.TopicWorkspaceCommandListGoalsByWS) != 2 || countingHub.Count(workspaceevents.TopicWorkspaceCommandListDoDsByWS) != 2 {
 		t.Fatalf("definition list commands goals=%d dods=%d, want selection plus effective definition lists",
-			countingHub.Count(events.TopicWorkspaceCommandListGoalsByWS),
-			countingHub.Count(events.TopicWorkspaceCommandListDoDsByWS))
+			countingHub.Count(workspaceevents.TopicWorkspaceCommandListGoalsByWS),
+			countingHub.Count(workspaceevents.TopicWorkspaceCommandListDoDsByWS))
 	}
-	if countingHub.Count(events.TopicWorkspaceCommandGetGoal) != 0 || countingHub.Count(events.TopicWorkspaceCommandGetDoD) != 0 {
+	if countingHub.Count(workspaceevents.TopicWorkspaceCommandGetGoal) != 0 || countingHub.Count(workspaceevents.TopicWorkspaceCommandGetDoD) != 0 {
 		t.Fatalf("definition get commands goals=%d dods=%d, want no definition reload",
-			countingHub.Count(events.TopicWorkspaceCommandGetGoal),
-			countingHub.Count(events.TopicWorkspaceCommandGetDoD))
+			countingHub.Count(workspaceevents.TopicWorkspaceCommandGetGoal),
+			countingHub.Count(workspaceevents.TopicWorkspaceCommandGetDoD))
 	}
 }
 
@@ -1976,8 +1983,8 @@ func TestActivationDefinitionSelectionReadsGoalAndDoDConcurrently(t *testing.T) 
 		started: started,
 		release: release,
 		labels: map[string]string{
-			events.TopicWorkspaceCommandListGoalsByWS: "goal",
-			events.TopicWorkspaceCommandListDoDsByWS:  "dod",
+			workspaceevents.TopicWorkspaceCommandListGoalsByWS: "goal",
+			workspaceevents.TopicWorkspaceCommandListDoDsByWS:  "dod",
 		},
 	}
 	errCh := make(chan error, 1)
@@ -2055,8 +2062,8 @@ func TestActivationResponseReusesRunSnapshotRun(t *testing.T) {
 	if item.Run.ID == "" || item.Run.ID != item.Snapshot.TaskProgress.RunID {
 		t.Fatalf("activation run=%+v taskProgress=%+v, want response run from run snapshot", item.Run, item.Snapshot.TaskProgress)
 	}
-	if countingHub.Count(events.TopicRunCommandGet) != 1 {
-		t.Fatalf("run get commands = %d, want RunSnapshot read only", countingHub.Count(events.TopicRunCommandGet))
+	if countingHub.Count(runevents.TopicRunCommandGet) != 1 {
+		t.Fatalf("run get commands = %d, want RunSnapshot read only", countingHub.Count(runevents.TopicRunCommandGet))
 	}
 }
 
@@ -2092,7 +2099,7 @@ func TestActivateWorkspaceExecutionCreatesRunWithInlineCompressedContext(t *test
 	}
 	countingRuns := &countingRunRepository{base: exports.Repositories.Runs}
 	var createdRuns []*runmodel.Run
-	unsubscribe := exports.Infrastructure.EventHub.Subscribe(events.TopicRunCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribe := exports.Infrastructure.EventHub.Subscribe(runevents.TopicRunCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runmodule.CreateRunCommand)
 		if ok {
 			createdRuns = append(createdRuns, &runmodel.Run{
@@ -2255,9 +2262,9 @@ func TestBuildWorkspaceExecutionContextStartsIndependentReadsConcurrently(t *tes
 		started: started,
 		release: release,
 		labels: map[string]string{
-			events.TopicSoulCommandGet:                 "soul",
-			events.TopicMemoryCommandListByWorkspace:   "memory",
-			events.TopicDecisionCommandListTicketsByWS: "governance",
+			soulevents.TopicSoulCommandGet:                     "soul",
+			memoryevents.TopicMemoryCommandListByWorkspace:     "memory",
+			decisionevents.TopicDecisionCommandListTicketsByWS: "governance",
 		},
 	}
 	borrowed, err := NewRuntimeSessionFromExports(exports)
@@ -2344,8 +2351,8 @@ func TestActivationContextReadsMCPServersAndCapabilitiesConcurrently(t *testing.
 		started: started,
 		release: release,
 		labels: map[string]string{
-			events.TopicMCPCommandGetServer:     "mcp-server",
-			events.TopicMCPCommandGetCapability: "mcp-capability",
+			mcpevents.TopicMCPCommandGetServer:     "mcp-server",
+			mcpevents.TopicMCPCommandGetCapability: "mcp-capability",
 		},
 	}
 	borrowed, err := NewRuntimeSessionFromExports(exports)
@@ -3434,7 +3441,7 @@ func TestSelectedMemoryItemsFiltersProviderRetryProcessMemory(t *testing.T) {
 		},
 	}}
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
 		wsID := common.WorkspaceID("")
 		if raw, _ := envelope.Payload[events.PayloadKeyWorkspaceID].(string); raw != "" {
 			wsID = common.WorkspaceID(raw)

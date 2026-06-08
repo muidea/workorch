@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	approvalModel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -441,14 +443,14 @@ func TestService_CreateAndResolveApproval_PublishesEvents(t *testing.T) {
 	if len(published) != 2 {
 		t.Fatalf("len(published) = %d, want 2", len(published))
 	}
-	if published[0].Topic != events.TopicApprovalCreated {
-		t.Fatalf("first topic = %s, want %s", published[0].Topic, events.TopicApprovalCreated)
+	if published[0].Topic != approvalevents.TopicApprovalCreated {
+		t.Fatalf("first topic = %s, want %s", published[0].Topic, approvalevents.TopicApprovalCreated)
 	}
 	if published[0].Version != events.WorkorchEventVersion || published[1].Version != events.WorkorchEventVersion {
 		t.Fatalf("event versions = [%s %s], want both %s", published[0].Version, published[1].Version, events.WorkorchEventVersion)
 	}
-	if published[1].Topic != events.TopicApprovalResolved {
-		t.Fatalf("second topic = %s, want %s", published[1].Topic, events.TopicApprovalResolved)
+	if published[1].Topic != approvalevents.TopicApprovalResolved {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, approvalevents.TopicApprovalResolved)
 	}
 	if published[1].Payload[events.PayloadKeyState] != string(common.ApprovalStateApproved) {
 		t.Fatalf("resolved state payload = %v, want approved", published[1].Payload[events.PayloadKeyState])

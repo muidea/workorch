@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+
 	resultcontracts "github.com/muidea/workorch/internal/modules/kernel/result/pkg/contracts"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -13,7 +15,7 @@ func ReadResultByOwnerCommand(ctx context.Context, hub events.Hub, resultID comm
 	if hub == nil || resultID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicResultCommandGet, "result", string(resultID), "", "", map[string]any{
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandGet, "result", string(resultID), "", "", map[string]any{
 		events.PayloadKeyCommand: resultcontracts.GetResultCommand{ResultID: resultID},
 	})
 	if err != nil {

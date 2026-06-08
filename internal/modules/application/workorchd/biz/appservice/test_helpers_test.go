@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
@@ -82,7 +86,7 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *RuntimeSessi
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
 		return Workspace{}, err
 	}
-	if err := ownercommandports.Publish(ctx, hub, events.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
+	if err := ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandCreate, "workspace", string(id), id, "", map[string]any{
 		events.PayloadKeyWorkspaceID:          string(id),
 		events.PayloadKeyTitle:                title,
 		events.PayloadKeyDescription:          description,
@@ -118,7 +122,7 @@ func publishAppserviceTestCommand(ctx context.Context, hub events.Hub, envelope 
 
 func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.CreateServerCommand) error {
 	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicMCPCommandCreateServer,
+		Topic:        mcpevents.TopicMCPCommandCreateServer,
 		SourceModule: "workorchd/appservice/test",
 		SubjectType:  "mcp_server",
 		SubjectID:    string(cmd.ServerID),
@@ -131,7 +135,7 @@ func createTestMCPServerWithExports(ctx context.Context, exports bootstrap.Expor
 
 func updateTestMCPCapabilityWithExports(ctx context.Context, exports bootstrap.Exports, cmd mcpservice.UpdateCapabilityCommand) error {
 	return publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicMCPCommandUpdateCapability,
+		Topic:        mcpevents.TopicMCPCommandUpdateCapability,
 		SourceModule: "workorchd/appservice/test",
 		SubjectType:  "mcp_capability",
 		SubjectID:    string(cmd.ID),
@@ -210,7 +214,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		t.Fatalf("Create decision step: %v", err)
 	}
 	if err := publishAppserviceTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicDecisionCommandEnsureTicket,
+		Topic:        decisionevents.TopicDecisionCommandEnsureTicket,
 		SourceModule: "workorchd/appservice/test",
 		SubjectType:  "decision_ticket",
 		SubjectID:    string(ticketID),

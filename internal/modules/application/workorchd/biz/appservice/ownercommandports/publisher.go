@@ -27,6 +27,9 @@ func PublishWithResponseFrom(ctx context.Context, source string, hub events.Hub,
 	if hub == nil || topic == "" {
 		return events.Envelope{}, common.ErrInvalidArgument
 	}
+	if err := validateOwnerWriteTopic(topic); err != nil {
+		return events.Envelope{}, err
+	}
 	if source == "" {
 		source = sourceModule
 	}
@@ -46,4 +49,12 @@ func PublishWithResponseFrom(ctx context.Context, source string, hub events.Hub,
 		return events.Envelope{}, err
 	}
 	return events.Envelope{}, common.ErrInvalidArgument
+}
+
+func validateOwnerWriteTopic(topic string) error {
+	contract, ok := events.ResolveEventHubContract(topic)
+	if !ok || contract.CommandClass != events.EventCommandClassWrite {
+		return common.ErrInvalidArgument
+	}
+	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -29,13 +31,13 @@ func PublishRunCommand(ctx context.Context, hub events.Hub, topic string, subjec
 }
 
 func SupersedeRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return PublishRunCommand(ctx, hub, events.TopicRunCommandSupersede, "run", string(runID), workspaceID, runID, map[string]any{
+	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandSupersede, "run", string(runID), workspaceID, runID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.SupersedeRunCommand{RunID: runID},
 	})
 }
 
 func CreateWorkspaceExecutionRun(ctx context.Context, hub events.Hub, runID common.RunID, workspaceID common.WorkspaceID, goalID common.GoalID, dodID common.DoDID, executionContext map[string]any, priority int) error {
-	return PublishRunCommand(ctx, hub, events.TopicRunCommandCreate, "run", string(runID), workspaceID, runID, map[string]any{
+	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandCreate, "run", string(runID), workspaceID, runID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.CreateRunCommand{
 			RunID:              runID,
 			WorkspaceID:        workspaceID,
@@ -50,13 +52,13 @@ func CreateWorkspaceExecutionRun(ctx context.Context, hub events.Hub, runID comm
 }
 
 func StartRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return PublishRunCommand(ctx, hub, events.TopicRunCommandStart, "run", string(runID), workspaceID, runID, map[string]any{
+	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandStart, "run", string(runID), workspaceID, runID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.StartRunCommand{RunID: runID},
 	})
 }
 
 func FailRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
-	return PublishRunCommand(ctx, hub, events.TopicRunCommandFail, "run", string(runID), workspaceID, runID, map[string]any{
+	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandFail, "run", string(runID), workspaceID, runID, map[string]any{
 		events.PayloadKeyCommand: runcontracts.FailRunCommand{RunID: runID, Reason: failureReason},
 	})
 }

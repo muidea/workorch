@@ -3,6 +3,12 @@ package server
 import (
 	"strings"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -15,25 +21,25 @@ func enrichSSEEnvelope(envelope events.Envelope) events.Envelope {
 		summary["revision"] = envelope.Revision
 	}
 	switch envelope.Topic {
-	case events.TopicWorkspaceStateChanged:
+	case workspaceevents.TopicWorkspaceStateChanged:
 		addSSEPayloadString(summary, "workspaceState", envelope.Payload, events.PayloadKeyState)
 		addSSEPayloadString(summary, "activeRunId", envelope.Payload, events.PayloadKeyActiveRunID)
-	case events.TopicRunCreated, events.TopicRunStateChanged:
+	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		addSSEPayloadString(summary, "runState", envelope.Payload, events.PayloadKeyState)
 		addSSEPayloadString(summary, "blockingTicketId", envelope.Payload, events.PayloadKeyBlockingTicketID)
 		addSSEPayloadString(summary, "blockingApprovalId", envelope.Payload, events.PayloadKeyBlockingApprovalID)
 		if progress := runProgressSummary(envelope); progress != "" {
 			summary["progressSummary"] = progress
 		}
-	case events.TopicTicketCreated:
+	case decisionevents.TopicTicketCreated:
 		if envelope.SubjectID != "" {
 			summary["blockingTicketId"] = envelope.SubjectID
 		}
-	case events.TopicApprovalCreated:
+	case approvalevents.TopicApprovalCreated:
 		if envelope.SubjectID != "" {
 			summary["blockingApprovalId"] = envelope.SubjectID
 		}
-	case events.TopicResultAccepted:
+	case resultevents.TopicResultAccepted:
 		addSSEPayloadString(summary, "resultState", envelope.Payload, events.PayloadKeyState)
 		addSSEPayloadString(summary, "outcomeSummary", envelope.Payload, events.PayloadKeySummary)
 	}

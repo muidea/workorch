@@ -6,6 +6,7 @@ import (
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -73,7 +74,7 @@ func (g mcpEventServerGetter) GetServer(ctx context.Context, id common.MCPServer
 		return nil, common.ErrInvalidArgument
 	}
 	err := g.hub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicMCPCommandGetServer,
+		Topic:        mcpevents.TopicMCPCommandGetServer,
 		SourceModule: ModuleID,
 		SubjectType:  "mcp_server",
 		SubjectID:    string(id),

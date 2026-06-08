@@ -3,6 +3,8 @@ package ownerreadports
 import (
 	"context"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -19,7 +21,7 @@ func ReadApprovalByOwnerCommand(ctx context.Context, hub events.Hub, approvalID 
 	if workspaceID != "" {
 		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, events.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", payload)
+	response, err := PublishCommandWithResponse(ctx, hub, approvalevents.TopicApprovalCommandGet, "approval", string(approvalID), workspaceID, "", payload)
 	if err != nil {
 		return nil, err
 	}

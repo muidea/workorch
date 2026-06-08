@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -208,7 +208,7 @@ func (p *patchSubsystem) apply(
 		if err != nil {
 			patch.State = common.PatchStateFailed
 			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
 				return errors.Join(err, publishErr)
 			}
 			return err
@@ -219,7 +219,7 @@ func (p *patchSubsystem) apply(
 		if err := applyWorkspacePatch(deliverableDirectory, request); err != nil {
 			patch.State = common.PatchStateFailed
 			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
 				return errors.Join(err, publishErr)
 			}
 			return err
@@ -228,7 +228,7 @@ func (p *patchSubsystem) apply(
 		if err != nil {
 			patch.State = common.PatchStateFailed
 			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
 				return errors.Join(err, publishErr)
 			}
 			return err
@@ -246,7 +246,7 @@ func (p *patchSubsystem) apply(
 			patch.State = common.PatchStateFailed
 			patch.AfterHash = afterHash
 			_ = p.evidence.Patches.Update(ctx, patch)
-			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchFailed, err); publishErr != nil {
+			if publishErr := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchFailed, err); publishErr != nil {
 				return errors.Join(err, publishErr)
 			}
 			return err
@@ -258,7 +258,7 @@ func (p *patchSubsystem) apply(
 		if err := p.evidence.Patches.Update(ctx, patch); err != nil {
 			return err
 		}
-		if err := p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchApplied, nil); err != nil {
+		if err := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchApplied, nil); err != nil {
 			return err
 		}
 	}
@@ -334,7 +334,7 @@ func (p *patchSubsystem) revert(
 		"afterHash":  patch.BeforeHash,
 		"approvalId": string(request.ApprovalID),
 	}
-	return p.publishChanged(ctx, run, step, toolCall, patch, events.TopicPatchReverted, nil)
+	return p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchReverted, nil)
 }
 
 func runtimePatchRevertRequestFromOutput(output map[string]any) (runtimePatchRevertRequest, bool, error) {

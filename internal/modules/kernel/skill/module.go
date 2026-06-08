@@ -6,6 +6,7 @@ import (
 	skillbiz "github.com/muidea/workorch/internal/modules/kernel/skill/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/common"
 	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
+	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	skillservice "github.com/muidea/workorch/internal/modules/kernel/skill/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -61,10 +62,10 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicSkillCommandCreate, m.handleSkillCommand),
-		m.eventHub.Subscribe(events.TopicSkillCommandGet, m.handleSkillCommand),
-		m.eventHub.Subscribe(events.TopicSkillCommandList, m.handleSkillCommand),
-		m.eventHub.Subscribe(events.TopicSkillCommandUpdate, m.handleSkillCommand),
+		m.eventHub.Subscribe(skillevents.TopicSkillCommandCreate, m.handleSkillCommand),
+		m.eventHub.Subscribe(skillevents.TopicSkillCommandGet, m.handleSkillCommand),
+		m.eventHub.Subscribe(skillevents.TopicSkillCommandList, m.handleSkillCommand),
+		m.eventHub.Subscribe(skillevents.TopicSkillCommandUpdate, m.handleSkillCommand),
 	)
 	return nil
 }
@@ -92,7 +93,7 @@ func (m *Module) handleSkillCommand(ctx context.Context, envelope events.Envelop
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicSkillCommandCreate:
+	case skillevents.TopicSkillCommandCreate:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.CreateSkillCommand)
 		if !ok {
 			var err error
@@ -109,19 +110,19 @@ func (m *Module) handleSkillCommand(ctx context.Context, envelope events.Envelop
 			return err
 		}
 		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkill: item})
-	case events.TopicSkillCommandGet:
+	case skillevents.TopicSkillCommandGet:
 		item, err := m.servicePtr.GetSkill(ctx, common.SkillID(stringPayload(envelope.Payload, events.PayloadKeySkillID)))
 		if err != nil {
 			return err
 		}
 		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkill: item})
-	case events.TopicSkillCommandList:
+	case skillevents.TopicSkillCommandList:
 		items, err := m.servicePtr.ListSkills(ctx)
 		if err != nil {
 			return err
 		}
 		return skillCommandResponse(envelope, map[string]any{events.PayloadKeySkills: items})
-	case events.TopicSkillCommandUpdate:
+	case skillevents.TopicSkillCommandUpdate:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.UpdateSkillCommand)
 		if !ok {
 			var err error

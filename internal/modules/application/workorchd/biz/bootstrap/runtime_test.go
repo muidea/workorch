@@ -9,6 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -96,7 +101,7 @@ func publishTestCommand(ctx context.Context, hub events.Hub, envelope events.Env
 
 func createTestWorkspace(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, title string, internalDirectory string) error {
 	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicWorkspaceCommandCreate,
+		Topic:        workspaceevents.TopicWorkspaceCommandCreate,
 		SourceModule: "workorch/bootstrap-test",
 		SubjectType:  "workspace",
 		SubjectID:    string(workspaceID),
@@ -112,7 +117,7 @@ func createTestWorkspace(ctx context.Context, exports Exports, workspaceID commo
 
 func createTestRun(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID) error {
 	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicRunCommandEnsure,
+		Topic:        runevents.TopicRunCommandEnsure,
 		SourceModule: "workorch/bootstrap-test",
 		SubjectType:  "run",
 		SubjectID:    string(runID),
@@ -127,7 +132,7 @@ func createTestRun(ctx context.Context, exports Exports, workspaceID common.Work
 
 func createTestApproval(ctx context.Context, exports Exports, workspaceID common.WorkspaceID, runID common.RunID, stepID common.StepID, approvalID common.ApprovalID) error {
 	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicApprovalCommandEnsure,
+		Topic:        approvalevents.TopicApprovalCommandEnsure,
 		SourceModule: "workorch/bootstrap-test",
 		SubjectType:  "approval",
 		SubjectID:    string(approvalID),
@@ -146,7 +151,7 @@ func createTestApproval(ctx context.Context, exports Exports, workspaceID common
 
 func blockTestRunOnApproval(ctx context.Context, exports Exports, runID common.RunID, approvalID common.ApprovalID) error {
 	return publishTestCommand(ctx, exports.Infrastructure.EventHub, events.Envelope{
-		Topic:        events.TopicOrchestratorCommandBlockApproval,
+		Topic:        orchestratorevents.TopicOrchestratorCommandBlockApproval,
 		SourceModule: "workorch/bootstrap-test",
 		SubjectType:  "run",
 		SubjectID:    string(runID),
@@ -296,7 +301,7 @@ func TestNewWithBackendRegistersOrchestratorCommandHandlers(t *testing.T) {
 		t.Fatalf("BlockOnApproval: %v", err)
 	}
 	err := exports.Infrastructure.EventHub.Publish(context.Background(), events.Envelope{
-		Topic: events.TopicOrchestratorCommandBlockApproval,
+		Topic: orchestratorevents.TopicOrchestratorCommandBlockApproval,
 		Payload: map[string]any{
 			events.PayloadKeyRunID:              "run-missing",
 			events.PayloadKeyBlockingApprovalID: "approval-missing",

@@ -3,8 +3,9 @@ package readmodelcore
 import (
 	"strings"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -36,7 +37,7 @@ func RunEventRecordRepositoryQuery(runID common.RunID, limit int) repository.Eve
 
 func RunLLMUsageEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
 	query := RunEventRecordRepositoryQuery(runID, limit)
-	query.Topic = events.TopicRunLLMUsageRecorded
+	query.Topic = runevents.TopicRunLLMUsageRecorded
 	return query
 }
 
@@ -49,6 +50,6 @@ func WorkspaceEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit i
 
 func WorkspaceLLMUsageEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit int) repository.EventRecordQuery {
 	query := WorkspaceEventRecordRepositoryQuery(workspaceID, limit)
-	query.Topic = events.TopicRunLLMUsageRecorded
+	query.Topic = runevents.TopicRunLLMUsageRecorded
 	return query
 }

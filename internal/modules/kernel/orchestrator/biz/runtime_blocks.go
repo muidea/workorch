@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -584,7 +586,7 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicTicketCreated,
+		Topic:        decisionevents.TopicTicketCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "decision_ticket",
 		SubjectID:    string(ticket.ID),
@@ -629,7 +631,7 @@ func (o *RuntimeOrchestrator) createApproval(
 	}
 	return o.eventHub.Publish(ctx, events.Envelope{
 		Version:      events.WorkorchEventVersion,
-		Topic:        events.TopicApprovalCreated,
+		Topic:        approvalevents.TopicApprovalCreated,
 		SourceModule: modulecommon.ModuleID,
 		SubjectType:  "approval",
 		SubjectID:    string(approval.ID),

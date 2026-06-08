@@ -5,6 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
@@ -59,7 +64,7 @@ func TestDeleteSoulRejectsMissingIDBeforePublishing(t *testing.T) {
 func TestDeleteSoulPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicSoulCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(soulevents.TopicSoulCommandDelete, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 
@@ -86,7 +91,7 @@ func TestDeleteSoulPublishesCommandPayload(t *testing.T) {
 func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicMemoryCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(memoryevents.TopicMemoryCommandDelete, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(envelope)
 	})
 
@@ -114,7 +119,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 
-	hub.Subscribe(events.TopicSoulCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(soulevents.TopicSoulCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.CreateSoulCommand)
 		if !ok {
 			t.Fatalf("soul command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
@@ -129,7 +134,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 			events.PayloadKeySoul: &soulmodel.Soul{ID: cmd.SoulID, Name: cmd.Name, SoulMD: cmd.SoulMD},
 		}})
 	})
-	hub.Subscribe(events.TopicSkillCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(skillevents.TopicSkillCommandCreate, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(skillcontracts.CreateSkillCommand)
 		if !ok {
 			t.Fatalf("skill command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
@@ -144,7 +149,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 			events.PayloadKeySkill: &skillmodel.Skill{ID: cmd.SkillID, Name: cmd.Name, Instruction: cmd.Instruction},
 		}})
 	})
-	hub.Subscribe(events.TopicMCPCommandCreateServer, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(mcpevents.TopicMCPCommandCreateServer, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateServerCommand)
 		if !ok {
 			t.Fatalf("server command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
@@ -159,7 +164,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 			events.PayloadKeyServer: &mcpmodel.Server{ID: cmd.ServerID, Name: cmd.Name, Command: cmd.Command, Env: cmd.Env},
 		}})
 	})
-	hub.Subscribe(events.TopicMCPCommandCreateCapability, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(mcpevents.TopicMCPCommandCreateCapability, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(mcpcontracts.CreateCapabilityCommand)
 		if !ok {
 			t.Fatalf("capability command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
@@ -174,7 +179,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 			events.PayloadKeyCapability: &mcpmodel.Capability{ID: cmd.ID, ServerID: cmd.ServerID, Name: cmd.Name, Schema: cmd.Schema},
 		}})
 	})
-	hub.Subscribe(events.TopicMCPCommandListCapabilities, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(mcpevents.TopicMCPCommandListCapabilities, func(_ context.Context, envelope events.Envelope) error {
 		query, ok := envelope.Payload[events.PayloadKeyCapabilityQuery].(mcpcontracts.CapabilityQuery)
 		if !ok {
 			t.Fatalf("capability query payload type = %T", envelope.Payload[events.PayloadKeyCapabilityQuery])
@@ -186,7 +191,7 @@ func TestContextRegistryWritesPublishContractCommands(t *testing.T) {
 			events.PayloadKeyCapabilities: []*mcpmodel.Capability{{ID: "cap-contract", ServerID: query.ServerID, Kind: query.Kind}},
 		}})
 	})
-	hub.Subscribe(events.TopicSoulCommandValidateCapability, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(soulevents.TopicSoulCommandValidateCapability, func(_ context.Context, envelope events.Envelope) error {
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(soulcontracts.ValidateCapabilitySelectionCommand)
 		if !ok {
 			t.Fatalf("validate command payload type = %T", envelope.Payload[events.PayloadKeyCommand])
@@ -221,7 +226,7 @@ func TestMCPServerViewAndDerivedEntriesUseOwnerEventHubCommand(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	callCount := 0
-	hub.Subscribe(events.TopicMCPCommandGetServer, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(mcpevents.TopicMCPCommandGetServer, func(_ context.Context, envelope events.Envelope) error {
 		callCount++
 		if envelope.SourceModule != sourceModule {
 			t.Fatalf("source module = %q, want %q", envelope.SourceModule, sourceModule)
@@ -305,7 +310,7 @@ func (f fakeSkillHubCatalog) ListWorkspaceSkills(_ context.Context, workspaceID 
 func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicSkillCommandGet, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(skillevents.TopicSkillCommandGet, func(_ context.Context, envelope events.Envelope) error {
 		if got := envelope.Payload[events.PayloadKeySkillID]; got != "skillhub:workspace:ws-001:workspace-skill" {
 			t.Fatalf("skill id payload = %v", got)
 		}
@@ -330,7 +335,7 @@ func TestReadSkillViewFallsBackToSkillHubWhenRepositorySkillMissing(t *testing.T
 func TestListSkillsViewMergesRepositoryAndSkillHubSkills(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
-	hub.Subscribe(events.TopicSkillCommandList, func(_ context.Context, envelope events.Envelope) error {
+	hub.Subscribe(skillevents.TopicSkillCommandList, func(_ context.Context, envelope events.Envelope) error {
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{

@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	webcommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
@@ -993,7 +996,7 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 	}
 	publishedBeforeRelease := hub.Published()
 	for _, item := range publishedBeforeRelease {
-		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
 			t.Fatalf("published completed run event before terminal writes were released: %+v", publishedBeforeRelease)
 		}
 	}
@@ -1010,10 +1013,10 @@ func TestRuntimeOrchestrator_FinalRunAndWorkspaceCompletionWritesConcurrently(t 
 	var completedRunIndex = -1
 	var completedWorkspaceIndex = -1
 	for idx, item := range published {
-		if item.Topic == events.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
+		if item.Topic == runevents.TopicRunStateChanged && item.Payload[events.PayloadKeyState] == string(common.RunStateCompleted) {
 			completedRunIndex = idx
 		}
-		if item.Topic == events.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateCompleted) {
+		if item.Topic == workspaceevents.TopicWorkspaceStateChanged && item.Payload[events.PayloadKeyState] == string(common.WorkspaceStateCompleted) {
 			completedWorkspaceIndex = idx
 		}
 	}

@@ -3,6 +3,8 @@ package runports
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -65,7 +67,7 @@ func WorkspaceDefinitionContextPatch(ctx context.Context, hub events.Hub, item *
 	if err != nil {
 		return nil, err
 	}
-	goalRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicGoalDefined)
-	doDRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, events.TopicDoDDefined)
+	goalRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, workspaceevents.TopicGoalDefined)
+	doDRevisions := activationcore.WorkspaceDefinitionRevisionContexts(ctx, eventRecords, workspace.ID, workspaceevents.TopicDoDDefined)
 	return workspaceDefinitionContextPatchFromDefinitions(effectiveGoal, workspaceGoals, goalRevisions, effectiveDoD, workspaceDoDs, doDRevisions), nil
 }

@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -18,7 +24,7 @@ type eventTicketReader struct {
 }
 
 func (r eventTicketReader) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicDecisionCommandGetTicket, "decision_ticket", string(id), "", "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetTicket, "decision_ticket", string(id), "", "", map[string]any{
 		events.PayloadKeyBlockingTicketID: string(id),
 	})
 	if err != nil {
@@ -36,7 +42,7 @@ type eventResolutionReader struct {
 }
 
 func (r eventResolutionReader) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decisionmodel.Resolution, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), "", "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, decisionevents.TopicDecisionCommandGetResolution, "decision_ticket", string(ticketID), "", "", map[string]any{
 		events.PayloadKeyBlockingTicketID: string(ticketID),
 	})
 	if err != nil {
@@ -54,7 +60,7 @@ type eventApprovalReader struct {
 }
 
 func (r eventApprovalReader) Get(ctx context.Context, id common.ApprovalID) (*approvalmodel.Approval, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicApprovalCommandGet, "approval", string(id), "", "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, approvalevents.TopicApprovalCommandGet, "approval", string(id), "", "", map[string]any{
 		events.PayloadKeyApprovalID: string(id),
 	})
 	if err != nil {
@@ -72,7 +78,7 @@ type eventRunReader struct {
 }
 
 func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
 		events.PayloadKeyRunID: string(id),
 	})
 	if err != nil {
@@ -86,7 +92,7 @@ func (r eventRunReader) Get(ctx context.Context, id common.RunID) (*runmodel.Run
 }
 
 func (r eventRunReader) List(ctx context.Context) ([]*runmodel.Run, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicRunCommandList, "run", "all", "", "", nil)
+	response, err := publishGovernanceReadCommand(ctx, r.hub, runevents.TopicRunCommandList, "run", "all", "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +108,7 @@ type eventWorkspaceReader struct {
 }
 
 func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*workspacemodel.Goal, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicWorkspaceCommandGetGoal, "goal", string(id), "", "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(id), "", "", map[string]any{
 		events.PayloadKeyGoalID: string(id),
 	})
 	if err != nil {
@@ -116,7 +122,7 @@ func (r eventWorkspaceReader) GetGoal(ctx context.Context, id common.GoalID) (*w
 }
 
 func (r eventWorkspaceReader) GetDoD(ctx context.Context, id common.DoDID) (*workspacemodel.DoD, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicWorkspaceCommandGetDoD, "dod", string(id), "", "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(id), "", "", map[string]any{
 		events.PayloadKeyDoDID: string(id),
 	})
 	if err != nil {
@@ -134,7 +140,7 @@ type eventMemoryReader struct {
 }
 
 func (r eventMemoryReader) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
-	response, err := publishGovernanceReadCommand(ctx, r.hub, events.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
+	response, err := publishGovernanceReadCommand(ctx, r.hub, memoryevents.TopicMemoryCommandListByWorkspace, "workspace", string(workspaceID), workspaceID, "", map[string]any{
 		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {

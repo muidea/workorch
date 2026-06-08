@@ -109,7 +109,7 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 		ctx,
 		cloneEnvelope(envelope),
 	)
-	ev.BindLaneKey(workorchEventLaneKey(envelope))
+	ev.BindLaneKey(EventHubLaneKey(envelope))
 	result := h.hub.Send(ev)
 	if result == nil {
 		return nil
@@ -154,7 +154,7 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 		ctx,
 		cloneEnvelope(envelope),
 	)
-	ev.BindLaneKey(workorchEventLaneKey(envelope))
+	ev.BindLaneKey(EventHubLaneKey(envelope))
 	h.hub.Post(ev)
 	return nil
 }
@@ -299,34 +299,6 @@ func (h *MagicHub) dispatchLocalWildcard(ctx context.Context, envelope Envelope)
 		}
 	}
 	return nil
-}
-
-func workorchEventLaneKey(envelope Envelope) string {
-	topic := strings.TrimSpace(envelope.Topic)
-	if isFacadeTopicLane(topic) {
-		return "topic/" + topic
-	}
-	runID := strings.TrimSpace(envelope.RunID)
-	if runID != "" {
-		return "run/" + runID
-	}
-	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
-	if workspaceID != "" {
-		return "workspace/" + workspaceID
-	}
-	if topic != "" {
-		return "topic/" + topic
-	}
-	return "topic/unknown"
-}
-
-func isFacadeTopicLane(topic string) bool {
-	switch topic {
-	case TopicCLICommand, TopicCLIResult, TopicCLIProgress:
-		return true
-	default:
-		return false
-	}
 }
 
 func (h *MagicHub) Published() []Envelope {

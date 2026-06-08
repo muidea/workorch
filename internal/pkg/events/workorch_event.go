@@ -3,6 +3,15 @@ package events
 import (
 	"context"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	resultevents "github.com/muidea/workorch/internal/modules/kernel/result/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -95,43 +104,43 @@ type AutoGovernanceEvent struct {
 }
 
 var workorchTopics = []string{
-	TopicWorkspaceCreated,
-	TopicWorkspaceStateChanged,
-	TopicWorkspaceDeleted,
-	TopicGoalDefined,
-	TopicDoDDefined,
-	TopicRunCreated,
-	TopicRunStateChanged,
-	TopicRunLLMStreamProgress,
-	TopicRunLLMUsageRecorded,
-	TopicStepDispatched,
-	TopicStepStateChanged,
-	TopicTicketCreated,
-	TopicTicketResolved,
-	TopicApprovalCreated,
-	TopicApprovalResolved,
-	TopicResultAccepted,
-	TopicResultRejected,
-	TopicResultSuperseded,
-	TopicArtifactCreated,
-	TopicPatchPreviewed,
-	TopicPatchApplied,
-	TopicPatchFailed,
-	TopicPatchReverted,
-	TopicArtifactContinuationCreated,
-	TopicArtifactContinuationChunkRecorded,
-	TopicArtifactContinuationChunkRejected,
-	TopicArtifactContinuationAssembled,
-	TopicArtifactContinuationApplied,
-	TopicArtifactContinuationFailed,
-	TopicMemoryCreated,
-	TopicMemoryUpdated,
-	TopicMemoryDeleted,
-	TopicMemoryRecallRecorded,
-	TopicGovernanceAutoEvaluated,
-	TopicGovernanceAutoResolved,
-	TopicGovernanceAutoEscalated,
-	TopicGovernanceAutoBlocked,
+	workspaceevents.TopicWorkspaceCreated,
+	workspaceevents.TopicWorkspaceStateChanged,
+	workspaceevents.TopicWorkspaceDeleted,
+	workspaceevents.TopicGoalDefined,
+	workspaceevents.TopicDoDDefined,
+	runevents.TopicRunCreated,
+	runevents.TopicRunStateChanged,
+	runevents.TopicRunLLMStreamProgress,
+	runevents.TopicRunLLMUsageRecorded,
+	runevents.TopicStepDispatched,
+	runevents.TopicStepStateChanged,
+	decisionevents.TopicTicketCreated,
+	decisionevents.TopicTicketResolved,
+	approvalevents.TopicApprovalCreated,
+	approvalevents.TopicApprovalResolved,
+	resultevents.TopicResultAccepted,
+	resultevents.TopicResultRejected,
+	resultevents.TopicResultSuperseded,
+	resultevents.TopicArtifactCreated,
+	orchestratorevents.TopicPatchPreviewed,
+	orchestratorevents.TopicPatchApplied,
+	orchestratorevents.TopicPatchFailed,
+	orchestratorevents.TopicPatchReverted,
+	orchestratorevents.TopicArtifactContinuationCreated,
+	orchestratorevents.TopicArtifactContinuationChunkRecorded,
+	orchestratorevents.TopicArtifactContinuationChunkRejected,
+	orchestratorevents.TopicArtifactContinuationAssembled,
+	orchestratorevents.TopicArtifactContinuationApplied,
+	orchestratorevents.TopicArtifactContinuationFailed,
+	memoryevents.TopicMemoryCreated,
+	memoryevents.TopicMemoryUpdated,
+	memoryevents.TopicMemoryDeleted,
+	memoryevents.TopicMemoryRecallRecorded,
+	governanceevents.TopicGovernanceAutoEvaluated,
+	governanceevents.TopicGovernanceAutoResolved,
+	governanceevents.TopicGovernanceAutoEscalated,
+	governanceevents.TopicGovernanceAutoBlocked,
 }
 
 func WorkorchTopics() []string {
@@ -167,102 +176,102 @@ func NormalizeWorkorchEnvelope(envelope Envelope) (Envelope, bool) {
 
 func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 	switch envelope.Topic {
-	case TopicWorkspaceCreated, TopicWorkspaceStateChanged, TopicWorkspaceDeleted:
+	case workspaceevents.TopicWorkspaceCreated, workspaceevents.TopicWorkspaceStateChanged, workspaceevents.TopicWorkspaceDeleted:
 		event, ok := DecodeWorkspaceEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicRunCreated, TopicRunStateChanged:
+	case runevents.TopicRunCreated, runevents.TopicRunStateChanged:
 		event, ok := DecodeRunEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicRunLLMStreamProgress:
+	case runevents.TopicRunLLMStreamProgress:
 		event, ok := DecodeLLMStreamProgressEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicRunLLMUsageRecorded:
+	case runevents.TopicRunLLMUsageRecorded:
 		event, ok := DecodeLLMUsageEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicGoalDefined:
+	case workspaceevents.TopicGoalDefined:
 		event, ok := DecodeGoalEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicDoDDefined:
+	case workspaceevents.TopicDoDDefined:
 		event, ok := DecodeDoDEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicStepDispatched, TopicStepStateChanged:
+	case runevents.TopicStepDispatched, runevents.TopicStepStateChanged:
 		event, ok := DecodeStepEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicTicketCreated, TopicTicketResolved:
+	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved:
 		event, ok := DecodeDecisionTicketEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicApprovalCreated, TopicApprovalResolved:
+	case approvalevents.TopicApprovalCreated, approvalevents.TopicApprovalResolved:
 		event, ok := DecodeApprovalEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicResultAccepted, TopicResultRejected, TopicResultSuperseded:
+	case resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded:
 		event, ok := DecodeResultEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicArtifactCreated:
+	case resultevents.TopicArtifactCreated:
 		event, ok := DecodeArtifactEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicPatchPreviewed, TopicPatchApplied, TopicPatchFailed, TopicPatchReverted:
+	case orchestratorevents.TopicPatchPreviewed, orchestratorevents.TopicPatchApplied, orchestratorevents.TopicPatchFailed, orchestratorevents.TopicPatchReverted:
 		event, ok := DecodePatchEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicArtifactContinuationCreated,
-		TopicArtifactContinuationChunkRecorded,
-		TopicArtifactContinuationChunkRejected,
-		TopicArtifactContinuationAssembled,
-		TopicArtifactContinuationApplied,
-		TopicArtifactContinuationFailed:
+	case orchestratorevents.TopicArtifactContinuationCreated,
+		orchestratorevents.TopicArtifactContinuationChunkRecorded,
+		orchestratorevents.TopicArtifactContinuationChunkRejected,
+		orchestratorevents.TopicArtifactContinuationAssembled,
+		orchestratorevents.TopicArtifactContinuationApplied,
+		orchestratorevents.TopicArtifactContinuationFailed:
 		event, ok := DecodeArtifactContinuationEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicMemoryCreated, TopicMemoryUpdated, TopicMemoryDeleted:
+	case memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted:
 		event, ok := DecodeMemoryEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicMemoryRecallRecorded:
+	case memoryevents.TopicMemoryRecallRecorded:
 		event, ok := DecodeMemoryRecallEvent(envelope)
 		if !ok {
 			return nil, false
 		}
 		return event, true
-	case TopicGovernanceAutoEvaluated, TopicGovernanceAutoResolved, TopicGovernanceAutoEscalated, TopicGovernanceAutoBlocked:
+	case governanceevents.TopicGovernanceAutoEvaluated, governanceevents.TopicGovernanceAutoResolved, governanceevents.TopicGovernanceAutoEscalated, governanceevents.TopicGovernanceAutoBlocked:
 		event, ok := DecodeAutoGovernanceEvent(envelope)
 		if !ok {
 			return nil, false
@@ -274,7 +283,7 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 }
 
 func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
-	if envelope.Topic != TopicWorkspaceCreated && envelope.Topic != TopicWorkspaceStateChanged && envelope.Topic != TopicWorkspaceDeleted {
+	if envelope.Topic != workspaceevents.TopicWorkspaceCreated && envelope.Topic != workspaceevents.TopicWorkspaceStateChanged && envelope.Topic != workspaceevents.TopicWorkspaceDeleted {
 		return WorkspaceEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -292,7 +301,7 @@ func DecodeWorkspaceEvent(envelope Envelope) (WorkspaceEvent, bool) {
 }
 
 func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
-	if envelope.Topic != TopicRunCreated && envelope.Topic != TopicRunStateChanged {
+	if envelope.Topic != runevents.TopicRunCreated && envelope.Topic != runevents.TopicRunStateChanged {
 		return RunEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -317,7 +326,7 @@ func DecodeRunEvent(envelope Envelope) (RunEvent, bool) {
 }
 
 func DecodeLLMStreamProgressEvent(envelope Envelope) (LLMStreamProgressEvent, bool) {
-	if envelope.Topic != TopicRunLLMStreamProgress {
+	if envelope.Topic != runevents.TopicRunLLMStreamProgress {
 		return LLMStreamProgressEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -346,7 +355,7 @@ func DecodeLLMStreamProgressEvent(envelope Envelope) (LLMStreamProgressEvent, bo
 }
 
 func DecodeLLMUsageEvent(envelope Envelope) (LLMUsageEvent, bool) {
-	if envelope.Topic != TopicRunLLMUsageRecorded {
+	if envelope.Topic != runevents.TopicRunLLMUsageRecorded {
 		return LLMUsageEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -364,7 +373,7 @@ func DecodeLLMUsageEvent(envelope Envelope) (LLMUsageEvent, bool) {
 }
 
 func DecodeGoalEvent(envelope Envelope) (GoalEvent, bool) {
-	if envelope.Topic != TopicGoalDefined {
+	if envelope.Topic != workspaceevents.TopicGoalDefined {
 		return GoalEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -382,7 +391,7 @@ func DecodeGoalEvent(envelope Envelope) (GoalEvent, bool) {
 }
 
 func DecodeDoDEvent(envelope Envelope) (DoDEvent, bool) {
-	if envelope.Topic != TopicDoDDefined {
+	if envelope.Topic != workspaceevents.TopicDoDDefined {
 		return DoDEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -400,7 +409,7 @@ func DecodeDoDEvent(envelope Envelope) (DoDEvent, bool) {
 }
 
 func DecodeStepEvent(envelope Envelope) (StepEvent, bool) {
-	if envelope.Topic != TopicStepDispatched && envelope.Topic != TopicStepStateChanged {
+	if envelope.Topic != runevents.TopicStepDispatched && envelope.Topic != runevents.TopicStepStateChanged {
 		return StepEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -422,7 +431,7 @@ func DecodeDecisionTicketEvent(envelope Envelope) (DecisionTicketEvent, bool) {
 	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
 		return DecisionTicketEvent{}, false
 	}
-	if envelope.Topic == TopicTicketResolved {
+	if envelope.Topic == decisionevents.TopicTicketResolved {
 		data, ok := DecodeDecisionResolutionPayload(envelope.Payload)
 		if !ok {
 			return DecisionTicketEvent{}, false
@@ -438,7 +447,7 @@ func DecodeDecisionTicketEvent(envelope Envelope) (DecisionTicketEvent, bool) {
 			ResolutionPayload: clonePayloadMap(data.Payload),
 		}, true
 	}
-	if envelope.Topic != TopicTicketCreated {
+	if envelope.Topic != decisionevents.TopicTicketCreated {
 		return DecisionTicketEvent{}, false
 	}
 	data, ok := DecodeDecisionTicketPayload(envelope.Payload)
@@ -452,7 +461,7 @@ func DecodeDecisionTicketEvent(envelope Envelope) (DecisionTicketEvent, bool) {
 }
 
 func DecodeApprovalEvent(envelope Envelope) (ApprovalEvent, bool) {
-	if envelope.Topic != TopicApprovalCreated && envelope.Topic != TopicApprovalResolved {
+	if envelope.Topic != approvalevents.TopicApprovalCreated && envelope.Topic != approvalevents.TopicApprovalResolved {
 		return ApprovalEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -489,7 +498,7 @@ func DecodeResultEvent(envelope Envelope) (ResultEvent, bool) {
 
 func isResultTopic(topic string) bool {
 	switch topic {
-	case TopicResultAccepted, TopicResultRejected, TopicResultSuperseded:
+	case resultevents.TopicResultAccepted, resultevents.TopicResultRejected, resultevents.TopicResultSuperseded:
 		return true
 	default:
 		return false
@@ -497,7 +506,7 @@ func isResultTopic(topic string) bool {
 }
 
 func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {
-	if envelope.Topic != TopicArtifactCreated {
+	if envelope.Topic != resultevents.TopicArtifactCreated {
 		return ArtifactEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -515,7 +524,7 @@ func DecodeArtifactEvent(envelope Envelope) (ArtifactEvent, bool) {
 }
 
 func DecodePatchEvent(envelope Envelope) (PatchEvent, bool) {
-	if envelope.Topic != TopicPatchPreviewed && envelope.Topic != TopicPatchApplied && envelope.Topic != TopicPatchFailed && envelope.Topic != TopicPatchReverted {
+	if envelope.Topic != orchestratorevents.TopicPatchPreviewed && envelope.Topic != orchestratorevents.TopicPatchApplied && envelope.Topic != orchestratorevents.TopicPatchFailed && envelope.Topic != orchestratorevents.TopicPatchReverted {
 		return PatchEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -534,12 +543,12 @@ func DecodePatchEvent(envelope Envelope) (PatchEvent, bool) {
 
 func DecodeArtifactContinuationEvent(envelope Envelope) (ArtifactContinuationEvent, bool) {
 	switch envelope.Topic {
-	case TopicArtifactContinuationCreated,
-		TopicArtifactContinuationChunkRecorded,
-		TopicArtifactContinuationChunkRejected,
-		TopicArtifactContinuationAssembled,
-		TopicArtifactContinuationApplied,
-		TopicArtifactContinuationFailed:
+	case orchestratorevents.TopicArtifactContinuationCreated,
+		orchestratorevents.TopicArtifactContinuationChunkRecorded,
+		orchestratorevents.TopicArtifactContinuationChunkRejected,
+		orchestratorevents.TopicArtifactContinuationAssembled,
+		orchestratorevents.TopicArtifactContinuationApplied,
+		orchestratorevents.TopicArtifactContinuationFailed:
 	default:
 		return ArtifactContinuationEvent{}, false
 	}
@@ -556,7 +565,7 @@ func DecodeArtifactContinuationEvent(envelope Envelope) (ArtifactContinuationEve
 }
 
 func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
-	if envelope.Topic != TopicMemoryCreated && envelope.Topic != TopicMemoryUpdated && envelope.Topic != TopicMemoryDeleted {
+	if envelope.Topic != memoryevents.TopicMemoryCreated && envelope.Topic != memoryevents.TopicMemoryUpdated && envelope.Topic != memoryevents.TopicMemoryDeleted {
 		return MemoryEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -574,7 +583,7 @@ func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
 }
 
 func DecodeMemoryRecallEvent(envelope Envelope) (MemoryRecallEvent, bool) {
-	if envelope.Topic != TopicMemoryRecallRecorded {
+	if envelope.Topic != memoryevents.TopicMemoryRecallRecorded {
 		return MemoryRecallEvent{}, false
 	}
 	spec, ok := WorkorchEventContract(envelope.Topic)
@@ -593,7 +602,7 @@ func DecodeMemoryRecallEvent(envelope Envelope) (MemoryRecallEvent, bool) {
 
 func DecodeAutoGovernanceEvent(envelope Envelope) (AutoGovernanceEvent, bool) {
 	switch envelope.Topic {
-	case TopicGovernanceAutoEvaluated, TopicGovernanceAutoResolved, TopicGovernanceAutoEscalated, TopicGovernanceAutoBlocked:
+	case governanceevents.TopicGovernanceAutoEvaluated, governanceevents.TopicGovernanceAutoResolved, governanceevents.TopicGovernanceAutoEscalated, governanceevents.TopicGovernanceAutoBlocked:
 	default:
 		return AutoGovernanceEvent{}, false
 	}

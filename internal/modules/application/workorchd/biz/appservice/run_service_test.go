@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
@@ -1095,7 +1097,7 @@ func TestReadRunWithSessionReturnsFailureReason(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := exports.Infrastructure.EventHub.Publish(ctx, events.Envelope{
-		Topic:        events.TopicOrchestratorCommandFailRun,
+		Topic:        orchestratorevents.TopicOrchestratorCommandFailRun,
 		SourceModule: "workorchd/appservice/run-service-test",
 		SubjectType:  "run",
 		SubjectID:    "run-failure",

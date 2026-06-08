@@ -3,6 +3,8 @@ package workorchd
 import (
 	"context"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
@@ -75,7 +77,7 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 			m.service.Shutdown(ctx)
 			return cd.NewError(cd.IllegalParam, err.Error())
 		}
-		m.doneUnsub = m.eventHub.Subscribe(events.TopicWorkorchDCommandDone, m.handleDoneCommand)
+		m.doneUnsub = m.eventHub.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
 	}
 	return nil
 }

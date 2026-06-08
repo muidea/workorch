@@ -6,6 +6,7 @@ import (
 	approvalbiz "github.com/muidea/workorch/internal/modules/kernel/approval/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/common"
 	approvalcontracts "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/contracts"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	approvalservice "github.com/muidea/workorch/internal/modules/kernel/approval/service"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -64,17 +65,17 @@ func (m *Module) Start() error {
 	if len(m.unsub) > 0 {
 		return nil
 	}
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicApprovalCommandEnsureApproved, m.handleEnsureApprovedCommand))
-	m.unsub = append(m.unsub, m.eventHub.Subscribe(events.TopicApprovalCommandEnsureRejected, m.handleEnsureRejectedCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, m.handleEnsureApprovedCommand))
+	m.unsub = append(m.unsub, m.eventHub.Subscribe(approvalevents.TopicApprovalCommandEnsureRejected, m.handleEnsureRejectedCommand))
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicApprovalCommandEnsure, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandCreate, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandGet, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandList, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandListByRun, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandListByWorkspace, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandUpdate, m.handleApprovalCommand),
-		m.eventHub.Subscribe(events.TopicApprovalCommandDelete, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandEnsure, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandCreate, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandGet, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandList, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandListByRun, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandListByWorkspace, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandUpdate, m.handleApprovalCommand),
+		m.eventHub.Subscribe(approvalevents.TopicApprovalCommandDelete, m.handleApprovalCommand),
 	)
 	return nil
 }
@@ -135,7 +136,7 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 		return common.ErrInvalidArgument
 	}
 	switch envelope.Topic {
-	case events.TopicApprovalCommandEnsure:
+	case approvalevents.TopicApprovalCommandEnsure:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -159,7 +160,7 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return approvalCommandResponse(envelope, nil)
-	case events.TopicApprovalCommandCreate:
+	case approvalevents.TopicApprovalCommandCreate:
 		if m.servicePtr == nil {
 			return common.ErrInvalidArgument
 		}
@@ -175,7 +176,7 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return approvalCommandResponse(envelope, nil)
-	case events.TopicApprovalCommandGet:
+	case approvalevents.TopicApprovalCommandGet:
 		item, err := m.approvals.Get(ctx, common.ApprovalID(stringPayload(envelope.Payload, events.PayloadKeyApprovalID)))
 		if err != nil {
 			return err
@@ -184,26 +185,26 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 			return common.ErrNotFound
 		}
 		return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyApproval: item})
-	case events.TopicApprovalCommandList:
+	case approvalevents.TopicApprovalCommandList:
 		items, err := m.approvals.List(ctx)
 		if err != nil {
 			return err
 		}
 		return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicApprovalCommandListByRun:
+	case approvalevents.TopicApprovalCommandListByRun:
 		items, err := m.approvals.ListByRunID(ctx, common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)))
 		if err != nil {
 			return err
 		}
 		items = filterApprovalsByScope(items, envelope)
 		return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicApprovalCommandListByWorkspace:
+	case approvalevents.TopicApprovalCommandListByWorkspace:
 		items, err := m.approvals.ListByWorkspaceID(ctx, common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
 		if err != nil {
 			return err
 		}
 		return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyItems: items})
-	case events.TopicApprovalCommandUpdate:
+	case approvalevents.TopicApprovalCommandUpdate:
 		var item *approvalmodel.Approval
 		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.UpdateApprovalCommand); ok {
 			item = approvalFromUpdateCommand(cmd)
@@ -221,7 +222,7 @@ func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		return approvalCommandResponse(envelope, nil)
-	case events.TopicApprovalCommandDelete:
+	case approvalevents.TopicApprovalCommandDelete:
 		approvalID := deleteApprovalIDFromPayload(envelope.Payload)
 		if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
 			return err

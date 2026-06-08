@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -17,7 +20,7 @@ func eventResolveDecision(hub events.Hub) ResolveDecisionFunc {
 		workspaceID := stringFromPayload(payload, events.PayloadKeyWorkspaceID)
 		runID := stringFromPayload(payload, events.PayloadKeyRunID)
 		stepID := stringFromPayload(payload, events.PayloadKeyStepID)
-		return publishGovernanceCommand(ctx, hub, events.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), map[string]any{
+		return publishGovernanceCommand(ctx, hub, decisionevents.TopicDecisionCommandEnsureResolved, "decision_ticket", string(ticketID), map[string]any{
 			events.PayloadKeyBlockingTicketID: string(ticketID),
 			events.PayloadKeyResolutionID:     "resolution-" + string(ticketID) + "-auto-governance",
 			events.PayloadKeyType:             resolutionType,
@@ -32,7 +35,7 @@ func eventResolveDecision(hub events.Hub) ResolveDecisionFunc {
 func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
 	return func(ctx context.Context, approvalID common.ApprovalID) error {
 		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
-		return publishGovernanceCommand(ctx, hub, events.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), map[string]any{
+		return publishGovernanceCommand(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), map[string]any{
 			events.PayloadKeyApprovalID:  string(approvalID),
 			events.PayloadKeyWorkspaceID: workspaceID,
 		}, workspaceID, "", "")
@@ -42,7 +45,7 @@ func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
 func eventResumeRun(hub events.Hub) ResumeRunFunc {
 	return func(ctx context.Context, runID common.RunID) error {
 		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
-		return publishGovernanceCommand(ctx, hub, events.TopicRunCommandEnsureResumed, "run", string(runID), map[string]any{
+		return publishGovernanceCommand(ctx, hub, runevents.TopicRunCommandEnsureResumed, "run", string(runID), map[string]any{
 			events.PayloadKeyWorkspaceID: workspaceID,
 			events.PayloadKeyRunID:       string(runID),
 		}, workspaceID, string(runID), "")

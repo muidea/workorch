@@ -3,8 +3,9 @@ package readmodelcore
 import (
 	"testing"
 
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestMemoryRecallTraceRepositoryQueryNormalizesFields(t *testing.T) {
@@ -88,7 +89,7 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	if llm.RunID != common.RunID("run-001") {
 		t.Fatalf("llm run id mismatch: %q", llm.RunID)
 	}
-	if llm.Topic != events.TopicRunLLMUsageRecorded {
+	if llm.Topic != runevents.TopicRunLLMUsageRecorded {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {
@@ -112,7 +113,7 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	if llm.WorkspaceID != common.WorkspaceID("ws-001") {
 		t.Fatalf("llm workspace id mismatch: %q", llm.WorkspaceID)
 	}
-	if llm.Topic != events.TopicRunLLMUsageRecorded {
+	if llm.Topic != runevents.TopicRunLLMUsageRecorded {
 		t.Fatalf("llm topic mismatch: %q", llm.Topic)
 	}
 	if llm.Limit != 5000 {

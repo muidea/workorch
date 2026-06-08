@@ -3,6 +3,8 @@ package clicore
 import (
 	"context"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -26,7 +28,7 @@ func (d *Dispatcher) Run() error {
 	if d.unsub != nil {
 		return nil
 	}
-	d.unsub = d.eventHub.Subscribe(events.TopicCLICommand, d.handleEnvelope)
+	d.unsub = d.eventHub.Subscribe(workorchdevents.TopicCLICommand, d.handleEnvelope)
 	return nil
 }
 
@@ -47,7 +49,7 @@ func (d *Dispatcher) handleEnvelope(ctx context.Context, envelope events.Envelop
 	}
 	result := d.dispatchCommand(ctx, cmd)
 	resultEnvelope := events.Envelope{
-		Topic:        events.TopicCLIResult,
+		Topic:        workorchdevents.TopicCLIResult,
 		SourceModule: "workorchd-cli-dispatcher",
 		SubjectType:  cmd.SubjectType,
 		SubjectID:    cmd.SubjectID,

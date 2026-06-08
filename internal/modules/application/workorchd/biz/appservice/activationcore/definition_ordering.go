@@ -3,10 +3,11 @@ package activationcore
 import (
 	"context"
 
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -15,7 +16,7 @@ type EventRecordLister interface {
 }
 
 func OrderedWorkspaceGoals(ctx context.Context, eventRecords EventRecordLister, workspaceID common.WorkspaceID, items []*workspacemodel.Goal) []*workspacemodel.Goal {
-	return OrderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicGoalDefined, items, func(item *workspacemodel.Goal) common.GoalID {
+	return OrderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, workspaceevents.TopicGoalDefined, items, func(item *workspacemodel.Goal) common.GoalID {
 		if item == nil {
 			return ""
 		}
@@ -24,7 +25,7 @@ func OrderedWorkspaceGoals(ctx context.Context, eventRecords EventRecordLister, 
 }
 
 func OrderedWorkspaceDoDs(ctx context.Context, eventRecords EventRecordLister, workspaceID common.WorkspaceID, items []*workspacemodel.DoD) []*workspacemodel.DoD {
-	return OrderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, events.TopicDoDDefined, items, func(item *workspacemodel.DoD) common.DoDID {
+	return OrderedWorkspaceDefinitions(ctx, eventRecords, workspaceID, workspaceevents.TopicDoDDefined, items, func(item *workspacemodel.DoD) common.DoDID {
 		if item == nil {
 			return ""
 		}

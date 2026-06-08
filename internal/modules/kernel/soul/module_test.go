@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+
 	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -31,7 +33,7 @@ func TestDeleteSoulCommandAcceptsContractPayload(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       events.TopicSoulCommandDelete,
+		Topic:       soulevents.TopicSoulCommandDelete,
 		SubjectType: "soul",
 		SubjectID:   "soul-delete-contract",
 		Payload: map[string]any{

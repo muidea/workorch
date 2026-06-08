@@ -8,6 +8,7 @@ import (
 
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/run/pkg/common"
 	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -86,7 +87,7 @@ func (s *Service) CreateRun(ctx context.Context, cmd runcontracts.CreateRunComma
 	if err := s.runs.Create(ctx, run); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunCreated, run)
+	return s.publishRunEvent(ctx, runevents.TopicRunCreated, run)
 }
 
 func (s *Service) EnsureRun(ctx context.Context, cmd runcontracts.CreateRunCommand) error {
@@ -345,7 +346,7 @@ func (s *Service) ValidateRun(ctx context.Context, cmd runcontracts.ValidateRunC
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
 }
 
 func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunCommand) error {
@@ -370,7 +371,7 @@ func (s *Service) CompleteRun(ctx context.Context, cmd runcontracts.CompleteRunC
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
 }
 
 func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunCommand) error {
@@ -395,7 +396,7 @@ func (s *Service) CancelRun(ctx context.Context, cmd runcontracts.CancelRunComma
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
 }
 
 func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRunCommand) error {
@@ -420,7 +421,7 @@ func (s *Service) SupersedeRun(ctx context.Context, cmd runcontracts.SupersedeRu
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
 }
 
 func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) error {
@@ -445,7 +446,7 @@ func (s *Service) FailRun(ctx context.Context, cmd runcontracts.FailRunCommand) 
 	if err := s.runs.Update(ctx, r); err != nil {
 		return err
 	}
-	return s.publishRunEvent(ctx, events.TopicRunStateChanged, r)
+	return s.publishRunEvent(ctx, runevents.TopicRunStateChanged, r)
 }
 
 func isTerminalRunState(state common.RunState) bool {

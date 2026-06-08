@@ -6,6 +6,7 @@ import (
 	eventstreambiz "github.com/muidea/workorch/internal/modules/kernel/eventstream/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/common"
 	eventstreamcontracts "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/contracts"
+	eventstreamevents "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/events"
 	eventstreamservice "github.com/muidea/workorch/internal/modules/kernel/eventstream/service"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -56,8 +57,8 @@ func (m *Module) Start() error {
 		return err
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(events.TopicEventStreamCommandList, m.handleListCommand),
-		m.eventHub.Subscribe(events.TopicEventStreamCommandPurgeWorkspace, m.handlePurgeWorkspaceCommand),
+		m.eventHub.Subscribe(eventstreamevents.TopicEventStreamCommandList, m.handleListCommand),
+		m.eventHub.Subscribe(eventstreamevents.TopicEventStreamCommandPurgeWorkspace, m.handlePurgeWorkspaceCommand),
 	)
 	return nil
 }
