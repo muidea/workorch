@@ -182,7 +182,7 @@
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/workspace_state.go`（line 204-311）
+- `internal/services/workorch/service/tui/workspace_state.go`（line 204-311）
 
 **变更：**
 - 删除 `m.resetWorkspaceView()` 调用
@@ -211,7 +211,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/model.go`（line 1428-1601, `applyBackendEvent`）
+- `internal/services/workorch/service/tui/model.go`（line 1428-1601, `applyBackendEvent`）
 
 **改为增量处理的事件：**
 
@@ -240,7 +240,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/model.go`（line 138）
+- `internal/services/workorch/service/tui/model.go`（line 138）
 
 **变更：** `make(chan backend.Event, 64)` → `make(chan backend.Event, 256)`
 
@@ -249,7 +249,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/model.go` — `AppModel` 增加 `lastRevision int64`
+- `internal/services/workorch/service/tui/model.go` — `AppModel` 增加 `lastRevision int64`
 - `web/workorch-console/src/hooks/useSSE.ts` — `lastRevisionRef` 追踪
 
 **实现结果：**
@@ -265,7 +265,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/model.go`（line 544-585, `submitInput`）
+- `internal/services/workorch/service/tui/model.go`（line 544-585, `submitInput`）
 
 **Plain text input 路由规则：**
 
@@ -288,7 +288,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **新文件：**
-- `internal/modules/application/workorch/service/tui/inspect_commands.go`
+- `internal/services/workorch/service/tui/inspect_commands.go`
 
 **命令列表：**
 
@@ -302,8 +302,8 @@ if msg.Decisions != nil {
 | `/artifacts` | artifact 列表 | `m.artifacts` + `m.artifactContinuations` |
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/model.go`（`handleSlashCommand`）— 增加 case 分支
-- `internal/modules/application/workorch/service/tui/input.go`（`baseSlashCommandSuggestions`）— 增加建议项
+- `internal/services/workorch/service/tui/model.go`（`handleSlashCommand`）— 增加 case 分支
+- `internal/services/workorch/service/tui/input.go`（`baseSlashCommandSuggestions`）— 增加建议项
 
 **实现结果：**
 - 新增 `inspect_commands.go`，包含 status / coverage / steps / timeline / patches / artifacts 渲染。
@@ -315,7 +315,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **修改文件：**
-- `internal/modules/application/workorch/service/tui/view.go`（help 渲染区域）
+- `internal/services/workorch/service/tui/view.go`（help 渲染区域）
 
 **分组结构：**
 ```
@@ -357,7 +357,7 @@ if msg.Decisions != nil {
 **状态：已收口**
 
 **新文件：**
-- `internal/modules/application/workorch/service/cli/run_inspect.go`
+- `internal/services/workorch/service/cli/run_inspect.go`
 
 **命令：**
 - `run coverage <id>` — 读取 workspace snapshot，展示 DoD 覆盖状态
@@ -411,13 +411,13 @@ if msg.Decisions != nil {
 
 | 验证项 | 方法 |
 |--------|------|
-| Go TUI 闪烁修复 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 partial context 不清空显示、完整空 snapshot 清空定义 |
-| 上下文感知输入 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 active run plain text → operator input、idle workspace plain text → goal |
-| Inspect 命令 | `go test ./internal/modules/application/workorch/service/tui -count=1` 覆盖 `/status`、`/coverage`、`/timeline`、`/patches`、`/artifacts` |
+| Go TUI 闪烁修复 | `go test ./internal/services/workorch/service/tui -count=1` 覆盖 partial context 不清空显示、完整空 snapshot 清空定义 |
+| 上下文感知输入 | `go test ./internal/services/workorch/service/tui -count=1` 覆盖 active run plain text → operator input、idle workspace plain text → goal |
+| Inspect 命令 | `go test ./internal/services/workorch/service/tui -count=1` 覆盖 `/status`、`/coverage`、`/timeline`、`/patches`、`/artifacts` |
 | Revision counter | `go test ./internal/pkg/events -count=1` 覆盖 MemoryHub / MagicHub workspace revision |
 | SSE id / stateSummary / replay | `go test ./internal/modules/application/workorchd/service/server -run 'TestEventStream|TestEventRecordQuery' -count=1` |
 | Web Console 增量 | `npm --prefix web/workorch-console run build` 验证类型与打包 |
-| CLI 子命令 | `go test ./internal/modules/application/workorch/service/cli -count=1` |
+| CLI 子命令 | `go test ./internal/services/workorch/service/cli -count=1` |
 | 整体 | 本轮未执行 `make test-race`；已执行受影响包定向测试与 Web build |
 
 ---
@@ -431,11 +431,11 @@ if msg.Decisions != nil {
 | `internal/pkg/events/magic_hub.go` | MagicHub（生产用） |
 | `internal/pkg/events/topics_*.go` | 按 owner / block / application 域拆分的事件 topic 常量 |
 | `internal/modules/application/workorchd/service/server/http.go:1723` | SSE endpoint handler |
-| `internal/modules/application/workorch/service/tui/model.go` | TUI 主模型 + Update + applyBackendEvent |
-| `internal/modules/application/workorch/service/tui/workspace_state.go` | applyWorkspaceContext + resetWorkspaceView |
-| `internal/modules/application/workorch/service/tui/input.go` | slash 命令建议 + 自然语言识别 |
-| `internal/modules/application/workorch/service/tui/view.go` | 渲染 + help |
-| `internal/modules/application/workorch/service/tui/commands.go` | FetchWorkspaceContext + 命令 Cmd |
+| `internal/services/workorch/service/tui/model.go` | TUI 主模型 + Update + applyBackendEvent |
+| `internal/services/workorch/service/tui/workspace_state.go` | applyWorkspaceContext + resetWorkspaceView |
+| `internal/services/workorch/service/tui/input.go` | slash 命令建议 + 自然语言识别 |
+| `internal/services/workorch/service/tui/view.go` | 渲染 + help |
+| `internal/services/workorch/service/tui/commands.go` | FetchWorkspaceContext + 命令 Cmd |
 | `web/workorch-console/src/hooks/useSSE.ts` | SSE hook |
 | `web/workorch-console/src/pages/WorkspaceDetailPage.tsx:162-218` | SSE 事件处理 + loadWorkspaceContext |
 | `web/workorch-console/src/api.ts` | REST API 客户端 |

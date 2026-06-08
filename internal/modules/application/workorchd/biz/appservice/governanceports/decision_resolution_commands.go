@@ -15,9 +15,10 @@ func ResolveDecision(ctx context.Context, hub events.Hub, ticket *decisionmodel.
 		return nil, nil, common.ErrInvalidArgument
 	}
 	ticketID := string(ticket.ID)
+	resolutionID := "resolution-" + string(ticket.WorkspaceID) + "-" + ticketID + "-" + resolutionType
 	response, err := ownercommandports.PublishWithResponse(ctx, hub, events.TopicDecisionCommandEnsureResolved, "decision_ticket", ticketID, ticket.WorkspaceID, ticket.RunID, map[string]any{
 		events.PayloadKeyCommand: decisioncontracts.ResolveTicketCommand{
-			ResolutionID: common.ResolutionID("resolution-" + ticketID + "-" + resolutionType),
+			ResolutionID: common.ResolutionID(resolutionID),
 			TicketID:     ticket.ID,
 			WorkspaceID:  ticket.WorkspaceID,
 			RunID:        ticket.RunID,

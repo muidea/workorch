@@ -86,7 +86,7 @@ Last Updated: 2026-05-29
 - thin main -> `application/workorch/main.go`
 - application runtime wiring -> `internal/modules/application/workorchd/biz/bootstrap`
 - appservice workflow composition -> `internal/modules/application/workorchd/biz/appservice`
-- TUI surface -> `internal/modules/application/workorch/service/tui`
+- TUI surface -> `internal/services/workorch/service/tui`
 - orchestrator split-by-responsibility -> `internal/modules/kernel/orchestrator/biz`
 - observed snapshot assembly -> `internal/modules/application/workorchd/pkg/observed`
 

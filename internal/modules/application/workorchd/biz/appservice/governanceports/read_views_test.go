@@ -147,6 +147,58 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 }
 
+func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(events.TopicDecisionCommandListTickets, func(_ context.Context, envelope events.Envelope) error {
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyTickets: []*decisionmodel.Ticket{
+					{
+						ID:          "ticket-duplicate",
+						WorkspaceID: "ws-old",
+						RunID:       "run-002",
+						State:       common.DecisionTicketStateResolved,
+					},
+					{
+						ID:          "ticket-duplicate",
+						WorkspaceID: "ws-current",
+						RunID:       "run-002",
+						State:       common.DecisionTicketStateOpen,
+					},
+				},
+			},
+		})
+	})
+	hub.Subscribe(events.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.WorkspaceID != "ws-current" || cmd.TicketID != "ticket-duplicate" {
+			t.Fatalf("command scope = workspace:%q ticket:%q, want current open ticket", cmd.WorkspaceID, cmd.TicketID)
+		}
+		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
+			events.PayloadKeyTicket:     ticket,
+			events.PayloadKeyResolution: resolution,
+		}})
+	})
+
+	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-duplicate", appmodelcore.ResolveDecisionCommand{
+		ResolutionType:    "replan",
+		ResolutionPayload: map[string]any{"operator": "test"},
+	}, "")
+	if err != nil {
+		t.Fatalf("ResolveDecisionView err = %v", err)
+	}
+	if item.WorkspaceID != "ws-current" || item.State != string(common.DecisionTicketStateResolved) {
+		t.Fatalf("item = %+v, want resolved current workspace ticket", item)
+	}
+}
+
 func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

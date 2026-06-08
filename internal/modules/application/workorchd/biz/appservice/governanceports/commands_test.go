@@ -122,6 +122,9 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 		if cmd.TicketID != "ticket-contract" || cmd.WorkspaceID != "ws-contract" || cmd.RunID != "run-contract" || cmd.Type != "provide_missing_info" {
 			t.Fatalf("command = %+v", cmd)
 		}
+		if cmd.ResolutionID != "resolution-ws-contract-ticket-contract-provide_missing_info" {
+			t.Fatalf("resolutionID = %q, want workspace-scoped id", cmd.ResolutionID)
+		}
 		if cmd.Payload["answer"] != "42" {
 			t.Fatalf("command payload = %#v", cmd.Payload)
 		}
@@ -147,6 +150,46 @@ func TestResolveDecisionPublishesContractCommand(t *testing.T) {
 	}
 	if ticket.ID != "ticket-contract" || resolution.Type != "provide_missing_info" {
 		t.Fatalf("ticket/resolution = %+v / %+v", ticket, resolution)
+	}
+}
+
+func TestResolveDecisionScopesResolutionIDByWorkspace(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	var resolutionIDs []common.ResolutionID
+	hub.Subscribe(events.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		resolutionIDs = append(resolutionIDs, cmd.ResolutionID)
+		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
+			events.PayloadKeyTicket:     ticket,
+			events.PayloadKeyResolution: resolution,
+		}})
+	})
+
+	for _, workspaceID := range []common.WorkspaceID{"ws-scope-a", "ws-scope-b"} {
+		_, _, err := ResolveDecision(ctx, hub, &decisionmodel.Ticket{
+			ID:          "ticket-same",
+			WorkspaceID: workspaceID,
+			RunID:       "run-same",
+			StepID:      "run-same/decision",
+		}, "replan", map[string]any{"operator": "scope-test"})
+		if err != nil {
+			t.Fatalf("ResolveDecision(%s): %v", workspaceID, err)
+		}
+	}
+	if len(resolutionIDs) != 2 {
+		t.Fatalf("resolutionIDs = %v, want two IDs", resolutionIDs)
+	}
+	if resolutionIDs[0] != "resolution-ws-scope-a-ticket-same-replan" || resolutionIDs[1] != "resolution-ws-scope-b-ticket-same-replan" {
+		t.Fatalf("resolutionIDs = %v, want workspace-scoped IDs", resolutionIDs)
+	}
+	if resolutionIDs[0] == resolutionIDs[1] {
+		t.Fatalf("resolutionIDs collided: %v", resolutionIDs)
 	}
 }
 

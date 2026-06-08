@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/app"
+	"github.com/muidea/workorch/internal/services/workorch"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/application/workorchd"
@@ -37,7 +37,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := app.Run(ctx, app.Options{
+	if err := workorch.Run(ctx, workorch.Options{
 		ProgramName: os.Args[0],
 		Args:        os.Args[1:],
 	}); err != nil {

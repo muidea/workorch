@@ -23,8 +23,8 @@ go test ./internal/modules/kernel/orchestrator/biz \
 
 echo "-> SRD-15: Web/TUI 业务模型展示映射回归"
 make console-build
-go test ./internal/modules/application/workorch/service/tui -count=1
-go test ./internal/modules/application/workorch/biz/backend -count=1
+go test ./internal/services/workorch/service/tui -count=1
+go test ./internal/services/workorch/biz/backends -count=1
 go test ./internal/modules/application/workorchd/service/server -count=1
 go test ./internal/modules/application/workorchd/biz/appservice -count=1
 

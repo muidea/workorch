@@ -93,6 +93,7 @@ func (s *Service) ResolveTicket(ctx context.Context, cmd decisioncontracts.Resol
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return common.ErrInvalidArgument
 	}
+	ctx = resolveCommandContext(ctx, cmd)
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
@@ -169,6 +170,7 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	if !modulecommon.IsSupportedResolutionType(cmd.Type) {
 		return nil, nil, common.ErrInvalidArgument
 	}
+	ctx = resolveCommandContext(ctx, cmd)
 
 	ticket, err := s.tickets.Get(ctx, cmd.TicketID)
 	if err != nil {
@@ -211,6 +213,13 @@ func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontrac
 		return false
 	}
 	return true
+}
+
+func resolveCommandContext(ctx context.Context, cmd decisioncontracts.ResolveTicketCommand) context.Context {
+	if cmd.WorkspaceID == "" {
+		return ctx
+	}
+	return common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 }
 
 func sameResolutionPayload(left map[string]any, right map[string]any) bool {

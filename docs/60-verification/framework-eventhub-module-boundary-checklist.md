@@ -54,9 +54,11 @@ Last Updated: 2026-06-03
 
 | 模块 | 代码落点 | 核对内容 | 状态 |
 | --- | --- | --- | --- |
-| application entry | `application/workorch/main.go` | 是否只负责进程入口、信号、调用 `app.Run`；是否避免业务逻辑 | reviewed |
-| workorch app | `internal/modules/application/workorch/app` | 是否统一使用 `application.Startup` / `Run` / `Shutdown`；server / interactive / remote 模式边界是否清晰 | reviewed |
-| workorch plugin | `internal/modules/application/workorch` | plugin 生命周期是否符合 `Setup` / `Run` / `Teardown`；是否无重副作用 | reviewed |
+| application entry | `application/workorch/main.go` | 是否只负责进程入口、信号、显式启用 initiator/module/block，并调用 process service；是否避免业务逻辑 | reviewed |
+| workorch process service | `internal/services/workorch` | 是否实现进程级 `framework/service.LifecycleService`；server / interactive / remote 模式边界是否清晰；是否不作为 plugin module 注册 | reviewed |
+| workorch CLI/TUI port | `internal/pkg/workorchport` | CLI/TUI/agent 是否只依赖 port 契约；port 是否不依赖具体 backend 实现或 `internal/services/workorch` | reviewed |
+| workorch REST client | `internal/pkg/workorchclient` | REST client 是否只负责 HTTP path、request/response 和 error mapping；是否不依赖 framework application、EventHub、CLI/TUI | reviewed |
+| workorch backend implementations | `internal/services/workorch/biz/backends` | remote backend 是否只使用 `workorchclient`；embedded backend 是否只通过 EventHub command/response 访问正式 owner state | reviewed |
 | workorchd plugin | `internal/modules/application/workorchd` | 是否接收框架 `event.Hub` / `BackgroundRoutine`；`Startup` / `Run` / `Shutdown` 是否清晰 | reviewed |
 
 ## Initiator / Runtime Assembly Layer
@@ -174,7 +176,7 @@ Last Updated: 2026-06-03
 - `workorchruntime` initiator no longer imports `internal/modules/application/workorchd/biz/bootstrap`. Shared repository backend/data-root helpers, workspace-scoped file repository construction, artifact storage repository, builtin defaults seeding, and runtime policy mapping now live under `internal/pkg/workorchrepo`, `internal/pkg/workorchdefaults`, and `internal/pkg/workorchruntimepolicy`.
 - `bootstrap.Exports` no longer contains `ServiceExports`; application/session assembly receives repositories, EventHub, and config loader only. Tests that previously used `exports.Services.*` now either publish owner command events through EventHub or create repository fixtures for local algorithm setup.
 - Kernel/block/application `plugin.go` files no longer create extra `plugin` wrapper structs. The framework registration path now registers `New()` directly, and the concrete `*Module` implements framework `Setup(ctx,eventHub,bg)`, `Run(ctx)`, and `Teardown(ctx)` while explicit embedded-runtime/test wiring uses `Configure/Start/Stop`.
-- `application/workorch/main.go` now only handles process signal context, `app.Run`, and explicit framework side-effect imports for the entrypoint-selected initiator/modules. Test-only default-workspace wrappers were removed from production `main`, so the entry file no longer imports CLI backend/common packages.
+- `application/workorch/main.go` now only handles process signal context, `workorch.Run`, and explicit framework side-effect imports for the entrypoint-selected initiator/modules. Test-only default-workspace wrappers were removed from production `main`, so the entry file no longer imports CLI backend/common packages.
 - `application/workorch` no longer imports the `workorchd` module package to wait for server shutdown. `main` explicitly enables `workorchd` with a side-effect import, while server mode queries `TopicWorkorchDCommandDone` through EventHub; the `workorchd` module subscribes in `Run` and unsubscribes in `Teardown`.
 - `workorchd` no longer keeps a global `defaultModule` singleton or package-level `Done()` helper. The framework registration path uses `pluginmodule.Register(New())`, and server done-channel access remains an EventHub command handled by the module instance.
 - `application/workorch/app` no longer imports `workorchd/biz/appservice` or constructs `RuntimeSession` directly. Embedded interactive mode obtains a `backend.NewEmbeddedEventHub()` backend from the runtime initiator EventHub; appservice/session handling is owned by workorchd.
@@ -213,9 +215,9 @@ Last Updated: 2026-06-03
   - `rg "repository\\.(WorkspaceRepository|GoalRepository|DoDRepository|RunRepository|StepRepository|RuntimeCheckpointRepository|DecisionTicketRepository|DecisionResolutionRepository|ApprovalRepository|ResultRepository|ArtifactRepository|SoulRepository|SkillRepository|MCPServerRepository|MCPCapabilityRepository|MemoryRecallTraceRepository|ArtifactContinuationRepository|EventRecordRepository|ToolCallRepository|PatchRepository|ValidationResultRepository|AutoGovernanceTraceRepository)" internal/modules/application/workorchd/biz/appservice -g '*.go' --glob '!**/*_test.go'` returns no production matches.
   - `rg "exports\\.Services|Services:|ServiceExports|Bootstrap\\.Exports\\(\\)\\.Services|Set[A-Za-z]+Service|[A-Za-z]+Service\\(\\)" internal application -g '*.go' --glob '!**/*_test.go'` returns no cross-owner service facade matches.
   - `rg "Repositories\\.(Workspaces|Goals|DoDs|Runs|Steps|Results|Artifacts|MemoryRecallTraces|MCPCapabilities|Tickets|Resolutions|Approvals|ArtifactContinuations|EventRecords|ToolCalls|Patches|ValidationResults|AutoGovernanceTraces)" internal/modules/application/workorchd/biz/appservice -g '*.go' --glob '!**/*_test.go'` returns no production matches.
-  - `rg -n 'internal/modules/application/workorchd/biz/appservice' application/workorch internal/modules/application/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
+  - `rg -n 'internal/modules/application/workorchd/biz/appservice' application/workorch internal/services/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
   - `rg -n 'NewLocal\\(|localBackend' application internal -g '*.go' --glob '!**/*_test.go'` returns no production matches.
-  - `rg -n 'TopicCLICommand|NewCLICommandDispatcher|CLICommandDispatcher' internal/modules/application/workorch internal/modules/application/workorchd internal/pkg -g '*.go' --glob '!**/*_test.go'` shows the workorch backend publisher and workorchd dispatcher subscriber only.
+  - `rg -n 'TopicCLICommand|NewCLICommandDispatcher|CLICommandDispatcher' internal/services/workorch internal/modules/application/workorchd internal/pkg -g '*.go' --glob '!**/*_test.go'` shows the workorch backend publisher and workorchd dispatcher subscriber only.
   - `rg "\\.Repositories\\.(Workspaces|Goals|DoDs|Runs|Steps|RuntimeCheckpoints|Tickets|Resolutions|Approvals|Results|Artifacts|Souls|Skills|MCPServers|MCPCapabilities|MemoryRecallTraces|ArtifactContinuations|EventRecords|ToolCalls|Patches|ValidationResults|AutoGovernanceTraces)\\.(Get|List|ListByWorkspaceID|ListByRun|ListByWorkspace|ListByResult|GetByTicketID|Create|Update|Delete|Upsert)" internal/modules -g '*.go' --glob '!**/*_test.go'` returns no production matches outside owner modules.
   - `rg "Services\\.(WorkspaceService|RunService|DecisionService|ApprovalService|ResultService|SoulService|MCPService|MemoryService|SkillService|EventStreamService)\\.[A-Za-z]" internal/modules/application/workorchd/biz/appservice -g '*.go' --glob '!**/*_test.go'` returns no production matches.
   - `rg "\\.(Create|Update|Delete|Upsert)\\(ctx," internal/modules/application/workorchd/biz/appservice -g '*.go' --glob '!**/*_test.go'` returns only application-owned `workspace_template_service.go` writes.
@@ -226,16 +228,16 @@ Last Updated: 2026-06-03
   - `rg -n 'github.com/muidea/workorch/internal/modules/(blocks|kernel)/[^/]+/biz' internal/modules/application internal/initiators application -g '*.go' --glob '!**/*_test.go'` returns no production matches.
   - `rg -n 'exports\\.Services|ServiceExports|Bootstrap\\.Exports\\(\\)\\.Services|Set(Soul|Memory|Skill|MCP|EventStream|Workspace|Decision|Approval|Result|Orchestrator|Run)Service|\\.(Soul|Memory|Skill|MCP|EventStream|Workspace|Decision|Approval|Result|Orchestrator|Run)Service\\(\\)' internal application -g '*.go' --glob '!**/*_test.go'` returns no production matches.
   - `rg -n '\\.Repositories\\.(Workspaces|Goals|DoDs|Runs|Steps|RuntimeCheckpoints|Tickets|Resolutions|Approvals|Results|Artifacts|Souls|Skills|MCPServers|MCPCapabilities|MemoryItems|MemoryRecallTraces|ArtifactContinuations|EventRecords|ToolCalls|Patches|ValidationResults|AutoGovernanceTraces)\\.(Get|List|ListByWorkspaceID|ListByRun|ListByWorkspace|ListByResult|GetByTicketID|Create|Update|Delete|Upsert)' internal application -g '*.go' --glob '!**/*_test.go'` returns no production matches.
-  - `rg -n 'github.com/muidea/workorch/internal/modules/application/workorch/(biz|service)' application/workorch/main.go application/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
-  - `rg -n 'internal/modules/application/workorchd\"|workorchserver|Done\\(\\)' internal/modules/application/workorch application/workorch -g '*.go' --glob '!**/*_test.go'` returns only the explicit `application/workorch/main.go` side-effect import for enabling `workorchd`; server done waiting uses EventHub command.
+  - `rg -n 'github.com/muidea/workorch/internal/services/workorch/(biz|service)' application/workorch/main.go application/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
+  - `rg -n 'internal/modules/application/workorchd\"|workorchserver|Done\\(\\)' internal/services/workorch application/workorch -g '*.go' --glob '!**/*_test.go'` returns only the explicit `application/workorch/main.go` side-effect import for enabling `workorchd`; server done waiting uses EventHub command.
   - `rg -n 'TopicWorkorchDCommandDone|PayloadKeyDoneChannel' internal application -g '*.go'` shows app publisher, workorchd module subscriber/response, and module regression coverage.
-  - `rg -n 'internal/modules/application/workorchd/biz/appservice|appservice\\.' internal/modules/application/workorch/app application/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
-  - `rg -n 'NewEmbeddedEventHub|NewRuntimeSessionFromInitiator|RuntimeSession' internal/modules/application/workorch/app internal/modules/application/workorch/biz/backend -g '*.go' --glob '!**/*_test.go'` shows app uses `backend.NewEmbeddedEventHub`, while no runtime session construction remains in the workorch backend production path.
-  - `rg -n 'session\\.Borrow\\(\\)' internal/modules/application/workorch/biz/backend -g '*.go' -C 1` returns no production matches after deleting the appservice-backed local backend.
+  - `rg -n 'internal/modules/application/workorchd/biz/appservice|appservice\\.' internal/services/workorch application/workorch -g '*.go' --glob '!**/*_test.go'` returns no production matches.
+  - `rg -n 'NewEmbeddedEventHub|NewRuntimeSessionFromInitiator|RuntimeSession' internal/services/workorch internal/services/workorch/biz/backends -g '*.go' --glob '!**/*_test.go'` shows app uses `backend.NewEmbeddedEventHub`, while no runtime session construction remains in the workorch backend production path.
+  - `rg -n 'session\\.Borrow\\(\\)' internal/services/workorch/biz/backends -g '*.go' -C 1` returns no production matches after deleting the appservice-backed local backend.
   - `rg -n '\\bgo func\\b|Subscribe\\(|Unsubscribe\\(|BackgroundRoutine|task\\.' internal/modules internal/initiators application -g '*.go' --glob '!**/*_test.go'` was reviewed for long-lived work. No new module-level untracked background worker was found; request-local fan-out waits before returning, and HTTP continuation work uses `scheduleBackground`.
   - `rg -n 'NewMagicHub\\(|event\\.NewHub|task\\.NewBackgroundRoutine|BackgroundRoutine\\(|AsyncFunction\\(|AsyncTask\\(|Timer\\(' internal application -g '*.go' --glob '!**/*_test.go'` shows application modules reuse framework-provided EventHub/BackgroundRoutine; standalone hub creation is limited to the shared events wrapper constructor.
   - `rg -n 'if len\\(m\\.unsub\\) > 0|if m\\.executor != nil|if len\\(e\\.unsub\\) > 0|if d\\.unsub != nil' internal/modules/blocks internal/modules/kernel internal/modules/application/workorchd/biz/appservice -g '*.go' --glob '!**/*_test.go'` shows duplicate-run guards in EventHub command owner modules, block executors, shared runtime executor, and the workorchd CLI dispatcher.
-  - `rg -n 'agent \\[goal\\]|RunWithBackend|go func' internal/modules/application/workorch/service/cli internal/modules/application/workorch/biz/agent -g '*.go'` shows the CLI agent command is the only command-local goroutine around agent execution; it now captures the returned error and uses a cancelable context.
+  - `rg -n 'agent \\[goal\\]|RunWithBackend|go func' internal/services/workorch/service/cli internal/services/workorch/biz/agent -g '*.go'` shows the CLI agent command is the only command-local goroutine around agent execution; it now captures the returned error and uses a cancelable context.
   - `rg -n 'Publish\\([^\\n]*events\\.Envelope|Topic[A-Za-z0-9]+Command|RuntimeBlockExecuteTopic|ResponseEnvelope\\(' internal application -g '*.go' --glob '!**/*_test.go'` and `rg -n '_\\s*=\\s*[^\\n]*\\.Publish\\(|if err := [^\\n]*\\.Publish\\([^\\n]*; err != nil|err := [^\\n]*\\.Publish\\(' internal application -g '*.go' --glob '!**/*_test.go'` were reviewed for command response handling. The only missing-response-as-success helper found was `publishActivationRunCommand`, now fixed and covered.
   - `rg -n 'type plugin|newPlugin|pluginmodule\\.Register\\(newPlugin\\(\\)\\)|module \\*Module|p\\.module' internal/modules -g 'plugin.go'` returns no matches after integrating `plugin.go` into concrete module lifecycle implementations.
   - Remaining appservice direct repository writes are limited to application-owned workspace templates, not kernel formal owner state.
@@ -256,16 +258,16 @@ Last Updated: 2026-06-03
   - `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` passed against a local file-backend service started by `make run-file` after the command response audit update. HTTP, workspace template/soul, LLM workspace execution, and MCP stdio workspace execution passed; MCP stdio completed `workspaceId=ws-2196db8036940a76`, `runId=run-001`, `runState=completed`, `steps=4`, `toolCalls=4`, `validations=4`, `runtimeCheckpoints=11`.
   - `git diff --check` passed after the command response audit update.
   - `go test ./internal/modules/blocks/pkg/runtimeevent ./internal/modules/application/workorchd/biz/appservice ./internal/modules/kernel/result -count=1` passed after adding duplicate-`Run()` subscription guards and regression coverage for runtime executor, CLI dispatcher, and representative result owner module.
-  - `go test ./internal/modules/application/workorch/service/cli ./internal/modules/application/workorch/biz/agent -count=1` passed after fixing CLI agent error propagation and adding regression coverage for backend failure before event emission.
-  - `go test ./internal/modules/application/workorch/biz/backend ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/events -count=1` passed after removing the unmanaged CLI result fallback goroutine and rechecking EventHub command/result behavior.
-  - `go test ./internal/modules/application/workorch/biz/backend ./internal/modules/application/workorchd -count=1` passed after moving `/cli/command` handling from the workorch backend into the workorchd owner dispatcher.
-  - `go test ./application/workorch ./internal/modules/application/workorch/app ./internal/modules/application/workorch/biz/backend ./internal/modules/application/workorchd ./internal/pkg/events -count=1` passed after deleting the appservice-backed local backend and keeping workorch embedded mode on EventHub command/result transport.
+  - `go test ./internal/services/workorch/service/cli ./internal/services/workorch/biz/agent -count=1` passed after fixing CLI agent error propagation and adding regression coverage for backend failure before event emission.
+  - `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd/biz/appservice ./internal/pkg/events -count=1` passed after removing the unmanaged CLI result fallback goroutine and rechecking EventHub command/result behavior.
+  - `go test ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd -count=1` passed after moving `/cli/command` handling from the workorch backend into the workorchd owner dispatcher.
+  - `go test ./application/workorch ./internal/services/workorch ./internal/services/workorch/biz/backends ./internal/modules/application/workorchd ./internal/pkg/events -count=1` passed after deleting the appservice-backed local backend and keeping workorch embedded mode on EventHub command/result transport.
   - `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` passed after the CLI dispatcher migration and local backend removal.
   - `git diff --check` passed after the CLI dispatcher migration and documentation update.
   - `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` passed against a local file-backend service started by `make run-file` after the CLI dispatcher migration. HTTP, workspace template/soul, LLM workspace execution, and MCP stdio workspace execution passed; MCP stdio completed `workspaceId=ws-8d2d9b2560111449`, `runId=run-001`, `runState=completed`, `steps=4`, `toolCalls=4`, `validations=4`, `runtimeCheckpoints=11`.
-  - `go test ./application/workorch ./internal/modules/application/workorch/app ./internal/modules/application/workorch/biz/backend -count=1` passed after moving embedded RuntimeSession creation/close from app into the backend facade.
-  - `go test ./application/workorch ./internal/modules/application/workorch/app ./internal/modules/application/workorchd ./internal/pkg/events -count=1` passed after moving workorchd server done waiting behind an EventHub command and adding module command coverage.
-  - `go test ./application/workorch ./internal/modules/application/workorch/... -count=1` passed after removing production `main` test helpers and moving CLI/TUI embedded command handling to workorchd.
+  - `go test ./application/workorch ./internal/services/workorch ./internal/services/workorch/biz/backends -count=1` passed after moving embedded RuntimeSession creation/close from app into the backend facade.
+  - `go test ./application/workorch ./internal/services/workorch ./internal/modules/application/workorchd ./internal/pkg/events -count=1` passed after moving workorchd server done waiting behind an EventHub command and adding module command coverage.
+  - `go test ./application/workorch ./internal/services/workorch/... -count=1` passed after removing production `main` test helpers and moving CLI/TUI embedded command handling to workorchd.
   - `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` passed after the CLI/TUI EventHub dispatcher boundary cleanup.
   - `go test ./internal/pkg/workorchrepo ./internal/pkg/workorchdefaults ./internal/pkg/workorchruntimepolicy ./internal/initiators/workorchruntime ./internal/modules/application/workorchd/biz/bootstrap ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/service/server ./application/workorch -count=1` passed after moving shared bootstrap helpers out of application bootstrap.
   - `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` passed after the latest shared-helper package-boundary cleanup.
@@ -283,7 +285,7 @@ Last Updated: 2026-06-03
   - `go test ./application/workorch -count=1 -timeout=240s` passed after the appservice boundary closure.
   - `go test ./internal/modules/kernel/run ./internal/modules/application/workorchd/biz/appservice -count=1 -timeout=300s` passed after adding the scoped run owner command guard.
   - `go test ./internal/modules/kernel/eventstream ./internal/modules/kernel/eventstream/biz -count=1 -timeout=120s` passed after adding EventStream duplicate start/stop regression coverage.
-  - `go test ./internal/modules/application/workorch/service/tui -count=1 -timeout=240s` passed after adding TUI active-workspace run scope regression coverage.
+  - `go test ./internal/services/workorch/service/tui -count=1 -timeout=240s` passed after adding TUI active-workspace run scope regression coverage.
   - `go test ./internal/modules/kernel/governance/biz -count=1 -timeout=240s` passed after adding auto-governance event envelope scope contract coverage.
   - `go test ./internal/modules/kernel/orchestrator ./internal/modules/kernel/result -count=1 -timeout=240s` passed after adding Result/Artifact EventHub adapter scope and missing-response contract coverage.
   - `go test ./internal/modules/kernel/orchestrator/biz -run 'CompleteRun|CompletesLLMRunWithSatisfiedDoDAssessment|CompletionGate' -count=1 -timeout=240s` passed after adding the direct CompleteRun accepted-result gate.
@@ -296,36 +298,36 @@ Last Updated: 2026-06-03
 
 ## Audit Records
 
-### application/workorch entry and app runtime
+### application/workorch entry and process service runtime
 
-- Code: `application/workorch/main.go`, `internal/modules/application/workorch/app`
-- Owner layer: Application entry / CLI runtime
-- Expected responsibility: `main` 负责信号上下文、按进程入口启用 framework initiator/modules，并调用 `app.Run`；`app` 负责解析启动模式、配置目录、调用 `application.Startup` / `Run` / `Shutdown`，并在 local interactive/server 模式内复用同一 framework runtime。
+- Code: `application/workorch/main.go`, `internal/services/workorch`
+- Owner layer: Application entry / process service runtime
+- Expected responsibility: `main` 负责信号上下文、按进程入口启用 framework initiator/modules，并调用 `workorch.Run`；process service 负责解析启动模式、配置目录、调用 `application.Startup` / `Run` / `Shutdown`，并在 local interactive/server 模式内复用同一 framework runtime。
 - Current responsibility: 已对齐参考 `magicRunner` 入口：framework side-effect imports 位于 `application/workorch/main.go`，`app` 包不再隐式注册 modules；remote 模式走 remote backend，不启动本地 framework runtime；local 模式统一使用 `service.DefaultService()` 启动已注册 initiator/module。
-- Lifecycle check: `runLocal` 在 `application.Startup` 成功后 defer `shutdownApplication`，再调用 `application.Run`；server 模式通过 EventHub `TopicWorkorchDCommandDone` 查询 workorchd module 实例的 done channel，或等待进程 context 取消；interactive 模式创建 embedded EventHub backend，并由 workorchd CLI dispatcher 借用 request-scoped `RuntimeSession`。
-- EventHub check: `app` 不直接创建独立 EventHub；interactive backend 通过 runtime initiator 暴露的 framework EventHub 发布 CLI command/result envelope。
-- Background task check: `app` 不直接启动长期任务；长期任务由 framework service/module/initiator 接管。
-- State ownership check: `app` 仅做 workspace 默认选择和 CLI flow 编排，不直接裁决 Run 状态机。
+- Lifecycle check: local runtime 在 `application.Startup` 成功后 defer `shutdownApplication`，再调用 `application.Run`；server 模式通过 EventHub `TopicWorkorchDCommandDone` 查询 workorchd module 实例的 done channel，或等待进程 context 取消；interactive 模式创建 embedded EventHub backend，并由 workorchd CLI dispatcher 借用 request-scoped `RuntimeSession`。
+- EventHub check: process service 不直接创建独立 EventHub；interactive backend 通过 runtime initiator 暴露的 framework EventHub 发布 CLI command/result envelope。
+- Background task check: process service 不直接启动长期任务；长期任务由 framework service/module/initiator 接管。
+- State ownership check: process service 仅做 workspace 默认选择和 CLI flow 编排，不直接裁决 Run 状态机。
 - Workspace scope check: 默认 workspace 解析只用于 CLI 初始上下文；TUI run continuation / stale run recovery 路径通过 `ContextWithRuntimeWorkspaceID` 将 active workspace 传给 backend `Run.Get` / `Run.List` / `Run.Resume`，backend 再交给 appservice owner command scope guard。
 - Findings: framework module 注册曾放在 `app` 包，导致应用包带 side-effect 注册；已上移到 `main` 入口按进程启用。TUI active workspace run scope 已补回归测试，覆盖切换 workspace 后继续执行不会误用其他 workspace 的同名/旧 run。
 - Required action: 后续新增 TUI/backend run 操作必须继续绑定 active workspace context，不能只传 workspace-local `runID`。
-- Verification: `go test ./application/workorch ./internal/modules/application/workorch/app -count=1`; `go test ./internal/modules/application/workorch/service/tui -count=1 -timeout=240s`
+- Verification: `go test ./application/workorch ./internal/services/workorch -count=1`; `go test ./internal/services/workorch/service/tui -count=1 -timeout=240s`
 - Status: reviewed
 
-### application/workorch plugin lifecycle
+### workorch process service lifecycle
 
-- Code: `internal/modules/application/workorch`
-- Owner layer: Application plugin module
-- Expected responsibility: 作为 CLI application module 注册到 magicCommon plugin framework，验证 runtime initiator 已可获取，不承担业务状态机。
-- Current responsibility: `Setup` 只通过 initiator helper 验证 `workorchruntime` 已接线并创建空 `Module`；`Run` / `Teardown` 无重副作用。
-- Lifecycle check: `Setup` / `Run` / `Teardown` 均为轻量、幂等路径；权重晚于 runtime initiator。
-- EventHub check: plugin 不直接使用 EventHub，符合当前空 module 职责。
-- Background task check: plugin 不启动后台任务。
+- Code: `internal/services/workorch`
+- Owner layer: Process service
+- Expected responsibility: 作为 `framework/service.LifecycleService` 风格的进程级 service 管理 `remote` / `server` / `interactive` 模式，接入 `framework/application`，但不注册为 plugin module。
+- Current responsibility: `Startup` 解析选项和配置；local 模式启动 framework application；remote / embedded backend 由 process service 选择并传给 CLI/TUI/agent；`Shutdown` 负责释放 process service 持有的 runtime。
+- Lifecycle check: `Startup` / `Run` / `Shutdown` 均为进程级生命周期路径；plugin module 启用仍由 `application/workorch/main.go` 的 side-effect imports 决定。
+- EventHub check: process service 只通过 embedded backend 使用 runtime initiator 暴露的 EventHub command/result transport，不直接访问 owner service/repository。
+- Background task check: process service 不启动长期后台任务；长期任务由 framework service/module/initiator 接管。
 - State ownership check: 不持有或写入业务状态。
-- Workspace scope check: 不涉及 run/workspace 查询。
-- Findings: 未发现需要本轮代码收口的问题。
-- Required action: 若后续 CLI module 承担实际订阅或后台任务，必须通过 framework `event.Hub` / `BackgroundRoutine` 接线。
-- Verification: `go test ./internal/modules/application/workorch/... -count=1`
+- Workspace scope check: 默认 workspace/session 只通过 `workorchport.Backend` 查询或创建；run/ticket 等 workspace-local ID 必须由调用路径传递 workspace scope 或由服务端唯一 open 对象解析。
+- Findings: 原 `internal/modules/application/workorch` 不是 plugin module，已迁移到 `internal/services/workorch`。
+- Required action: 后续新增 process service 能力不得放回 `internal/modules`；如需要正式 plugin lifecycle，应新建真正的 module/block/initiator 并通过入口显式启用。
+- Verification: `go test ./internal/services/workorch/... -count=1`
 - Status: reviewed
 
 ### workorchd plugin lifecycle

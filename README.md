@@ -15,6 +15,7 @@ configured.
 ## Structure
 
 - `application/workorch`: executable entry; default mode starts the TUI, and `--server` starts the HTTP/Web service
+- `internal/services/workorch`: process-level framework service for startup mode selection, local/remote backend wiring, CLI, TUI, and agent session adapters
 - `internal/initiators/workorchruntime`: workorch runtime initiator that provides repository providers, EventHub access, runtime policy, and bootstrap helpers to plugin-loaded modules
 - `internal/modules/application/workorchd`: server-side application module plus `biz` / `service` / `pkg` implementation packages
 - `web/workorch-console`: React/TypeScript management console source, built into workorch server assets
@@ -22,7 +23,7 @@ configured.
 - `internal/modules/kernel/{workspace,run,decision,approval,orchestrator,eventstream,mcp,memory,skill,soul,result,system}`: workorch kernel modules
 - `internal/modules/kernel/result`: formal Result / Artifact business outcome models
 - `internal/modules/blocks/{file,git,llm,mcp,shell,ssh,web}`: reusable runtime capability block modules
-- `internal/pkg/{common,events,repository,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy}`: shared internal primitives and runtime contracts
+- `internal/pkg/{common,events,repository,workorchclient,workorchport,workorchdeps,workorchrepo,workorchruntimecontract,workorchruntimepolicy}`: shared internal primitives, REST client, CLI/TUI/agent port contracts, and runtime contracts
 - `docs/`: repo docs
 - `docs/next-stage-result-event-development-plan.md`: completed formal Result / Artifact and persistent Workorch event stream scope
 - `.github/workflows/ci.yml`: GitHub Actions CI workflow
@@ -39,6 +40,9 @@ Each module is now normalized around the go-multi-module-dev minimum shape:
 The application layer is also split by responsibility:
 
 - `application/workorch/main.go`: thin process entry that starts the TUI by default, or starts the magicCommon service with `--server`; it explicitly imports the selected `workorchruntime` initiator plus the required `kernel` and `blocks` modules
+- `internal/services/workorch`: process-level `framework/service.LifecycleService` implementation for `remote` / `server` / `interactive` modes; it is not a plugin module and does not own formal state
+- `internal/services/workorch/service/cli` and `internal/services/workorch/service/tui`: command and interactive adapters that depend on `internal/pkg/workorchport`
+- `internal/services/workorch/biz/backends`: `workorchport.Backend` implementations; remote mode uses `internal/pkg/workorchclient`, embedded mode uses EventHub command/response
 - `internal/modules/application/workorchd`: plugin module registration plus `Setup` / `Run` / `Teardown` bridge for the workorch HTTP service
 - `internal/initiators/workorchruntime`: application runtime dependency provider used by plugin-loaded modules
 - `internal/modules/application/workorchd/biz/bootstrap`: backend assembly, repository wiring, EventHub/runtime dependency export, and application runtime construction

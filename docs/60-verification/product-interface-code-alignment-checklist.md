@@ -44,7 +44,7 @@ Last Updated: 2026-05-30
 - `internal/modules/application/workorchd/biz/appservice`
 - `internal/modules/application/workorchd/pkg/observed`
 - `internal/modules/application/workorchd/pkg/presenter`
-- `internal/modules/application/workorch/service/tui`
+- `internal/services/workorch/service/tui`
 - `web/workorch-console/src`
 
 ## Review Order
@@ -221,8 +221,8 @@ Last Updated: 2026-05-30
 | --- | --- | --- | --- |
 | service API | `internal/modules/application/workorchd/service/server/http.go` / `internal/modules/application/workorchd/biz/appservice/read_model_service.go` | pass | workspace/run snapshot、observability、detail page、raw content endpoint 均有正式落点；handler 继续保持 parse / validation / response 边界。 |
 | deployment / startup | `docs/50-product-interface/deployment.md` / `internal/modules/application/workorchd` | pass | 本轮未发现 startup surface 混入 acceptance 断言；file backend 与 deliverable/internal boundary 继续由配置和 runtime session 承接。 |
-| TUI requirements / interaction | `internal/modules/application/workorch/service/tui` | pass | 本地 TUI 使用 shared backend 与 EventHub subscription；未发现 fixed polling 或本地 HTTP client 路径。slash command、decision、approval、result-first 主视图与当前交互合同一致。 |
-| TUI display / refresh | `internal/modules/application/workorch/service/tui/view.go` / `workspace_state.go` | pass | active workspace + active run 驱动主视图、状态栏和 blocker；非 active workspace 事件仅刷新 bounded monitor。artifact continuation 仅展示 target/state/progress/failure summary。 |
+| TUI requirements / interaction | `internal/services/workorch/service/tui` | pass | 本地 TUI 使用 shared backend 与 EventHub subscription；未发现 fixed polling 或本地 HTTP client 路径。slash command、decision、approval、result-first 主视图与当前交互合同一致。 |
+| TUI display / refresh | `internal/services/workorch/service/tui/view.go` / `workspace_state.go` | pass | active workspace + active run 驱动主视图、状态栏和 blocker；非 active workspace 事件仅刷新 bounded monitor。artifact continuation 仅展示 target/state/progress/failure summary。 |
 | Web Console mapping | `web/workorch-console/src/api.ts` / `web/workorch-console/src/pages` | pass | Business Board、Workspace Detail、Governance Queue、Runtime Control、Configuration、Service Status 均通过文档列出的 API families 获取正式读模型；SSE 只触发刷新。 |
 | raw/detail boundary | `internal/modules/application/workorchd/biz/appservice/artifact_content_service.go` / `runtime_raw_content_service.go` / `web/workorch-console/src/api.ts` | pass | `artifacts/content` 与 `runtime/payloads` 仍是显式打开路径；snapshot/observability 默认不嵌入 runtime raw payload 或 artifact continuation 正文。 |
 | form / interaction boundary | `web/workorch-console/src/pages` | pass | Web form 只做字段组织、最小校验和 API 调用；未发现前端重演 DoD 质量、approval fallback、provider compatibility 或 runtime 状态机。 |

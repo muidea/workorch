@@ -33,7 +33,7 @@ Out of scope:
 
 ## Hard Acceptance Rules
 
-- 本地 TUI 不得 import `internal/modules/application/workorch/biz/client`
+- 本地 TUI 不得 import `internal/pkg/workorchclient`
 - 本地 TUI 不得使用固定轮询刷新状态
 - 本地 TUI 不得启动或依赖 `workorchd` 子进程
 - 本地 TUI 不得依赖本机 HTTP listener
@@ -144,7 +144,7 @@ TUI acceptance 当前还应明确验证以下边界：
 make cli-test
 make verify-cli
 make verify-tui-agent
-go test ./internal/modules/application/workorch/... --count 1
+go test ./internal/services/workorch/... --count 1
 ```
 
 ## Source Documents

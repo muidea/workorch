@@ -32,7 +32,7 @@ Last Updated: 2026-05-30
 - `internal/modules/application/workorchd/pkg/observed/*`
 - `internal/modules/application/workorchd/pkg/presenter/*`
 - `internal/modules/application/workorchd/service/server/*`
-- `internal/modules/application/workorch/service/tui/*`
+- `internal/services/workorch/service/tui/*`
 - `internal/modules/kernel/*`
 - `internal/modules/blocks/*`
 - `internal/pkg/repository/*`

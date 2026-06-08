@@ -4,7 +4,7 @@ set -euo pipefail
 # See docs/workorch-cli-tui-agent-requirements.md CLI-AGENT-15, CLI-AGENT-11.
 
 CLI_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODULE_BASE="internal/modules/application/workorch"
+MODULE_BASE="internal/services/workorch"
 PASS=0
 FAIL=0
 
@@ -24,9 +24,9 @@ check_no_import() {
 echo "=== CLI Architecture Guards ==="
 
 # 1. Forbidden imports in local-mode packages.
-check_no_import "service/tui" "biz/client" "TUI: no HTTP client import"
-check_no_import "biz/agent" "biz/client" "Agent: no HTTP client import"
-check_no_import "service/cli" "biz/client" "CLI commands: no HTTP client import"
+check_no_import "service/tui" "workorchclient" "TUI: no HTTP client import"
+check_no_import "biz/agent" "workorchclient" "Agent: no HTTP client import"
+check_no_import "service/cli" "workorchclient" "CLI commands: no HTTP client import"
 check_no_import "service/cli" "biz/local" "CLI commands: no launcher import"
 
 # 2. biz/local directory must not exist.
@@ -50,20 +50,20 @@ else
 	pass "TUI: mouse selection/copy preserved"
 fi
 
-# 4. No HTTP client outside biz/client and biz/backend/remote.
+# 4. No HTTP client outside workorchclient and biz/backends/remote.
 echo "  → Checking no HTTP client leakage outside allowed packages..."
-HTTP_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"' \
-  "$CLI_ROOT/$MODULE_BASE/" 2>/dev/null | grep -v 'biz/client/' | grep -v 'biz/backend/remote.go' || true)
+HTTP_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/pkg/workorchclient"' \
+  "$CLI_ROOT/$MODULE_BASE/" 2>/dev/null | grep -v 'workorchclient/' | grep -v 'biz/backends/remote.go' || true)
 if [ -n "$HTTP_LEAKS" ]; then
   fail "HTTP client leaked outside allowed packages: $HTTP_LEAKS"
 else
   pass "HTTP client contained in allowed packages"
 fi
 
-# 5. Local/eventhub backend must not import biz/client; remote backend is the
+# 5. Local/eventhub backend must not import workorchclient; remote backend is the
 # only backend transport allowed to use the HTTP client.
-LOCAL_BACKEND_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"\|"biz/client"' \
-  "$CLI_ROOT/$MODULE_BASE/biz/backend/" 2>/dev/null | grep -v 'biz/backend/remote.go' || true)
+LOCAL_BACKEND_LEAKS=$(grep -rn '"github.com/muidea/workorch/internal/pkg/workorchclient"\|"workorchclient"' \
+  "$CLI_ROOT/$MODULE_BASE/biz/backends/" 2>/dev/null | grep -v 'biz/backends/remote.go' || true)
 if [ -n "$LOCAL_BACKEND_LEAKS" ]; then
   fail "Local/eventhub backend imports HTTP client: $LOCAL_BACKEND_LEAKS"
 else

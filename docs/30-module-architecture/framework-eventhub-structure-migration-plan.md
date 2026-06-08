@@ -70,19 +70,19 @@ Initiators are not owner modules. They should provide foundational dependencies 
 
 | Unit | Current role | Target classification | Adjustment |
 | --- | --- | --- | --- |
-| `internal/modules/application/workorch` | No-op framework module; CLI/TUI behavior lives in `app`, `biz/backend`, `service/cli`, `service/tui` | Entrypoint/application package, not a framework module | Prefer removing the framework module registration and the `main.go` side-effect import. Keep `app`, `biz/backend`, `service/cli`, and `service/tui` as ordinary application packages driven by `app.Run`. |
+| `internal/services/workorch` | Process service; CLI/TUI behavior lives in `service/cli`, `service/tui`, `biz/backends`, `biz/agent`, and `biz/session` | `framework/service` lifecycle service, not a plugin module | Keep as ordinary process service imported by `application/workorch/main.go`; do not register it through `framework/plugin/module`. |
 | `internal/modules/application/workorchd` | HTTP service host, runtime session, CLI dispatcher, read/app services | Application service host | Keep as application module. Split large `biz/appservice` package by use-case over time. It should not own kernel formal state. |
 
 Application modules should compose user-facing services and use EventHub-backed ports for owner state.
 
-Removal evidence for `application/workorch`:
+Removal evidence for the old `application/workorch` plugin shape:
 
-- `module.go` only defines `ID`, empty `Configure`, empty `Start`, and empty `Stop`.
-- `plugin.go` only verifies that `workorchruntime` is present, then calls the empty lifecycle methods.
-- Production side-effect registration is only `_ "github.com/muidea/workorch/internal/modules/application/workorch"` in `application/workorch/main.go`.
-- Real CLI/TUI behavior is executed by `app.Run`, `biz/backend`, `service/cli`, and `service/tui`, not by framework module `Run`.
+- The old module lifecycle had no formal owner state and no concrete plugin responsibility.
+- `application/workorch/main.go` now imports `github.com/muidea/workorch/internal/services/workorch` directly as the process service.
+- Side-effect imports in `application/workorch/main.go` are reserved for real initiator/module/block registrations.
+- Real CLI/TUI behavior is executed by the process service, `biz/backends`, `biz/agent`, `biz/session`, `service/cli`, and `service/tui`, not by a framework plugin module.
 
-Therefore `application/workorch` should be treated as an application package namespace, not as a plugin module, unless a future concrete lifecycle responsibility is added.
+Therefore `application/workorch` should be treated as the executable entrypoint namespace, while `internal/services/workorch` is the process lifecycle service.
 
 ### Blocks
 
@@ -147,7 +147,7 @@ Expected responsibility:
 - Process signal context.
 - Program/version output if needed.
 - Explicit initiator/module imports.
-- Delegate mode parsing and app behavior to `internal/modules/application/workorch/app`.
+- Delegate mode parsing and app behavior to `internal/services/workorch`.
 
 No appservice, bootstrap, server, repository, or owner implementation package should be imported from the entrypoint.
 
@@ -343,18 +343,18 @@ Example target packages:
 
 Tasks:
 
-- Remove `_ "github.com/muidea/workorch/internal/modules/application/workorch"` from `application/workorch/main.go`.
-- Delete `internal/modules/application/workorch/plugin.go` if no concrete framework lifecycle responsibility is added.
-- Delete or keep `internal/modules/application/workorch/module.go` only if needed as a plain package type. If it only carries empty lifecycle methods, delete it.
-- Keep `internal/modules/application/workorch/app`, `biz`, `service`, and `pkg` packages as ordinary application implementation packages.
+- Import `github.com/muidea/workorch/internal/services/workorch` normally from `application/workorch/main.go`.
+- Keep side-effect imports only for real initiator/module/block registrations.
+- Ensure `internal/services/workorch` has no `plugin.go` or `module.go` registration file.
+- Keep `biz`, `service`, and `pkg` packages as ordinary process service implementation packages.
 - Recheck any source-module constants that intentionally use `application/workorch`; keep event source constants if they identify CLI/application origin rather than plugin module identity.
 
 Verification:
 
 ```bash
-rg -n '_ "github.com/muidea/workorch/internal/modules/application/workorch"' application internal -g '*.go'
-rg -n 'pluginmodule\.Register\(New\(\)\)|type Module struct\{\}|func \(m \*Module\) Configure\(\)|func \(m \*Module\) Start\(\)' internal/modules/application/workorch -g '*.go'
-go test ./application/workorch ./internal/modules/application/workorch/... -count=1
+rg -n '_ "github.com/muidea/workorch/internal/services/workorch"' application internal -g '*.go'
+rg -n 'pluginmodule\.Register\(New\(\)\)|type Module struct\{\}|func \(m \*Module\) Configure\(\)|func \(m \*Module\) Start\(\)' internal/services/workorch -g '*.go'
+go test ./application/workorch ./internal/services/workorch/... -count=1
 go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1
 ```
 
@@ -577,7 +577,7 @@ Audit classification:
 | `internal/modules/application/workorchd/biz/appservice/runports/definition_validation.go` | request-local parallel owner reads, joined with `sync.WaitGroup` before return | acceptable |
 | `internal/modules/application/workorchd/biz/appservice/workspace_execution_activation_service.go` | bounded parallel catalog/memory reads, joined with `sync.WaitGroup` before return | acceptable |
 | `internal/modules/application/workorchd/biz/appservice/activationports/selection.go` | request-local parallel owner reads for selected MCP/memory refs, joined with `sync.WaitGroup` before return | acceptable |
-| `internal/modules/application/workorch/service/cli/agent_cmd.go` | command-local agent run goroutine; terminal branches now cancel context and wait on `runErr` before returning | acceptable |
+| `internal/services/workorch/service/cli/agent_cmd.go` | command-local agent run goroutine; terminal branches now cancel context and wait on `runErr` before returning | acceptable |
 | `internal/modules/application/workorchd/service/server/service.go` | HTTP server startup submitted to framework `BackgroundRoutine` | acceptable |
 | `internal/modules/application/workorchd/service/server/http_types.go` | server-owned fallback scheduler uses cancellable context and `WaitGroup`; uses framework `BackgroundRoutine` when present | acceptable |
 | `internal/modules/application/workorchd/service/server/http_run_cache.go` | scheduled cache warm task through server background scheduler; local timer observes context | acceptable |
@@ -585,7 +585,7 @@ Audit classification:
 | `internal/modules/kernel/governance/biz/service.go` | governance continuation/reconcile submitted to framework `BackgroundRoutine` when available; local timer observes cancellation | acceptable |
 | `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go` | stdio session stderr/cmd wait/read goroutines are tied to process pipes and closed through session `Close` / command exit | acceptable |
 | `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go` | stdio session stderr drain, process wait, and response reader goroutines are tied to session/context close | acceptable |
-| `internal/modules/application/workorch/service/cli/agent_cmd.go` | CLI command-local process stream handling | acceptable |
+| `internal/services/workorch/service/cli/agent_cmd.go` | CLI command-local process stream handling | acceptable |
 
 ### Phase 8: Refresh framework/EventHub skills
 
@@ -667,7 +667,7 @@ Use this table to record progress.
 
 | Phase | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Phase 0 remove no-op `application/workorch` plugin | done | `rg` old side-effect import: no matches; `rg` empty module lifecycle: no matches; `go test ./application/workorch ./internal/modules/application/workorch/... -count=1`; `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` | `application/workorch` remains an application package namespace only. |
+| Phase 0 remove no-op `application/workorch` plugin | done | `rg` old side-effect import: no matches; `rg` empty module lifecycle: no matches; `go test ./application/workorch ./internal/services/workorch/... -count=1`; `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1` | `application/workorch` remains an application package namespace only. |
 | Phase 1 dependency resolver / runtime contract | done | `rg` direct runtime initiator lookup: no matches; `rg` old orchestrator model import: no matches; `go test ./internal/pkg/workorchruntimecontract ./internal/pkg/repository ./internal/pkg/repository/file ./internal/pkg/repository/memory ./internal/pkg/workorchrepo -count=1`; `go test ./internal/modules/blocks/... ./internal/modules/kernel/orchestrator/... ./internal/modules/application/workorchd/biz/appservice -count=1` | Runtime policy lives in `internal/pkg/workorchruntimepolicy`; execution/artifact contracts live in `internal/pkg/workorchruntimecontract`. |
 | Phase 2 system module defaults | done | `rg EnsureBuiltinDefaults` only reports `internal/modules/kernel/system/module.go`; `go test ./internal/modules/kernel/system ./internal/initiators/... -count=1`; `WORKORCH_BASE_URL=http://127.0.0.1:8080 make verify-ci-mvp-file` | MCP stdio deployed verification completed with `runState=completed`. |
 | Phase 3 repository narrowing | done | `rg 'runtime\.Repositories\(\)|ResolveRuntimeHelper\(ModuleID\)' internal/modules/application internal/modules/blocks internal/modules/kernel ...`: no matches; `rg '\.Repositories\.(Workspaces\|Goals\|DoDs\|Runs\|Steps\|Results\|Artifacts\|Tickets\|Approvals\|Souls\|Skills\|MCPServers\|MCPCapabilities)' internal/modules/application ...`: no matches; `rg '\bRepositories\(\)|\.Repositories\(' internal application -g '*.go'`: no matches; `go test ./internal/pkg/workorchdeps ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorchd/biz/bootstrap -count=1`; `go test ./internal/modules/blocks/... ./internal/modules/kernel/... -count=1` | Module plugins now use grouped repository resolvers. Application runtime session builds exports through `workorchdeps` rather than direct full `RepositorySet` access. The runtime initiator `Helper` now exposes `RepositoryProvider()` instead of `Repositories() RepositorySet`; the full repository set is private to `workorchruntime`, so callers must request owner-scoped repository groups. |
@@ -771,7 +771,7 @@ Phase 6 incremental closure notes:
 - `contextregistryports` now also owns memory delete and list-by-workspace command payload construction/response extraction. `context_registry_service.go` calls the focused port functions rather than constructing those memory command payloads in the root facade.
 - `governanceports` now owns decision resolution and approval approve/reject command publication plus owner response extraction. `decision_service.go` and `approval_service.go` keep session handling, runtime workspace checks, batch orchestration, owner reads, and app-facing projection while governance command payload construction lives in the focused EventHub port package.
 - `workspaceports.UpdateWorkspaceRecord` now preserves the workspace active-run scope on update envelopes, and `contextregistryports` owns soul capability validation command payloads. `workspace_soul_bindings_service.go` keeps only binding normalization, owner reads, and activation/routing validation orchestration.
-- Latest `application/workorch` namespace verification passed: side-effect framework module imports remain only in `application/workorch/main.go`; `internal/modules/application/workorch` retains CLI/TUI/backend application behavior as ordinary packages, not a plugin module. Verification: `go test ./application/workorch -count=1` and `go test ./internal/modules/application/workorch/... -count=1`.
+- Latest `application/workorch` namespace verification passed: side-effect framework module imports remain only in `application/workorch/main.go`; `internal/services/workorch` retains CLI/TUI/backend application behavior as ordinary packages, not a plugin module. Verification: `go test ./application/workorch -count=1` and `go test ./internal/services/workorch/... -count=1`.
 - Latest definition command port cleanup verification passed: `go test ./internal/modules/application/workorchd/biz/appservice/definitionports ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(Goal|DoD|Definition|Quality|Activation|WorkspaceExecution)' -count=1`, `go test ./internal/modules/application/workorchd/biz/appservice/... -count=1`, `go test ./internal/modules/application/workorchd/... -count=1`, `git diff --check`, the service-command payload boundary scan, and the appservice direct owner repository/service import scan.
 - Latest workspace command port cleanup verification passed: `go test ./internal/modules/application/workorchd/biz/appservice/workspaceports ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(Workspace|Template|Soul|Routing|Activation|WorkspaceExecution)' -count=1`; `workspace_service.go` no longer imports `ownercommandports` or constructs workspace owner/eventstream command payloads directly.
 - Latest run command port cleanup verification passed: `go test ./internal/modules/application/workorchd/biz/appservice/runports ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(Run|Recovery|CompressedContext|WorkspaceExecution|Activation)' -count=1`.
@@ -794,8 +794,8 @@ Phase 6 incremental closure notes:
 - Latest context-registry memory use-case and run definition validation cleanup verification passed: `go test ./internal/modules/application/workorchd/biz/appservice/contextregistryports ./internal/modules/application/workorchd/biz/appservice/contextregistrycore -count=1`, `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(ContextRegistry|Skill|MCP|Memory|Soul|WorkspaceSetupDraft|Activation|WorkspaceExecution)' -count=1`, `go test ./internal/modules/application/workorchd/biz/appservice/runports -count=1`, and `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(Run|Recovery|CompressedContext|WorkspaceExecution|Activation|MemoryRecall)' -count=1`.
 - Latest regression after memory use-case and run definition validation cleanup passed: `go test ./internal/modules/application/workorchd/biz/appservice/... -count=1`, `go test ./internal/modules/application/workorchd/... -count=1`, `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1`, `go test ./application/workorch -count=1`, `git diff --check`, the service-command payload boundary scan, the appservice direct owner repository/service import scan, and the root appservice command topic/payload residue scan.
 - Phase 7 background audit was refreshed against the current production `go func` / timer / `BackgroundRoutine` scan. `agent_cmd.go` now cancels the command context and waits on the agent run goroutine in terminal CLI branches before returning; activation/run port fan-out and MCP stdio session goroutines were classified in the audit table with their join/close paths.
-- Latest CLI agent goroutine cleanup verification passed: `go test ./internal/modules/application/workorch/service/cli ./internal/modules/application/workorch/biz/agent -count=1` and `go test ./application/workorch -count=1`.
-- Latest Phase 7 audit refresh regression passed: the production goroutine/timer scan (`rg -n '\bgo func\b|AsyncFunction|AsyncTask|TimerWithContext|Timer\(' internal/modules internal/initiators application -g '*.go' --glob '!**/*_test.go'`), `go test ./internal/modules/application/workorch/... ./application/workorch -count=1`, `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1`, `git diff --check`, the service-command payload boundary scan, and the appservice direct owner repository/service import scan.
+- Latest CLI agent goroutine cleanup verification passed: `go test ./internal/services/workorch/service/cli ./internal/services/workorch/biz/agent -count=1` and `go test ./application/workorch -count=1`.
+- Latest Phase 7 audit refresh regression passed: the production goroutine/timer scan (`rg -n '\bgo func\b|AsyncFunction|AsyncTask|TimerWithContext|Timer\(' internal/modules internal/initiators application -g '*.go' --glob '!**/*_test.go'`), `go test ./internal/services/workorch/... ./application/workorch -count=1`, `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1`, `git diff --check`, the service-command payload boundary scan, and the appservice direct owner repository/service import scan.
 - `activationports` now owns explicit skill selection for workspace execution, including parallel EventHub owner reads and SkillHub fallback through the narrow `contextregistrycore.SkillHubSkillCatalog` interface. `skill_selection_service.go` and activation context assembly pass the session-derived catalog into the focused port instead of keeping an appservice `selectedSkills` wrapper.
 - Latest activation skill-selection port cleanup verification passed: `go test ./internal/modules/application/workorchd/biz/appservice/activationports -count=1`, `go test ./internal/modules/application/workorchd/biz/appservice -run 'Test.*(Skill|SkillHub|Activation|WorkspaceExecution|MCP|Memory|Soul)' -count=1`, `git diff --check`, the selected-skill owner-read locality scan, the service-command payload boundary scan, and the appservice direct owner repository/service import scan.
 - Latest `workorchd` regression after activation skill-selection port cleanup passed: `go test ./internal/modules/application/workorchd/biz/appservice/... -count=1`, `go test ./internal/modules/application/workorchd/... -count=1`, `git diff --check`, and the selected-skill owner-read locality scan.
@@ -2070,4 +2070,4 @@ Phase 6 incremental closure notes:
 - Phase 6 closure criteria have been tightened: framework/EventHub boundary compliance is mandatory, while remaining same-package helper extraction is optional and should be driven by mixed responsibilities or boundary-risk reduction rather than line count. Current appservice structure verification shows focused subpackages for activation, app models, CLI, config, content, context registry, definitions, governance, localization, owner commands/reads, quality, read models, run/runtime, setup draft, skill selection, and workspace support. Generated empty test directories under `appservice/.workorch-data` and `appservice/workspaces` were removed before recording structure evidence.
 - Latest Phase 6 mandatory boundary audit passed: `find internal/modules/application/workorchd/biz -maxdepth 2 -type d | sort`, `rg -n 'internal/modules/application/workorchd/biz/appservice' internal/modules/application/workorchd/service -g '*.go'`, `go test ./internal/modules/application/workorchd/... -count=1`, `git diff --check`, the service-command payload boundary scan, and the appservice direct owner repository/service import scan. The remaining files at or above 80 lines are optional maintainability candidates unless a later scan shows actual framework/EventHub boundary risk.
 - Latest broader Phase 6 regression passed: `go test ./internal/initiators/... ./internal/modules/... ./internal/pkg/... -count=1`, `go test ./application/workorch -count=1`, and `git diff --check`.
-- After upgrading to `magicCommon v1.5.9`, `application/workorch` now bridges framework `*cd.Error` returns through explicit nil checks before returning Go `error` values. This prevents typed-nil `error` interfaces from causing server mode to immediately shutdown after `application.Run`. Verification passed: `go test ./application/workorch ./internal/modules/application/workorch/... -count=1`, `go test ./internal/modules/application/workorchd/... -count=1`, and `go test ./internal/initiators/... ./internal/modules/kernel/... ./internal/modules/blocks/... ./internal/pkg/... -count=1`.
+- After upgrading to `magicCommon v1.5.9`, `application/workorch` now bridges framework `*cd.Error` returns through explicit nil checks before returning Go `error` values. This prevents typed-nil `error` interfaces from causing server mode to immediately shutdown after `application.Run`. Verification passed: `go test ./application/workorch ./internal/services/workorch/... -count=1`, `go test ./internal/modules/application/workorchd/... -count=1`, and `go test ./internal/initiators/... ./internal/modules/kernel/... ./internal/modules/blocks/... ./internal/pkg/... -count=1`.

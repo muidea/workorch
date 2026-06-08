@@ -333,6 +333,6 @@ projection follow-up。
 
 - 状态：基础防护已收口，CTX-01/CTX-02 已完成本轮收口，剩余项待下一轮需求推进。
 - 已验证：受影响范围测试通过：
-  - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/modules/application/workorch/service/tui -count=1`
+  - `go test ./internal/modules/kernel/orchestrator/biz ./internal/modules/blocks/llm/biz ./internal/modules/application/workorchd/biz/appservice ./internal/services/workorch/service/tui -count=1`
 - 前置能力：固定 bytes 预算和 provider timeout retry 已完成基础收口。
 - 主要遗留：provider failover 高级策略、多入口治理语义归一的剩余入口覆盖、真实 tokenizer/原生 token usage、provider 原生 usage 的跨模型覆盖率与精度提升、context-too-large 差异化治理策略。

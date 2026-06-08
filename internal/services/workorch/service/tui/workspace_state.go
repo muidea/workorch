@@ -1,0 +1,520 @@
+package tui
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+)
+
+func findWorkspace(workspaces []backend.WorkspaceInfo, id string) *backend.WorkspaceInfo {
+	for i := range workspaces {
+		if string(workspaces[i].ID) == id {
+			return &workspaces[i]
+		}
+	}
+	return nil
+}
+
+func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
+	for i := range workspaces {
+		if string(workspaces[i].ID) == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
+	state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
+	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID))
+	title := firstPayloadString(evt.Payload, "title", "Title", events.PayloadKeyTitle)
+	description := firstPayloadString(evt.Payload, "description", "Description", events.PayloadKeyDescription)
+	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", events.PayloadKeyDeliverableDirectory)
+	for i := range m.workspaces {
+		if m.workspaces[i].ID == evt.WorkspaceID {
+			if title != "" {
+				m.workspaces[i].Title = title
+			}
+			if description != "" {
+				m.workspaces[i].Description = description
+			}
+			if deliverableDirectory != "" {
+				m.workspaces[i].DeliverableDirectory = deliverableDirectory
+			}
+			if state != "" {
+				m.workspaces[i].State = state
+			}
+			if activeRunID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyActiveRunID, "ActiveRunID", "activeRunId") {
+				m.workspaces[i].ActiveRunID = activeRunID
+			}
+			return
+		}
+	}
+	m.workspaces = append(m.workspaces, backend.WorkspaceInfo{
+		ID:                   evt.WorkspaceID,
+		Title:                title,
+		Description:          description,
+		DeliverableDirectory: deliverableDirectory,
+		State:                state,
+		ActiveRunID:          activeRunID,
+	})
+}
+
+func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
+	if id == "" {
+		return
+	}
+	next := m.workspaces[:0]
+	for _, ws := range m.workspaces {
+		if ws.ID != id {
+			next = append(next, ws)
+		}
+	}
+	m.workspaces = next
+	if len(m.workspaces) == 0 {
+		m.activeWorkspaceID = ""
+		m.selectedWorkspaceID = ""
+		m.cursor = 0
+		return
+	}
+	if m.cursor >= len(m.workspaces) {
+		m.cursor = len(m.workspaces) - 1
+	}
+}
+
+func (m *AppModel) ensureActiveWorkspace() {
+	if len(m.workspaces) == 0 {
+		return
+	}
+	if m.activeWorkspaceID == "" {
+		m.activeWorkspaceID = m.defaultWorkspaceID
+	}
+	if m.workspaceSelectMode {
+		if idx := workspaceIndex(m.workspaces, m.selectedWorkspaceID); idx >= 0 {
+			m.cursor = idx
+			return
+		}
+	}
+	if idx := workspaceIndex(m.workspaces, m.activeWorkspaceID); idx >= 0 {
+		m.selectedWorkspaceID = m.activeWorkspaceID
+		m.cursor = idx
+		return
+	}
+	if idx := workspaceIndex(m.workspaces, m.defaultWorkspaceID); idx >= 0 {
+		m.activeWorkspaceID = m.defaultWorkspaceID
+		m.selectedWorkspaceID = m.defaultWorkspaceID
+		m.cursor = idx
+		return
+	}
+	m.activeWorkspaceID = string(m.workspaces[0].ID)
+	m.selectedWorkspaceID = m.activeWorkspaceID
+	m.cursor = 0
+}
+
+func (m *AppModel) nextWorkspace() {
+	if len(m.workspaces) == 0 {
+		return
+	}
+	idx := m.selectedWorkspaceIndex()
+	idx = (idx + 1) % len(m.workspaces)
+	m.cursor = idx
+	m.selectedWorkspaceID = string(m.workspaces[idx].ID)
+}
+
+func (m *AppModel) prevWorkspace() {
+	if len(m.workspaces) == 0 {
+		return
+	}
+	idx := m.selectedWorkspaceIndex()
+	idx--
+	if idx < 0 {
+		idx = len(m.workspaces) - 1
+	}
+	m.cursor = idx
+	m.selectedWorkspaceID = string(m.workspaces[idx].ID)
+}
+
+func (m *AppModel) setActiveWorkspace(id string) {
+	if id == "" || id == m.activeWorkspaceID {
+		return
+	}
+	m.activeWorkspaceID = id
+	m.selectedWorkspaceID = id
+	if idx := workspaceIndex(m.workspaces, id); idx >= 0 {
+		m.cursor = idx
+	}
+	if m.options.OnActiveWorkspaceChanged != nil {
+		m.options.OnActiveWorkspaceChanged(id)
+	}
+}
+
+func (m *AppModel) toggleWorkspaceSelectMode() {
+	if m.workspaceSelectMode {
+		m.cancelWorkspaceSelection()
+		return
+	}
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = m.activeWorkspaceID
+	if idx := workspaceIndex(m.workspaces, m.selectedWorkspaceID); idx >= 0 {
+		m.cursor = idx
+	}
+}
+
+func (m *AppModel) cancelWorkspaceSelection() {
+	m.workspaceSelectMode = false
+	m.selectedWorkspaceID = m.activeWorkspaceID
+	if idx := workspaceIndex(m.workspaces, m.activeWorkspaceID); idx >= 0 {
+		m.cursor = idx
+	}
+}
+
+func (m *AppModel) selectedWorkspaceIndex() int {
+	if idx := workspaceIndex(m.workspaces, m.selectedWorkspaceID); idx >= 0 {
+		return idx
+	}
+	if m.cursor >= 0 && m.cursor < len(m.workspaces) {
+		return m.cursor
+	}
+	if idx := workspaceIndex(m.workspaces, m.activeWorkspaceID); idx >= 0 {
+		return idx
+	}
+	return 0
+}
+
+func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
+	if m.selectedWorkspaceID == "" {
+		m.workspaceSelectMode = false
+		return m, nil
+	}
+	if m.selectedWorkspaceID == m.activeWorkspaceID {
+		m.workspaceSelectMode = false
+		return m, nil
+	}
+	m.setActiveWorkspace(m.selectedWorkspaceID)
+	m.workspaceSelectMode = false
+	m.resetWorkspaceView()
+	m.progressText = "Workspace switched; refreshing state"
+	return m, FetchAll(m.be)
+}
+
+func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
+	if msg.Workspace == nil {
+		return
+	}
+	workspaceID := string(msg.Workspace.ID)
+	if workspaceID == "" || workspaceID != m.activeWorkspaceID {
+		return
+	}
+	previousTask := m.currentTask
+	previousTranscript := append([]transcriptItem(nil), m.transcript...)
+	previousDoDItems := append([]string(nil), m.dodItems...)
+	m.upsertWorkspace(*msg.Workspace)
+	if msg.Decisions != nil {
+		m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
+	}
+	if msg.Approvals != nil {
+		m.approvals = append([]backend.ApprovalInfo(nil), msg.Approvals...)
+	}
+
+	workspaceHasLive := msg.WorkspaceHasLive || msg.Workspace.ActiveRunID != ""
+	activeRun := msg.ActiveRun
+	displayRun := msg.DisplayRun
+	if displayRun == nil {
+		displayRun = activeRun
+	}
+	run := displayRun
+	if run == nil {
+		m.activeRunID = ""
+		m.running = false
+		m.clearRunProjectionState()
+		if msg.Goal != nil && strings.TrimSpace(msg.Goal.Text) != "" {
+			goalText := strings.TrimSpace(msg.Goal.Text)
+			m.currentTask = goalText
+			m.transcript = initialTranscript(goalText)
+		} else if msg.Snapshot != nil {
+			m.currentTask = ""
+			m.transcript = nil
+		}
+		if msg.DoD != nil && len(msg.DoD.Items) > 0 {
+			m.dodItems = append([]string(nil), msg.DoD.Items...)
+		} else if msg.Snapshot != nil {
+			m.dodItems = nil
+		}
+		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
+		m.applyWorkspaceProgress(msg.Workspace.State)
+		m.syncBlockingDecisionFromList()
+		m.syncBlockingApprovalFromList()
+		return
+	}
+	if workspaceHasLive && activeRun != nil {
+		m.activeRunID = string(activeRun.ID)
+	} else {
+		m.activeRunID = ""
+	}
+	goalText := effectiveGoalText(run)
+	if goalText == "" && msg.Goal != nil {
+		goalText = strings.TrimSpace(msg.Goal.Text)
+	}
+	if goalText != "" {
+		m.currentTask = goalText
+		m.transcript = effectiveGoalTranscript(run, goalText)
+	} else if msg.Snapshot != nil {
+		m.currentTask = ""
+		m.transcript = nil
+	}
+	if items := effectiveDoDItems(run); len(items) > 0 {
+		m.dodItems = items
+	} else if msg.DoD != nil && len(msg.DoD.Items) > 0 {
+		m.dodItems = append([]string(nil), msg.DoD.Items...)
+	} else if msg.Snapshot != nil {
+		m.dodItems = nil
+	}
+	m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
+	if msg.Snapshot != nil {
+		if runStateIsTerminal(run.State) {
+			m.result = snapshotDisplayResult(msg.Snapshot, run.ID)
+		} else {
+			m.result = ""
+		}
+		m.artifacts = snapshotArtifactLabels(msg.Snapshot, run.ID)
+		m.sources = snapshotWebSourceLabels(msg.Snapshot, run.ID)
+		m.patches = snapshotPatches(msg.Snapshot, run.ID)
+		m.artifactContinuations = snapshotArtifactContinuations(msg.Snapshot, run.ID)
+		m.taskDecomp = snapshotTaskDecompositions(msg.Snapshot, run.ID)
+		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
+		m.llmUsage = msg.Snapshot.LLMUsageSummary
+		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
+		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
+	}
+
+	state := run.State
+	payload := map[string]any{
+		events.PayloadKeyFailureReason:      run.FailureReason,
+		events.PayloadKeyBlockingTicketID:   string(run.BlockingTicketID),
+		events.PayloadKeyBlockingApprovalID: string(run.BlockingApprovalID),
+	}
+	if msg.Status != nil {
+		state = msg.Status.State
+		payload[events.PayloadKeyFailureReason] = msg.Status.FailureReason
+		payload[events.PayloadKeyBlockingTicketID] = string(msg.Status.BlockingTicketID)
+		payload[events.PayloadKeyBlockingApprovalID] = string(msg.Status.BlockingApprovalID)
+	}
+	if msg.Snapshot != nil && payload[events.PayloadKeyFailureReason] == "" {
+		payload[events.PayloadKeyFailureReason] = msg.Snapshot.Outcome.Reason
+	}
+	if workspaceHasLive {
+		m.applyRunState(state, payload)
+	} else {
+		m.applyWorkspaceProgress(msg.Workspace.State)
+	}
+	if msg.Status != nil && msg.Status.CurrentStepKind != "" && m.progress == progressRunning {
+		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
+	}
+	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
+		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
+	}
+	m.syncBlockingDecisionFromList()
+	m.syncBlockingApprovalFromList()
+	if strings.TrimSpace(m.result) != "" {
+		m.followMainViewportTail()
+	}
+}
+
+func (m *AppModel) clearRunProjectionState() {
+	m.result = ""
+	m.artifacts = nil
+	m.sources = nil
+	m.patches = nil
+	m.artifactContinuations = nil
+	m.taskDecomp = nil
+	m.memoryRecalls = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
+	m.repairLoop = ""
+	m.failureReason = ""
+	m.failureHint = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+}
+
+func (m *AppModel) restoreDefinitionsWhenPartialContext(msg WorkspaceContextMsg, previousTask string, previousTranscript []transcriptItem, previousDoDItems []string) {
+	if msg.Snapshot != nil {
+		return
+	}
+	if strings.TrimSpace(m.currentTask) == "" && strings.TrimSpace(previousTask) != "" {
+		m.currentTask = previousTask
+		m.transcript = append([]transcriptItem(nil), previousTranscript...)
+	}
+	if len(m.dodItems) == 0 && len(previousDoDItems) > 0 {
+		m.dodItems = append([]string(nil), previousDoDItems...)
+	}
+}
+
+func runStateIsTerminal(state common.RunState) bool {
+	switch state {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func runStateIsLive(state common.RunState) bool {
+	return state != "" && !runStateIsTerminal(state) &&
+		state != common.RunStateBlockedOnDecision &&
+		state != common.RunStateBlockedOnApproval
+}
+
+func workspaceStateIsLive(state common.WorkspaceState) bool {
+	switch state {
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+func effectiveGoalText(run *backend.RunInfo) string {
+	if run == nil {
+		return ""
+	}
+	goal := payloadMap(run.ExecutionContext, "goal")
+	if goal == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
+}
+
+func effectiveGoalTranscript(run *backend.RunInfo, fallback string) []transcriptItem {
+	if run == nil {
+		return initialTranscript(fallback)
+	}
+	goals := contextGoalMaps(run.ExecutionContext["goals"])
+	if len(goals) == 0 {
+		return initialTranscript(fallback)
+	}
+	items := make([]transcriptItem, 0, len(goals))
+	seen := map[string]struct{}{}
+	for _, goal := range goals {
+		text := strings.TrimSpace(firstPayloadString(goal, "text", "Text"))
+		if text == "" {
+			continue
+		}
+		if _, ok := seen[text]; ok {
+			continue
+		}
+		seen[text] = struct{}{}
+		items = append(items, transcriptItem{Kind: "Goal", Text: text})
+	}
+	if len(items) == 0 {
+		return initialTranscript(fallback)
+	}
+	return items
+}
+
+func effectiveDoDItems(run *backend.RunInfo) []string {
+	if run == nil {
+		return nil
+	}
+	dod := payloadMap(run.ExecutionContext, "dod")
+	if dod == nil {
+		return nil
+	}
+	return payloadStringSliceValue(dod, "items", "Items")
+}
+
+func contextGoalMaps(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		ret := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if goal, ok := item.(map[string]any); ok {
+				ret = append(ret, goal)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func (m *AppModel) resetWorkspaceView() {
+	m.activeRunID = ""
+	m.currentTask = ""
+	m.dodItems = nil
+	m.transcript = nil
+	m.result = ""
+	m.artifacts = nil
+	m.patches = nil
+	m.artifactContinuations = nil
+	m.taskDecomp = nil
+	m.memoryRecalls = nil
+	m.llmUsage = backend.LLMUsageSummaryInfo{}
+	m.llmContext = nil
+	m.runtimeEvents = nil
+	m.repairLoop = ""
+	m.failureReason = ""
+	m.failureHint = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	m.decisions = nil
+	m.approvals = nil
+	m.running = false
+	m.progress = progressIdle
+	m.progressText = ""
+	m.lastError = nil
+	m.resetMainViewport()
+	m.clearInput()
+}
+
+func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
+	for idx := len(traces) - 1; idx >= 0; idx-- {
+		budget := traces[idx].ContextBudget
+		if len(budget) == 0 {
+			continue
+		}
+		return clonePayloadMap(budget)
+	}
+	return nil
+}
+
+func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
+	for i := range m.workspaces {
+		if m.workspaces[i].ID == ws.ID {
+			m.workspaces[i] = ws
+			return
+		}
+	}
+	m.workspaces = append(m.workspaces, ws)
+}
+
+func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
+	switch state {
+	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		m.running = true
+		m.progress = progressRunning
+		m.progressText = string(state) + "; waiting for progress or final result"
+	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+		m.running = false
+		m.progress = progressWaitingDecision
+		m.progressText = "Waiting for workspace input"
+	case common.WorkspaceStateCompleted:
+		m.running = false
+		m.progress = progressCompleted
+		m.progressText = "Completed"
+	case common.WorkspaceStateFailed:
+		m.running = false
+		m.progress = progressFailed
+		m.progressText = "Workspace failed"
+	default:
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = ""
+	}
+}

@@ -26,7 +26,7 @@ go test ./internal/pkg/events ./internal/modules/kernel/eventstream/biz ./intern
   -count=1
 
 echo "-> FDP-E2E-05/07: TUI and CLI patch evidence projection"
-go test ./internal/modules/application/workorch/service/tui ./internal/modules/application/workorch/service/cli \
+go test ./internal/services/workorch/service/tui ./internal/services/workorch/service/cli \
   -run 'Test(ModelWorkspaceContextPrefersFinalSummaryArtifactOutput|ModelWorkspaceContextHydratesFreshSnapshot|ModelResultArtifacts|ModelResultArtifactsHiddenWhenResultContainsArtifactIndex|PatchesForRunFiltersWorkspaceSnapshotPatches|NonEmptyApprovalIDPrefersApplyThenRevertApproval)$' \
   -count=1
 

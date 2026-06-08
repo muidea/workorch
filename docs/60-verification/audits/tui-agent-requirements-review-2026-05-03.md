@@ -13,10 +13,10 @@ Last Updated: 2026-05-29
 ## Review Scope
 
 - `application/workorch`
-- `internal/modules/application/workorch/biz/backend`
-- `internal/modules/application/workorch/biz/agent`
-- `internal/modules/application/workorch/service/cli`
-- `internal/modules/application/workorch/service/tui`
+- `internal/services/workorch/biz/backends`
+- `internal/services/workorch/biz/agent`
+- `internal/services/workorch/service/cli`
+- `internal/services/workorch/service/tui`
 - `scripts/verify-cli-architecture.sh`
 
 ## Review Result Summary

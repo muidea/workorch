@@ -30,7 +30,7 @@ Last Updated: 2026-05-30
 - `internal/modules/blocks/llm/biz/prompt_messages.go`
 - `internal/modules/blocks/llm/biz/runtime_adapter.go`
 - `internal/modules/application/workorchd/biz/appservice/read_model_service.go`
-- `internal/modules/application/workorch/service/tui/*`
+- `internal/services/workorch/service/tui/*`
 - `internal/pkg/repository/*/artifact_continuation_repository.go`
 - `internal/pkg/repository/repository_contract_test.go`
 - `scripts/verify-incremental-artifact-e2e.sh`

@@ -14,7 +14,7 @@ go test ./internal/modules/application/workorchd/biz/appservice \
   -count=1
 
 echo "-> AG-E2E-09: TUI shows compact auto governance status"
-go test ./internal/modules/application/workorch/service/tui \
+go test ./internal/services/workorch/service/tui \
   -run 'TestModelGovernanceResolvedEventShowsCompactStatus|TestModelGovernanceEscalatedEventRefreshesBlockers' \
   -count=1
 

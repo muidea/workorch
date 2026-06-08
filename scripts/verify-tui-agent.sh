@@ -30,14 +30,14 @@ if $STATIC_ONLY; then
   echo ""
   echo "── Layer 1: Static Architecture Guards ──"
 
-  MODULE_BASE="internal/modules/application/workorch"
+  MODULE_BASE="internal/services/workorch"
   TUI_DIR="$CLI_ROOT/$MODULE_BASE/service/tui"
 
-  # 1a. TUI must not import biz/client.
-  if grep -rq '"biz/client"' "$TUI_DIR" 2>/dev/null; then
-    fail "TUI imports biz/client"
+  # 1a. TUI must not import workorchclient.
+  if grep -rq '"workorchclient"' "$TUI_DIR" 2>/dev/null; then
+    fail "TUI imports workorchclient"
   else
-    pass "TUI: no biz/client import"
+    pass "TUI: no workorchclient import"
   fi
 
   # 1b. TUI must not use fixed polling.
@@ -55,10 +55,10 @@ if $STATIC_ONLY; then
   fi
 
   # 1d. CLI commands must not import HTTP client directly.
-  if grep -rq '"github.com/muidea/workorch/internal/modules/application/workorch/biz/client"' "$CLI_ROOT/$MODULE_BASE/service/cli" 2>/dev/null; then
-    fail "CLI commands import biz/client"
+  if grep -rq '"github.com/muidea/workorch/internal/pkg/workorchclient"' "$CLI_ROOT/$MODULE_BASE/service/cli" 2>/dev/null; then
+    fail "CLI commands import workorchclient"
   else
-    pass "CLI: no direct biz/client import"
+    pass "CLI: no direct workorchclient import"
   fi
 
   # 1e. Agent must not use direct sessions or polling.
@@ -76,21 +76,21 @@ echo "── Layer 2+3: Go Tests ──"
 cd "$CLI_ROOT"
 
 # TUI model tests
-if go test ./internal/modules/application/workorch/service/tui --count 1 2>&1; then
+if go test ./internal/services/workorch/service/tui --count 1 2>&1; then
   pass "TUI model tests pass"
 else
   fail "TUI model tests fail"
 fi
 
 # Backend tests
-if go test ./internal/modules/application/workorch/biz/backend --count 1 2>&1; then
+if go test ./internal/services/workorch/biz/backends --count 1 2>&1; then
   pass "Backend tests pass"
 else
   fail "Backend tests fail"
 fi
 
 # Agent tests
-if go test ./internal/modules/application/workorch/biz/agent --count 1 2>&1; then
+if go test ./internal/services/workorch/biz/agent --count 1 2>&1; then
   pass "Agent tests pass"
 else
   fail "Agent tests fail"
@@ -137,7 +137,7 @@ if $SCRIPTED; then
     # TUI-E2E-12: Keyboard-only viewport scroll keeps side panels fixed and
     # preserves terminal-native mouse selection/copy by disabling mouse wheel
     # reporting.
-    if go test ./internal/modules/application/workorch/service/tui -run '^TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract$' --count 1 2>&1; then
+    if go test ./internal/services/workorch/service/tui -run '^TestTUIE2EViewportKeyboardScrollAndMouseSelectionContract$' --count 1 2>&1; then
       pass "TUI-E2E-12: keyboard viewport scroll and mouse-copy contract"
     else
       fail "TUI-E2E-12: keyboard viewport scroll or mouse-copy contract failed"
@@ -145,13 +145,13 @@ if $SCRIPTED; then
 
     # TUI-E2E-13: Workspace lifecycle events update the right monitor through
     # backend callbacks without fixed polling.
-    if go test ./internal/modules/application/workorch/service/tui -run '^TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents$' --count 1 2>&1; then
+    if go test ./internal/services/workorch/service/tui -run '^TestTUIE2EWorkspaceListLiveRefreshFromBackendEvents$' --count 1 2>&1; then
       pass "TUI-E2E-13: workspace list live refresh from backend events"
     else
       fail "TUI-E2E-13: workspace list live refresh failed"
     fi
 
-    if go test ./internal/modules/application/workorch/service/tui -run '^(TestModelMemoryCommandShowsRecallSummary|TestModelMemoryRecallEventRefreshesContext)$' --count 1 2>&1; then
+    if go test ./internal/services/workorch/service/tui -run '^(TestModelMemoryCommandShowsRecallSummary|TestModelMemoryRecallEventRefreshesContext)$' --count 1 2>&1; then
       pass "TUI-E2E-14: memory recall compact summary and event refresh"
     else
       fail "TUI-E2E-14: memory recall compact summary or event refresh failed"

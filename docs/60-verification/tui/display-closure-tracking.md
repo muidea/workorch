@@ -66,7 +66,7 @@ Last Updated: 2026-05-30
 ## Verification Commands
 
 ```bash
-GOCACHE=../../../../../../../tmp/workorch-go-build go test ./internal/modules/application/workorch/service/tui --count 1
+GOCACHE=../../../../../../../tmp/workorch-go-build go test ./internal/services/workorch/service/tui --count 1
 GOCACHE=../../../../../../../tmp/workorch-go-build make verify-tui-agent
 GOCACHE=../../../../../../../tmp/workorch-go-build make cli-test
 ```

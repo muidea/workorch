@@ -266,7 +266,7 @@ verify_software_dev_profile_snapshot() {
   local snapshot_file="$3"
   local results_metadata_file="$TMP_DIR/${workspace_id_for_run}-${run_id}-profile-results-metadata.json"
   local results_file="$TMP_DIR/${workspace_id_for_run}-${run_id}-profile-results.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id_for_run/runs/$run_id/results&limit=500" >"$results_metadata_file"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id_for_run/runs/$run_id/results?limit=500" >"$results_metadata_file"
   python3 - "$results_metadata_file" "$results_file" "$snapshot_file" "$TMP_DIR/configuration.json" "$BASE_URL" "$workspace_id_for_run" "$run_id" <<'PY'
 import json
 import os

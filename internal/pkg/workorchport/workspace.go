@@ -1,0 +1,69 @@
+package workorchport
+
+import (
+	"context"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+type CreateWorkspaceRequest struct {
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	TemplateID           string
+}
+
+type WorkspaceInfo struct {
+	ID                   common.WorkspaceID
+	Title                string
+	Description          string
+	DeliverableDirectory string
+	State                common.WorkspaceState
+	ActiveRunID          common.RunID
+	TemplateID           string
+	ProfileID            string
+	DefaultSoulID        common.SoulID
+	SoulBindings         map[string]common.SoulID
+}
+
+type WorkspaceOutcomeInfo struct {
+	WorkspaceID  common.WorkspaceID
+	State        string
+	RunID        common.RunID
+	ResultID     common.ResultID
+	Accepted     bool
+	Terminal     bool
+	Summary      string
+	Reason       string
+	EvidenceRefs []string
+	ArtifactRefs []string
+}
+
+type WorkspaceSnapshotInfo struct {
+	Workspace             WorkspaceInfo
+	Outcome               WorkspaceOutcomeInfo
+	TaskProgress          TaskProgressInfo
+	CoverageSummary       map[string]any
+	TaskDecompositions    []TaskDecompositionInfo
+	Goals                 []GoalInfo
+	DoDs                  []DoDInfo
+	Runs                  []RunInfo
+	Results               []ResultInfo
+	Artifacts             []ArtifactInfo
+	ArtifactContinuations []ArtifactContinuationInfo
+	Patches               []PatchInfo
+	MemoryRecallTraces    []MemoryRecallTraceInfo
+	WebSources            []WebSourceTraceInfo
+	LLMUsageTraces        []LLMUsageTraceInfo
+	LLMUsageSummary       LLMUsageSummaryInfo
+	EventRecords          []EventRecordInfo
+	Decisions             []DecisionInfo
+	Approvals             []ApprovalInfo
+}
+
+type WorkspaceBackend interface {
+	Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error)
+	Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error)
+	List(ctx context.Context) ([]WorkspaceInfo, error)
+	Delete(ctx context.Context, id common.WorkspaceID, purge bool) error
+}

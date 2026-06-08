@@ -44,7 +44,7 @@ Last Updated: 2026-05-30
 - `Makefile`
 - `internal/modules/application/workorchd/service/server/http_test.go`
 - `internal/modules/kernel/orchestrator/...`
-- `internal/modules/application/workorch/service/tui/...`
+- `internal/services/workorch/service/tui/...`
 - 相关 e2e / verifier 测试入口
 
 ## Review Order
@@ -241,7 +241,7 @@ Last Updated: 2026-05-30
 | core runtime verifier | `scripts/verify-workorch-runtime-core-flow.sh`, `scripts/verify-boundary-contract.sh`, `scripts/verify-incremental-artifact-e2e.sh`, `internal/modules/kernel/orchestrator/biz/runtime_verify_script_test.go`, incremental artifact orchestrator/repository/read-model tests | pass | core flow script 包含 stage/context gate/state-changing/result closeout/activeRun 等 JSON fixture 断言；boundary script 阻止 weather/software-dev/LSP 等 profile 语义回流到 reusable runtime/Web 代码；incremental artifact 由独立 e2e 和单测承接，不误压到 core-flow 脚本。 |
 | profile software-dev verifier | `scripts/verify-workorch-runtime-profile-software-dev.sh`, `scripts/verify-software-dev-goal-dod-e2e.sh`, `scripts/verify-software-dev-code-agent.sh`, `scripts/verify-software-requirement-development-orchestration.sh` | pass | profile verifier 校验 `profileContracts.software-dev`、acceptance dimensions、deliverable coverage、evidence requirements 与 direct evidence step-kind gate；e2e 场景不替代 core verifier。 |
 | loadtest baseline | `Makefile`, `scripts/loadtest-governed-workspace-concurrency.sh`, `scripts/loadtest-governed-workspace-concurrency.py` | pass | mock/real 共用单一 harness，通过环境变量切换；脚本输出 `summary.json` / `report.md`，并断言 success rate、accepted Result、linked Artifact、Decision/Approval/ToolCall/ValidationResult 与 timeline integrity。 |
-| TUI acceptance | `scripts/verify-tui-agent.sh`, `scripts/verify-cli-architecture.sh`, `internal/modules/application/workorch/service/tui/*_test.go`, `scripts/verify-tui-long-output-e2e.sh` | pass | static guard 阻止 `biz/client`、HTTP、fixed polling；TUI model tests 覆盖 workspace switch、decision/approval、terminal result、result-first display、monitor refresh 与长输出滚动。 |
+| TUI acceptance | `scripts/verify-tui-agent.sh`, `scripts/verify-cli-architecture.sh`, `internal/services/workorch/service/tui/*_test.go`, `scripts/verify-tui-long-output-e2e.sh` | pass | static guard 阻止 `biz/client`、HTTP、fixed polling；TUI model tests 覆盖 workspace switch、decision/approval、terminal result、result-first display、monitor refresh 与长输出滚动。 |
 | audits boundary | `docs/60-verification/audits/overview.md` | pass | audit 目录作为历史核查材料入口保留，当前没有被 Makefile/script 当作 active verifier contract。 |
 | cross-verification consistency | `docs/60-verification/service-acceptance.md`, `docs/60-verification/core-runtime-verifier.md`, `docs/60-verification/profile-software-dev-verifier.md`, `docs/60-verification/loadtest-baseline.md` | pass | service/core/profile/loadtest/TUI 的入口职责已分层：deployed-instance、container/file-backend、core neutrality、profile rules、capacity baseline 不互相替代。 |
 

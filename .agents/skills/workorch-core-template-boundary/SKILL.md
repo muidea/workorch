@@ -2,7 +2,7 @@
 name: workorch-core-template-boundary
 description: "在 WorkOrch 开发、评审或排查中涉及 kernel/orchestrator/appservice、workspaceTemplate、Soul、DoD、evidence policy、prompt/context、ticket/approval、runtime block、memory 或 e2e 时使用；用于强制核对 WorkOrch 基础能力与 workspaceTemplate 业务策略边界，避免把具体场景、语言、工具或模板规则写入 core 通用流程。"
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
   author: "rangh"
   created_at: "2026-05-09T17:01:44+08:00"
 ---
@@ -13,7 +13,7 @@ metadata:
 
 ## 适用场景
 
-- 修改 `internal/modules/kernel/**`、`internal/modules/blocks/**`、`internal/modules/application/workorchd/biz/appservice/**`、`internal/pkg/repository/**`、`application/workorch` 或 CLI/TUI/Web 入口时。
+- 修改 `internal/modules/kernel/**`、`internal/modules/blocks/**`、`internal/modules/application/workorchd/biz/appservice/**`、`internal/services/workorch/**`、`internal/pkg/workorchclient/**`、`internal/pkg/workorchport/**`、`internal/pkg/repository/**`、`application/workorch` 或 CLI/TUI/Web 入口时。
 - 涉及 `workspaceTemplate`、Soul、Goal、DoD、Run、Ticket、Approval、Memory、Artifact、EvidenceQuality、runtime block、LLM prompt/context、e2e 验收时。
 - 排查“某个模板或业务场景执行异常”时，特别是软件开发、天气查询、代码审查、文档生成等模板相关问题。
 - 发现通用代码中出现具体业务名、模板名、编程语言、命令、外部服务、城市、服务器地址、测试输出 marker 等内容时。
@@ -21,6 +21,9 @@ metadata:
 ## 核心原则
 
 - WorkOrch core 只提供中立的编排、状态机、事件、治理、证据、上下文传递、运行时调度和质量门禁能力。
+- `application/workorch` 是薄入口，`internal/services/workorch` 是 process service，`internal/modules/**` 只承载真实 framework initiator/module/block；process service 不应注册为 plugin module。
+- CLI/TUI/agent 只能通过 `internal/pkg/workorchport` 访问 WorkOrch 能力；remote backend 只能通过 `internal/pkg/workorchclient` 访问 REST API；embedded backend 只能通过 EventHub command/result 访问正式 owner state。
+- workspace/run/ticket/approval/result/artifact 等对象跨 workspace 可能同名，所有 command、REST、CLI/TUI backend 和派生持久化 ID 必须携带足够 scope；无 scope 的 resolve/get 入口只能选择唯一 open 对象，否则返回 conflict。
 - `workspaceTemplate`、Soul、默认 DoD、template-bound policy、Skill、MCP 配置和 e2e 数据承载具体业务策略。
 - 通用代码可以消费结构化字段，但不能根据模板名、Soul 名称、业务文本、命令输出文本或具体场景字符串推断行为。
 - 如果需要支持某类场景规则，优先把规则做成数据配置，再由通用能力读取数据执行。
@@ -35,6 +38,8 @@ WorkOrch core 可以包含：
 
 - 通用状态：Goal、DoD、Run、Step、Ticket、Approval、Memory、Artifact、EvidenceQuality。
 - 通用机制：事件发布订阅、异步回调、上下文预算、traceability、质量门禁、repository clone、read model 投影。
+- 进程壳和适配器：`internal/services/workorch` 负责 mode selection、CLI/TUI/remote/server 编排和 backend 选择，但不拥有正式业务状态。
+- 契约包：`internal/pkg/workorchport` 定义 CLI/TUI/agent port DTO，`internal/pkg/workorchclient` 定义 REST client DTO、path 构建和 error mapping。
 - 通用 block 能力：shell/file/web/llm/mcp/approval 等能力的参数执行、结构化输出和错误处理。
 - 通用策略解释器：例如读取 `evidencePolicies` 并按统一 schema 标记 `evidenceQuality`。
 - 通用 LLM request 分区：C0 稳定语言/Schema 合同、C1 Goal/DoD 定义、C2 声明式能力合同、C3 阶段合同、C4 当前进展/失败/动作、C5 大对象引用。
@@ -101,11 +106,17 @@ Template / Soul / policy 可以包含：
    - 对涉及证据、prompt、DoD、ticket、approval 的修改，检查是否有按文本内容推断业务语义。
    - 对涉及 LLM request/context/cache 的修改，检查动态运行期字段是否进入 C0，检查 provider 私有 cache 字段是否进入 core。
    - 对涉及 repair/follow-up/resume/definition change 的修改，检查是否仍能继承最新 Goal/DoD、coverage、requiredOutput、accepted/rejected evidence 和 current requested action。
+   - 对涉及 CLI/TUI/agent/backend/client 的修改，检查是否仍满足 process service、port、client、EventHub owner 边界，以及 REST query string 是否与 handler/脚本一致。
 
 ```bash
 rg -n "software-dev|weather-query|code-review|go test|npm test|no tests to run|city|ssh|server" internal/modules/kernel internal/modules/application/workorchd/biz/appservice internal/pkg
 rg -n "stateChangingOutputRequired|repairObjective|providerTimeoutStateChangingRetry|assessmentOnly|runtimeRepairFollowUp|currentProgressDigest|memoryRecall|Cache-Control|cache_control" internal/modules/blocks/llm internal/modules/kernel
 rg -n "definitionChangeImpact|coverageTargetSet|repairActionPackage|processEvidenceTimeline|requiredOutput|blocked_on_decision|contextGate" internal/modules/kernel internal/modules/blocks/llm
+rg -n "internal/modules/application/workorch(?!d)" application internal scripts Makefile README.md --pcre2
+rg -n "workorchclient|biz/backends" internal/services/workorch/service internal/services/workorch/biz/agent internal/services/workorch/biz/session -g "*.go"
+rg -n "internal/services/workorch|internal/pkg/workorchclient|biz/backends" internal/pkg/workorchport -g "*.go"
+rg -n "workorchport|internal/services/workorch|framework/application|EventHub|event\\.Hub" internal/pkg/workorchclient -g "*.go"
+rg -n "kernel/.*/(biz|service|repository)|repository\\." internal/services/workorch internal/pkg/workorchport internal/pkg/workorchclient -g "*.go"
 ```
 
 3. 选择正确落点。
@@ -139,6 +150,9 @@ rg -n "definitionChangeImpact|coverageTargetSet|repairActionPackage|processEvide
 - 通用目录搜索没有新增不该出现的具体业务/模板/语言/命令特判。
 - 新增模板策略能从 template 创建期绑定到 workspace，并能在 run executionContext 中追溯。
 - Web/TUI/CLI 只展示业务模型字段，不复制后端的业务推断逻辑。
+- CLI/TUI/agent 只依赖 `workorchport`；REST client 不依赖 port/service/framework/EventHub；embedded backend 对同步 command/result 缺失或错误返回失败。
+- REST URL 的 path/query 与前端、client、handler、e2e 脚本一致；新增状态等待或列表分页参数时必须确认使用 `?` 开始 query string。
+- 跨 workspace 可能重复的 run/ticket/approval/result/artifact 操作已绑定 workspace scope；无 scope API 对重复 open 对象返回 conflict。
 - 文档同步说明策略归属：core 通用能力、template 数据、Soul 约束或 e2e fixture。
 - 涉及 LLM context/cache 时，必须补充或更新 `docs/workorch-llm-request-cache-aware-context-design.md` / `docs/workorch-runtime-stage-contract-neutrality-design.md` 中的对应约束。
 - 涉及 Goal/DoD 变更、repair/follow-up/resume、memory/context 裁剪时，必须证明 LLM request 中仍包含完整收敛合同和可追溯 evidence。
@@ -170,6 +184,8 @@ rg -n "definitionChangeImpact|coverageTargetSet|repairActionPackage|processEvide
 - 禁止在 `kernel/orchestrator`、通用 `appservice` 或 repository 中写入具体模板、业务、语言、命令输出 marker 的特判。
 - 禁止用“先兼容一下”的方式绕过 template/Soul/policy 归属。
 - 禁止让 TUI/Web/CLI 形成另一套业务决策逻辑。
+- 禁止让 CLI/TUI/agent 直接 import REST client、backend implementation、kernel owner service 或 repository。
+- 禁止用无 scope 的 run/ticket/approval ID 直接 resolve/get 跨 workspace 对象；不能确定唯一对象时必须 conflict。
 - 禁止把 e2e fixture 中的业务文本复制到 core 作为判断依据。
 - 禁止把运行期动态字段、repair guidance、provider retry guidance、当前失败/进展、memory recall 或 requested action 拼入 C0 stable prompt。
 - 禁止为了缓存命中删除 Goal/DoD、requiredOutput、failure evidence、target snapshot、process evidence timeline 等 LLM 必需上下文；缓存优化必须通过分区稳定性和有序裁剪实现。

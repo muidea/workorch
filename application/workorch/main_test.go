@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/muidea/workorch/internal/modules/application/workorch/app"
-	"github.com/muidea/workorch/internal/modules/application/workorch/biz/backend"
-	cliconfig "github.com/muidea/workorch/internal/modules/application/workorch/biz/config"
 	"github.com/muidea/workorch/internal/pkg/common"
+	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
+	"github.com/muidea/workorch/internal/services/workorch/biz/session"
 )
 
 func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
@@ -19,7 +19,7 @@ func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
 
-	got := app.ResolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
+	got := session.ResolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
 
 	if got.ID != "ws-current" {
 		t.Fatalf("workspace = %s, want ws-current", got.ID)
@@ -35,7 +35,7 @@ func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *tes
 		{ID: "ws-last", Title: "last", DeliverableDirectory: "/other"},
 	}}
 
-	got := app.ResolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
+	got := session.ResolveDefaultWorkspace(context.Background(), be, "/project", cfgPath)
 
 	if got.ID != "ws-last" {
 		t.Fatalf("workspace = %s, want ws-last", got.ID)
@@ -50,7 +50,7 @@ func TestResolveDefaultWorkspaceCreatesOnlyWhenNoReusableWorkspace(t *testing.T)
 	workingDir := t.TempDir()
 	be := &startupFakeBackend{}
 
-	got := app.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
+	got := session.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
 
 	if got.ID != "ws-created" {
 		t.Fatalf("workspace = %s, want ws-created", got.ID)
@@ -71,7 +71,7 @@ func TestResolveDefaultWorkspaceCreatesGenericGovernedWorkspaceForCodeDirectory(
 	}
 	be := &startupFakeBackend{}
 
-	got := app.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
+	got := session.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
 
 	if got.ID != "ws-created" {
 		t.Fatalf("workspace = %s, want ws-created", got.ID)

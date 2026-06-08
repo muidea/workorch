@@ -28,8 +28,8 @@ Last Updated: 2026-05-30
 - `internal/modules/application/workorchd/service/server/http.go`
 - `internal/modules/application/workorchd/service/server/http_test.go`
 - `internal/modules/application/workorchd/biz/appservice/*`
-- `internal/modules/application/workorch/service/tui/*`
-- `internal/modules/application/workorch/biz/backend/*`
+- `internal/services/workorch/service/tui/*`
+- `internal/services/workorch/biz/backends/*`
 - `web/workorch-console/src/api.ts`
 - `web/workorch-console/src/pages/*`
 - `web/workorch-console/src/helpers.tsx`

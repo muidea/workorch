@@ -210,10 +210,10 @@ stable definition entry 中的正式文档为准。
 
 相关稳定落点当前已集中在以下位置：
 
-- `internal/modules/application/workorch/app`
-- `internal/modules/application/workorch/runtime`
-- `internal/modules/application/workorch/service/cli`
-- `internal/modules/application/workorch/service/tui`
+- `internal/services/workorch`
+- `internal/services/workorch/runtime.go`
+- `internal/services/workorch/service/cli`
+- `internal/services/workorch/service/tui`
 - `internal/modules/application/workorchd/service/server`
 - `application/workorch/main.go`
 
@@ -239,7 +239,7 @@ stable definition entry 中的正式文档为准。
 
 2026-05-03 收口项：
 
-- 新增共享启动层 `internal/modules/application/workorch/app`。
+- 新增共享启动层 `internal/services/workorch`。
 - `application/workorch` 默认通过共享启动层进入前台 TUI 模式，并在同进程启动后端 console / API / HTTP 能力。
 - `application/workorch` 顶层入口已清理，server-only 改为 `workorch --server`。
 - 显式 server 模式支持 `--server` / `serve` / `--daemon`。

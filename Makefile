@@ -307,7 +307,7 @@ cli-build: go-deps
 	$(GO) build -o $(CLI_BUILD_OUT) $(CLI_APP)
 
 cli-test:
-	$(GO) test ./internal/modules/application/workorch/... --count 1
+	$(GO) test ./internal/services/workorch/... --count 1
 	./scripts/verify-cli-architecture.sh
 
 cli-clean:

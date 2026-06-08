@@ -21,7 +21,7 @@ func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancec
 	}
 	resolutionType := semantic.ResolutionType
 	payload := governancecore.WithDecisionSemanticPayload(cmd.ResolutionPayload, semantic)
-	ticket, err := ReadDecisionTicket(ctx, hub, ticketID)
+	ticket, err := ReadDecisionTicketForResolution(ctx, hub, ticketID, scope)
 	if err != nil {
 		return readmodelcore.Decision{}, err
 	}
@@ -34,6 +34,42 @@ func ResolveDecisionView(ctx context.Context, hub events.Hub, traces governancec
 		return readmodelcore.Decision{}, err
 	}
 	return readmodelprojection.MapDecision(item, resolution, autoGovernance), nil
+}
+
+func ReadDecisionTicketForResolution(ctx context.Context, hub events.Hub, ticketID common.TicketID, scope common.WorkspaceID) (*decisionmodel.Ticket, error) {
+	if ticketID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	if scope != "" {
+		return ReadDecisionTicket(common.ContextWithRuntimeWorkspaceID(ctx, scope), hub, ticketID)
+	}
+	candidates, err := DecisionTicketsForQuery(ctx, hub, "", "")
+	if err != nil {
+		return nil, err
+	}
+	var matches []*decisionmodel.Ticket
+	var openMatches []*decisionmodel.Ticket
+	for _, item := range candidates {
+		if item == nil || item.ID != ticketID {
+			continue
+		}
+		matches = append(matches, item)
+		if item.State == common.DecisionTicketStateOpen {
+			openMatches = append(openMatches, item)
+		}
+	}
+	switch {
+	case len(openMatches) == 1:
+		return openMatches[0], nil
+	case len(openMatches) > 1:
+		return nil, common.ErrConflict
+	case len(matches) == 1:
+		return matches[0], nil
+	case len(matches) > 1:
+		return nil, common.ErrConflict
+	default:
+		return nil, common.ErrNotFound
+	}
 }
 
 func resolveDecisionTicket(ctx context.Context, hub events.Hub, ticket *decisionmodel.Ticket, resolutionType string, payload map[string]any, scope common.WorkspaceID) (*decisionmodel.Ticket, *decisionmodel.Resolution, error) {

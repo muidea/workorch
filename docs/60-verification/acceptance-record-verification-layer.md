@@ -41,7 +41,7 @@ Last Updated: 2026-05-30
 - `scripts/verify-tui-long-output-e2e.sh`
 - `internal/modules/application/workorchd/service/server/http_test.go`
 - `internal/modules/kernel/orchestrator/biz/runtime_verify_script_test.go`
-- `internal/modules/application/workorch/service/tui/*_test.go`
+- `internal/services/workorch/service/tui/*_test.go`
 
 ## Acceptance Result
 

@@ -361,11 +361,66 @@ func TestResolveDecisionWithBackendReturnsResolvedDecision(t *testing.T) {
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
 		t.Fatalf("decision = %+v, want resolved provide_missing_info", item)
 	}
-	if item.ResolutionID != "resolution-"+started.BlockingTicketID+"-"+decisioncommon.ResolutionTypeProvideMissingInfo {
-		t.Fatalf("resolutionID = %q, want resolution-%s-%s", item.ResolutionID, started.BlockingTicketID, decisioncommon.ResolutionTypeProvideMissingInfo)
+	wantResolutionID := "resolution-" + started.WorkspaceID + "-" + started.BlockingTicketID + "-" + decisioncommon.ResolutionTypeProvideMissingInfo
+	if item.ResolutionID != wantResolutionID {
+		t.Fatalf("resolutionID = %q, want %s", item.ResolutionID, wantResolutionID)
 	}
 	if item.ResolutionPayload["operator"] != "tester" {
 		t.Fatalf("resolutionPayload = %+v, want operator tester", item.ResolutionPayload)
+	}
+}
+
+func TestResolveDecisionWithSessionWithoutScopePrefersOpenDuplicateFileTicket(t *testing.T) {
+	session, ctx := newTestRuntimeSession(t, "file", t.TempDir())
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("runtime exports: %v", err)
+	}
+	ticketID := common.TicketID("ticket-duplicate-resolution")
+	runID := common.RunID("run-duplicate-resolution")
+	oldCtx := common.ContextWithRuntimeWorkspaceID(ctx, "ws-duplicate-old")
+	currentCtx := common.ContextWithRuntimeWorkspaceID(ctx, "ws-duplicate-current")
+	if err := exports.Repositories.Tickets.Create(oldCtx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-duplicate-old",
+		RunID:       runID,
+		StepID:      "run-duplicate-resolution/step-1",
+		Reason:      "old resolved ticket",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("create old ticket: %v", err)
+	}
+	if err := exports.Repositories.Resolutions.Create(oldCtx, &decisionmodel.Resolution{
+		ID:       "resolution-ws-duplicate-old-ticket-duplicate-resolution-replan",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeReplan,
+		Payload:  map[string]any{"operator": "old"},
+	}); err != nil {
+		t.Fatalf("create old resolution: %v", err)
+	}
+	if err := exports.Repositories.Tickets.Create(currentCtx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: "ws-duplicate-current",
+		RunID:       runID,
+		StepID:      "run-duplicate-resolution/step-1",
+		Reason:      "current open ticket",
+		State:       common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create current ticket: %v", err)
+	}
+
+	item, err := ResolveDecisionWithSession(context.Background(), session, string(ticketID), ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "current"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDecisionWithSession: %v", err)
+	}
+	if item.WorkspaceID != "ws-duplicate-current" || item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision = %+v, want current workspace resolved replan", item)
+	}
+	if item.ResolutionID != "resolution-ws-duplicate-current-ticket-duplicate-resolution-replan" {
+		t.Fatalf("resolutionID = %q, want current workspace-scoped resolution", item.ResolutionID)
 	}
 }
 
@@ -712,8 +767,8 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo || item.ResolutionPayload["operator"] != "tester" {
 		t.Fatalf("decision = %+v, want resolved response from returned entities", item)
 	}
-	if got := tickets.getCount.Load(); got != 2 {
-		t.Fatalf("ticket Get count = %d, want validation read plus service resolve read without app response reread", got)
+	if got := tickets.getCount.Load(); got != 1 {
+		t.Fatalf("ticket Get count = %d, want service resolve read without app response reread", got)
 	}
 	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
 		t.Fatalf("resolution GetByTicketID count = %d, want no app response reread on first resolve", got)
@@ -734,8 +789,9 @@ func TestResolveDecisionWithBackendSupportsRejectCurrentPath(t *testing.T) {
 	if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeRejectCurrentPath {
 		t.Fatalf("decision = %+v, want resolved reject_current_path", item)
 	}
-	if item.ResolutionID != "resolution-"+started.BlockingTicketID+"-"+decisioncommon.ResolutionTypeRejectCurrentPath {
-		t.Fatalf("resolutionID = %q, want formal reject resolution id", item.ResolutionID)
+	wantResolutionID := "resolution-" + started.WorkspaceID + "-" + started.BlockingTicketID + "-" + decisioncommon.ResolutionTypeRejectCurrentPath
+	if item.ResolutionID != wantResolutionID {
+		t.Fatalf("resolutionID = %q, want %s", item.ResolutionID, wantResolutionID)
 	}
 	if item.ResolutionPayload["reason"] != "not viable" {
 		t.Fatalf("resolutionPayload = %+v, want reject reason", item.ResolutionPayload)
