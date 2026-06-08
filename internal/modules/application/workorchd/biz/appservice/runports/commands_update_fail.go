@@ -3,6 +3,7 @@ package runports
 import (
 	"context"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownercommandports"
@@ -38,7 +39,8 @@ func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason str
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandFail, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.FailRunCommand{RunID: item.ID, Reason: reason},
+	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+		events.PayloadKeyRunID:         string(item.ID),
+		events.PayloadKeyFailureReason: reason,
 	})
 }

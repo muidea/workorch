@@ -12,33 +12,53 @@ import (
 )
 
 func (o *RuntimeOrchestrator) StartRun(ctx context.Context, runID common.RunID) error {
+	r, ws, err := o.acceptRunStart(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return o.dispatchAcceptedRun(ctx, r, ws)
+}
+
+func (o *RuntimeOrchestrator) AcceptRunStart(ctx context.Context, runID common.RunID) error {
+	_, _, err := o.acceptRunStart(ctx, runID)
+	return err
+}
+
+func (o *RuntimeOrchestrator) acceptRunStart(ctx context.Context, runID common.RunID) (*runModel.Run, *workspaceModel.Workspace, error) {
 	if runID == "" {
-		return common.ErrInvalidArgument
+		return nil, nil, common.ErrInvalidArgument
 	}
 
 	r, err := o.runs.Get(ctx, runID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if r.State != common.RunStateCreated {
-		return common.ErrConflict
+		return nil, nil, common.ErrConflict
 	}
 	ws, err := o.runStateManager().workspaceForCreatedRunStart(ctx, r)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	r.State = common.RunStateRunning
 	r.FailureReason = ""
 	ws, err = o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, ws)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := o.eventPublisher().publishRunStateChanged(ctx, r); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, ws, runID); err != nil {
-		return err
+		return nil, nil, err
+	}
+	return r, ws, nil
+}
+
+func (o *RuntimeOrchestrator) dispatchAcceptedRun(ctx context.Context, r *runModel.Run, ws *workspaceModel.Workspace) error {
+	if r == nil || r.ID == "" {
+		return common.ErrInvalidArgument
 	}
 	specs, err := o.nextDispatchSpecs(ctx, r)
 	if err != nil {

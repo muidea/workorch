@@ -40,8 +40,8 @@ func StartRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	return ownercommandports.Publish(ctx, hub, runevents.TopicRunCommandStart, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.StartRunCommand{RunID: item.ID},
+	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+		events.PayloadKeyRunID: string(item.ID),
 	})
 }
 

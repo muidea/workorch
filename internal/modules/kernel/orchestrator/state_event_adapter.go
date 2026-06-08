@@ -33,8 +33,10 @@ func (r runEventRepository) Create(ctx context.Context, item *runmodel.Run) erro
 }
 
 func (r runEventRepository) Get(ctx context.Context, id common.RunID) (*runmodel.Run, error) {
-	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), "", id, map[string]any{
-		events.PayloadKeyRunID: string(id),
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	response, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandGet, "run", string(id), workspaceID, id, map[string]any{
+		events.PayloadKeyRunID:       string(id),
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
 		return nil, err
@@ -83,8 +85,10 @@ func (r runEventRepository) Update(ctx context.Context, item *runmodel.Run) erro
 }
 
 func (r runEventRepository) Delete(ctx context.Context, id common.RunID) error {
-	_, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandDelete, "run", string(id), "", id, map[string]any{
-		events.PayloadKeyCommand: runcontracts.DeleteRunCommand{RunID: id},
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	_, err := publishStateEventCommand(ctx, r.hub, runevents.TopicRunCommandDelete, "run", string(id), workspaceID, id, map[string]any{
+		events.PayloadKeyCommand:     runcontracts.DeleteRunCommand{RunID: id},
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	return err
 }

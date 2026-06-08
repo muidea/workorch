@@ -335,7 +335,7 @@ func TestRuntimeSessionRunServiceBlockOnApprovalUsesEventCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
-	ctx := context.Background()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-session-command")
 	ensureTestWorkspace(t, ctx, session, "ws-session-command")
 	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
 	if err := actions.EnsureRun(ctx, "run-session-command", "ws-session-command"); err != nil {

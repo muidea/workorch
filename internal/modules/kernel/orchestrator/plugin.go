@@ -23,7 +23,7 @@ func init() {
 
 func (m *Module) Weight() int { return 30 }
 
-func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
+func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.BackgroundRoutine) *cd.Error {
 	repos, err := workorchdeps.ResolveOrchestratorRepositories(ModuleID)
 	if err != nil {
 		return err
@@ -86,6 +86,7 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine)
 		ArtifactContinuations: repos.ArtifactContinuations,
 		RuntimePolicy:         runtimePolicy,
 		EventHub:              eventHub,
+		BackgroundRoutine:     backgroundRoutine,
 	}); setupErr != nil {
 		return cd.NewError(cd.Unexpected, setupErr.Error())
 	}

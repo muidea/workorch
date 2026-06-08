@@ -258,9 +258,10 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs", "run-main-file")
 	assertRunAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file", "run-main-file", workspaceID)
 	assertRunListAvailable(t, "http://"+addr+"/api/v1/workorch/runs?workspaceId="+workspaceID, "run-main-file")
-	blockedProviderRun := assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/start", "run-main-file", "blocked_on_decision")
-	if blockedProviderRun.Run.BlockingTicketID == "" {
-		t.Fatalf("blocked provider run ticket = %q, want non-empty", blockedProviderRun.Run.BlockingTicketID)
+	assertRunStartAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/start", "run-main-file", "running")
+	blockedProviderRun := waitForRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/status", "run-main-file", "blocked_on_decision")
+	if blockedProviderRun.Status.BlockingTicketID == "" {
+		t.Fatalf("blocked provider run ticket = %q, want non-empty", blockedProviderRun.Status.BlockingTicketID)
 	}
 	assertRunSnapshotAvailableWithState(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/snapshot", "run-main-file", workspaceID, "blocked_on_decision")
 	assertRunStatusAvailable(t, "http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-main-file/status", "run-main-file", "blocked_on_decision")
@@ -302,7 +303,7 @@ func TestWorkorchServerModeSupportsFileRepositoryBackend(t *testing.T) {
 		"http://"+addr+"/api/v1/workorch/workspaces/"+workspaceID+"/snapshot",
 		workspaceID,
 		[]string{"run-main-file", decisionResolveRunID, decisionRejectRunID, approvalApproveRunID, approvalRejectRunID},
-		[]string{blockedProviderRun.Run.BlockingTicketID, blockedDecisionID, rejectedDecisionID},
+		[]string{blockedProviderRun.Status.BlockingTicketID, blockedDecisionID, rejectedDecisionID},
 		[]string{blockedApprovalID, rejectedApprovalID},
 	)
 
@@ -334,7 +335,8 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 	assertWorkspaceLayoutDirectories(t, dataDir, workspaceID)
 
 	createRunInstance(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs", "run-restart-completed", "", "")
-	blockedProviderRun := assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "run-restart-completed", "blocked_on_decision")
+	assertRunStartAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "run-restart-completed", "running")
+	blockedProviderRun := waitForRunStatusAvailable(t, "http://"+firstAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/status", "run-restart-completed", "blocked_on_decision")
 
 	decisionRunID := "run-decision-restart-resolved"
 	blockedDecisionID := seedBlockedDecisionRunForProcess(t, dataDir, workspaceID, decisionRunID)
@@ -376,7 +378,7 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 		"http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/snapshot",
 		workspaceID,
 		[]string{"run-restart-completed", decisionRunID, approvalRunID},
-		[]string{blockedProviderRun.Run.BlockingTicketID, blockedDecisionID},
+		[]string{blockedProviderRun.Status.BlockingTicketID, blockedDecisionID},
 		[]string{blockedApprovalID},
 	)
 	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "conflict")

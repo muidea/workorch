@@ -282,25 +282,29 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		goal, err := be.Goal().Define(ctx, common.WorkspaceID(workspaceID), text)
+		wsID := common.WorkspaceID(workspaceID)
+		goal, err := be.Goal().Define(ctx, wsID, text)
 		if err != nil {
-			return RunStartedMsg{Error: err}
+			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
 		if len(dodItems) == 0 {
-			dodItems = backend.DefaultDoDItemsForWorkspace(ctx, be, common.WorkspaceID(workspaceID))
+			dodItems = backend.DefaultDoDItemsForWorkspace(ctx, be, wsID)
 		}
-		dod, err := be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
+		dod, err := be.DoD().Define(ctx, wsID, dodItems)
 		if err != nil {
-			return RunStartedMsg{Error: err}
+			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		run, err := be.Run().Activate(ctx, common.WorkspaceID(workspaceID), backend.ActivateRunRequest{
+		run, err := be.Run().Activate(ctx, wsID, backend.ActivateRunRequest{
 			GoalID: goal.ID,
 			DoDID:  dod.ID,
 		})
 		if err != nil {
-			return RunStartedMsg{Error: err}
+			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		return RunStartedMsg{Run: run}
+		if run != nil && run.WorkspaceID == "" {
+			run.WorkspaceID = wsID
+		}
+		return RunStartedMsg{Run: run, WorkspaceID: workspaceID}
 	}
 }
 

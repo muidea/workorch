@@ -144,6 +144,7 @@ func (m *AppModel) setActiveWorkspace(id string) {
 	}
 	m.activeWorkspaceID = id
 	m.selectedWorkspaceID = id
+	m.resetWorkspaceView()
 	if idx := workspaceIndex(m.workspaces, id); idx >= 0 {
 		m.cursor = idx
 	}
@@ -183,6 +184,28 @@ func (m *AppModel) selectedWorkspaceIndex() int {
 		return idx
 	}
 	return 0
+}
+
+func (m *AppModel) activeWorkspaceRunID() string {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws != nil && ws.ActiveRunID != "" {
+		return string(ws.ActiveRunID)
+	}
+	if strings.TrimSpace(m.activeRunID) == "" {
+		return ""
+	}
+	if ws != nil && !workspaceStateIsLive(ws.State) {
+		return ""
+	}
+	return m.activeRunID
+}
+
+func (m *AppModel) activeWorkspaceStateIsLive() bool {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return false
+	}
+	return workspaceStateIsLive(ws.State)
 }
 
 func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {

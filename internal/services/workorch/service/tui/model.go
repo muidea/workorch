@@ -289,6 +289,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applyBackendEvent(msg.Event)
 		return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
 	case RunStartedMsg:
+		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			if isTransientContextError(msg.Error) {
 				return m, nil
@@ -300,9 +303,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Run != nil {
-			if !m.runMessageBelongsToActiveWorkspace("", msg.Run) {
-				return m, nil
-			}
 			m.running = true
 			m.activeRunID = string(msg.Run.ID)
 			m.applyRunStarted(msg.Run)
@@ -583,13 +583,13 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.clearInput()
 	m.lastError = nil
-	if m.activeRunID != "" || m.running {
+	if runID := m.activeWorkspaceRunID(); runID != "" || m.activeWorkspaceStateIsLive() {
 		m.cancelWorkspaceSelection()
 		m.clearRunDisplayState()
 		m.appendTranscript("Input", text)
 		m.progress = progressSubmitting
 		m.progressText = "Continuing active run"
-		return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, text)
+		return m, ContinueRun(m.be, m.activeWorkspaceID, runID, text)
 	}
 	m.cancelWorkspaceSelection()
 	return m.submitGoalText(text)
@@ -682,7 +682,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			m.progress = progressSubmitting
 			m.progressText = "Continuing active run"
-			return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeRunID, rest), true
+			return m, ContinueRun(m.be, m.activeWorkspaceID, m.activeWorkspaceRunID(), rest), true
 		case "restart":
 			m.clearInput()
 			m.cancelWorkspaceSelection()

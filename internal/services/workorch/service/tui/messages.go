@@ -56,8 +56,9 @@ type BackendEventMsg struct {
 }
 
 type RunStartedMsg struct {
-	Run   *backend.RunInfo
-	Error error
+	Run         *backend.RunInfo
+	WorkspaceID string
+	Error       error
 }
 
 type DoDUpdatedMsg struct {

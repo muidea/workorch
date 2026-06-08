@@ -334,6 +334,58 @@ func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
 	}
 }
 
+func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateRunning)
+	m := NewAppModel(be, "ws-b", "")
+	m.workspaces = []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
+	}
+	m.activeWorkspaceID = "ws-b"
+	m.selectedWorkspaceID = "ws-b"
+	m.activeRunID = "run-a"
+	m.running = true
+	m.progress = progressRunning
+	m.setInput("启动 B 工作区")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected submit command")
+	}
+	msg, ok := cmd().(RunStartedMsg)
+	if !ok || msg.Error != nil || msg.Run == nil {
+		t.Fatalf("submit msg = %#v, want scoped RunStartedMsg", msg)
+	}
+	if msg.WorkspaceID != "ws-b" || msg.Run.WorkspaceID != "ws-b" {
+		t.Fatalf("run scope = msg:%q run:%q, want ws-b", msg.WorkspaceID, msg.Run.WorkspaceID)
+	}
+	_, _ = next.(*AppModel).Update(msg)
+
+	if len(be.goals) != 1 || be.goals[0] != "启动 B 工作区" {
+		t.Fatalf("goals = %v, want new goal for current workspace", be.goals)
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume from another workspace running state", be.resumes)
+	}
+}
+
+func TestModelIgnoresRunStartedErrorForInactiveWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.progressText = "active workspace"
+
+	next, cmd := m.Update(RunStartedMsg{
+		WorkspaceID: "ws-a",
+		Error:       errors.New("stale activation failed"),
+	})
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale run started error should not trigger command")
+	}
+	if m.lastError != nil || m.progress == progressFailed || m.progressText != "active workspace" {
+		t.Fatalf("stale error polluted active state: err=%v progress=%s text=%q", m.lastError, m.progress, m.progressText)
+	}
+}
+
 func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")

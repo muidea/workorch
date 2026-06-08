@@ -71,23 +71,21 @@ func TestRunCommandGetHonorsWorkspaceScope(t *testing.T) {
 	}
 }
 
-func TestRunCommandEnsureResumedHonorsWorkspaceScope(t *testing.T) {
+func TestRunCommandDeleteHonorsWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	runs := memory.NewRunRepository()
-	runID := common.RunID("run-scoped-resume")
+	runID := common.RunID("run-scoped-delete")
 	if err := runs.Create(ctx, &runmodel.Run{
-		ID:               runID,
-		WorkspaceID:      "ws-run-resume-a",
-		State:            common.RunStateBlockedOnDecision,
-		BlockingTicketID: "ticket-scoped-resume",
+		ID:          runID,
+		WorkspaceID: "ws-run-delete-a",
+		State:       common.RunStateCreated,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 
-	orchestrator := &fakeRunOrchestrator{}
 	module := New()
-	if err := module.Configure(Dependencies{Runs: runs, Orchestrator: orchestrator, EventHub: hub}); err != nil {
+	if err := module.Configure(Dependencies{Runs: runs, EventHub: hub}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := module.Start(); err != nil {
@@ -100,58 +98,34 @@ func TestRunCommandEnsureResumedHonorsWorkspaceScope(t *testing.T) {
 	})
 
 	err := hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandEnsureResumed,
-		WorkspaceID: "ws-run-resume-b",
+		Topic:       runevents.TopicRunCommandDelete,
+		WorkspaceID: "ws-run-delete-b",
 		RunID:       string(runID),
 		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-resume-b",
+			events.PayloadKeyWorkspaceID: "ws-run-delete-b",
 			events.PayloadKeyRunID:       string(runID),
 		},
 	})
 	if !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("wrong workspace ensure resumed err = %v, want not found", err)
+		t.Fatalf("wrong workspace delete err = %v, want not found", err)
 	}
-	if orchestrator.resumed != "" {
-		t.Fatalf("orchestrator resumed %q on wrong workspace", orchestrator.resumed)
+	if _, err := runs.Get(ctx, runID); err != nil {
+		t.Fatalf("run deleted on wrong workspace: %v", err)
 	}
 
 	err = hub.Publish(ctx, events.Envelope{
-		Topic:       runevents.TopicRunCommandEnsureResumed,
-		WorkspaceID: "ws-run-resume-a",
+		Topic:       runevents.TopicRunCommandDelete,
+		WorkspaceID: "ws-run-delete-a",
 		RunID:       string(runID),
 		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID: "ws-run-resume-a",
+			events.PayloadKeyWorkspaceID: "ws-run-delete-a",
 			events.PayloadKeyRunID:       string(runID),
 		},
 	})
-	response, ok := events.ResponseEnvelope(err)
-	if !ok {
-		t.Fatalf("scoped ensure resumed err = %v, want response", err)
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("scoped delete err = %v, want response", err)
 	}
-	if response.RunID != string(runID) || orchestrator.resumed != runID {
-		t.Fatalf("response runID=%q resumed=%q, want %s", response.RunID, orchestrator.resumed, runID)
+	if _, err := runs.Get(ctx, runID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("run still exists after scoped delete err = %v", err)
 	}
 }
-
-type fakeRunOrchestrator struct {
-	resumed common.RunID
-}
-
-func (o *fakeRunOrchestrator) StartRun(context.Context, common.RunID) error { return nil }
-func (o *fakeRunOrchestrator) BlockOnDecision(context.Context, common.RunID, common.TicketID) error {
-	return nil
-}
-func (o *fakeRunOrchestrator) BlockOnApproval(context.Context, common.RunID, common.ApprovalID) error {
-	return nil
-}
-func (o *fakeRunOrchestrator) ResumeRun(_ context.Context, runID common.RunID) error {
-	o.resumed = runID
-	return nil
-}
-func (o *fakeRunOrchestrator) ValidateRun(context.Context, common.RunID) error { return nil }
-func (o *fakeRunOrchestrator) CompleteRun(context.Context, common.RunID) error { return nil }
-func (o *fakeRunOrchestrator) CancelRun(context.Context, common.RunID) error   { return nil }
-func (o *fakeRunOrchestrator) SupersedeRun(context.Context, common.RunID) error {
-	return nil
-}
-func (o *fakeRunOrchestrator) FailRun(context.Context, common.RunID, string) error { return nil }

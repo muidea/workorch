@@ -19,8 +19,4 @@ const (
 	TopicRunCommandListCheckpointsByRun = "/run/command/list-runtime-checkpoints-by-run"
 	TopicRunCommandUpdate               = "/run/command/update"
 	TopicRunCommandDelete               = "/run/command/delete"
-	TopicRunCommandStart                = "/run/command/start"
-	TopicRunCommandSupersede            = "/run/command/supersede"
-	TopicRunCommandFail                 = "/run/command/fail"
-	TopicRunCommandEnsureResumed        = "/run/command/ensure-resumed"
 )

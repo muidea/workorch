@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
@@ -31,8 +32,8 @@ func PublishRunCommand(ctx context.Context, hub events.Hub, topic string, subjec
 }
 
 func SupersedeRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandSupersede, "run", string(runID), workspaceID, runID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.SupersedeRunCommand{RunID: runID},
+	return PublishRunCommand(ctx, hub, orchestratorevents.TopicOrchestratorCommandSupersedeRun, "run", string(runID), workspaceID, runID, map[string]any{
+		events.PayloadKeyRunID: string(runID),
 	})
 }
 
@@ -52,13 +53,14 @@ func CreateWorkspaceExecutionRun(ctx context.Context, hub events.Hub, runID comm
 }
 
 func StartRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID) error {
-	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandStart, "run", string(runID), workspaceID, runID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.StartRunCommand{RunID: runID},
+	return PublishRunCommand(ctx, hub, orchestratorevents.TopicOrchestratorCommandStartRun, "run", string(runID), workspaceID, runID, map[string]any{
+		events.PayloadKeyRunID: string(runID),
 	})
 }
 
 func FailRun(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, runID common.RunID, failureReason string) error {
-	return PublishRunCommand(ctx, hub, runevents.TopicRunCommandFail, "run", string(runID), workspaceID, runID, map[string]any{
-		events.PayloadKeyCommand: runcontracts.FailRunCommand{RunID: runID, Reason: failureReason},
+	return PublishRunCommand(ctx, hub, orchestratorevents.TopicOrchestratorCommandFailRun, "run", string(runID), workspaceID, runID, map[string]any{
+		events.PayloadKeyRunID:         string(runID),
+		events.PayloadKeyFailureReason: failureReason,
 	})
 }

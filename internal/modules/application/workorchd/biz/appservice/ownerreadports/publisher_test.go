@@ -12,7 +12,7 @@ import (
 )
 
 func TestPublishCommandWithResponseRejectsWriteTopic(t *testing.T) {
-	_, err := PublishCommandWithResponse(context.Background(), events.NewMemoryHub(), runevents.TopicRunCommandStart, "run", "run-001", "", "run-001", map[string]any{
+	_, err := PublishCommandWithResponse(context.Background(), events.NewMemoryHub(), runevents.TopicRunCommandUpdate, "run", "run-001", "", "run-001", map[string]any{
 		events.PayloadKeyRunID: "run-001",
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {

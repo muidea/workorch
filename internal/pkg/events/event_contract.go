@@ -144,13 +144,20 @@ func queryLaneKey(topic string, envelope Envelope) string {
 	if topicPart == "" {
 		topicPart = "unknown"
 	}
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
 	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+		if workspaceID != "" {
+			return "query/" + topicPart + "/workspace/" + workspaceID + "/run/" + runID
+		}
 		return "query/" + topicPart + "/run/" + runID
 	}
 	if stepID := strings.TrimSpace(envelope.StepID); stepID != "" {
+		if workspaceID != "" {
+			return "query/" + topicPart + "/workspace/" + workspaceID + "/step/" + stepID
+		}
 		return "query/" + topicPart + "/step/" + stepID
 	}
-	if workspaceID := strings.TrimSpace(envelope.WorkspaceID); workspaceID != "" {
+	if workspaceID != "" {
 		return "query/" + topicPart + "/workspace/" + workspaceID
 	}
 	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
@@ -161,23 +168,40 @@ func queryLaneKey(topic string, envelope Envelope) string {
 
 func stateLaneKey(owner string, envelope Envelope) string {
 	owner = lanePart(owner, "owner")
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
 	switch owner {
-	case "run", "orchestrator":
+	case "run":
 		if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+			if workspaceID != "" {
+				return "state/run/" + workspaceID + "/" + runID
+			}
 			return "state/run/" + runID
 		}
+	case "orchestrator":
+		if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+			if workspaceID != "" {
+				return "state/orchestrator/workspace/" + workspaceID + "/run/" + runID
+			}
+			return "state/orchestrator/run/" + runID
+		}
 	case "workspace":
-		if workspaceID := strings.TrimSpace(envelope.WorkspaceID); workspaceID != "" {
+		if workspaceID != "" {
 			return "state/workspace/" + workspaceID
 		}
 	}
 	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
+		if workspaceID != "" {
+			return "state/" + owner + "/workspace/" + workspaceID + "/subject/" + subjectID
+		}
 		return "state/" + owner + "/" + subjectID
 	}
 	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+		if workspaceID != "" {
+			return "state/" + owner + "/workspace/" + workspaceID + "/run/" + runID
+		}
 		return "state/" + owner + "/run/" + runID
 	}
-	if workspaceID := strings.TrimSpace(envelope.WorkspaceID); workspaceID != "" {
+	if workspaceID != "" {
 		return "state/" + owner + "/workspace/" + workspaceID
 	}
 	return "state/" + owner
@@ -188,16 +212,26 @@ func executeLaneKey(contract EventHubContract, envelope Envelope) string {
 	if kind == "" {
 		kind = lanePart(contract.Owner, "unknown")
 	}
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
 	if stepID := strings.TrimSpace(envelope.StepID); stepID != "" {
+		if workspaceID != "" {
+			return "exec/block/" + kind + "/workspace/" + workspaceID + "/step/" + stepID
+		}
 		return "exec/block/" + kind + "/" + stepID
 	}
 	if subjectID := strings.TrimSpace(envelope.SubjectID); subjectID != "" {
+		if workspaceID != "" {
+			return "exec/block/" + kind + "/workspace/" + workspaceID + "/subject/" + subjectID
+		}
 		return "exec/block/" + kind + "/subject/" + subjectID
 	}
 	if runID := strings.TrimSpace(envelope.RunID); runID != "" {
+		if workspaceID != "" {
+			return "exec/block/" + kind + "/workspace/" + workspaceID + "/run/" + runID
+		}
 		return "exec/block/" + kind + "/run/" + runID
 	}
-	if workspaceID := strings.TrimSpace(envelope.WorkspaceID); workspaceID != "" {
+	if workspaceID != "" {
 		return "exec/block/" + kind + "/workspace/" + workspaceID
 	}
 	return "exec/block/" + kind

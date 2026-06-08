@@ -98,7 +98,6 @@ func (m *Module) Start() error {
 		return nil
 	}
 	m.unsub = append(m.unsub,
-		m.eventHub.Subscribe(runevents.TopicRunCommandEnsureResumed, m.handleEnsureResumedCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandEnsure, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandCreate, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandGet, m.handleRunQueryCommand),
@@ -110,9 +109,6 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandUpdate, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandDelete, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(runevents.TopicRunCommandStart, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(runevents.TopicRunCommandSupersede, m.handleRunQueryCommand),
-		m.eventHub.Subscribe(runevents.TopicRunCommandFail, m.handleRunQueryCommand),
 	)
 	return nil
 }
@@ -136,29 +132,6 @@ func (m *Module) Stop(ctx context.Context) error {
 
 func (m *Module) Service() Service {
 	return m.servicePtr
-}
-
-func (m *Module) handleEnsureResumedCommand(ctx context.Context, envelope events.Envelope) error {
-	if m == nil || m.servicePtr == nil {
-		return common.ErrInvalidArgument
-	}
-	cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-	if !ok {
-		cmd = runcontracts.ResumeRunCommand{
-			RunID:       common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
-			WorkspaceID: common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID)),
-		}
-	}
-	if cmd.RunID == "" {
-		cmd.RunID = common.RunID(envelope.RunID)
-	}
-	if cmd.WorkspaceID == "" {
-		cmd.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
-	}
-	if err := m.servicePtr.EnsureResumed(ctx, cmd); err != nil {
-		return err
-	}
-	return events.Response(events.Envelope{Topic: envelope.Topic + "/response", SourceModule: ModuleID, SubjectType: envelope.SubjectType, SubjectID: envelope.SubjectID, WorkspaceID: envelope.WorkspaceID, RunID: string(cmd.RunID), StepID: envelope.StepID})
 }
 
 func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Envelope) error {
@@ -300,37 +273,20 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		return runCommandResponse(envelope, nil)
 	case runevents.TopicRunCommandDelete:
 		runID := deleteRunIDFromPayload(envelope.Payload, envelope.RunID)
-		if err := m.runs.Delete(ctx, runID); err != nil {
-			return err
+		workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+		if workspaceID == "" {
+			workspaceID = common.WorkspaceID(envelope.WorkspaceID)
 		}
-		return runCommandResponse(envelope, nil)
-	case runevents.TopicRunCommandStart:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.StartRunCommand)
-		if !ok {
-			cmd = runcontracts.StartRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
-		}
-		if err := m.servicePtr.EnsureStarted(ctx, cmd); err != nil {
-			return err
-		}
-		return runCommandResponse(envelope, nil)
-	case runevents.TopicRunCommandSupersede:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.SupersedeRunCommand)
-		if !ok {
-			cmd = runcontracts.SupersedeRunCommand{RunID: common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))}
-		}
-		if err := m.servicePtr.SupersedeRun(ctx, cmd); err != nil {
-			return err
-		}
-		return runCommandResponse(envelope, nil)
-	case runevents.TopicRunCommandFail:
-		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.FailRunCommand)
-		if !ok {
-			cmd = runcontracts.FailRunCommand{
-				RunID:  common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID)),
-				Reason: stringPayload(envelope.Payload, events.PayloadKeyFailureReason),
+		if workspaceID != "" {
+			item, err := m.runs.Get(ctx, runID)
+			if err != nil {
+				return err
+			}
+			if item.WorkspaceID != workspaceID {
+				return common.ErrNotFound
 			}
 		}
-		if err := m.servicePtr.FailRun(ctx, cmd); err != nil {
+		if err := m.runs.Delete(ctx, runID); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)

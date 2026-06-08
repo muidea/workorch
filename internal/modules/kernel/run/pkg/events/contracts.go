@@ -26,10 +26,6 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandEnsure,
 		TopicRunCommandUpdate,
 		TopicRunCommandDelete,
-		TopicRunCommandStart,
-		TopicRunCommandSupersede,
-		TopicRunCommandFail,
-		TopicRunCommandEnsureResumed,
 	)...)
 	return ret
 }

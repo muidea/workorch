@@ -128,8 +128,8 @@ Last Updated: 2026-06-08
 - 每个 workspace-scoped 事件必须包含 `WorkspaceID`；run/step 事件还必须包含 `RunID` / `StepID`。
 - lane 表达一致性边界，不直接表达业务作用域；`RunID` / `WorkspaceID` 只是 scope，不能自动决定串行队列。
 - owner read/query command 应落在 query lane，不与 state write lane 共队列。
-- run 状态机写入、状态转换和 formal evidence 绑定应落在 `state/run/<runID>` lane；workspace owner 写入应落在 `state/workspace/<workspaceID>` lane。
-- block execution 使用 execute/resource lane，例如 `exec/block/<kind>/<stepID>`，不因携带 `RunID` 默认进入 run state lane。
+- run owner 正式记录写入和 formal evidence 绑定应落在 `state/run/<workspaceID>/<runID>` lane；orchestrator 执行推进应落在 `state/orchestrator/workspace/<workspaceID>/run/<runID>` lane；`runID` 是 workspace-local，不能单独作为跨 workspace 串行 key；workspace owner 写入应落在 `state/workspace/<workspaceID>` lane。
+- block execution 使用 execute/resource lane，例如 `exec/block/<kind>/workspace/<workspaceID>/step/<stepID>`，不因携带 `RunID` 默认进入 run state lane；当 `stepID` 是 workspace-local 时也必须带 workspace scope。
 - CLI/TUI facade、progress、notification 和 observability 事件按契约使用 topic lane 或异步通知 lane。
 - 详细规则以 `../30-module-architecture/eventhub-lane-policy-and-module-event-contract-plan.md` 为准。
 - 事件 handler 不应做长耗时工作；若需要 resume、recovery、batch scan，应转交 scheduler/background task。
@@ -170,7 +170,7 @@ Last Updated: 2026-06-08
 - Appservice production code no longer imports kernel owner `service` packages or owner module command aliases for EventHub command payloads. Command publishers use stable event payload keys and owner model payloads; owner modules translate those payloads into their internal service commands inside the subscribed handler.
 - Context registry Soul/Skill/MCP/Memory write/read command paths now publish owner commands. CLI/TUI embedded mode publishes `/cli/command` envelopes only; the workorchd owner dispatcher calls appservice EventHub-backed use-cases and returns `/cli/result`.
 - Governance no longer falls back to direct Goal/DoD repository access in production; it uses a workspace definition reader backed by owner commands. Tests retain narrow fakes for local algorithm coverage.
-- MagicHub lane policy now prioritizes run lane over workspace lane when `RunID` is present. This preserves run state-machine serialization while allowing nested synchronous workspace command reads inside run/orchestrator command handling.
+- MagicHub lane policy now scopes run owner state lanes as `state/run/<workspaceID>/<runID>` and orchestrator execution lanes as `state/orchestrator/workspace/<workspaceID>/run/<runID>`. This preserves owner-local per-run serialization without making different workspaces' local `run-001` executions block each other, and avoids synchronous orchestrator handlers waiting on their own lane when they write back through the run owner.
 - MagicHub subscription/unsubscription against the underlying magicCommon hub now uses bounded waits and no longer holds the WorkOrch wrapper lock while subscribing. Wildcard subscriptions are intentionally wrapper-local, while concrete topic subscriptions still deliver across wrappers sharing the same underlying hub.
 - Governance notification observers no longer execute auto-governance synchronously inside the EventHub dispatch stack. Ticket/approval/run-state notifications enqueue lifecycle-managed governance work, so nested owner command `Send` calls do not block the original EventHub handler.
 - MCP catalog default capability derivation remains generic for arbitrary tools/resources/prompts, while built-in acceptance resource/prompt metadata is intentionally applied for the stdio e2e and user-facing catalog display.
@@ -407,13 +407,13 @@ Last Updated: 2026-06-08
 - Code: `internal/pkg/events`
 - Owner layer: Shared event infrastructure
 - Expected responsibility: 将 WorkOrch `Hub` 映射到 magicCommon `event.Hub`，同步 `Publish` 使用 `Send`，异步 `PublishAsync` 使用 `Post`，并保持 scoped lane ordering 和 unsubscribe 释放。
-- Current responsibility: `MagicHub.Publish` 使用 `Send` 并返回 handler response/error；`PublishAsync` 使用 `Post`；run-scoped 事件优先使用 `run/<id>` lane，workspace 事件使用 `workspace/<id>` lane，全局事件 fallback 到 topic lane；同一 raw hub 的 wrapper 共享 workspace revision state。
+- Current responsibility: `MagicHub.Publish` 使用 `Send` 并返回 handler response/error；`PublishAsync` 使用 `Post`；lane 由 owner event contract 显式计算，run owner 写入在有 workspace scope 时使用 `state/run/<workspaceID>/<runID>`，orchestrator 执行推进使用 `state/orchestrator/workspace/<workspaceID>/run/<runID>`，owner read/query 使用 query lane，block execution 使用 execute/resource lane，全局事件 fallback 到 topic lane；同一 raw hub 的 wrapper 共享 workspace revision state。
 - Lifecycle check: owner-created MagicHub 支持 `Terminate`；wrapped framework hub 不由 adapter 关闭。
 - EventHub check: 已有测试覆盖 Send/Post 行为、run/workspace scoped lane、topic fallback、shared wrapper revision、multi-wrapper delivery、wildcard subscription 和 unsubscribe。
 - Background task check: adapter 不启动业务后台任务；unsubscribe 为避免底层阻塞使用 bounded wait。
 - State ownership check: 只记录 event envelope 和 revision，不裁决业务状态。
-- Workspace scope check: revision 仍按 WorkspaceID scoped；lane 先按 RunID scoped，再按 WorkspaceID scoped；缺失 WorkspaceID 的全局事件 revision 为 0。
-- Findings: 同 workspace lane 曾导致 run command handler 内同步发布 workspace command 时发生嵌套等待；已通过 run lane 优先策略收口。
+- Workspace scope check: revision 仍按 WorkspaceID scoped；涉及 workspace-local `runID` / `stepID` 的 state/query/execute lane 在有 WorkspaceID 时必须带 workspace scope；缺失 WorkspaceID 的全局事件 revision 为 0。
+- Findings: 同 workspace lane 曾导致 run command handler 内同步发布 workspace command 时发生嵌套等待；已通过显式 owner contract 拆分 state/query/execute lane 收口。随后发现不同 workspace 的 `run-001` 会因 runID-only state lane 被错误串行，已改为 workspace-scoped owner state lane；继续发现 orchestrator 与 run owner 共用 `state/run` 会在 orchestrator handler 内同步回写 run owner 时自锁，已拆为 `state/orchestrator/...` 与 `state/run/...`。
 - Required action: 已核对主要 workspace-scoped 事件发布方：run/workspace/decision/approval/governance/orchestrator/memory/result/artifact 事件均携带对应 `WorkspaceID` / `RunID` / `StepID`；本轮补强 Decision/Approval owner command 的 scope guard，调用方携带 workspace/run/step scope 时由 owner module 强制校验。
 - Verification: `go test ./internal/pkg/events -count=1`
 - Status: reviewed
@@ -471,11 +471,11 @@ Last Updated: 2026-06-08
 - Code: `internal/modules/application/workorchd/biz/appservice/workspace_execution_activation_service.go`
 - Owner layer: Application use-case orchestration
 - Expected responsibility: 组合 workspace、goal、DoD、selection context 和 run creation/start；正式 Run 状态转换通过 kernel run service 完成。
-- Current responsibility: 根据 workspace 当前定义和命令选择 Goal/DoD/Soul/Skill/MCP/Memory，构建 executionContext，并通过 run owner command events 触发 supersede/create/start/fail 进入 kernel 状态机。
+- Current responsibility: 根据 workspace 当前定义和命令选择 Goal/DoD/Soul/Skill/MCP/Memory，构建 executionContext；通过 run owner command 创建 Run 记录，通过 orchestrator owner command 触发 supersede/start/fail 执行推进。
 - Lifecycle check: appservice 不注册 framework module，不持有长期生命周期资源；session 通过 `CloseOnReturn` 释放。
-- EventHub check: 通过 session/context 传入统一 EventHub，activation 发布 `/run/command/*` 同步命令并要求 `events.Response`；创建/启动 run 的正式事件由 kernel service/orchestrator 发布。
+- EventHub check: 通过 session/context 传入统一 EventHub，activation 对 Run 记录创建发布 run owner command，对 supersede/start/fail 发布 orchestrator owner command，所有同步命令均要求 `events.Response`；创建/启动 run 的正式事件由 kernel run/orchestrator owner 发布。
 - Background task check: 不启动长期后台任务；activation 是单次 use-case。
-- State ownership check: active run stale replacement、新 run 创建和启动均通过 run owner command handler 间接进入 run service；未发现直接写 Run 终态的越界逻辑。
+- State ownership check: active run stale replacement 的 supersede、run start/fail 均通过 orchestrator owner command；新 run 创建仍通过 run owner command handler；未发现 application 直接写 Run 终态的越界逻辑。
 - Workspace scope check: activation 开始即读取 workspace 并写入 runtime workspace context，后续 run repository lookup 使用 scoped context。
 - Findings: activation 曾直接调用 `RunService` facade；已改为 EventHub command，避免 application use-case 直接触达 run owner state machine facade。本轮 command response 审计发现 `publishActivationRunCommand` 在缺少 `events.Response` 且 `Publish` 无错误时会误返回成功，已改为返回 missing-response 错误。
 - Required action: 后续继续核对 selection context 中 Skill/MCP/Memory 自动绑定策略是否应进一步拆入专门 selector service。

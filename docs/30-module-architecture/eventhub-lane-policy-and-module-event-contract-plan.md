@@ -105,11 +105,12 @@ lane key 必须表达一致性或资源竞争边界。建议统一使用以下�
 
 | Lane | 用途 | 示例 |
 | --- | --- | --- |
-| `state/run/<runId>` | run owner 状态写入、run 状态机转换、run formal evidence 绑定 | start/resume/fail/complete run |
+| `state/run/<workspaceId>/<runId>` | run owner 正式 Run 记录写入和 formal evidence 绑定；`runId` 是 workspace-local，必须携带 workspace scope | create/update/delete run |
+| `state/orchestrator/workspace/<workspaceId>/run/<runId>` | orchestrator 执行推进、resume/recovery/closeout 等编排状态；不得与 run owner lane 共队列，否则 handler 内同步回写 run owner 会自锁 | start/resume/fail/complete run |
 | `state/workspace/<workspaceId>` | workspace owner 状态写入、goal/dod/workspace 变更 | create workspace, update goal |
-| `state/<owner>/<id>` | 其他 owner 正式状态写入 | `state/approval/<approvalId>` |
-| `query/<topic>/<scope>` | owner read/query，不阻塞状态写 lane | `query/run/command/list-steps-by-run/run/run-001` |
-| `exec/block/<kind>/<stepId>` | block 执行互斥或按 step 独立执行 | `exec/block/mcp/run-001-step-2` |
+| `state/<owner>/workspace/<workspaceId>/<subject|run>/<id>` | 其他 owner 正式状态写入；workspace-local subject 必须带 workspace scope | `state/approval/workspace/ws-a/subject/approval-001` |
+| `query/<topic>/<scope>` | owner read/query，不阻塞状态写 lane；读取 workspace-local run/step 时必须带 workspace scope | `query/run/command/list-steps-by-run/workspace/ws-a/run/run-001` |
+| `exec/block/<kind>/workspace/<workspaceId>/step/<stepId>` | block 执行互斥或按 step 独立执行；`stepId` 也是 workspace-local 时必须携带 workspace scope | `exec/block/mcp-tool-call/workspace/ws-a/step/run-001-step-2` |
 | `resource/<type>/<id>` | 外部资源互斥，例如文件、patch、workspace deliverable | `resource/file/<workspaceId>/<path>` |
 | `topic/<topic>` | facade、通知、progress、无需业务串行的 topic | CLI result/progress |
 | `global/<owner>` | 全局单例状态或启动治理 | runtime config update |
@@ -118,6 +119,9 @@ lane key 必须表达一致性或资源竞争边界。建议统一使用以下�
 
 - 禁止把 `run/<runId>` 作为所有 run-scoped 事件的默认 lane。
 - 禁止把 `workspace/<workspaceId>` 作为所有 workspace-scoped 事件的默认 lane。
+- 禁止在 run/orchestrator state lane 中只使用 workspace-local `runId`；必须使用 `workspaceId + runId`，否则不同 workspace 的 `run-001` 会被错误串行。
+- 禁止让 orchestrator 执行推进 command 与 run owner 写 command 共用同一个 lane；orchestrator 可按 workspace/run 串行，但 lane owner 必须是 `orchestrator`。
+- 禁止在 query/execute lane 中只使用 workspace-local `runId` 或 `stepId`；只要 envelope 有 `workspaceId`，lane 必须带 workspace scope。
 - 禁止只靠 topic 字符串片段推断 read/write/execute/notify。
 - 禁止让 CLI/TUI facade 消息与 run 状态机写入共用同一 lane。
 
@@ -149,13 +153,13 @@ TopicRunCommandGet
   requiredScope: workspaceId optional for scoped verification, runId required
   response: run model or not found error
 
-TopicRunCommandStart
-  owner: kernel/run
+TopicOrchestratorCommandStartRun
+  owner: kernel/orchestrator
   deliveryMode: sync
   commandClass: write
-  lanePolicy: state/run/<runId>
+  lanePolicy: state/orchestrator/workspace/<workspaceId>/run/<runId>
   requiredScope: workspaceId, runId
-  response: updated run model
+  response: orchestrator command response
 ```
 
 ## Adjustment Scope
@@ -200,7 +204,7 @@ TopicRunCommandStart
 要求：
 
 - block execution topic 使用 execute contract。
-- 无状态 block 执行使用 `exec/block/<kind>/<stepId>` 或更精确资源 lane。
+- 无状态 block 执行使用 `exec/block/<kind>/workspace/<workspaceId>/step/<stepId>` 或更精确资源 lane；当 `stepId` 不是全局唯一时必须携带 workspace scope。
 - 需要外部资源互斥的 block 使用 `resource/<type>/<id>` lane。
 - block 不进入 run state lane，除非它实际拥有 run 状态，这种情况原则上不应发生。
 
@@ -376,7 +380,7 @@ make verify-managed-full
 
 - 新增 `internal/pkg/events/event_contract.go`，集中定义 `EventHubContract`、`EventCommandClass` 和 `EventLanePolicy`。
 - `MagicHub` 已改为通过 `EventHubLaneKey(envelope)` 调用契约解析器，不再直接根据 `RunID` / `WorkspaceID` 推断 lane。
-- runtime block execute prefix 由 contract resolver 识别，lane 进入 `exec/block/<kind>/<stepID>`。
+- runtime block execute prefix 由 contract resolver 识别，lane 在有 workspace scope 时进入 `exec/block/<kind>/workspace/<workspaceID>/step/<stepID>`。
 - CLI facade topic 进入 topic lane。
 - owner read command 进入 query lane。
 - owner write/state command 进入 state lane。
@@ -400,7 +404,7 @@ go test ./internal/pkg/events -count=1
 - `ownercommandports` 的 publish helper 增加 write contract 校验，只允许 `EventCommandClassWrite` topic。
 - `ownerreadports` 不再复用 `ownercommandports` 发布函数，已独立发布 read command 并校验 `EventCommandClassRead`。
 - 补充 read/write helper 误用回归测试。
-- 补充 `runtimeevent.Executor` 回归测试，确认同一个 run 上 state write lane 阻塞时，runtime block execute 仍可通过 `exec/block/<kind>/<stepID>` lane 完成。
+- 补充 `runtimeevent.Executor` 回归测试，确认同一个 run 上 state write lane 阻塞时，runtime block execute 仍可通过 workspace-scoped execute lane 完成。
 
 直接验证：
 

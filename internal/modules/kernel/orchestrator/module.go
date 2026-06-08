@@ -2,7 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 
+	"github.com/muidea/magicCommon/task"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
@@ -38,14 +42,16 @@ type Dependencies struct {
 	ArtifactContinuations repository.ArtifactContinuationRepository
 	RuntimePolicy         orchestratorbiz.RuntimePolicy
 	EventHub              events.Hub
+	BackgroundRoutine     task.BackgroundRoutine
 }
 
 type Module struct {
-	bizPtr     *orchestratorbiz.RuntimeOrchestrator
-	servicePtr *orchestratorservice.Module
-	steps      repository.StepRepository
-	eventHub   events.Hub
-	unsub      []func()
+	bizPtr            *orchestratorbiz.RuntimeOrchestrator
+	servicePtr        *orchestratorservice.Module
+	steps             repository.StepRepository
+	eventHub          events.Hub
+	backgroundRoutine task.BackgroundRoutine
+	unsub             []func()
 }
 
 func New() *Module { return &Module{} }
@@ -100,6 +106,7 @@ func (m *Module) Configure(deps Dependencies) error {
 	})
 	m.steps = deps.Steps
 	m.eventHub = deps.EventHub
+	m.backgroundRoutine = deps.BackgroundRoutine
 	return nil
 }
 
@@ -141,6 +148,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.bizPtr = nil
 	m.steps = nil
 	m.eventHub = nil
+	m.backgroundRoutine = nil
 	return nil
 }
 
@@ -160,7 +168,7 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 	var err error
 	switch envelope.Topic {
 	case orchestratorevents.TopicOrchestratorCommandStartRun:
-		err = m.servicePtr.StartRun(ctx, runID)
+		err = m.handleStartRunCommand(ctx, envelope, runID)
 	case orchestratorevents.TopicOrchestratorCommandBlockDecision:
 		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
 		if !ok {
@@ -220,6 +228,45 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 		RunID:        string(runID),
 		StepID:       envelope.StepID,
 	})
+}
+
+func (m *Module) handleStartRunCommand(ctx context.Context, envelope events.Envelope, runID common.RunID) error {
+	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
+		return common.ErrInvalidArgument
+	}
+	if m.backgroundRoutine == nil {
+		return m.servicePtr.StartRun(ctx, runID)
+	}
+	if err := m.bizPtr.AcceptRunStart(ctx, runID); err != nil {
+		return err
+	}
+	bgCtx := orchestratorBackgroundContext(ctx, envelope)
+	if err := m.backgroundRoutine.AsyncFunction(func() {
+		if err := m.servicePtr.ResumeRun(bgCtx, runID); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.Warn("workorch orchestrator background start dispatch failed", "workspaceID", envelope.WorkspaceID, "runID", runID, "err", err)
+			_ = m.servicePtr.FailRun(bgCtx, runID, fmt.Sprintf("background start dispatch failed: %v", err))
+		}
+	}); err != nil {
+		_ = m.servicePtr.FailRun(bgCtx, runID, fmt.Sprintf("background start dispatch scheduling failed: %v", err))
+		return err
+	}
+	return nil
+}
+
+func orchestratorBackgroundContext(ctx context.Context, envelope events.Envelope) context.Context {
+	bgCtx := context.Background()
+	if workspaceID := common.WorkspaceID(envelope.WorkspaceID); workspaceID != "" {
+		bgCtx = common.ContextWithRuntimeWorkspaceID(bgCtx, workspaceID)
+	} else if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
+		bgCtx = common.ContextWithRuntimeWorkspaceID(bgCtx, workspaceID)
+	}
+	if providerID := common.RuntimeLLMProviderIDFromContext(ctx); providerID != "" {
+		bgCtx = common.ContextWithRuntimeLLMProviderID(bgCtx, providerID)
+	}
+	return bgCtx
 }
 
 func stringPayload(payload map[string]any, key string) string {

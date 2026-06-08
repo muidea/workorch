@@ -18,6 +18,7 @@ import (
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -596,7 +597,7 @@ func (h *blockingActivationEventHub) Subscribe(topic string, handler events.Hand
 
 func TestPublishActivationRunCommandRequiresResponse(t *testing.T) {
 	hub := events.NewMemoryHub()
-	err := activationports.PublishRunCommand(context.Background(), hub, runevents.TopicRunCommandStart, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
+	err := activationports.PublishRunCommand(context.Background(), hub, orchestratorevents.TopicOrchestratorCommandStartRun, "run", "run-activation", "ws-activation", "run-activation", map[string]any{
 		events.PayloadKeyRunID: "run-activation",
 	})
 	if err == nil {

@@ -68,16 +68,16 @@ func TestEventHubActionPortReturnsInvalidArgumentWhenHubOrRequiredInputMissing(t
 }
 
 func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
-	ctx := context.Background()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-action-port")
 	hub := events.NewMemoryHub()
 	port := runtimeports.NewEventHubActionPort(hub)
 	wantTopics := []string{
 		workspaceevents.TopicWorkspaceCommandEnsure,
 		runevents.TopicRunCommandEnsure,
-		runevents.TopicRunCommandStart,
+		orchestratorevents.TopicOrchestratorCommandStartRun,
 		orchestratorevents.TopicOrchestratorCommandBlockDecision,
 		orchestratorevents.TopicOrchestratorCommandBlockApproval,
-		runevents.TopicRunCommandEnsureResumed,
+		orchestratorevents.TopicOrchestratorCommandResumeRun,
 		decisionevents.TopicDecisionCommandEnsureTicket,
 		decisionevents.TopicDecisionCommandEnsureResolved,
 		approvalevents.TopicApprovalCommandEnsure,
@@ -146,9 +146,11 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 	if !ok || runEnsureCmd.RunID != "run-action-port" || runEnsureCmd.WorkspaceID != "ws-action-port" {
 		t.Fatalf("run ensure command = %#v", published[1].Payload[events.PayloadKeyCommand])
 	}
-	startCmd, ok := published[2].Payload[events.PayloadKeyCommand].(runcontracts.StartRunCommand)
-	if !ok || startCmd.RunID != "run-action-port" {
-		t.Fatalf("run start command = %#v", published[2].Payload[events.PayloadKeyCommand])
+	if runID, ok := published[2].Payload[events.PayloadKeyRunID].(string); !ok || runID != "run-action-port" {
+		t.Fatalf("run start payload = %#v", published[2].Payload)
+	}
+	if published[2].WorkspaceID != "ws-action-port" {
+		t.Fatalf("run start workspace = %q", published[2].WorkspaceID)
 	}
 	blockDecisionCmd, ok := published[3].Payload[events.PayloadKeyCommand].(runcontracts.BlockOnDecisionCommand)
 	if !ok || blockDecisionCmd.RunID != "run-action-port" || blockDecisionCmd.TicketID != "ticket-action-port" {
@@ -159,7 +161,7 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 		t.Fatalf("block approval command = %#v", published[4].Payload[events.PayloadKeyCommand])
 	}
 	resumeCmd, ok := published[5].Payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-	if !ok || resumeCmd.RunID != "run-action-port" {
+	if !ok || resumeCmd.RunID != "run-action-port" || resumeCmd.WorkspaceID != "ws-action-port" {
 		t.Fatalf("run resume command = %#v", published[5].Payload[events.PayloadKeyCommand])
 	}
 	ticketCmd, ok := published[6].Payload[events.PayloadKeyCommand].(decisioncontracts.CreateTicketCommand)

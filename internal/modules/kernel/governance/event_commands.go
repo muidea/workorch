@@ -7,7 +7,7 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -45,7 +45,7 @@ func eventResolveApproval(hub events.Hub) ResolveApprovalFunc {
 func eventResumeRun(hub events.Hub) ResumeRunFunc {
 	return func(ctx context.Context, runID common.RunID) error {
 		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
-		return publishGovernanceCommand(ctx, hub, runevents.TopicRunCommandEnsureResumed, "run", string(runID), map[string]any{
+		return publishGovernanceCommand(ctx, hub, orchestratorevents.TopicOrchestratorCommandResumeRun, "run", string(runID), map[string]any{
 			events.PayloadKeyWorkspaceID: workspaceID,
 			events.PayloadKeyRunID:       string(runID),
 		}, workspaceID, string(runID), "")

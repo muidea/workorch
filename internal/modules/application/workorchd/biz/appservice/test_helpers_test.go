@@ -200,6 +200,7 @@ func prepareDecisionRun(t *testing.T, dataRoot string, workspaceID string, runID
 		t.Fatalf("runtime exports: %v", err)
 	}
 	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -255,6 +256,7 @@ func prepareApprovalRun(t *testing.T, dataRoot string, workspaceID string, runID
 		t.Fatalf("runtime exports: %v", err)
 	}
 	actions := runtimeports.NewEventHubActionPort(exports.Infrastructure.EventHub)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	ensureTestWorkspace(t, ctx, session, workspaceID)
 	if err := actions.EnsureRun(ctx, common.RunID(runID), common.WorkspaceID(workspaceID)); err != nil {
 		t.Fatalf("CreateRun: %v", err)
