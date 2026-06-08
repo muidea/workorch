@@ -3086,18 +3086,29 @@ func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
 
 	got := <-ch
 	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-b" {
-		t.Fatalf("event = %+v, want workspace created to replace older non-critical event", got)
+		t.Fatalf("event = %+v, want workspace created to replace older queued event", got)
 	}
 }
 
 func TestEnqueueBackendEventDropsNonCriticalWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.Event, 1)
 	enqueueBackendEvent(ch, backend.Event{Type: backend.EventWorkspaceCreated, WorkspaceID: "ws-a"})
-	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-b"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventType("custom/non-critical"), WorkspaceID: "ws-b"})
 
 	got := <-ch
 	if got.Type != backend.EventWorkspaceCreated || got.WorkspaceID != "ws-a" {
 		t.Fatalf("event = %+v, want existing critical event preserved", got)
+	}
+}
+
+func TestEnqueueBackendEventKeepsStepWhenChannelFull(t *testing.T) {
+	ch := make(chan backend.Event, 1)
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepDispatched, WorkspaceID: "ws-a"})
+	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Type != backend.EventStepCompleted || got.WorkspaceID != "ws-b" {
+		t.Fatalf("event = %+v, want latest critical step event", got)
 	}
 }
 
@@ -3229,6 +3240,26 @@ func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
 	}
 	if m.progress != progressRunning || !strings.Contains(m.progressText, "LLM streaming") || len(m.runtimeEvents) != 1 {
 		t.Fatalf("stream progress not applied: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
+	}
+}
+
+func TestModelActiveWorkspaceNeedsLiveRefresh(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-live", "")
+	m.activeWorkspaceID = "ws-live"
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:          "ws-live",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-live",
+	}}
+	if !m.activeWorkspaceNeedsLiveRefresh() {
+		t.Fatal("running workspace should need periodic live refresh")
+	}
+
+	m.workspaces[0].State = common.WorkspaceStateCompleted
+	m.running = false
+	m.progress = progressIdle
+	if m.activeWorkspaceNeedsLiveRefresh() {
+		t.Fatal("completed idle workspace should not need periodic live refresh")
 	}
 }
 

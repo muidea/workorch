@@ -18,6 +18,8 @@ type workspaceSnapshotBackend interface {
 	Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
 }
 
+const liveRefreshInterval = 3 * time.Second
+
 func FetchAll(be backend.Backend) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -276,6 +278,12 @@ func WaitForBackendEvent(ch <-chan backend.Event) tea.Cmd {
 		}
 		return BackendEventMsg{Event: evt}
 	}
+}
+
+func ScheduleLiveRefreshTick() tea.Cmd {
+	return tea.Tick(liveRefreshInterval, func(time.Time) tea.Msg {
+		return LiveRefreshTickMsg{}
+	})
 }
 
 func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []string) tea.Cmd {

@@ -69,7 +69,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		if lastEventID == "" {
 			lastEventID = strings.TrimSpace(r.URL.Query().Get("lastEventId"))
 		}
-		for _, envelope := range state.eventReplay.After(lastEventID, filterEnvelope) {
+		for _, envelope := range state.replayEventStreamEnvelopes(r.Context(), lastEventID, workspaceID, runID, filterEnvelope) {
 			if !writeSSEEnvelope(w, flusher, envelope) {
 				return
 			}

@@ -1186,6 +1186,54 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	}
 }
 
+func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state.listEventRecords = func(_ context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
+		if query.WorkspaceID != "ws-persist" || query.RunID != "run-persist" || query.CursorAfterID != "evt-old" {
+			t.Fatalf("query = %+v, want workspace/run cursor replay query", query)
+		}
+		return []appservice.EventRecord{{
+			ID:          "evt-persisted-step",
+			Version:     "workorch.event.v1",
+			Topic:       runevents.TopicStepStateChanged,
+			WorkspaceID: "ws-persist",
+			RunID:       "run-persist",
+			StepID:      "run-persist/step-1",
+			Revision:    12,
+			Payload: map[string]any{
+				events.PayloadKeyState: string(common.StepStateCompleted),
+			},
+		}}, nil
+	}
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-persist&runId=run-persist", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", "evt-old")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	id, replayed := readSSEEnvelope(t, lines, readErr)
+	if id != "evt-persisted-step" || replayed.Topic != runevents.TopicStepStateChanged || replayed.StepID != "run-persist/step-1" {
+		t.Fatalf("replayed id=%q envelope=%+v, want persisted step state event", id, replayed)
+	}
+	if replayed.Payload[events.PayloadKeyState] != string(common.StepStateCompleted) {
+		t.Fatalf("payload = %+v, want completed state", replayed.Payload)
+	}
+}
+
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 	hub := events.NewMagicHub()
 	defer hub.Terminate(context.Background())
@@ -1347,18 +1395,29 @@ func TestEnqueueEventStreamEnvelopeKeepsWorkspaceCreatedWhenChannelFull(t *testi
 
 	got := <-ch
 	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-b" {
-		t.Fatalf("envelope = %+v, want workspace-created to replace older non-critical event", got)
+		t.Fatalf("envelope = %+v, want workspace-created to replace older queued event", got)
 	}
 }
 
 func TestEnqueueEventStreamEnvelopeDropsNonCriticalWhenChannelFull(t *testing.T) {
 	ch := make(chan events.Envelope, 1)
 	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: workspaceevents.TopicWorkspaceCreated, WorkspaceID: "ws-a"})
-	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: "/custom/non-critical", WorkspaceID: "ws-b"})
 
 	got := <-ch
 	if got.Topic != workspaceevents.TopicWorkspaceCreated || got.WorkspaceID != "ws-a" {
 		t.Fatalf("envelope = %+v, want existing critical event preserved", got)
+	}
+}
+
+func TestEnqueueEventStreamEnvelopeKeepsStepStateWhenChannelFull(t *testing.T) {
+	ch := make(chan events.Envelope, 1)
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepDispatched, WorkspaceID: "ws-a"})
+	enqueueEventStreamEnvelope(ch, events.Envelope{Topic: runevents.TopicStepStateChanged, WorkspaceID: "ws-b"})
+
+	got := <-ch
+	if got.Topic != runevents.TopicStepStateChanged || got.WorkspaceID != "ws-b" {
+		t.Fatalf("envelope = %+v, want latest critical step state event", got)
 	}
 }
 

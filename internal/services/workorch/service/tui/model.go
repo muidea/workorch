@@ -179,11 +179,16 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 		backend.EventWorkspaceDeleted,
 		backend.EventWorkspaceListChanged,
 		backend.EventRunStateChanged,
+		backend.EventStepDispatched,
+		backend.EventStepCompleted,
 		backend.EventDecisionCreated,
 		backend.EventDecisionResolved,
 		backend.EventApprovalCreated,
 		backend.EventApprovalResolved,
 		backend.EventResultAccepted,
+		backend.EventMemoryRecallRecorded,
+		backend.EventLLMStreamProgress,
+		backend.EventLLMUsageRecorded,
 		backend.EventPatchApplied,
 		backend.EventPatchFailed:
 		return true
@@ -193,7 +198,7 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
+	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh), ScheduleLiveRefreshTick()}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
 			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
@@ -298,6 +303,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BackendEventMsg:
 		cmd := m.applyBackendEvent(msg.Event)
 		return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
+	case LiveRefreshTickMsg:
+		cmds := []tea.Cmd{ScheduleLiveRefreshTick()}
+		if m.activeWorkspaceNeedsLiveRefresh() {
+			cmds = append(cmds, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+		}
+		return m, tea.Batch(cmds...)
 	case RunStartedMsg:
 		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
 			return m, nil
@@ -1952,6 +1963,16 @@ func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
 		FetchWorkspaceContext(m.be, m.activeWorkspaceID),
 		m.requestWorkspaceListRefresh(),
 	)
+}
+
+func (m *AppModel) activeWorkspaceNeedsLiveRefresh() bool {
+	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return false
+	}
+	if m.running || m.progress == progressRunning || m.progress == progressSubmitting {
+		return true
+	}
+	return m.activeWorkspaceStateIsLive()
 }
 
 func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *backend.RunInfo) bool {

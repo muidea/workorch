@@ -1924,7 +1924,12 @@ func isEventStreamCriticalTopic(topic string) bool {
 	switch topic {
 	case workspaceevents.TopicWorkspaceCreated,
 		workspaceevents.TopicWorkspaceDeleted,
-		workspaceevents.TopicWorkspaceStateChanged:
+		workspaceevents.TopicWorkspaceStateChanged,
+		runevents.TopicRunStateChanged,
+		runevents.TopicStepDispatched,
+		runevents.TopicStepStateChanged,
+		runevents.TopicRunLLMStreamProgress,
+		runevents.TopicRunLLMUsageRecorded:
 		return true
 	default:
 		return false

@@ -55,6 +55,8 @@ type BackendEventMsg struct {
 	Event backend.Event
 }
 
+type LiveRefreshTickMsg struct{}
+
 type RunStartedMsg struct {
 	Run         *backend.RunInfo
 	WorkspaceID string
