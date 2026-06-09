@@ -263,7 +263,7 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 	m.workspaceSelectMode = false
 	m.resetWorkspaceView()
 	m.progressText = "Workspace switched; refreshing state"
-	return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+	return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContextForSwitch(m.be, m.activeWorkspaceID))
 }
 
 func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {

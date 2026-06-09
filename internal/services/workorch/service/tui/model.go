@@ -237,11 +237,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case WorkspaceContextMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
 		m.applyWorkspaceContext(msg)
+		if msg.ResetMainViewport {
+			m.syncMainViewportToCurrentContent()
+		}
 		return m, m.fetchActiveBlockerDetails()
 	case WorkspaceCreatedMsg:
 		if msg.Error != nil {
@@ -255,10 +261,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progressText = "Workspace created"
 			m.result = fmt.Sprintf("Workspace created: %s", workspaceLabel(*msg.Workspace))
 			m.lastError = nil
-			return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContext(m.be, string(msg.Workspace.ID)))
+			return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContextForSwitch(m.be, string(msg.Workspace.ID)))
 		}
 		return m, nil
 	case DecisionListMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
@@ -267,6 +276,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncBlockingDecisionFromList()
 		return m, nil
 	case DecisionDetailMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
@@ -280,6 +292,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ApprovalListMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
@@ -288,6 +303,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncBlockingApprovalFromList()
 		return m, nil
 	case ApprovalDetailMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
 			return m, nil
@@ -1565,10 +1583,10 @@ func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.
 func (m *AppModel) fetchActiveBlockerDetails() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
-		cmds = append(cmds, FetchDecision(m.be, string(m.blockingDecision.ID)))
+		cmds = append(cmds, FetchDecision(m.be, m.activeWorkspaceID, string(m.blockingDecision.ID)))
 	}
 	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
-		cmds = append(cmds, FetchApproval(m.be, string(m.blockingApproval.ID)))
+		cmds = append(cmds, FetchApproval(m.be, m.activeWorkspaceID, string(m.blockingApproval.ID)))
 	}
 	if m.activeWorkspaceID != "" {
 		cmds = append(cmds, FetchBlockers(m.be, m.activeWorkspaceID))
@@ -1973,6 +1991,13 @@ func (m *AppModel) activeWorkspaceNeedsLiveRefresh() bool {
 		return true
 	}
 	return m.activeWorkspaceStateIsLive()
+}
+
+func (m *AppModel) workspaceMessageBelongsToActiveWorkspace(workspaceID string) bool {
+	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return true
+	}
+	return workspaceID == m.activeWorkspaceID
 }
 
 func (m *AppModel) runMessageBelongsToActiveWorkspace(workspaceID string, run *backend.RunInfo) bool {

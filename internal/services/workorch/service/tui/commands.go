@@ -45,6 +45,14 @@ func FetchConfiguration(be backend.Backend) tea.Cmd {
 }
 
 func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
+	return fetchWorkspaceContext(be, workspaceID, false)
+}
+
+func FetchWorkspaceContextForSwitch(be backend.Backend, workspaceID string) tea.Cmd {
+	return fetchWorkspaceContext(be, workspaceID, true)
+}
+
+func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainViewport bool) tea.Cmd {
 	if workspaceID == "" {
 		return nil
 	}
@@ -56,7 +64,7 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		if snapshotBackend, ok := be.Workspace().(workspaceSnapshotBackend); ok {
 			snapshot, err := snapshotBackend.Snapshot(ctx, wsID)
 			if err != nil {
-				return WorkspaceContextMsg{Error: err}
+				return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 			}
 			if snapshot != nil {
 				liveRunID := snapshot.Workspace.ActiveRunID
@@ -83,28 +91,30 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 					dod = latestDoDFromBackend(ctx, be, wsID)
 				}
 				return WorkspaceContextMsg{
-					Workspace:        &snapshot.Workspace,
-					Snapshot:         snapshot,
-					Runs:             snapshot.Runs,
-					ActiveRun:        activeRun,
-					DisplayRun:       displayRun,
-					Status:           status,
-					Goal:             goal,
-					DoD:              dod,
-					Decisions:        snapshot.Decisions,
-					Approvals:        snapshot.Approvals,
-					WorkspaceHasLive: snapshot.Workspace.ActiveRunID != "",
+					WorkspaceID:       workspaceID,
+					ResetMainViewport: resetMainViewport,
+					Workspace:         &snapshot.Workspace,
+					Snapshot:          snapshot,
+					Runs:              snapshot.Runs,
+					ActiveRun:         activeRun,
+					DisplayRun:        displayRun,
+					Status:            status,
+					Goal:              goal,
+					DoD:               dod,
+					Decisions:         snapshot.Decisions,
+					Approvals:         snapshot.Approvals,
+					WorkspaceHasLive:  snapshot.Workspace.ActiveRunID != "",
 				}
 			}
 		}
 
 		workspace, err := be.Workspace().Get(ctx, wsID)
 		if err != nil {
-			return WorkspaceContextMsg{Error: err}
+			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 		}
 		runs, err := be.Run().List(ctx, wsID)
 		if err != nil {
-			return WorkspaceContextMsg{Error: err}
+			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 		}
 		run := selectWorkspaceRun(workspace.ActiveRunID, runs)
 		if run != nil {
@@ -130,23 +140,25 @@ func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
 		}
 		decisions, err := be.Decision().List(ctx, wsID)
 		if err != nil {
-			return WorkspaceContextMsg{Error: err}
+			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 		}
 		approvals, err := be.Approval().List(ctx, wsID)
 		if err != nil {
-			return WorkspaceContextMsg{Error: err}
+			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 		}
 		return WorkspaceContextMsg{
-			Workspace:        workspace,
-			Runs:             runs,
-			ActiveRun:        run,
-			DisplayRun:       run,
-			Status:           status,
-			Goal:             goal,
-			DoD:              dod,
-			Decisions:        decisions,
-			Approvals:        approvals,
-			WorkspaceHasLive: workspace.ActiveRunID != "",
+			WorkspaceID:       workspaceID,
+			ResetMainViewport: resetMainViewport,
+			Workspace:         workspace,
+			Runs:              runs,
+			ActiveRun:         run,
+			DisplayRun:        run,
+			Status:            status,
+			Goal:              goal,
+			DoD:               dod,
+			Decisions:         decisions,
+			Approvals:         approvals,
+			WorkspaceHasLive:  workspace.ActiveRunID != "",
 		}
 	}
 }
@@ -165,7 +177,7 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		items, err := be.Decision().List(ctx, common.WorkspaceID(workspaceID))
-		return DecisionListMsg{Decisions: items, Error: err}
+		return DecisionListMsg{WorkspaceID: workspaceID, Decisions: items, Error: err}
 	}
 }
 
@@ -236,12 +248,12 @@ func selectWorkspaceRun(activeRunID common.RunID, runs []backend.RunInfo) *backe
 	return &runs[len(runs)-1]
 }
 
-func FetchDecision(be backend.Backend, ticketID string) tea.Cmd {
+func FetchDecision(be backend.Backend, workspaceID string, ticketID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		item, err := be.Decision().Get(ctx, common.TicketID(ticketID))
-		return DecisionDetailMsg{Decision: item, Error: err}
+		return DecisionDetailMsg{WorkspaceID: workspaceID, Decision: item, Error: err}
 	}
 }
 
@@ -250,16 +262,16 @@ func FetchApprovals(be backend.Backend, workspaceID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		items, err := be.Approval().List(ctx, common.WorkspaceID(workspaceID))
-		return ApprovalListMsg{Approvals: items, Error: err}
+		return ApprovalListMsg{WorkspaceID: workspaceID, Approvals: items, Error: err}
 	}
 }
 
-func FetchApproval(be backend.Backend, approvalID string) tea.Cmd {
+func FetchApproval(be backend.Backend, workspaceID string, approvalID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		item, err := be.Approval().Get(ctx, common.ApprovalID(approvalID))
-		return ApprovalDetailMsg{Approval: item, Error: err}
+		return ApprovalDetailMsg{WorkspaceID: workspaceID, Approval: item, Error: err}
 	}
 }
 

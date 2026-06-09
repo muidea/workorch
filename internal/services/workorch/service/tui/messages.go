@@ -10,18 +10,20 @@ type WorkspaceListMsg struct {
 }
 
 type WorkspaceContextMsg struct {
-	Workspace        *backend.WorkspaceInfo
-	Snapshot         *backend.WorkspaceSnapshotInfo
-	Runs             []backend.RunInfo
-	ActiveRun        *backend.RunInfo
-	DisplayRun       *backend.RunInfo
-	Status           *backend.RunStatusInfo
-	Goal             *backend.GoalInfo
-	DoD              *backend.DoDInfo
-	Decisions        []backend.DecisionInfo
-	Approvals        []backend.ApprovalInfo
-	WorkspaceHasLive bool
-	Error            error
+	WorkspaceID       string
+	ResetMainViewport bool
+	Workspace         *backend.WorkspaceInfo
+	Snapshot          *backend.WorkspaceSnapshotInfo
+	Runs              []backend.RunInfo
+	ActiveRun         *backend.RunInfo
+	DisplayRun        *backend.RunInfo
+	Status            *backend.RunStatusInfo
+	Goal              *backend.GoalInfo
+	DoD               *backend.DoDInfo
+	Decisions         []backend.DecisionInfo
+	Approvals         []backend.ApprovalInfo
+	WorkspaceHasLive  bool
+	Error             error
 }
 
 type WorkspaceCreatedMsg struct {
@@ -30,23 +32,27 @@ type WorkspaceCreatedMsg struct {
 }
 
 type DecisionListMsg struct {
-	Decisions []backend.DecisionInfo
-	Error     error
+	WorkspaceID string
+	Decisions   []backend.DecisionInfo
+	Error       error
 }
 
 type DecisionDetailMsg struct {
-	Decision *backend.DecisionInfo
-	Error    error
+	WorkspaceID string
+	Decision    *backend.DecisionInfo
+	Error       error
 }
 
 type ApprovalListMsg struct {
-	Approvals []backend.ApprovalInfo
-	Error     error
+	WorkspaceID string
+	Approvals   []backend.ApprovalInfo
+	Error       error
 }
 
 type ApprovalDetailMsg struct {
-	Approval *backend.ApprovalInfo
-	Error    error
+	WorkspaceID string
+	Approval    *backend.ApprovalInfo
+	Error       error
 }
 
 type ErrorMsg struct{ Error error }

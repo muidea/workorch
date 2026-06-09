@@ -2302,6 +2302,97 @@ func TestModelIgnoresRunControlForInactiveWorkspace(t *testing.T) {
 	}
 }
 
+func TestModelIgnoresStaleWorkspaceContextError(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.activeWorkspaceID = "ws-b"
+	m.progressText = "Workspace switched; refreshing state"
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		WorkspaceID: "ws-a",
+		Error:       errors.New("old workspace snapshot failed"),
+	})
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatal("stale context error should not trigger follow-up command")
+	}
+	if m.lastError != nil || m.progressText != "Workspace switched; refreshing state" {
+		t.Fatalf("stale context error polluted state: err=%v progress=%q", m.lastError, m.progressText)
+	}
+}
+
+func TestModelIgnoresStaleBlockerListsForInactiveWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.activeWorkspaceID = "ws-b"
+
+	next, cmd := m.Update(DecisionListMsg{
+		WorkspaceID: "ws-a",
+		Decisions:   []backend.DecisionInfo{{ID: "ticket-old", State: "open"}},
+	})
+	m = asModel(next)
+	if cmd != nil || len(m.decisions) != 0 || m.blockingDecision != nil {
+		t.Fatalf("stale decisions polluted state: cmd=%v decisions=%+v blocker=%+v", cmd != nil, m.decisions, m.blockingDecision)
+	}
+
+	next, cmd = m.Update(ApprovalListMsg{
+		WorkspaceID: "ws-a",
+		Approvals:   []backend.ApprovalInfo{{ID: "approval-old", State: "pending"}},
+	})
+	m = asModel(next)
+	if cmd != nil || len(m.approvals) != 0 || m.blockingApproval != nil {
+		t.Fatalf("stale approvals polluted state: cmd=%v approvals=%+v blocker=%+v", cmd != nil, m.approvals, m.blockingApproval)
+	}
+
+	next, cmd = m.Update(DecisionDetailMsg{
+		WorkspaceID: "ws-a",
+		Decision:    &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", State: "open"},
+	})
+	m = asModel(next)
+	if cmd != nil || len(m.decisions) != 0 || m.blockingDecision != nil {
+		t.Fatalf("stale decision detail polluted state: cmd=%v decisions=%+v blocker=%+v", cmd != nil, m.decisions, m.blockingDecision)
+	}
+
+	next, cmd = m.Update(ApprovalDetailMsg{
+		WorkspaceID: "ws-a",
+		Approval:    &backend.ApprovalInfo{ID: "approval-old", WorkspaceID: "ws-a", State: "pending"},
+	})
+	m = asModel(next)
+	if cmd != nil || len(m.approvals) != 0 || m.blockingApproval != nil {
+		t.Fatalf("stale approval detail polluted state: cmd=%v approvals=%+v blocker=%+v", cmd != nil, m.approvals, m.blockingApproval)
+	}
+}
+
+func TestModelWorkspaceSwitchContextResetsScrolledMainViewport(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.width = 120
+	m.height = 16
+	m.activeWorkspaceID = "ws-b"
+	lines := make([]string, 0, 80)
+	for i := 0; i < 80; i++ {
+		lines = append(lines, fmt.Sprintf("old-workspace-line-%02d", i))
+	}
+	m.result = strings.Join(lines, "\n")
+	_ = m.View()
+	m.scrollMain(10)
+	if m.mainViewport == nil || m.mainViewport.YOffset == 0 {
+		t.Fatal("expected old workspace view to be scrolled before switch context")
+	}
+
+	next, _ := m.Update(WorkspaceContextMsg{
+		WorkspaceID:       "ws-b",
+		ResetMainViewport: true,
+		Workspace:         &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
+		Goal:              &backend.GoalInfo{ID: "goal-b", WorkspaceID: "ws-b", Text: "fresh workspace goal"},
+	})
+	m = asModel(next)
+	view := stripANSI(m.View())
+	if m.mainViewport.YOffset != 0 {
+		t.Fatalf("viewport offset = %d, want reset to top", m.mainViewport.YOffset)
+	}
+	if !strings.Contains(view, "fresh workspace goal") || strings.Contains(view, "old-workspace-line") {
+		t.Fatalf("view not refreshed after workspace switch context:\n%s", view)
+	}
+}
+
 func TestModelIgnoresRunStartedForInactiveWorkspace(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 
