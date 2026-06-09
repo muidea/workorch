@@ -25,6 +25,28 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
+func TestMain(m *testing.M) {
+	originalWD, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get test working directory: %v\n", err)
+		os.Exit(1)
+	}
+	testWD, err := os.MkdirTemp("", "workorch-appservice-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create isolated test working directory: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Chdir(testWD); err != nil {
+		fmt.Fprintf(os.Stderr, "switch to isolated test working directory: %v\n", err)
+		_ = os.RemoveAll(testWD)
+		os.Exit(1)
+	}
+	code := m.Run()
+	_ = os.Chdir(originalWD)
+	_ = os.RemoveAll(testWD)
+	os.Exit(code)
+}
+
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
 	t.Helper()
 
