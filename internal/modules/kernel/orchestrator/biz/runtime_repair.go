@@ -371,7 +371,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	policy := o.RuntimePolicy()
 	switch runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), policy, o.runtime != nil, o.tickets != nil, run, failedStep) {
 	case runtimeRecoveryActionProviderRetry:
-		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, maxProviderRetryAttemptsForPolicy(policy), o, true)
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, o.repairManager().effectiveMaxProviderRetryAttempts(ctx, policy, run, failedStep), o, true)
 		if err != nil {
 			return err
 		}
@@ -762,7 +762,7 @@ func shouldAttemptProviderRetry(ctx context.Context, repair *repairSubsystem, po
 		return false
 	}
 	attempts := repair.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep))
-	if attempts >= maxProviderRetryAttemptsForPolicy(policy) {
+	if attempts >= repair.effectiveMaxProviderRetryAttempts(ctx, policy, run, failedStep) {
 		return false
 	}
 	if isRetryableLLMProviderRuntimeFailure(run, failedStep) {
@@ -778,7 +778,7 @@ func providerRetryBudgetExhausted(ctx context.Context, repair *repairSubsystem, 
 	if !isRetryableLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return repair.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= maxProviderRetryAttemptsForPolicy(policy)
+	return repair.providerRetryAttemptCount(ctx, run.ID, providerRetryRootStepID(failedStep)) >= repair.effectiveMaxProviderRetryAttempts(ctx, policy, run, failedStep)
 }
 
 func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
@@ -791,7 +791,7 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := maxProviderRetryAttemptsForPolicy(o.RuntimePolicy())
+	maxAttempts := o.repairManager().effectiveMaxProviderRetryAttempts(ctx, o.RuntimePolicy(), run, failedStep)
 	rootStepID := providerRetryRootStepID(failedStep)
 	attempts := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID)
 	if attempts > maxAttempts {

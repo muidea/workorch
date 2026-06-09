@@ -12,6 +12,7 @@ import (
 type recordingBackgroundRoutine struct {
 	asyncFunctionCalled bool
 	asyncFunctionCalls  int
+	timerCalls          int
 	function            func()
 	err                 error
 }
@@ -44,6 +45,7 @@ func (r *recordingBackgroundRoutine) SyncFunctionWithTimeOut(function func(), ti
 }
 
 func (r *recordingBackgroundRoutine) Timer(ctx context.Context, task magictask.Task, intervalValue time.Duration, offsetValue time.Duration) error {
+	r.timerCalls++
 	return nil
 }
 
@@ -120,9 +122,13 @@ func TestHTTPServerStartupRecoveryUsesBackgroundRoutine(t *testing.T) {
 	httpServer := NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine)
 
 	httpServer.state.scheduleStartupRecovery()
+	httpServer.state.scheduleStartupRecovery()
 
 	if routine.asyncFunctionCalls != 1 {
 		t.Fatalf("startup recovery submitted %d background functions, want 1", routine.asyncFunctionCalls)
+	}
+	if routine.timerCalls != 1 {
+		t.Fatalf("startup recovery submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
 	}
 	if routine.function == nil {
 		t.Fatal("startup recovery submitted a nil background function")

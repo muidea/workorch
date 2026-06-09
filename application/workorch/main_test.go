@@ -45,25 +45,22 @@ func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *tes
 	}
 }
 
-func TestResolveDefaultWorkspaceCreatesOnlyWhenNoReusableWorkspace(t *testing.T) {
+func TestResolveDefaultWorkspaceDoesNotCreateWhenNoReusableWorkspace(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "")
 	workingDir := t.TempDir()
 	be := &startupFakeBackend{}
 
 	got := session.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
 
-	if got.ID != "ws-created" {
-		t.Fatalf("workspace = %s, want ws-created", got.ID)
+	if got.ID != "" {
+		t.Fatalf("workspace = %s, want empty", got.ID)
 	}
-	if be.created != 1 {
-		t.Fatalf("created = %d, want 1", be.created)
-	}
-	if be.lastCreate.TemplateID != "generic-governed" {
-		t.Fatalf("templateID = %q, want generic-governed for fresh startup", be.lastCreate.TemplateID)
+	if be.created != 0 {
+		t.Fatalf("created = %d, want 0", be.created)
 	}
 }
 
-func TestResolveDefaultWorkspaceCreatesGenericGovernedWorkspaceForCodeDirectory(t *testing.T) {
+func TestResolveDefaultWorkspaceDoesNotCreateForCodeDirectory(t *testing.T) {
 	cfgPath := writeCLIConfig(t, "")
 	workingDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workingDir, "go.mod"), []byte("module example.com/app\n"), 0o644); err != nil {
@@ -73,11 +70,11 @@ func TestResolveDefaultWorkspaceCreatesGenericGovernedWorkspaceForCodeDirectory(
 
 	got := session.ResolveDefaultWorkspace(context.Background(), be, workingDir, cfgPath)
 
-	if got.ID != "ws-created" {
-		t.Fatalf("workspace = %s, want ws-created", got.ID)
+	if got.ID != "" {
+		t.Fatalf("workspace = %s, want empty", got.ID)
 	}
-	if be.lastCreate.TemplateID != "generic-governed" {
-		t.Fatalf("templateID = %q, want generic-governed for fresh startup", be.lastCreate.TemplateID)
+	if be.created != 0 {
+		t.Fatalf("created = %d, want 0", be.created)
 	}
 }
 

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
@@ -220,6 +221,125 @@ func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *test
 	}
 	if action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, failed); action != runtimeRecoveryActionRuntimeRepair {
 		t.Fatalf("recoveryActionForFailedStep = %s, want runtime_repair", action)
+	}
+}
+
+func TestProviderRetryBudgetShrinksBeforeStateChange(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-retry-before-state-change")
+	rootStepID := common.StepID(string(runID) + "/planning-001")
+	repo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:              runID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	for attempt := 1; attempt <= maxProviderRetryAttemptsBeforeStateChange; attempt++ {
+		if err := repo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/provider-retry-%03d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+				stepInputKeyProviderRetryRootStep: string(rootStepID),
+			},
+			Output: map[string]any{
+				failureOutputKeyClass: failureClassProviderTimeout,
+				"stage":               "llm_provider_timeout",
+			},
+		}); err != nil {
+			t.Fatalf("seed provider retry %d: %v", attempt, err)
+		}
+	}
+	repair := newRepairSubsystem(repo, nil)
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/provider-retry-002"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyProviderRetryFollowUp: true,
+			stepInputKeyProviderRetryRootStep: string(rootStepID),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass: failureClassProviderTimeout,
+			"stage":               "llm_provider_timeout",
+		},
+	}
+	policy := NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 10})
+	if got := repair.effectiveMaxProviderRetryAttempts(ctx, policy, run, failed); got != maxProviderRetryAttemptsBeforeStateChange {
+		t.Fatalf("effective max provider retry attempts = %d, want pre-state-change budget", got)
+	}
+	if shouldAttemptProviderRetry(ctx, repair, policy, true, run, failed) {
+		t.Fatal("shouldAttemptProviderRetry = true, want exhausted before state-changing output")
+	}
+	if !providerRetryBudgetExhausted(ctx, repair, policy, run, failed) {
+		t.Fatal("providerRetryBudgetExhausted = false, want exhausted before state-changing output")
+	}
+}
+
+func TestProviderRetryBudgetUsesPolicyAfterStateChangeAttempt(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-retry-after-state-change")
+	rootStepID := common.StepID(string(runID) + "/planning-001")
+	repo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:              runID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	for attempt := 1; attempt <= maxProviderRetryAttemptsBeforeStateChange; attempt++ {
+		if err := repo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/provider-retry-stateful-%03d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+				stepInputKeyProviderRetryRootStep: string(rootStepID),
+			},
+			Output: map[string]any{
+				failureOutputKeyClass: failureClassProviderTimeout,
+				"stage":               "llm_provider_timeout",
+			},
+		}); err != nil {
+			t.Fatalf("seed provider retry %d: %v", attempt, err)
+		}
+	}
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed state-changing step: %v", err)
+	}
+	repair := newRepairSubsystem(repo, nil)
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/provider-retry-002"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyProviderRetryFollowUp: true,
+			stepInputKeyProviderRetryRootStep: string(rootStepID),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass: failureClassProviderTimeout,
+			"stage":               "llm_provider_timeout",
+		},
+	}
+	policy := NormalizeRuntimePolicy(RuntimePolicy{MaxProviderRetryAttempts: 10})
+	if got := repair.effectiveMaxProviderRetryAttempts(ctx, policy, run, failed); got != 10 {
+		t.Fatalf("effective max provider retry attempts = %d, want configured policy after state change", got)
+	}
+	if !shouldAttemptProviderRetry(ctx, repair, policy, true, run, failed) {
+		t.Fatal("shouldAttemptProviderRetry = false, want retry under configured budget after state-changing output")
 	}
 }
 

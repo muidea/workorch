@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	backend "github.com/muidea/workorch/internal/pkg/workorchport"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/services/workorch/biz/agent"
 )
 
@@ -29,14 +29,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	wsID := defaultWorkspaceID
 	if wsID == "" {
-		created, err := mustBackend().Workspace().Create(ctx, backend.CreateWorkspaceRequest{
-			Title:       "agent-" + truncateForID(goalText),
-			Description: goalText,
-		})
-		if err != nil {
-			return fmt.Errorf("create workspace: %w", err)
-		}
-		wsID = string(created.ID)
+		return fmt.Errorf("%w: workspace is required; create or select a workspace before running agent", common.ErrInvalidArgument)
 	}
 	fmt.Fprintf(os.Stderr, "Workspace: %s\n", wsID)
 
@@ -123,11 +116,4 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return <-runErr
-}
-
-func truncateForID(s string) string {
-	if len(s) > 50 {
-		return s[:47] + "..."
-	}
-	return s
 }

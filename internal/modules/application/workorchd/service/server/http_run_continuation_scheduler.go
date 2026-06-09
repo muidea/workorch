@@ -7,12 +7,20 @@ import (
 	"sync"
 	"time"
 
+	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+const runWatchdogInterval = 30 * time.Second
+
 type runContinuationScheduler struct {
 	state *serverState
+
+	recoveryMu             sync.Mutex
+	startupRecoveryStarted bool
+	periodicRecoveryTimer  bool
+	staleRecoveryRunning   bool
 
 	replanMu      sync.Mutex
 	replanStarted map[string]struct{}
@@ -33,6 +41,9 @@ func (s *runContinuationScheduler) scheduleStartupRecovery() {
 	if s == nil || s.state == nil {
 		return
 	}
+	if !s.markStartupRecoveryStarted() {
+		return
+	}
 	state := s.state
 	state.scheduleBackground("startup_recovery", func(ctx context.Context) {
 		timer := time.NewTimer(500 * time.Millisecond)
@@ -46,6 +57,32 @@ func (s *runContinuationScheduler) scheduleStartupRecovery() {
 			slog.Warn("workorch startup run recovery failed", "err", err)
 		}
 	})
+	s.schedulePeriodicStaleDispatchedRecovery()
+}
+
+func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
+	if s == nil || s.state == nil || s.state.backgroundRoutine == nil {
+		return
+	}
+	if !s.markPeriodicRecoveryTimerStarted() {
+		return
+	}
+	state := s.state
+	err := state.backgroundRoutine.Timer(
+		state.backgroundContext(),
+		backgroundFuncTask{fn: func() {
+			ctx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
+			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
+				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
+			}
+		}},
+		runWatchdogInterval,
+		0,
+	)
+	if err != nil {
+		s.clearPeriodicRecoveryTimerStarted()
+		slog.Warn("workorch stale dispatched run recovery timer failed", "err", err)
+	}
 }
 
 func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) error {
@@ -76,6 +113,117 @@ func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) 
 	}
 	s.recoverReplanContinuations(ctx)
 	return nil
+}
+
+func (s *runContinuationScheduler) recoverStaleDispatchedRuns(ctx context.Context) error {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	if !s.markStaleRecoveryRunning() {
+		return nil
+	}
+	defer s.clearStaleRecoveryRunning()
+
+	state := s.state
+	release, err := state.acquireRunSlotWithPriority(ctx, 0)
+	if err != nil {
+		state.metrics.runCanceled.Add(1)
+		return err
+	}
+	defer release()
+
+	var recovered []appservice.Run
+	if state.hasSharedSession() {
+		err = state.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var recoverErr error
+			recovered, recoverErr = appservice.RecoverStaleDispatchedRunsWithSession(ctx, session, appservice.DefaultStaleDispatchedStepMinAge, time.Now().UTC())
+			return recoverErr
+		})
+	} else {
+		recovered, err = appservice.RecoverStaleDispatchedRunsWithBackend(ctx, state.config.Backend, state.config.DataRoot, appservice.DefaultStaleDispatchedStepMinAge, time.Now().UTC())
+	}
+	if err != nil {
+		return err
+	}
+	if len(recovered) == 0 {
+		return nil
+	}
+	runIDs := make([]string, 0, len(recovered))
+	for _, item := range recovered {
+		runIDs = append(runIDs, item.ID)
+		state.notifyRunStatusChangedForRun(item)
+	}
+	slog.Warn("workorch recovered stale dispatched runs", "runIDs", runIDs)
+	return nil
+}
+
+func (s *runContinuationScheduler) markStartupRecoveryStarted() bool {
+	if s == nil {
+		return false
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if s.startupRecoveryStarted {
+		return false
+	}
+	s.startupRecoveryStarted = true
+	return true
+}
+
+func (s *runContinuationScheduler) markPeriodicRecoveryTimerStarted() bool {
+	if s == nil {
+		return false
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if s.periodicRecoveryTimer {
+		return false
+	}
+	s.periodicRecoveryTimer = true
+	return true
+}
+
+func (s *runContinuationScheduler) clearPeriodicRecoveryTimerStarted() {
+	if s == nil {
+		return
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.periodicRecoveryTimer = false
+}
+
+func (s *runContinuationScheduler) markStaleRecoveryRunning() bool {
+	if s == nil {
+		return false
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if s.staleRecoveryRunning {
+		return false
+	}
+	s.staleRecoveryRunning = true
+	return true
+}
+
+func (s *runContinuationScheduler) clearStaleRecoveryRunning() {
+	if s == nil {
+		return
+	}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.staleRecoveryRunning = false
+}
+
+type backgroundFuncTask struct {
+	fn func()
+}
+
+var _ magictask.Task = backgroundFuncTask{}
+
+func (t backgroundFuncTask) Run() {
+	if t.fn != nil {
+		t.fn()
+	}
 }
 
 func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Context) {

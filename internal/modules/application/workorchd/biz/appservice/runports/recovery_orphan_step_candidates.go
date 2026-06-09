@@ -2,6 +2,7 @@ package runports
 
 import (
 	"context"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -23,6 +24,35 @@ func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *run
 	}
 	terminal := runtimecore.TerminalStepModel(runSteps)
 	if terminal == nil || terminal.State != common.StepStateDispatched {
+		return nil, nil
+	}
+	return terminal, nil
+}
+
+func StaleOrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, error) {
+	terminal, err := OrphanDispatchedTerminalStep(ctx, hub, item)
+	if err != nil || terminal == nil {
+		return terminal, err
+	}
+	if minAge <= 0 {
+		return terminal, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	checkpoints, err := ListRuntimeCheckpointsByRun(ctx, hub, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	latest := runtimecore.LatestRuntimeCheckpointModel(checkpoints)
+	if latest == nil || latest.CurrentStepID != terminal.ID {
+		return nil, nil
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, latest.OccurredAt)
+	if err != nil {
+		return nil, nil
+	}
+	if occurredAt.After(now) || now.Sub(occurredAt) < minAge {
 		return nil, nil
 	}
 	return terminal, nil

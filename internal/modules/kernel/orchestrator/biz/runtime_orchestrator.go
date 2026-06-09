@@ -85,6 +85,8 @@ const (
 	maxGraphFollowUpExpansionAttempts   = 2
 )
 
+const maxProviderRetryAttemptsBeforeStateChange = 2
+
 type RuntimePolicy = workorchruntimepolicy.RuntimePolicy
 type LLMOutputRuntimePolicy = workorchruntimepolicy.LLMOutputRuntimePolicy
 

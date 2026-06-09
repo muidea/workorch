@@ -29,6 +29,52 @@ func (r *repairSubsystem) providerRetryAttemptCount(ctx context.Context, runID c
 	return count
 }
 
+func (r *repairSubsystem) effectiveMaxProviderRetryAttempts(ctx context.Context, policy RuntimePolicy, run *runModel.Run, failedStep *runModel.Step) int {
+	maxAttempts := maxProviderRetryAttemptsForPolicy(policy)
+	if maxAttempts <= maxProviderRetryAttemptsBeforeStateChange {
+		return maxAttempts
+	}
+	if run == nil || failedStep == nil || !runExecutionContractRequiresStateChange(run) {
+		return maxAttempts
+	}
+	if r.hasStateChangingAttempt(ctx, run.ID) {
+		return maxAttempts
+	}
+	return maxProviderRetryAttemptsBeforeStateChange
+}
+
+func (r *repairSubsystem) hasStateChangingAttempt(ctx context.Context, runID common.RunID) bool {
+	if r == nil || r.steps == nil || runID == "" {
+		return false
+	}
+	steps, err := r.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if stepHasStateChangingAttempt(step) {
+			return true
+		}
+	}
+	return false
+}
+
+func stepHasStateChangingAttempt(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if stepKindCanProduceStateChangingEvidence(step.Kind) {
+		return true
+	}
+	if hasStateChangingLLMExecutionOutput(step.Output) {
+		return true
+	}
+	if graph, ok := runtimeGraphSpecFromStep(step); ok {
+		return graphHasStateChangingPatchNode(graph) || graphHasDeclaredUngatedStateChangingToolNode(graph)
+	}
+	return false
+}
+
 func isFailedProviderRetryAttempt(rootStepID common.StepID, step *runModel.Step) bool {
 	if step == nil || rootStepID == "" || !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) || providerRetryRootStepID(step) != rootStepID {
 		return false

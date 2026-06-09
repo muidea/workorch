@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -14,17 +15,38 @@ import (
 type ResumeRunFunc func(context.Context, *runmodel.Run) error
 
 func RecoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc) (*runmodel.Step, bool, error) {
+	return recoverOrphanDispatchedStep(ctx, hub, item, maxIterations, resume, nil)
+}
+
+func RecoverStaleOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, minAge time.Duration, now time.Time) (*runmodel.Step, bool, error) {
+	if minAge <= 0 {
+		minAge = DefaultStaleDispatchedStepMinAge
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return recoverOrphanDispatchedStep(ctx, hub, item, maxIterations, resume, func(ctx context.Context, hub events.Hub, current *runmodel.Run) (*runmodel.Step, error) {
+		return StaleOrphanDispatchedTerminalStep(ctx, hub, current, minAge, now)
+	})
+}
+
+type orphanDispatchedStepSelector func(context.Context, events.Hub, *runmodel.Run) (*runmodel.Step, error)
+
+func recoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runmodel.Run, maxIterations int, resume ResumeRunFunc, selector orphanDispatchedStepSelector) (*runmodel.Step, bool, error) {
 	if hub == nil ||
 		item == nil ||
 		resume == nil ||
 		!runtimecore.IsRecoverableRunningRun(item) {
 		return nil, false, nil
 	}
+	if selector == nil {
+		selector = OrphanDispatchedTerminalStep
+	}
 	current := item
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, current.WorkspaceID)
 	var recovered *runmodel.Step
 	for attempt := 0; attempt < maxIterations; attempt++ {
-		terminal, err := OrphanDispatchedTerminalStep(ctx, hub, current)
+		terminal, err := selector(ctx, hub, current)
 		if err != nil {
 			return nil, false, err
 		}
@@ -41,7 +63,7 @@ func RecoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runm
 			if !errors.Is(err, common.ErrConflict) {
 				return nil, false, err
 			}
-			nextTerminal, terminalErr := OrphanDispatchedTerminalStep(ctx, hub, current)
+			nextTerminal, terminalErr := selector(ctx, hub, current)
 			if terminalErr != nil {
 				return nil, false, terminalErr
 			}
@@ -63,7 +85,7 @@ func RecoverOrphanDispatchedStep(ctx context.Context, hub events.Hub, item *runm
 		if !runtimecore.IsRecoverableRunningRun(current) {
 			return recovered, true, nil
 		}
-		nextTerminal, err := OrphanDispatchedTerminalStep(ctx, hub, current)
+		nextTerminal, err := selector(ctx, hub, current)
 		if err != nil {
 			return nil, false, err
 		}

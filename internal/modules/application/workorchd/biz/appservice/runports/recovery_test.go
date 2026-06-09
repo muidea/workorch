@@ -3,6 +3,7 @@ package runports
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelports"
@@ -239,6 +240,70 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	}
 	if runAfter.State != common.RunStateCompleted {
 		t.Fatalf("runAfter.State = %s, want completed", runAfter.State)
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepRequiresOldCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-orphan-recover-runports")
+	workspaceID := common.WorkspaceID("ws-stale-orphan-recover-runports")
+	stepID := common.StepID("run-stale-orphan-recover-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-orphan-recover-runports/checkpoint/recent",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:09:00Z",
+	}); err != nil {
+		t.Fatalf("seed recent checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:10:00Z")
+	resumeCalls := 0
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep recent: %v", err)
+	}
+	if changed || recovered != nil || resumeCalls != 0 {
+		t.Fatalf("recent checkpoint recovered=%+v changed=%v resumeCalls=%d, want no recovery", recovered, changed, resumeCalls)
+	}
+
+	now, _ = time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	recovered, changed, err = RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep old: %v", err)
+	}
+	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
+		t.Fatalf("old checkpoint recovered=%+v changed=%v resumeCalls=%d, want stale recovery", recovered, changed, resumeCalls)
 	}
 }
 

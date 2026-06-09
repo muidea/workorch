@@ -27,6 +27,23 @@ func TestRunAgentReturnsBackendErrorBeforeEvents(t *testing.T) {
 	}
 }
 
+func TestRunAgentRequiresSelectedWorkspace(t *testing.T) {
+	previousBackend := cliBackend
+	previousWorkspaceID := defaultWorkspaceID
+	t.Cleanup(func() {
+		cliBackend = previousBackend
+		defaultWorkspaceID = previousWorkspaceID
+	})
+
+	cliBackend = agentCommandFailureBackend{}
+	defaultWorkspaceID = ""
+
+	err := runAgent(nil, []string{"do", "work"})
+	if err == nil || !strings.Contains(err.Error(), "workspace is required") {
+		t.Fatalf("runAgent error = %v, want workspace required", err)
+	}
+}
+
 type agentCommandFailureBackend struct {
 	goalErr error
 }

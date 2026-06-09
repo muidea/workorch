@@ -2,14 +2,11 @@ package session
 
 import (
 	"context"
-	"path/filepath"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	cliconfig "github.com/muidea/workorch/internal/services/workorch/biz/config"
 )
-
-const defaultWorkspaceTemplateID = "generic-governed"
 
 func ExtractCLIConfigPath(args []string) string {
 	for i, a := range args {
@@ -41,14 +38,5 @@ func ResolveDefaultWorkspace(ctx context.Context, be backend.Backend, workingDir
 			return *ws
 		}
 	}
-	ws, err := be.Workspace().Create(ctx, backend.CreateWorkspaceRequest{
-		Title:                filepath.Base(workingDir),
-		Description:          workingDir,
-		DeliverableDirectory: workingDir,
-		TemplateID:           defaultWorkspaceTemplateID,
-	})
-	if err != nil {
-		return backend.WorkspaceInfo{}
-	}
-	return *ws
+	return backend.WorkspaceInfo{}
 }
