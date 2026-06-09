@@ -272,6 +272,16 @@ func (a *RuntimeAdapter) executeLog(ctx context.Context, request runtimemodel.St
 	if ref == "" {
 		ref = "HEAD"
 	}
+	if repo.UnbornHead && ref == "HEAD" {
+		output := a.baseOutput(request, repo, gitcommon.OperationLog, gitCommandResult{}, "completed")
+		output["pathspecs"] = pathspecs
+		output["commits"] = []map[string]any{}
+		output["limit"] = limit
+		output["limitClamped"] = clamped
+		output["zeroWork"] = true
+		output["summary"] = "git log completed with no commits because repository HEAD is unborn"
+		return runtimemodel.StepExecutionResult{Output: output}, nil
+	}
 	format := "%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s"
 	args := []string{"log", "--format=" + format, "-n", strconv.Itoa(limit), ref}
 	args = append(args, pathspecArgs(pathspecs)...)
@@ -300,6 +310,14 @@ func (a *RuntimeAdapter) executeShow(ctx context.Context, request runtimemodel.S
 	ref := strings.TrimSpace(stringFromMap(request.Input, "ref"))
 	if ref == "" {
 		ref = "HEAD"
+	}
+	if repo.UnbornHead && ref == "HEAD" {
+		output := a.baseOutput(request, repo, gitcommon.OperationShow, gitCommandResult{}, "completed")
+		output["pathspecs"] = pathspecs
+		output["ref"] = ref
+		output["zeroWork"] = true
+		output["summary"] = "git show completed with no commit because repository HEAD is unborn"
+		return runtimemodel.StepExecutionResult{Output: output}, nil
 	}
 	args := []string{"show", "--stat", "--summary", "--format=%H%x1f%h%x1f%an <%ae>%x1f%aI%x1f%s", ref}
 	args = append(args, pathspecArgs(pathspecs)...)
@@ -666,17 +684,17 @@ func optionalPathspecs(input map[string]any) ([]string, error) {
 	if input == nil || input["pathspecs"] == nil {
 		return nil, nil
 	}
-	return parsePathspecs(input["pathspecs"], false)
+	return parsePathspecs(input["pathspecs"], false, true)
 }
 
 func requiredPathspecs(input map[string]any) ([]string, error) {
 	if input == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return parsePathspecs(input["pathspecs"], true)
+	return parsePathspecs(input["pathspecs"], true, false)
 }
 
-func parsePathspecs(input any, required bool) ([]string, error) {
+func parsePathspecs(input any, required bool, allowRepositoryRoot bool) ([]string, error) {
 	var raw []string
 	switch typed := input.(type) {
 	case nil:
@@ -698,16 +716,19 @@ func parsePathspecs(input any, required bool) ([]string, error) {
 	}
 	ret := make([]string, 0, len(raw))
 	for _, item := range raw {
-		pathspec, err := normalizePathspec(item)
+		pathspec, err := normalizePathspec(item, allowRepositoryRoot)
 		if err != nil {
 			return nil, err
+		}
+		if pathspec == "" {
+			continue
 		}
 		ret = append(ret, pathspec)
 	}
 	return ret, nil
 }
 
-func normalizePathspec(value string) (string, error) {
+func normalizePathspec(value string, allowRepositoryRoot bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", fmt.Errorf("%w: empty pathspec is not allowed", common.ErrInvalidArgument)
@@ -719,6 +740,9 @@ func normalizePathspec(value string) (string, error) {
 		return "", fmt.Errorf("%w: git option or magic pathspec is not allowed", common.ErrInvalidArgument)
 	}
 	cleaned := filepath.Clean(value)
+	if cleaned == "." && allowRepositoryRoot {
+		return "", nil
+	}
 	if cleaned == "." || cleaned == "*" || cleaned == ":/" {
 		return "", fmt.Errorf("%w: broad pathspec is not allowed", common.ErrInvalidArgument)
 	}

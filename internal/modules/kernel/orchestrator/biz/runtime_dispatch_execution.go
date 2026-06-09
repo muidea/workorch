@@ -109,7 +109,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		Input:                         runtimeInput,
 	})
 	if err != nil {
-		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
+		if degradedOutput, ok := degradedRuntimeFailureOutput(run, step, result.Output, err); ok {
+			result.Output = degradedOutput
+		} else {
+			return o.handleRuntimeStepFailure(ctx, run, step, toolCall, result.Output, "runtime step failed", err)
+		}
 	}
 	output := result.Output
 	if err := validateRepairPatchOutputTargetRelevance(step, output); err != nil {

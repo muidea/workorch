@@ -61,6 +61,56 @@ func TestRuntimeAdapterReadStatusInEmptyRepository(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterReadLogAndShowInEmptyRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	repo := t.TempDir()
+	runGitForTest(t, repo, "init", "-q")
+
+	adapter := NewRuntimeAdapter(false)
+	for _, operation := range []string{gitcommon.OperationLog, gitcommon.OperationShow} {
+		result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+			Kind:                          gitcommon.StepKindRead,
+			WorkspaceDeliverableDirectory: repo,
+			Input:                         map[string]any{"operation": operation},
+		})
+		if err != nil {
+			t.Fatalf("execute %s in empty repo: %v\noutput=%+v", operation, err, result.Output)
+		}
+		if result.Output["status"] != "completed" || result.Output["zeroWork"] != true || result.Output["unbornHead"] != true {
+			t.Fatalf("%s output = %+v, want completed zero-work unborn HEAD baseline", operation, result.Output)
+		}
+		if operation == gitcommon.OperationLog {
+			commits, ok := result.Output["commits"].([]map[string]any)
+			if !ok || len(commits) != 0 {
+				t.Fatalf("commits = %#v, want empty list", result.Output["commits"])
+			}
+		}
+	}
+}
+
+func TestRuntimeAdapterReadPathspecDotMeansRepositoryRoot(t *testing.T) {
+	repo := newTestRepo(t)
+
+	adapter := NewRuntimeAdapter(false)
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindRead,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationStatus, "pathspecs": []any{"."}},
+	})
+	if err != nil {
+		t.Fatalf("execute status with root pathspec: %v\noutput=%+v", err, result.Output)
+	}
+	if result.Output["status"] != "completed" {
+		t.Fatalf("status output = %+v, want completed", result.Output)
+	}
+	pathspecs, ok := result.Output["pathspecs"].([]string)
+	if !ok || len(pathspecs) != 0 {
+		t.Fatalf("pathspecs = %#v, want repository-root pathspec normalized away", result.Output["pathspecs"])
+	}
+}
+
 func TestRuntimeAdapterWriteInitInitializesWorkspaceRepository(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git binary not available")
@@ -167,6 +217,23 @@ func TestRuntimeAdapterRejectsUnsafePathspec(t *testing.T) {
 	}
 	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorPathRejected {
 		t.Fatalf("output = %+v, want rejected path", result.Output)
+	}
+}
+
+func TestRuntimeAdapterWritePathspecDotStillRejected(t *testing.T) {
+	repo := newTestRepo(t)
+	adapter := NewRuntimeAdapter(true)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		Kind:                          gitcommon.StepKindWrite,
+		WorkspaceDeliverableDirectory: repo,
+		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"."}},
+	})
+	if err == nil {
+		t.Fatal("execute add with broad root pathspec: expected error")
+	}
+	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorPathRejected {
+		t.Fatalf("output = %+v, want rejected broad root pathspec", result.Output)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, execErr error) bool {
@@ -238,8 +239,94 @@ func coverageValidationRepairShouldEscalateToStateChanging(
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
 		return false
 	}
+	if coverageRepairInputRequiresStateChange(input) &&
+		!runtimeRepairRunHasCompletedStateChangeEvidence(ctx, repair, run.ID) {
+		return true
+	}
 	return runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep) ||
 		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
+}
+
+func coverageRepairInputRequiresStateChange(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["coverageTargetSet"]), "state_change") ||
+		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["unresolvedCoverageWorkItems"]), "state_change") ||
+		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingDoDItems"]), "state_change") ||
+		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingGoalCoverage"]), "state_change") {
+		return true
+	}
+	for _, key := range []string{"coverageWorkItemContext", "runtimeDiagnostics"} {
+		context := mapFromValue(input[key])
+		if coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(context["currentFocusItems"]), "state_change") ||
+			coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(context["unresolvedItems"]), "state_change") ||
+			coverageWorkItemRequiresEvidenceKind(mapFromValue(context["currentFocus"]), "state_change") {
+			return true
+		}
+	}
+	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
+		return coverageRepairInputRequiresStateChange(pkg)
+	}
+	return false
+}
+
+func coverageWorkItemSetRequiresEvidenceKind(items []map[string]any, kind string) bool {
+	for _, item := range items {
+		if coverageWorkItemRequiresEvidenceKind(item, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageWorkItemRequiresEvidenceKind(item map[string]any, kind string) bool {
+	if len(item) == 0 || strings.TrimSpace(kind) == "" {
+		return false
+	}
+	for _, key := range []string{"missingEvidenceKinds", "requiredEvidenceKinds"} {
+		for _, value := range stringSliceFromValue(item[key]) {
+			if strings.TrimSpace(value) == kind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeRepairRunHasCompletedStateChangeEvidence(ctx context.Context, repair *repairSubsystem, runID common.RunID) bool {
+	if repair == nil || repair.steps == nil || runID == "" {
+		return false
+	}
+	steps, err := repair.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if runtimeStepIsCompletedStateChangeEvidence(step) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeStepIsCompletedStateChangeEvidence(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateCompleted {
+		return false
+	}
+	if boolValue(step.Output["zeroWork"]) {
+		return false
+	}
+	switch strings.TrimSpace(step.Kind) {
+	case "patch/apply", "file/edit", "file/write":
+		return true
+	case "git/write":
+		return strings.TrimSpace(stringFromMap(step.Output, "operation")) == "commit"
+	case "shell/command", "mcp/tool_call":
+		return boolValue(step.Input["stateChanging"]) || boolValue(step.Output["stateChanging"])
+	default:
+		return false
+	}
 }
 
 func emptyWorkspaceEvidenceShouldStartStateChangingRepair(

@@ -223,6 +223,78 @@ func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *test
 	}
 }
 
+func TestCoverageStateChangeGapEscalatesAfterValidationOnlyRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-coverage-state-change-gap")
+	signature := "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment"
+	repo := memory.NewStepRepository()
+	previousRepair := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+			stepInputKeyRepairOfFailureSig:    signature,
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+			"stage":                   "llm_dod_assessment",
+		},
+	}
+	if err := repo.Create(ctx, previousRepair); err != nil {
+		t.Fatalf("seed previous repair: %v", err)
+	}
+	repair := newRepairSubsystem(repo, nil)
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-002"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+			stepInputKeyRepairOfFailureSig:    signature,
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: signature,
+			"stage":                   "llm_dod_assessment",
+		},
+	}
+	input := map[string]any{
+		"coverageTargetSet": []map[string]any{{
+			"id":                    "cwi-state-change",
+			"targetText":            "produce deliverable implementation",
+			"missingEvidenceKinds":  []string{"state_change", "validation"},
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+		}},
+	}
+
+	if !coverageValidationRepairShouldEscalateToStateChanging(ctx, repair, run, failed, input) {
+		t.Fatalf("coverageValidationRepairShouldEscalateToStateChanging = false, want state-change gap escalation")
+	}
+
+	if err := repo.Create(ctx, &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-001/001-apply"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"status": "completed",
+			"stage":  "patch_apply",
+		},
+	}); err != nil {
+		t.Fatalf("seed completed state change: %v", err)
+	}
+	if coverageValidationRepairShouldEscalateToStateChanging(ctx, repair, run, failed, input) {
+		t.Fatalf("coverageValidationRepairShouldEscalateToStateChanging = true, want no escalation after completed state-change evidence")
+	}
+}
+
 func TestShouldBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWithoutNewEvidence(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-duplicate-runtime-contract-loop")
