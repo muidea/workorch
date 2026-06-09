@@ -3011,6 +3011,68 @@ func TestParseLLMExecutionDecisionRejectsShellSyntaxInCommandName(t *testing.T) 
 	}
 }
 
+func TestNormalizeDecisionOutputRejectsEvidenceAcquisitionShellDeliverableWrite(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"continue",
+		"executionGraph":{"nodes":[
+			{"id":"init-go-mod","kind":"shell/command","input":{"command":"go","args":["mod","init","lsp-mcp-server"]}},
+			{"id":"create-main","kind":"shell/command","dependsOn":["init-go-mod"],"input":{"command":"sh","args":["-c","cat > main.go << 'EOF'\npackage main\nEOF"]}}
+		]}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	_, err = NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-evidence-write"),
+		StepID: common.StepID("run-evidence-write/llm-1"),
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":       false,
+					"mustProduceConcreteFailureEvidence": true,
+					"forbiddenKinds": []string{
+						"patch/apply",
+					},
+				},
+			},
+		},
+	}, decision)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "must not write deliverable files") {
+		t.Fatalf("NormalizeDecisionOutput err = %v, want deliverable write rejection", err)
+	}
+}
+
+func TestNormalizeDecisionOutputRejectsEvidenceAcquisitionDestructiveShellApproval(t *testing.T) {
+	decision, err := ParseLLMExecutionDecision([]byte(`{
+		"completionState":"blocked_on_approval",
+		"requiredApproval":{
+			"reason":"验证自动重启需要安全地杀死 gopls 子进程，但 shell 命令被策略拒绝为破坏性。请求批准执行特定 kill 命令。",
+			"context":{"candidateValues":{"命令":"pkill -x gopls"}}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseLLMExecutionDecision: %v", err)
+	}
+	_, err = NormalizeDecisionOutput(runtimemodel.StepExecutionRequest{
+		RunID:  common.RunID("run-evidence-approval"),
+		StepID: common.StepID("run-evidence-approval/llm-1"),
+		Input: map[string]any{
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode":       false,
+					"mustProduceConcreteFailureEvidence": true,
+					"forbiddenKinds": []string{
+						"patch/apply",
+					},
+				},
+			},
+		},
+	}, decision)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "must not escalate destructive shell") {
+		t.Fatalf("NormalizeDecisionOutput err = %v, want destructive shell approval rejection", err)
+	}
+}
+
 func TestParseLLMExecutionDecisionRejectsUndeclaredLocalWorkorchServiceAPI(t *testing.T) {
 	for _, payload := range []string{
 		`{"completionState":"continue","shellCommands":[{"command":"bash","args":["-c","curl -s -X POST -H 'Content-Type: application/json' -d '{\"priority\":1}' http://localhost:8080/runs"]}]}`,

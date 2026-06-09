@@ -677,9 +677,45 @@ func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[stri
 	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
 		return pkg
 	}
+	inheritRepeatedValidationRepairTargetEvidence(pkg, failedStep)
+	if !stateChangingRepairHasConcreteTargetEvidence(input, pkg) &&
+		!stateChangingRepairCanStartWithoutTargetEvidence(input, failedStep) {
+		required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+		required["evidenceAcquisitionRule"] = "current target evidence is required before state-changing patch/apply repair"
+		pkg["requiredOutput"] = required
+		pkg["evidenceAcquisitionRequired"] = true
+		pkg["evidenceAcquisitionReason"] = "missing current target evidence for repeated validation repair escalation"
+		return pkg
+	}
 	required := enforceStateChangingRequiredOutputForConvergence(pkg)
 	addStrategyReassessmentRequiredOutputContract(pkg, required)
 	return pkg
+}
+
+func stateChangingRepairCanStartWithoutTargetEvidence(input map[string]any, failedStep *runModel.Step) bool {
+	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageRunFromRepairInput(input), coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
+		return true
+	}
+	return repairInputHasEmptyWorkspaceSurfaceEvidence(input) ||
+		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
+}
+
+func inheritRepeatedValidationRepairTargetEvidence(pkg map[string]any, failedStep *runModel.Step) {
+	if len(pkg) == 0 || failedStep == nil || len(failedStep.Input) == 0 {
+		return
+	}
+	if len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		return
+	}
+	for _, key := range []string{"failureTargetRepairContext", "patchRepairContext", "rootCauseCandidateContext"} {
+		if repairContextHasAdmissibleTargetEvidence(failedStep.Input[key]) {
+			pkg["targetSnapshots"] = cloneStepInputValue(failedStep.Input[key])
+			return
+		}
+	}
+	if snapshots := repairActionTargetSnapshots(failedStep.Input); len(snapshots) > 0 {
+		pkg["targetSnapshots"] = cloneStepInputValue(snapshots)
+	}
 }
 
 func hydrateConvergenceTargetEvidence(input map[string]any) {
@@ -1475,8 +1511,13 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
 	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
-		if !repairHasImplementationTargetEvidence(input, pkg) {
+		primaryFocusCanStartWithoutTarget := coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input)))
+		if !repairHasImplementationTargetEvidence(input, pkg) && !primaryFocusCanStartWithoutTarget {
 			return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
+		}
+		if primaryFocusCanStartWithoutTarget {
+			pkg["primaryStateChangeWithoutTargetEvidence"] = true
+			required["mustReferenceCoverageWorkItem"] = true
 		}
 		required["mustIncludePrimaryStateChangingNode"] = true
 		required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()

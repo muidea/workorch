@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -90,6 +91,14 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	cmd := exec.CommandContext(runCtx, execCommand, execArgs...)
 	cmd.Dir = deliverableDirectory
 	cmd.Env = a.filteredEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 2 * time.Second
 	stdout := newLimitedOutputBuffer(MaxCommandOutputBytes)
 	stderr := newLimitedOutputBuffer(MaxCommandOutputBytes)
 	cmd.Stdout = stdout

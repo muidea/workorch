@@ -1506,6 +1506,22 @@ func repairInputHasEmptyWorkspaceSurfaceEvidence(input map[string]any) bool {
 	if processTimelineHasEmptyWorkspaceSurface(input["processEvidenceTimeline"]) {
 		return true
 	}
+	if coverageEvidenceCandidatesHaveEmptyWorkspaceSurface(input) {
+		return true
+	}
+	return false
+}
+
+func coverageEvidenceCandidatesHaveEmptyWorkspaceSurface(input map[string]any) bool {
+	for _, key := range []string{"missingDoDItems", "missingGoalCoverage", "coverageTargetSet"} {
+		for _, item := range mapSliceFromValue(input[key]) {
+			for _, candidate := range mapSliceFromValue(item["evidenceCandidates"]) {
+				if graphEvidenceHasEmptyWorkspaceSurface(candidate) || graphEvidenceHasEmptyWorkspaceSurface(candidate["output"]) {
+					return true
+				}
+			}
+		}
+	}
 	return false
 }
 

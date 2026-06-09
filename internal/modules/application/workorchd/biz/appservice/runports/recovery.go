@@ -37,6 +37,28 @@ func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume Res
 			ret = append(ret, RunViewWithFailureReason(recovered, OrphanDispatchedStepRecoveryReason+": "+string(recoveredStep.ID)))
 			continue
 		}
+		if TerminalStepCanDriveRunningRunResume(ctx, hub, item) {
+			if err := resume(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), item); err != nil {
+				latest, latestErr := ReadRun(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), hub, item.ID)
+				if latestErr != nil {
+					return nil, latestErr
+				}
+				if !IsStuckRunningRunCandidate(ctx, hub, latest) {
+					ret = append(ret, RunViewWithFailureReason(latest, OrphanDispatchedStepRecoveryReason+": terminal step resume"))
+					continue
+				}
+				if !IsStuckRunningRunCandidate(ctx, hub, item) {
+					return nil, err
+				}
+			} else {
+				recovered, err := ReadRun(common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID), hub, item.ID)
+				if err != nil {
+					return nil, err
+				}
+				ret = append(ret, RunViewWithFailureReason(recovered, OrphanDispatchedStepRecoveryReason+": terminal step resume"))
+				continue
+			}
+		}
 		if !IsStuckRunningRunCandidate(ctx, hub, item) {
 			continue
 		}

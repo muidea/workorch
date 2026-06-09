@@ -573,6 +573,11 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out["controlledSubstituteRule"] = "when a dependency or environment prerequisite is unavailable, first try a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port through accepted validation tools; static inspection alone does not close runtime-behavior coverage"
 	out["validationEvidenceModeRule"] = "each shell/command or mcp/tool_call node intended to close runtime-behavior coverage must declare input.validationEvidence.mode as runtime_behavior, controlled_substitute, executable_contract, or dynamic_execution; static_inspection/source_inspection metadata cannot close runtime-behavior coverage"
 	out["validationEvidenceObservationRule"] = "each concrete validation node must also declare input.validationEvidence.observationType as runtime_observation, controlled_substitute_observation, executable_contract_observation, or dynamic_execution_observation; controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute"
+	out["destructiveValidationApprovalRule"] = "if a shell/process-termination validation command is rejected by runtime policy, do not request approval to run it; use a non-destructive controlled substitute or return a failed assessment with the missing evidence"
+	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(out["forbiddenKinds"]),
+		"destructive_shell_approval",
+		"process_termination_approval",
+	))
 	return out
 }
 
@@ -633,9 +638,6 @@ func coverageRunFromRepairInput(input map[string]any) *runModel.Run {
 
 func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[string]any) bool {
 	if len(pkg) > 0 && boolValue(pkg["capabilityPolicyRepairRequired"]) {
-		return true
-	}
-	if boolValue(input["validationRepairEscalatedToImplementation"]) {
 		return true
 	}
 	return repairHasImplementationTargetEvidence(input, pkg)

@@ -14,7 +14,12 @@ func IsStuckRunningRunCandidate(ctx context.Context, hub events.Hub, item *runmo
 	return runtimecore.IsRecoverableRunningRun(item) && !HasContinuationCheckpoint(ctx, hub, item.ID)
 }
 
-func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+func TerminalStepCanDriveRunningRunResume(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
+	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
+	return err == nil && terminal != nil && terminal.State != common.StepStateDispatched
+}
+
+func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
 	if hub == nil || !runtimecore.IsRecoverableRunningRun(item) {
 		return nil, nil
 	}
@@ -22,7 +27,14 @@ func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *run
 	if err != nil {
 		return nil, err
 	}
-	terminal := runtimecore.TerminalStepModel(runSteps)
+	return runtimecore.TerminalStepModel(runSteps), nil
+}
+
+func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
+	if err != nil {
+		return nil, err
+	}
 	if terminal == nil || terminal.State != common.StepStateDispatched {
 		return nil, nil
 	}

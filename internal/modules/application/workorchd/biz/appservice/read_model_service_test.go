@@ -4961,6 +4961,88 @@ func TestMapWorkspaceOutcomeUsesLatestRunEventOverHistoricalAcceptedResult(t *te
 	}
 }
 
+func TestMapWorkspaceOutcomeIgnoresSupersededEventWhenReplacementRunFailed(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-replan-failed",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{
+				ID:          "run-001",
+				WorkspaceID: "ws-replan-failed",
+				State:       string(common.RunStateSuperseded),
+			},
+			{
+				ID:            "run-001-replan-001",
+				WorkspaceID:   "ws-replan-failed",
+				State:         string(common.RunStateFailed),
+				FailureReason: "stuck running run recovered",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-replan-failed",
+				Topic:       runevents.TopicRunStateChanged,
+				OccurredAt:  "2026-06-09T14:50:05Z",
+				WorkspaceID: "ws-replan-failed",
+				RunID:       "run-001-replan-001",
+				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+			},
+			{
+				ID:          "evt-old-superseded",
+				Topic:       runevents.TopicRunStateChanged,
+				OccurredAt:  "2026-06-09T14:50:06Z",
+				WorkspaceID: "ws-replan-failed",
+				RunID:       "run-001",
+				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "stuck running run recovered" {
+		t.Fatalf("outcome = %+v, want failed replacement run over newer superseded marker", outcome)
+	}
+}
+
+func TestMapWorkspaceOutcomeFallsBackToReplacementRunWhenEventsOnlyContainSupersededRun(t *testing.T) {
+	snapshot := WorkspaceSnapshot{
+		Workspace: Workspace{
+			ID:    "ws-replan-failed-with-stale-events",
+			State: string(common.WorkspaceStateFailed),
+		},
+		Runs: []Run{
+			{
+				ID:          "run-001",
+				WorkspaceID: "ws-replan-failed-with-stale-events",
+				State:       string(common.RunStateSuperseded),
+			},
+			{
+				ID:            "run-001-replan-001",
+				WorkspaceID:   "ws-replan-failed-with-stale-events",
+				State:         string(common.RunStateFailed),
+				FailureReason: "replacement failed",
+			},
+		},
+		EventRecords: []EventRecord{
+			{
+				ID:          "evt-old-failed-before-superseded",
+				Topic:       runevents.TopicRunStateChanged,
+				OccurredAt:  "2026-06-09T14:50:06Z",
+				WorkspaceID: "ws-replan-failed-with-stale-events",
+				RunID:       "run-001",
+				Payload:     map[string]any{events.PayloadKeyState: string(common.RunStateFailed)},
+			},
+		},
+	}
+
+	outcome := readmodelprojection.MapWorkspaceOutcome(snapshot)
+	if outcome.RunID != "run-001-replan-001" || outcome.State != "failed" || outcome.Reason != "replacement failed" {
+		t.Fatalf("outcome = %+v, want replacement failed run when event page only has superseded run", outcome)
+	}
+}
+
 func TestMapWorkspaceOutcomeUsesNewerTerminalResultOverStaleRunEvents(t *testing.T) {
 	snapshot := WorkspaceSnapshot{
 		Workspace: Workspace{

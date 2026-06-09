@@ -745,3 +745,61 @@ func TestRecoverStuckRunningRunViewsFailsRunningRunWithoutContinuation(t *testin
 		t.Fatalf("failure reason = %q, want %q", got[0].FailureReason, StuckRunningRunFailureReason)
 	}
 }
+
+func TestRecoverStuckRunningRunViewsResumesRunningRunWithCompletedTerminalStep(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	workspaceID := common.WorkspaceID("ws-recover-completed-terminal")
+	runID := common.RunID("run-recover-completed-terminal")
+	stepID := common.StepID("run-recover-completed-terminal/graph-001/001-done")
+
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "recover completed terminal",
+		DeliverableDirectory: "workspaces/ws-recover-completed-terminal",
+		State:                common.WorkspaceStateRunning,
+		ActiveRunID:          runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed terminal step: %v", err)
+	}
+
+	resumeCalls := 0
+	got, err := RecoverStuckRunningRunViews(ctx, exports.Infrastructure.EventHub, func(resumeCtx context.Context, current *runmodel.Run) error {
+		resumeCalls++
+		latest, err := exports.Repositories.Runs.Get(resumeCtx, current.ID)
+		if err != nil {
+			return err
+		}
+		latest.State = common.RunStateCompleted
+		return exports.Repositories.Runs.Update(resumeCtx, latest)
+	})
+	if err != nil {
+		t.Fatalf("RecoverStuckRunningRunViews: %v", err)
+	}
+	if resumeCalls != 1 {
+		t.Fatalf("resumeCalls = %d, want 1", resumeCalls)
+	}
+	if len(got) != 1 || got[0].ID != string(runID) || got[0].State != string(common.RunStateCompleted) {
+		t.Fatalf("recovered = %+v, want completed run view", got)
+	}
+}

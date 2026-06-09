@@ -2397,6 +2397,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverage
 		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("requiredOutput = %+v, want bounded validation evidence output only", required)
 	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "destructive_shell_approval") ||
+		!strings.Contains(stringFromMap(required, "destructiveValidationApprovalRule"), "do not request approval") {
+		t.Fatalf("requiredOutput = %+v, want destructive validation approval forbidden", required)
+	}
 }
 
 func TestRuntimeOrchestrator_RuntimeRepairInputIgnoresHistoricalTargetForCoverageAssessmentFailure(t *testing.T) {
@@ -2551,6 +2555,10 @@ func TestRuntimeOrchestrator_RuntimeRepairInputKeepsRepeatedValidationGapAsEvide
 		required["mustIncludeStateChangingNode"] == true ||
 		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
 		t.Fatalf("requiredOutput = %+v, want concrete validation evidence contract and no patch/apply", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "destructive_shell_approval") ||
+		!strings.Contains(stringFromMap(required, "destructiveValidationApprovalRule"), "do not request approval") {
+		t.Fatalf("requiredOutput = %+v, want destructive validation approval forbidden", required)
 	}
 	if !strings.Contains(strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n"), "Do not return patch/apply unless a later validation failure provides concrete target refs") {
 		t.Fatalf("repairGuidance = %+v, want no-target validation guidance", input["repairGuidance"])

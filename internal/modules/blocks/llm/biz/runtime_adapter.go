@@ -2531,6 +2531,9 @@ func NormalizeDecisionOutput(request runtimemodel.StepExecutionRequest, decision
 	if err := validateDecision(decision); err != nil {
 		return nil, err
 	}
+	if err := validateDecisionAgainstRequest(request.Input, decision); err != nil {
+		return nil, err
+	}
 	output := map[string]any{
 		"runId":       string(request.RunID),
 		"stepId":      string(request.StepID),
@@ -2700,6 +2703,167 @@ func validateDecision(decision llmmodels.LLMExecutionDecision) error {
 		}
 	}
 	return nil
+}
+
+func validateDecisionAgainstRequest(input map[string]any, decision llmmodels.LLMExecutionDecision) error {
+	if !evidenceAcquisitionShellMustStayReadOnly(input) {
+		return nil
+	}
+	if evidenceAcquisitionRequestsDestructiveShellApproval(decision) {
+		return fmt.Errorf("%w: evidence acquisition must not escalate destructive shell/process termination into approval; return non-destructive validation evidence or a failed assessment", common.ErrInvalidArgument)
+	}
+	for _, command := range decision.ShellCommands {
+		if shellCommandHasDeliverableWriteSideEffect(command.Command, command.Args) {
+			return fmt.Errorf("%w: evidence acquisition shell/command must not write deliverable files; use patch/apply in a state-changing repair graph", common.ErrInvalidArgument)
+		}
+	}
+	if decision.ExecutionGraph == nil {
+		return nil
+	}
+	for _, node := range decision.ExecutionGraph.Nodes {
+		if strings.TrimSpace(node.Kind) != shellcommon.StepKindCommand {
+			continue
+		}
+		command, _ := node.Input["command"].(string)
+		if shellCommandHasDeliverableWriteSideEffect(command, stringSliceValue(node.Input["args"])) {
+			return fmt.Errorf("%w: evidence acquisition shell/command node %q must not write deliverable files; use patch/apply in a state-changing repair graph", common.ErrInvalidArgument, strings.TrimSpace(node.ID))
+		}
+	}
+	return nil
+}
+
+func evidenceAcquisitionShellMustStayReadOnly(input map[string]any) bool {
+	pkg := recordFromAny(input["repairActionPackage"])
+	required := recordFromAny(pkg["requiredOutput"])
+	if !boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		return false
+	}
+	if boolValue(required["mustIncludeStateChangingNode"]) {
+		return false
+	}
+	for _, forbidden := range stringSliceFromValue(required["forbiddenKinds"]) {
+		if forbidden == llmcommon.RuntimeBlockKindPatchApply {
+			return true
+		}
+	}
+	return false
+}
+
+func evidenceAcquisitionRequestsDestructiveShellApproval(decision llmmodels.LLMExecutionDecision) bool {
+	if decision.CompletionState != "blocked_on_approval" || decision.RequiredApproval == nil {
+		return false
+	}
+	text := strings.ToLower(strings.Join(approvalRequestTextParts(decision.RequiredApproval.Reason, decision.RequiredApproval.Action, decision.RequiredApproval.Context), " "))
+	if text == "" {
+		return false
+	}
+	destructiveContext := strings.Contains(text, "destructive shell") ||
+		strings.Contains(text, "process termination") ||
+		strings.Contains(text, "kill command") ||
+		strings.Contains(text, "被策略拒绝") ||
+		strings.Contains(text, "破坏性")
+	if !destructiveContext {
+		return false
+	}
+	return shellScriptContainsProcessTermination(text)
+}
+
+func approvalRequestTextParts(reason string, action string, context map[string]any) []string {
+	ret := []string{reason, action}
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case string:
+			ret = append(ret, typed)
+		case map[string]any:
+			for key, item := range typed {
+				ret = append(ret, key)
+				walk(item)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case []string:
+			ret = append(ret, typed...)
+		}
+	}
+	walk(context)
+	return ret
+}
+
+func shellScriptContainsProcessTermination(script string) bool {
+	padded := " " + strings.ToLower(strings.TrimSpace(script)) + " "
+	markers := []string{
+		" pkill ",
+		" killall ",
+		" xargs kill",
+		" fuser -k",
+		" kill -",
+		" kill ",
+	}
+	for _, marker := range markers {
+		if strings.Contains(padded, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandHasDeliverableWriteSideEffect(command string, args []string) bool {
+	command = strings.TrimSpace(command)
+	base := filepath.Base(command)
+	if base == "go" && len(args) >= 2 && strings.TrimSpace(args[0]) == "mod" && strings.TrimSpace(args[1]) == "init" {
+		return true
+	}
+	script := shellCommandLine(command, args)
+	if strings.TrimSpace(script) == "" {
+		return false
+	}
+	return shellScriptWritesDeliverableFile(script)
+}
+
+func shellScriptWritesDeliverableFile(script string) bool {
+	lower := strings.ToLower(script)
+	if strings.Contains(lower, "cat >") || strings.Contains(lower, "cat <<") ||
+		strings.Contains(lower, "echo ") && strings.Contains(lower, ">") ||
+		strings.Contains(lower, "printf ") && strings.Contains(lower, ">") ||
+		strings.Contains(lower, " tee ") || strings.HasPrefix(strings.TrimSpace(lower), "tee ") {
+		return shellScriptHasNonTempWriteTarget(script)
+	}
+	return false
+}
+
+func shellScriptHasNonTempWriteTarget(script string) bool {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)(?:^|[\s;&|()])(?:cat|echo|printf)\b[^;&|]*>>?\s*['"]?([^'"\s;&|()]+)`),
+		regexp.MustCompile(`(?m)(?:^|[\s;&|()])tee\s+(?:-[a-zA-Z]+\s+)*['"]?([^'"\s;&|()]+)`),
+	}
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(script, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			if shellWriteTargetIsDeliverable(match[1]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shellWriteTargetIsDeliverable(target string) bool {
+	target = strings.Trim(strings.TrimSpace(target), `"'`)
+	if target == "" {
+		return false
+	}
+	if strings.HasPrefix(target, "/tmp/") || strings.HasPrefix(target, "$TMPDIR/") || strings.HasPrefix(target, "${TMPDIR}/") {
+		return false
+	}
+	if strings.HasPrefix(target, "/dev/") {
+		return false
+	}
+	return !filepath.IsAbs(target)
 }
 
 func validateExecutionGraph(graph llmmodels.BlockExecutionGraph) error {

@@ -181,6 +181,168 @@ func TestBuildConvergenceContractDefersPrimaryStateChangeWithoutTargetWhenProfil
 	}
 }
 
+func TestBuildConvergenceContractAllowsPrimaryDeliverableStateChangeWithoutTargetEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-primary-deliverable-new-workspace",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"evidenceRole":       "supplemental_evidence",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	sourceChange := map[string]any{
+		"id":                    "cwi-001",
+		"sourceScope":           "deliverable",
+		"sourceRequirementId":   "source_change",
+		"targetText":            "source_change",
+		"evidenceRole":          "primary_state_change",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{"state_change", "validation"},
+		"missingEvidenceKinds":  []string{"state_change", "validation"},
+	}
+	versionSnapshot := map[string]any{
+		"id":                    "cwi-002",
+		"sourceScope":           "deliverable",
+		"sourceRequirementId":   "version_control_snapshot",
+		"targetText":            "version_control_snapshot",
+		"evidenceRole":          "supplemental_evidence",
+		"status":                "open",
+		"requiredEvidenceKinds": []string{"validation"},
+		"missingEvidenceKinds":  []string{"validation"},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-primary-deliverable-new-workspace/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus":      sourceChange,
+				"currentFocusItems": []map[string]any{sourceChange, versionSnapshot},
+			},
+			"coverageTargetSet": []map[string]any{
+				{
+					"kind":                "deliverable",
+					"item":                "source_change",
+					"coverageTargetToken": "source_change",
+					"targetText":          "source_change",
+					"state":               "failed",
+					"source":              "deliverableCoverage",
+				},
+				{
+					"kind":                "deliverable",
+					"item":                "version_control_snapshot",
+					"coverageTargetToken": "version_control_snapshot",
+					"targetText":          "version_control_snapshot",
+					"state":               "failed",
+					"source":              "deliverableCoverage",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	if !contract.StateChangingOutputRequired || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("contract = %+v, want state-changing repair objective", contract)
+	}
+	if !boolValue(contract.RepairActionPackage["primaryStateChangeWithoutTargetEvidence"]) {
+		t.Fatalf("repairActionPackage = %+v, want primary state-change marker", contract.RepairActionPackage)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustIncludePrimaryStateChangingNode"] != true ||
+		required["mustReferenceCoverageWorkItem"] != true ||
+		boolValue(required["profileEvidenceRequirementDeferred"]) {
+		t.Fatalf("requiredOutput = %+v, want primary state-changing output without deferred evidence acquisition", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want patch/apply accepted for initial deliverable creation", required["acceptedKinds"])
+	}
+}
+
+func TestBuildConvergenceContractValidationEscalationNeedsTargetEvidenceBeforePatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-validation-escalation-no-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+			},
+		},
+	}
+	failedStep := &runmodel.Step{
+		ID:    "run-convergence-validation-escalation-no-target/validation",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{"repairObjective": repairObjectiveConcreteValidationEvidence},
+		Output: map[string]any{
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "usage.csv append behavior is not satisfied",
+				"items": []map[string]any{{
+					"item":  "usage.csv append behavior",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-validation-escalation-no-target/repair",
+		Input: map[string]any{
+			"validationRepairEscalatedToImplementation": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":       "dod",
+				"targetText": "usage.csv append behavior",
+				"state":      "failed",
+			}},
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "cwi-usage",
+					"sourceScope":           "dod_item",
+					"sourceRequirementId":   "dod-usage",
+					"targetText":            "usage.csv append behavior",
+					"status":                "failed",
+					"requiredEvidenceKinds": []string{"validation"},
+					"missingEvidenceKinds":  []string{"validation"},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, failedStep, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedEvidence ||
+		contract.RepairObjective != repairObjectiveAcquireFailureEvidence ||
+		!contract.ConcreteFailureEvidenceRequired {
+		t.Fatalf("contract = %+v, want evidence acquisition before state-changing patch", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if boolValue(required["mustIncludeStateChangingNode"]) ||
+		!boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want concrete target evidence acquisition", required)
+	}
+}
+
 func TestBuildConvergenceContractProfileStateChangePreservesCurrentTargetSnapshot(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-current-target",

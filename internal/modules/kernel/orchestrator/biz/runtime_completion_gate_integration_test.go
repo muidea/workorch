@@ -1128,20 +1128,23 @@ func TestRuntimeRepairInputEscalatesRepeatedValidationAfterResourceSurfaceEviden
 		InitialStepKind: llmWorkspaceExecutionStepKind,
 	}, failedStep, 3, errors.New("plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput"))
 
-	if input["repairObjective"] != repairObjectiveStateChangingOutput || input["stateChangingOutputRequired"] != true {
-		t.Fatalf("repair input = %+v, want repeated validation repair to escalate to state-changing output", input)
+	if input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["concreteFailureEvidenceRequired"] != true ||
+		input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("repair input = %+v, want repeated validation repair to acquire concrete target evidence first", input)
 	}
 	if input["validationRepairEscalatedToImplementation"] != true {
 		t.Fatalf("validationRepairEscalatedToImplementation = %v, want true", input["validationRepairEscalatedToImplementation"])
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_evidence", contract)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if required["mustIncludeStateChangingNode"] != true ||
-		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput = %+v, want state-changing patch/apply contract", required)
+	if required["mustIncludeStateChangingNode"] == true ||
+		required["mustProduceConcreteFailureEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want concrete target evidence acquisition contract", required)
 	}
 }
 

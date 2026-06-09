@@ -296,6 +296,30 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepTimeoutKillsProcessGroup(t *testing.T) {
+	adapter := NewRuntimeAdapterWithTimeout(50 * time.Millisecond)
+	deliverableDirectory := t.TempDir()
+
+	startedAt := time.Now()
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "sleep 5 & wait"},
+		},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("ExecuteRuntimeStep elapsed = %s, want process group timeout without waiting for background child", elapsed)
+	}
+	if result.Output["status"] != "timeout" {
+		t.Fatalf("status = %v, want timeout", result.Output["status"])
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepUsesInputTimeoutMillis(t *testing.T) {
 	adapter := NewRuntimeAdapterWithTimeout(time.Second)
 	deliverableDirectory := t.TempDir()
