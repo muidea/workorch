@@ -3170,6 +3170,83 @@ func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestShouldConsumeBackendSubscriptionEventMatchesHandledEvents(t *testing.T) {
+	handledEvents := []backend.EventType{
+		backend.EventWorkspaceCreated,
+		backend.EventWorkspaceListChanged,
+		backend.EventWorkspaceProjectionChanged,
+		backend.EventWorkspaceStateChanged,
+		backend.EventWorkspaceDeleted,
+		backend.EventGoalDefined,
+		backend.EventDoDDefined,
+		backend.EventRunStateChanged,
+		backend.EventStepDispatched,
+		backend.EventStepCompleted,
+		backend.EventDecisionCreated,
+		backend.EventDecisionResolved,
+		backend.EventApprovalCreated,
+		backend.EventApprovalResolved,
+		backend.EventResultAccepted,
+		backend.EventMemoryCreated,
+		backend.EventMemoryUpdated,
+		backend.EventMemoryDeleted,
+		backend.EventMemoryRecallRecorded,
+		backend.EventLLMStreamProgress,
+		backend.EventLLMUsageRecorded,
+		backend.EventPatchPreviewed,
+		backend.EventPatchApplied,
+		backend.EventPatchFailed,
+		backend.EventPatchReverted,
+		backend.EventArtifactContinuationChanged,
+		backend.EventGovernanceEvaluated,
+		backend.EventGovernanceResolved,
+		backend.EventGovernanceEscalated,
+		backend.EventGovernanceBlocked,
+	}
+	for _, eventType := range handledEvents {
+		if !shouldConsumeBackendSubscriptionEvent(eventType) {
+			t.Fatalf("%s should pass subscription filtering", eventType)
+		}
+		if !isBackendEventQueueCritical(eventType) {
+			t.Fatalf("%s should be preserved when the event queue is full", eventType)
+		}
+	}
+	unknown := backend.EventType("custom/non-critical")
+	if shouldConsumeBackendSubscriptionEvent(unknown) || isBackendEventQueueCritical(unknown) {
+		t.Fatalf("%s should remain filtered/non-critical", unknown)
+	}
+}
+
+func TestModelSubscriptionQueuesRunProgressEvents(t *testing.T) {
+	events := &subscriptionCaptureEvents{}
+	m := NewAppModel(&subscriptionCaptureBE{fakeBE: newFake(t), events: events}, "ws-a", "")
+	if events.handler == nil {
+		t.Fatal("expected model to subscribe to backend events")
+	}
+
+	events.handler(context.Background(), backend.Event{
+		Type:        backend.EventStepDispatched,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Payload:     map[string]any{"kind": "shell/command"},
+	})
+	select {
+	case got := <-m.eventCh:
+		if got.Type != backend.EventStepDispatched || got.WorkspaceID != "ws-a" || got.RunID != "run-a" {
+			t.Fatalf("queued event = %+v, want active step event", got)
+		}
+	default:
+		t.Fatal("step event was filtered before reaching the TUI model queue")
+	}
+
+	events.handler(context.Background(), backend.Event{Type: backend.EventType("custom/non-critical")})
+	select {
+	case got := <-m.eventCh:
+		t.Fatalf("unknown event should be filtered, got %+v", got)
+	default:
+	}
+}
+
 func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.Event, 1)
 	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-a"})
@@ -3628,6 +3705,22 @@ func (b *fakeBE) Memory() backend.MemoryBackend       { return &fakeMM{} }
 func (b *fakeBE) Template() backend.TemplateBackend   { return &fakeT{} }
 func (b *fakeBE) Config() backend.ConfigBackend       { return &fakeC{} }
 func (b *fakeBE) Events() backend.EventsBackend       { return &fakeE{} }
+
+type subscriptionCaptureBE struct {
+	*fakeBE
+	events *subscriptionCaptureEvents
+}
+
+func (b *subscriptionCaptureBE) Events() backend.EventsBackend { return b.events }
+
+type subscriptionCaptureEvents struct {
+	handler backend.EventHandler
+}
+
+func (f *subscriptionCaptureEvents) Subscribe(ctx context.Context, handler backend.EventHandler) (func(), error) {
+	f.handler = handler
+	return func() {}, nil
+}
 
 type workspaceCreateFake struct {
 	*fakeBE

@@ -177,20 +177,13 @@ func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
 
 func shouldConsumeBackendSubscriptionEvent(eventType backend.EventType) bool {
 	switch eventType {
-	case backend.EventWorkspaceListChanged,
-		backend.EventWorkspaceProjectionChanged:
-		return true
-	default:
-		return false
-	}
-}
-
-func isBackendEventQueueCritical(eventType backend.EventType) bool {
-	switch eventType {
 	case backend.EventWorkspaceCreated,
+		backend.EventWorkspaceListChanged,
+		backend.EventWorkspaceProjectionChanged,
 		backend.EventWorkspaceStateChanged,
 		backend.EventWorkspaceDeleted,
-		backend.EventWorkspaceListChanged,
+		backend.EventGoalDefined,
+		backend.EventDoDDefined,
 		backend.EventRunStateChanged,
 		backend.EventStepDispatched,
 		backend.EventStepCompleted,
@@ -199,15 +192,29 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 		backend.EventApprovalCreated,
 		backend.EventApprovalResolved,
 		backend.EventResultAccepted,
+		backend.EventMemoryCreated,
+		backend.EventMemoryUpdated,
+		backend.EventMemoryDeleted,
 		backend.EventMemoryRecallRecorded,
 		backend.EventLLMStreamProgress,
 		backend.EventLLMUsageRecorded,
+		backend.EventPatchPreviewed,
 		backend.EventPatchApplied,
-		backend.EventPatchFailed:
+		backend.EventPatchFailed,
+		backend.EventPatchReverted,
+		backend.EventArtifactContinuationChanged,
+		backend.EventGovernanceEvaluated,
+		backend.EventGovernanceResolved,
+		backend.EventGovernanceEscalated,
+		backend.EventGovernanceBlocked:
 		return true
 	default:
 		return false
 	}
+}
+
+func isBackendEventQueueCritical(eventType backend.EventType) bool {
+	return shouldConsumeBackendSubscriptionEvent(eventType)
 }
 
 func (m AppModel) Init() tea.Cmd {
