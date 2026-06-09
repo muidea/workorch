@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionActivation, WorkspaceExecutionActivationRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 
 const apiBase = '/api/v1/workorch';
 
@@ -129,21 +129,23 @@ export const workorchApi = {
     });
     return body.configuration;
   },
+  listWorkspaceProjection: async () => {
+    const body = await request<WorkspaceListProjection>(`${apiBase}/workspaces`);
+    return {
+      projection: body.projection,
+      workspaces: body.workspaces ?? []
+    };
+  },
   listWorkspaces: async () => {
-    const body = await request<{ workspaces: Workspace[] }>(`${apiBase}/workspaces`);
-    return body.workspaces ?? [];
+    const body = await workorchApi.listWorkspaceProjection();
+    return body.workspaces;
+  },
+  readWorkspaceSnapshotProjection: async (workspaceId: string) => {
+    return request<WorkspaceSnapshotProjection>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
   },
   readWorkspaceSnapshot: async (workspaceId: string) => {
-    const body = await request<{ snapshot: WorkspaceSnapshot }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
+    const body = await workorchApi.readWorkspaceSnapshotProjection(workspaceId);
     return body.snapshot;
-  },
-  readWorkspaceTaskProgress: async (workspaceId: string) => {
-    const body = await request<{ taskProgress: TaskProgress }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/task-progress`);
-    return body.taskProgress;
-  },
-  readWorkspaceTaskDecompositions: async (workspaceId: string) => {
-    const body = await request<{ taskDecompositions: TaskDecomposition[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/task-decompositions`);
-    return body.taskDecompositions ?? [];
   },
   readWorkspaceSoulBindings: async (workspaceId: string) => {
     const body = await request<{ soulBindings: WorkspaceSoulBindings }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`);
@@ -155,10 +157,6 @@ export const workorchApi = {
       body: JSON.stringify(soulBindings)
     });
     return body.soulBindings;
-  },
-  readWorkspaceContextBundle: async (workspaceId: string) => {
-    const body = await request<{ contextBundle: ContextBundle }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/context-bundle`);
-    return body.contextBundle;
   },
   createWorkspace: async (title: string, description?: string, deliverableDirectory?: string, templateId?: string) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {

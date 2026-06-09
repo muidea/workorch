@@ -70,7 +70,7 @@ Soul routing 的稳定产品面包括：
 
 - `GET /workspaces/:workspaceId/soul-bindings`
 - `PUT /workspaces/:workspaceId/soul-bindings`
-- `GET /workspaces/:workspaceId/context-bundle`
+- `GET /workspaces/:workspaceId/snapshot` 中的 `contextBundle`
 - `GET /workspaces/:workspaceId/runs/:runId/context-bundle`
 - `GET /workspaces/:workspaceId/runs/:runId/observability`
 

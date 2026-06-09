@@ -8,6 +8,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -42,8 +43,62 @@ func TestWorkspaceSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if len(got.Runs) != 1 || got.Runs[0].ID != string(run.ID) {
 		t.Fatalf("runs = %+v, want seeded run", got.Runs)
 	}
-	if events.calls != 2 {
-		t.Fatalf("event reader calls = %d, want workspace events and llm usage queries", events.calls)
+	if events.calls != 3 {
+		t.Fatalf("event reader calls = %d, want workspace events, workspace llm usage and run llm usage queries", events.calls)
+	}
+}
+
+func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-workspace-run-usage")
+	firstRunID := common.RunID("run-workspace-run-usage-native")
+	secondRunID := common.RunID("run-workspace-run-usage-estimated")
+	reader := &workspaceEventReaderByQuery{
+		workspaceRecords: []*eventstreammodel.EventRecord{
+			llmUsageEventRecord("usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
+		},
+		runRecords: map[common.RunID][]*eventstreammodel.EventRecord{
+			firstRunID: {
+				llmUsageEventRecord("usage-native", workspaceID, firstRunID, "provider-native", "model-native", false),
+			},
+			secondRunID: {
+				llmUsageEventRecord("usage-estimated", workspaceID, secondRunID, "provider-estimated", "model-estimated", true),
+			},
+		},
+	}
+
+	got, err := WorkspaceSnapshot(context.Background(), WorkspaceSnapshotReaders{
+		Workspaces: fakeRunSnapshotWorkspaceReader{items: []*workspacemodel.Workspace{{
+			ID:    workspaceID,
+			Title: "workspace run usage",
+			State: common.WorkspaceStateActive,
+		}}},
+		Runs: fakeRunStatusRunReader{items: []*runmodel.Run{
+			{ID: firstRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+			{ID: secondRunID, WorkspaceID: workspaceID, State: common.RunStateCompleted},
+		}},
+		Results:               fakeWorkspaceSnapshotResultReader{},
+		Artifacts:             fakeRunSnapshotArtifactReader{},
+		ArtifactContinuations: fakeRunSnapshotArtifactContinuationReader{},
+		EventRecords:          reader,
+		Patches:               fakeRunSnapshotPatchReader{},
+		Tickets:               fakeTicketReader{},
+		Resolutions:           fakeResolutionReader{},
+		Approvals:             fakeApprovalListReader{},
+	}, workspaceID, nil)
+	if err != nil {
+		t.Fatalf("WorkspaceSnapshot: %v", err)
+	}
+	if got.LLMUsageSummary.EntryTotal != 2 || got.LLMUsageSummary.EstimatedEntries != 1 {
+		t.Fatalf("llm usage summary = %+v, want two unique entries with one estimated", got.LLMUsageSummary)
+	}
+	if len(got.LLMUsageSummary.ProviderModelBreakdown) != 2 {
+		t.Fatalf("provider/model breakdown = %+v, want native and estimated providers", got.LLMUsageSummary.ProviderModelBreakdown)
+	}
+	if !llmUsageBreakdownContains(got.LLMUsageSummary.ProviderModelBreakdown, "provider-native", "model-native") ||
+		!llmUsageBreakdownContains(got.LLMUsageSummary.ProviderModelBreakdown, "provider-estimated", "model-estimated") {
+		t.Fatalf("provider/model breakdown = %+v, want native and estimated providers", got.LLMUsageSummary.ProviderModelBreakdown)
 	}
 }
 
@@ -135,4 +190,54 @@ type recordingWorkspaceEventReader struct {
 func (r *recordingWorkspaceEventReader) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	r.queries = append(r.queries, query)
 	return nil, nil
+}
+
+type workspaceEventReaderByQuery struct {
+	workspaceRecords []*eventstreammodel.EventRecord
+	runRecords       map[common.RunID][]*eventstreammodel.EventRecord
+}
+
+func (r *workspaceEventReaderByQuery) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+	if query.RunID != "" {
+		return r.runRecords[query.RunID], nil
+	}
+	if query.WorkspaceID != "" && query.Topic == runevents.TopicRunLLMUsageRecorded {
+		return r.workspaceRecords, nil
+	}
+	return nil, nil
+}
+
+func llmUsageEventRecord(id string, workspaceID common.WorkspaceID, runID common.RunID, providerID string, model string, estimated bool) *eventstreammodel.EventRecord {
+	return &eventstreammodel.EventRecord{
+		ID:          common.EventRecordID(id),
+		Version:     "workorch.event.v1",
+		Topic:       runevents.TopicRunLLMUsageRecorded,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      common.StepID(string(runID) + "/step-1"),
+		Payload: map[string]any{
+			"workspaceId":  string(workspaceID),
+			"runId":        string(runID),
+			"stepId":       string(runID) + "/step-1",
+			"providerId":   providerID,
+			"provider":     "compatible",
+			"model":        model,
+			"operation":    "chat_completions",
+			"inputTokens":  10,
+			"outputTokens": 5,
+			"totalTokens":  15,
+			"estimated":    estimated,
+			"usageSource":  "provider_native",
+			"status":       "completed",
+		},
+	}
+}
+
+func llmUsageBreakdownContains(items []readmodelcore.LLMUsageProviderModelBreakdown, providerID string, model string) bool {
+	for _, item := range items {
+		if item.ProviderID == providerID && item.Model == model && item.EntryTotal == 1 {
+			return true
+		}
+	}
+	return false
 }

@@ -46,6 +46,50 @@ func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotWithContextBundleEmbedsProjectionContext(t *testing.T) {
+	t.Parallel()
+
+	got := WorkspaceSnapshotWithContextBundle(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-context"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-context",
+			State:       "running",
+		},
+	})
+	if got.ContextBundle == nil {
+		t.Fatal("ContextBundle is nil, want embedded workspace context projection")
+	}
+	if got.ContextBundle.WorkspaceID != "ws-context" || got.ContextBundle.Mode != "workspace" {
+		t.Fatalf("context bundle = %+v, want workspace scoped projection", got.ContextBundle)
+	}
+}
+
+func TestWorkspaceSnapshotWithRunSnapshotRefreshesContextBundle(t *testing.T) {
+	t.Parallel()
+
+	got := WorkspaceSnapshotWithRunSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-context"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-context",
+			State:       "queued",
+		},
+	}, &readmodelcore.RunSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-context"},
+		Run:       readmodelcore.Run{ID: "run-context", WorkspaceID: "ws-context"},
+		TaskProgress: readmodelcore.TaskProgress{
+			WorkspaceID: "ws-context",
+			RunID:       "run-context",
+			State:       "running",
+		},
+	})
+	if got.ContextBundle == nil {
+		t.Fatal("ContextBundle is nil, want embedded run context projection")
+	}
+	if got.ContextBundle.Mode != "run_recovery" || got.ContextBundle.RunID != "run-context" {
+		t.Fatalf("context bundle = %+v, want run recovery context projection", got.ContextBundle)
+	}
+}
+
 func TestWorkspaceTaskDecompositionsFromSnapshots(t *testing.T) {
 	t.Parallel()
 

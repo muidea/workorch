@@ -67,6 +67,7 @@ type EventType string
 const (
 	EventWorkspaceCreated            EventType = "workspace/created"
 	EventWorkspaceListChanged        EventType = "workspace/list/changed"
+	EventWorkspaceProjectionChanged  EventType = "workspace/projection/changed"
 	EventWorkspaceStateChanged       EventType = "workspace/state/changed"
 	EventWorkspaceDeleted            EventType = "workspace/deleted"
 	EventGoalDefined                 EventType = "goal/defined"

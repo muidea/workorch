@@ -14,12 +14,6 @@ import (
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
-type workspaceSnapshotBackend interface {
-	Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error)
-}
-
-const liveRefreshInterval = 3 * time.Second
-
 func FetchAll(be backend.Backend) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -61,105 +55,38 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 		defer cancel()
 		wsID := common.WorkspaceID(workspaceID)
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
-		if snapshotBackend, ok := be.Workspace().(workspaceSnapshotBackend); ok {
-			snapshot, err := snapshotBackend.Snapshot(ctx, wsID)
-			if err != nil {
-				return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
+		}
+		if snapshot != nil {
+			liveRunID := snapshot.Workspace.ActiveRunID
+			activeRun := selectWorkspaceRun(liveRunID, snapshot.Runs)
+			displayRun := activeRun
+			if displayRun == nil && snapshot.Outcome.RunID != "" {
+				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
 			}
-			if snapshot != nil {
-				liveRunID := snapshot.Workspace.ActiveRunID
-				activeRun := selectWorkspaceRun(liveRunID, snapshot.Runs)
-				displayRun := activeRun
-				if displayRun == nil && snapshot.Outcome.RunID != "" {
-					displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
-				}
-				var status *backend.RunStatusInfo
-				var goal *backend.GoalInfo
-				var dod *backend.DoDInfo
-				if displayRun != nil {
-					status, _ = be.Run().Status(ctx, wsID, displayRun.ID)
-					if displayRun.GoalID != "" {
-						goal, _ = be.Goal().Get(ctx, wsID, displayRun.GoalID)
-					}
-					if displayRun.DoDID != "" {
-						dod, _ = be.DoD().Get(ctx, wsID, displayRun.DoDID)
-					}
-				}
-				goal = resolveWorkspaceContextGoal(snapshot, displayRun, goal)
-				dod = resolveWorkspaceContextDoD(snapshot, displayRun, dod)
-				if dod == nil {
-					dod = latestDoDFromBackend(ctx, be, wsID)
-				}
-				return WorkspaceContextMsg{
-					WorkspaceID:       workspaceID,
-					ResetMainViewport: resetMainViewport,
-					Workspace:         &snapshot.Workspace,
-					Snapshot:          snapshot,
-					Runs:              snapshot.Runs,
-					ActiveRun:         activeRun,
-					DisplayRun:        displayRun,
-					Status:            status,
-					Goal:              goal,
-					DoD:               dod,
-					Decisions:         snapshot.Decisions,
-					Approvals:         snapshot.Approvals,
-					WorkspaceHasLive:  snapshot.Workspace.ActiveRunID != "",
-				}
+			status := runStatusFromWorkspaceSnapshot(snapshot, displayRun)
+			goal := resolveWorkspaceContextGoal(snapshot, displayRun, nil)
+			dod := resolveWorkspaceContextDoD(snapshot, displayRun, nil)
+			return WorkspaceContextMsg{
+				WorkspaceID:       workspaceID,
+				ResetMainViewport: resetMainViewport,
+				Workspace:         &snapshot.Workspace,
+				Snapshot:          snapshot,
+				Runs:              snapshot.Runs,
+				ActiveRun:         activeRun,
+				DisplayRun:        displayRun,
+				Status:            status,
+				Goal:              goal,
+				DoD:               dod,
+				Decisions:         snapshot.Decisions,
+				Approvals:         snapshot.Approvals,
+				WorkspaceHasLive:  snapshot.Workspace.ActiveRunID != "",
 			}
 		}
 
-		workspace, err := be.Workspace().Get(ctx, wsID)
-		if err != nil {
-			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
-		}
-		runs, err := be.Run().List(ctx, wsID)
-		if err != nil {
-			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
-		}
-		run := selectWorkspaceRun(workspace.ActiveRunID, runs)
-		if run != nil {
-			fullRun, err := be.Run().Get(ctx, wsID, run.ID)
-			if err == nil && fullRun != nil {
-				run = fullRun
-			}
-		}
-		var status *backend.RunStatusInfo
-		var goal *backend.GoalInfo
-		var dod *backend.DoDInfo
-		if run != nil {
-			status, _ = be.Run().Status(ctx, wsID, run.ID)
-			if run.GoalID != "" {
-				goal, _ = be.Goal().Get(ctx, wsID, run.GoalID)
-			}
-			if run.DoDID != "" {
-				dod, _ = be.DoD().Get(ctx, wsID, run.DoDID)
-			}
-		}
-		if dod == nil {
-			dod = latestDoDFromBackend(ctx, be, wsID)
-		}
-		decisions, err := be.Decision().List(ctx, wsID)
-		if err != nil {
-			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
-		}
-		approvals, err := be.Approval().List(ctx, wsID)
-		if err != nil {
-			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
-		}
-		return WorkspaceContextMsg{
-			WorkspaceID:       workspaceID,
-			ResetMainViewport: resetMainViewport,
-			Workspace:         workspace,
-			Runs:              runs,
-			ActiveRun:         run,
-			DisplayRun:        run,
-			Status:            status,
-			Goal:              goal,
-			DoD:               dod,
-			Decisions:         decisions,
-			Approvals:         approvals,
-			WorkspaceHasLive:  workspace.ActiveRunID != "",
-		}
+		return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: common.ErrInvalidArgument}
 	}
 }
 
@@ -176,7 +103,16 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		items, err := be.Decision().List(ctx, common.WorkspaceID(workspaceID))
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return DecisionListMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		var items []backend.DecisionInfo
+		if snapshot != nil {
+			items = snapshot.Decisions
+		}
 		return DecisionListMsg{WorkspaceID: workspaceID, Decisions: items, Error: err}
 	}
 }
@@ -215,15 +151,34 @@ func resolveWorkspaceContextDoD(snapshot *backend.WorkspaceSnapshotInfo, run *ba
 	return &snapshot.DoDs[len(snapshot.DoDs)-1]
 }
 
-func latestDoDFromBackend(ctx context.Context, be backend.Backend, wsID common.WorkspaceID) *backend.DoDInfo {
-	if be == nil || wsID == "" {
+func runStatusFromWorkspaceSnapshot(snapshot *backend.WorkspaceSnapshotInfo, run *backend.RunInfo) *backend.RunStatusInfo {
+	if snapshot == nil || run == nil {
 		return nil
 	}
-	items, err := be.DoD().List(ctx, wsID)
-	if err != nil || len(items) == 0 {
-		return nil
+	status := &backend.RunStatusInfo{
+		ID:                 run.ID,
+		WorkspaceID:        run.WorkspaceID,
+		State:              run.State,
+		BlockingTicketID:   run.BlockingTicketID,
+		BlockingApprovalID: run.BlockingApprovalID,
+		FailureReason:      run.FailureReason,
 	}
-	return &items[len(items)-1]
+	if snapshot.TaskProgress.RunID == "" || snapshot.TaskProgress.RunID == run.ID {
+		if snapshot.TaskProgress.State != "" {
+			status.State = common.RunState(snapshot.TaskProgress.State)
+		}
+		status.CurrentStepID = snapshot.TaskProgress.Recovery.StepID
+		if status.BlockingTicketID == "" {
+			status.BlockingTicketID = snapshot.TaskProgress.Recovery.BlockingTicketID
+		}
+		if status.BlockingApprovalID == "" {
+			status.BlockingApprovalID = snapshot.TaskProgress.Recovery.BlockingApprovalID
+		}
+		if status.FailureReason == "" {
+			status.FailureReason = snapshot.TaskProgress.Recovery.Reason
+		}
+	}
+	return status
 }
 
 func selectWorkspaceRun(activeRunID common.RunID, runs []backend.RunInfo) *backend.RunInfo {
@@ -252,7 +207,16 @@ func FetchDecision(be backend.Backend, workspaceID string, ticketID string) tea.
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		item, err := be.Decision().Get(ctx, common.TicketID(ticketID))
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return DecisionDetailMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		item := findSnapshotDecision(snapshot, common.TicketID(ticketID))
+		if item == nil {
+			err = common.ErrNotFound
+		}
 		return DecisionDetailMsg{WorkspaceID: workspaceID, Decision: item, Error: err}
 	}
 }
@@ -261,7 +225,16 @@ func FetchApprovals(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		items, err := be.Approval().List(ctx, common.WorkspaceID(workspaceID))
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return ApprovalListMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		var items []backend.ApprovalInfo
+		if snapshot != nil {
+			items = snapshot.Approvals
+		}
 		return ApprovalListMsg{WorkspaceID: workspaceID, Approvals: items, Error: err}
 	}
 }
@@ -270,9 +243,42 @@ func FetchApproval(be backend.Backend, workspaceID string, approvalID string) te
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		item, err := be.Approval().Get(ctx, common.ApprovalID(approvalID))
+		wsID := common.WorkspaceID(workspaceID)
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return ApprovalDetailMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		item := findSnapshotApproval(snapshot, common.ApprovalID(approvalID))
+		if item == nil {
+			err = common.ErrNotFound
+		}
 		return ApprovalDetailMsg{WorkspaceID: workspaceID, Approval: item, Error: err}
 	}
+}
+
+func findSnapshotDecision(snapshot *backend.WorkspaceSnapshotInfo, ticketID common.TicketID) *backend.DecisionInfo {
+	if snapshot == nil || ticketID == "" {
+		return nil
+	}
+	for idx := range snapshot.Decisions {
+		if snapshot.Decisions[idx].ID == ticketID {
+			return &snapshot.Decisions[idx]
+		}
+	}
+	return nil
+}
+
+func findSnapshotApproval(snapshot *backend.WorkspaceSnapshotInfo, approvalID common.ApprovalID) *backend.ApprovalInfo {
+	if snapshot == nil || approvalID == "" {
+		return nil
+	}
+	for idx := range snapshot.Approvals {
+		if snapshot.Approvals[idx].ID == approvalID {
+			return &snapshot.Approvals[idx]
+		}
+	}
+	return nil
 }
 
 func FetchBlockers(be backend.Backend, workspaceID string) tea.Cmd {
@@ -290,12 +296,6 @@ func WaitForBackendEvent(ch <-chan backend.Event) tea.Cmd {
 		}
 		return BackendEventMsg{Event: evt}
 	}
-}
-
-func ScheduleLiveRefreshTick() tea.Cmd {
-	return tea.Tick(liveRefreshInterval, func(time.Time) tea.Msg {
-		return LiveRefreshTickMsg{}
-	})
 }
 
 func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []string) tea.Cmd {
@@ -356,38 +356,22 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		targetRunID := common.RunID(runID)
 		var run *backend.RunInfo
+		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
+		if err != nil {
+			return RunControlMsg{WorkspaceID: workspaceID, Error: err}
+		}
+		if snapshot == nil {
+			return RunControlMsg{WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
+		}
 		if targetRunID != "" {
-			fetchedRun, err := be.Run().Get(ctx, wsID, targetRunID)
-			if err != nil {
-				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
-			}
-			if runBelongsToWorkspace(fetchedRun, wsID) {
-				run = fetchedRun
-			} else {
+			run = selectWorkspaceRun(targetRunID, snapshot.Runs)
+			if !runBelongsToWorkspace(run, wsID) {
+				run = nil
 				targetRunID = ""
 			}
 		}
 		if run == nil {
-			workspace, err := be.Workspace().Get(ctx, wsID)
-			if err != nil {
-				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
-			}
-			runs, err := be.Run().List(ctx, wsID)
-			if err != nil {
-				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
-			}
-			run = selectWorkspaceRun(workspace.ActiveRunID, runs)
-			if run == nil {
-				return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
-			}
-			targetRunID = run.ID
-			fetchedRun, err := be.Run().Get(ctx, wsID, targetRunID)
-			if err != nil {
-				return RunControlMsg{WorkspaceID: workspaceID, Error: err}
-			}
-			if runBelongsToWorkspace(fetchedRun, wsID) {
-				run = fetchedRun
-			}
+			run = selectWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
 		}
 		if run == nil {
 			return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
@@ -531,10 +515,14 @@ func inferDecisionResolutionType(answer string) string {
 	return semantic.ResolutionType
 }
 
-func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cmd {
+func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, approve bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		wsID := common.WorkspaceID(workspaceID)
+		if wsID != "" {
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		}
 		var approval *backend.ApprovalInfo
 		var err error
 		resumeHandled := false
@@ -544,14 +532,26 @@ func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cm
 			approval, err = be.Approval().Reject(ctx, common.ApprovalID(approvalID))
 		}
 		if err != nil && errors.Is(err, common.ErrConflict) {
-			approval, err = be.Approval().Get(ctx, common.ApprovalID(approvalID))
+			var snapshot *backend.WorkspaceSnapshotInfo
+			if wsID == "" {
+				err = common.ErrInvalidArgument
+			} else {
+				snapshot, err = be.Workspace().Snapshot(ctx, wsID)
+			}
+			approval = findSnapshotApproval(snapshot, common.ApprovalID(approvalID))
+			if err == nil && approval == nil {
+				err = common.ErrNotFound
+			}
 			if err == nil && approval != nil {
+				if approval.WorkspaceID == "" {
+					approval.WorkspaceID = wsID
+				}
 				switch {
 				case approve && approval.State == string(common.ApprovalStateApproved):
-					err = resumeApprovalRun(ctx, be, approval)
+					err = resumeApprovalRunFromSnapshot(ctx, be, approval, snapshot)
 					resumeHandled = true
 				case !approve && approval.State == string(common.ApprovalStateRejected):
-					err = resumeApprovalRun(ctx, be, approval)
+					err = resumeApprovalRunFromSnapshot(ctx, be, approval, snapshot)
 					resumeHandled = true
 				}
 			}
@@ -564,18 +564,15 @@ func ResolveApproval(be backend.Backend, approvalID string, approve bool) tea.Cm
 	}
 }
 
-func resumeApprovalRun(ctx context.Context, be backend.Backend, approval *backend.ApprovalInfo) error {
-	if approval == nil || approval.RunID == "" {
+func resumeApprovalRunFromSnapshot(ctx context.Context, be backend.Backend, approval *backend.ApprovalInfo, snapshot *backend.WorkspaceSnapshotInfo) error {
+	if approval == nil || approval.RunID == "" || snapshot == nil {
 		return nil
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-	run, err := be.Run().Get(ctx, approval.WorkspaceID, approval.RunID)
-	if err != nil {
-		return err
-	}
+	run := selectWorkspaceRun(approval.RunID, snapshot.Runs)
 	if run == nil || run.State != common.RunStateBlockedOnApproval {
 		return nil
 	}
-	_, err = be.Run().Resume(ctx, approval.WorkspaceID, approval.RunID)
+	_, err := be.Run().Resume(ctx, approval.WorkspaceID, approval.RunID)
 	return err
 }

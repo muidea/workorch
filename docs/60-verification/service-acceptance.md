@@ -186,9 +186,6 @@ Last Updated: 2026-05-30
 - workspace/read model
   - `workspace`
   - `workspace snapshot`
-  - `task-progress`
-  - `context-bundle`
-  - `task-decompositions`
   - `memory-recalls`
 - run/read model
   - `run snapshot`
@@ -218,10 +215,7 @@ Last Updated: 2026-05-30
 | `GET /workspaces/:workspaceId/runs/:runId/context-bundle` | `contextBundle.sections`、`recentEvidence`、`compressedContext` |
 | `GET /workspaces/:workspaceId/runs/:runId/task-decompositions` | `taskDecompositions` 列表和节点总数/状态摘要 |
 | `GET /workspaces/:workspaceId/runs/:runId/memory-recalls` | `memoryRecallTraces` 列表和 source/stage 基本字段 |
-| `GET /workspaces/:workspaceId/snapshot` | `workspace`、`outcome`、`runs`、`taskProgress` 聚合 |
-| `GET /workspaces/:workspaceId/task-progress` | `taskProgress.state`、`blockers`、`recovery` |
-| `GET /workspaces/:workspaceId/context-bundle` | workspace 级 `sections` / `compressedContext` |
-| `GET /workspaces/:workspaceId/task-decompositions` | workspace 级 decomposition 汇总 |
+| `GET /workspaces/:workspaceId/snapshot` | `workspace`、`outcome`、`runs`、`taskProgress`、`contextBundle`、`taskDecompositions` 聚合 |
 | `GET /workspaces/:workspaceId/memory-recalls` | workspace 级 recall trace 汇总 |
 | `GET /runtime/payloads` | `ref` 成功读取与非法 `ref` 错误方向 |
 | `GET /artifacts/content` | `uri` 成功读取与非法 `uri` 错误方向 |
@@ -242,9 +236,6 @@ Last Updated: 2026-05-30
 | `GET /workspaces/:workspaceId/runs/:runId/task-decompositions` | direct | `http_test.go` native-read fixture |
 | `GET /workspaces/:workspaceId/runs/:runId/memory-recalls` | direct | `http_test.go` recall trace fixture |
 | `GET /workspaces/:workspaceId/snapshot` | direct | `http_test.go` workspace snapshot fixture |
-| `GET /workspaces/:workspaceId/task-progress` | direct | `http_test.go` native-read fixture |
-| `GET /workspaces/:workspaceId/context-bundle` | direct | `http_test.go` native-read fixture |
-| `GET /workspaces/:workspaceId/task-decompositions` | direct | `http_test.go` native-read fixture |
 | `GET /workspaces/:workspaceId/memory-recalls` | direct | `http_test.go` recall trace fixture |
 | `GET /decisions` | direct | `http_test.go` decision list/filter fixture |
 | `GET /approvals` | direct | `http_test.go` approval list/filter fixture |

@@ -54,7 +54,7 @@ func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	svc := &Service{
-		http:              NewHTTPServer(Config{Addr: "127.0.0.1:0", Backend: "memory"}),
+		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}
@@ -64,6 +64,9 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	}
 	if !routine.asyncFunctionCalled {
 		t.Fatal("Run did not submit HTTP server through BackgroundRoutine.AsyncFunction")
+	}
+	if routine.asyncFunctionCalls != 2 {
+		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
 	}
 	if routine.function == nil {
 		t.Fatal("Run submitted a nil background function")
@@ -78,11 +81,25 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	}
 }
 
+func TestServiceRunRequiresBackgroundRoutine(t *testing.T) {
+	svc := &Service{
+		http: NewHTTPServer(Config{Addr: "127.0.0.1:0", Backend: "memory"}),
+		done: make(chan error, 1),
+	}
+
+	if err := svc.Run(context.Background()); err == nil {
+		t.Fatal("Run returned nil error without background routine")
+	}
+	if svc.runStarted.Load() {
+		t.Fatal("Run left service marked as started without background routine")
+	}
+}
+
 func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	submitErr := errors.New("background routine is closed")
 	routine := &recordingBackgroundRoutine{err: submitErr}
 	svc := &Service{
-		http:              NewHTTPServer(Config{Addr: "127.0.0.1:0", Backend: "memory"}),
+		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine),
 		backgroundRoutine: routine,
 		done:              make(chan error, 1),
 	}

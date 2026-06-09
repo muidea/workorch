@@ -70,6 +70,7 @@ func registerRunWriteRoutes(router engine.RouteRegistry, state *serverState) {
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusCreated, runInstanceResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -287,6 +288,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
 		}
 		s.notifyRunStatusChangedForRun(item)
+		s.rebuildProjectedWorkspace(ctx, item.WorkspaceID)
 		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
 	case "resume":
 		var req struct {
@@ -314,6 +316,7 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
 		}
 		s.notifyRunStatusChangedForRun(item)
+		s.rebuildProjectedWorkspace(ctx, item.WorkspaceID)
 		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
 	default:
 		http.NotFound(w, r)

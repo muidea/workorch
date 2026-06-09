@@ -23,5 +23,6 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)
 	ret.Outcome = MapWorkspaceOutcome(ret)
+	ret = WorkspaceSnapshotWithContextBundle(ret)
 	return ret
 }

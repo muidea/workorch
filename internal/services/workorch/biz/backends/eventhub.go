@@ -151,15 +151,35 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler EventHand
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	unsub := b.parent.eventHub.Subscribe("*", func(ctx context.Context, envelope events.Envelope) error {
-		evt := convertEnvelope(envelope)
-		if evt.Type == "" {
+	unsubscribers := []func(){
+		b.parent.eventHub.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(ctx context.Context, envelope events.Envelope) error {
+			evt := convertEnvelope(envelope)
+			if evt.Type == "" {
+				return nil
+			}
+			handler(ctx, evt)
 			return nil
-		}
-		handler(ctx, evt)
-		return nil
-	})
+		}),
+	}
+	for _, topic := range events.WorkorchTopics() {
+		topic := topic
+		unsubscribers = append(unsubscribers, b.parent.eventHub.Subscribe(topic, func(ctx context.Context, envelope events.Envelope) error {
+			evt := convertEnvelope(envelope)
+			if evt.Type == "" {
+				return nil
+			}
+			handler(ctx, evt)
+			return nil
+		}))
+	}
 
+	unsub := func() {
+		for _, unsubscribe := range unsubscribers {
+			if unsubscribe != nil {
+				unsubscribe()
+			}
+		}
+	}
 	b.subs = append(b.subs, unsub)
 	return unsub, nil
 }
@@ -172,6 +192,8 @@ func convertEnvelope(envelope events.Envelope) (ret Event) {
 		}
 	}()
 	switch envelope.Topic {
+	case workorchdevents.TopicWorkspaceProjectionChanged:
+		return Event{Type: EventWorkspaceProjectionChanged, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicWorkspaceCreated:
 		return Event{Type: EventWorkspaceCreated, WorkspaceID: common.WorkspaceID(envelope.WorkspaceID), Payload: envelope.Payload}
 	case workspaceevents.TopicWorkspaceStateChanged:

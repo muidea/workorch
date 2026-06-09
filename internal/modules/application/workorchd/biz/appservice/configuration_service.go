@@ -20,6 +20,8 @@ type GovernanceAutoApprovalConfiguration = configcore.GovernanceAutoApprovalConf
 type GovernanceBudgetConfiguration = configcore.GovernanceBudgetConfiguration
 type UpdateLLMConfigurationCommand = configcore.UpdateLLMConfigurationCommand
 type UpdateServerConfigurationCommand = configcore.UpdateServerConfigurationCommand
+type UpdateRuntimeConfigurationCommand = configcore.UpdateRuntimeConfigurationCommand
+type UpdateRuntimeLLMOutputConfiguration = configcore.UpdateRuntimeLLMOutputConfiguration
 type UpdateLLMProviderConfiguration = configcore.UpdateLLMProviderConfiguration
 type UpdateLLMProviderInferenceProfile = configcore.UpdateLLMProviderInferenceProfile
 type UpdateLLMProviderContextProfile = configcore.UpdateLLMProviderContextProfile
@@ -40,6 +42,10 @@ func DefaultWebSearchProviderTemplates() []WebSearchProviderTemplate {
 
 func UpdateServerConfiguration(cmd UpdateServerConfigurationCommand) (ServiceConfiguration, error) {
 	return configcore.UpdateServerConfiguration(cmd)
+}
+
+func UpdateRuntimeConfiguration(cmd UpdateRuntimeConfigurationCommand) (ServiceConfiguration, error) {
+	return configcore.UpdateRuntimeConfiguration(cmd)
 }
 
 func UpdateLLMConfiguration(cmd UpdateLLMConfigurationCommand) (ServiceConfiguration, error) {

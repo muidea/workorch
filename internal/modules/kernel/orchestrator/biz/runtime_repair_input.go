@@ -95,7 +95,7 @@ func runtimeRepairBaseInputDepsFor(o *RuntimeOrchestrator) runtimeRepairBaseInpu
 		return runtimeRepairBaseInputDeps{}
 	}
 	return runtimeRepairBaseInputDeps{
-		policy:     o.policy,
+		policy:     o.RuntimePolicy(),
 		llmContext: o.llmContextManager(),
 	}
 }
@@ -837,9 +837,10 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
-	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
+	policy := o.RuntimePolicy()
+	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)
-	applyLLMOutputModeSelection(ctx, o.policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
+	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	return input
 }

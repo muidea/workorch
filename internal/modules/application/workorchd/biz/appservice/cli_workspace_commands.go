@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -16,10 +17,16 @@ func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd e
 		item, err := ReadWorkspaceWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandWorkspaceList:
-		items, err := ListWorkspacesWithSession(ctx, d.borrow())
+		if d.viewReader == nil {
+			return nil, nil, common.ErrInvalidArgument
+		}
+		items, err := d.viewReader.ListWorkspaceView(ctx)
 		return nil, clicore.ResourceMaps(items), err
 	case events.CommandWorkspaceSnapshot:
-		item, err := ReadWorkspaceSnapshotWithSession(ctx, d.borrow(), cmd.SubjectID)
+		if d.viewReader == nil {
+			return nil, nil, common.ErrInvalidArgument
+		}
+		item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandWorkspaceDelete:
 		err := DeleteWorkspaceWithSession(ctx, d.borrow(), cmd.SubjectID, DeleteWorkspaceCommand{Purge: clicore.BoolValue(cmd.Payload, "purge")})

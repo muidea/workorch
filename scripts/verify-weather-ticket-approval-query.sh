@@ -699,6 +699,75 @@ wait_run_state() {
   return 1
 }
 
+wait_run_state_any() {
+  local run_id="$1"
+  local output_file="$2"
+  shift 2
+  local deadline=$((SECONDS + 180))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
+    if python3 - "$output_file" "$@" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+state = (data.get("status") or {}).get("state")
+raise SystemExit(0 if state in set(sys.argv[2:]) else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$output_file" >&2
+  return 1
+}
+
+wait_workspace_list_projection() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local expected_state="$3"
+  local output_file="$4"
+  local deadline=$((SECONDS + 180))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$output_file"
+    if python3 - "$output_file" "$workspace_id" "$run_id" "$expected_state" <<'PY'
+import json
+import sys
+
+path, workspace_id, run_id, expected_state = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+for item in data.get("workspaces") or []:
+    if item.get("id") != workspace_id:
+        continue
+    if item.get("state") == expected_state and item.get("activeRunId") == run_id:
+        raise SystemExit(0)
+    raise SystemExit(1)
+raise SystemExit(1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  python3 - "$output_file" "$workspace_id" "$run_id" "$expected_state" <<'PY' >&2 || true
+import json
+import sys
+
+path, workspace_id, run_id, expected_state = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+for item in data.get("workspaces") or []:
+    if item.get("id") == workspace_id:
+        raise SystemExit(f"workspace list projection = {item}, want {expected_state} activeRunId={run_id}")
+raise SystemExit(f"workspace {workspace_id} missing from workspace list")
+PY
+  return 1
+}
+
 validate_snapshot() {
   python3 - "$TMP_DIR/snapshot.json" "$TMP_DIR/observability.json" "$ticket_id" "$approval_id" "$COUNTRY" "$PROVINCE" "$CITY" "$BASE_URL" "$workspace_id" <<'PY'
 import json
@@ -906,6 +975,14 @@ post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activati
   "$TMP_DIR/decision-activation.json"
 run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
 activation_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.state")"
+activation_state_file="$TMP_DIR/decision-activation.json"
+activation_state_prefix="activation.run"
+if [[ "$activation_state" == "running" ]]; then
+  wait_run_state_any "$run_id" "$TMP_DIR/decision-status.json" "blocked_on_decision" "blocked_on_approval" "completed"
+  activation_state="$(json_path "$TMP_DIR/decision-status.json" "status.state")"
+  activation_state_file="$TMP_DIR/decision-status.json"
+  activation_state_prefix="status"
+fi
 
 python3 - "$TMP_DIR/decision-resolution.json" "$COUNTRY" "$PROVINCE" "$CITY" "$LOOKUP_NAME" <<'PY'
 import json
@@ -927,7 +1004,7 @@ with open(output, "w", encoding="utf-8") as handle:
 PY
 
 if [[ "$activation_state" == "blocked_on_decision" ]]; then
-  ticket_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.blockingTicketId")"
+  ticket_id="$(json_path "$activation_state_file" "$activation_state_prefix.blockingTicketId")"
   ticket_path="$(url_encode "$ticket_id")"
   curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-ticket.json"
   grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-ticket.json" >/dev/null
@@ -949,22 +1026,7 @@ else
 fi
 
 if [[ "$activation_state" != "completed" ]]; then
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces-blocked.json"
-  python3 - "$TMP_DIR/workspaces-blocked.json" "$workspace_id" "$run_id" <<'PY'
-import json
-import sys
-
-path, workspace_id, run_id = sys.argv[1:]
-data = json.load(open(path, encoding="utf-8"))
-for item in data.get("workspaces") or []:
-    if item.get("id") != workspace_id:
-        continue
-    if item.get("state") != "blocked" or item.get("activeRunId") != run_id:
-        raise SystemExit(f"workspace list projection = {item}, want blocked activeRunId={run_id}")
-    break
-else:
-    raise SystemExit(f"workspace {workspace_id} missing from workspace list")
-PY
+  wait_workspace_list_projection "$workspace_id" "$run_id" "blocked" "$TMP_DIR/workspaces-blocked.json"
   approval_id="$(json_path "$TMP_DIR/approval-status.json" "status.blockingApprovalId")"
   approval_path="$(url_encode "$approval_id")"
   curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-pending.json"

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -26,8 +27,9 @@ import (
 )
 
 type statusResponse struct {
-	Service string `json:"service"`
-	Status  string `json:"status"`
+	Service    string                     `json:"service"`
+	Status     string                     `json:"status"`
+	Projection *workspaceProjectionStatus `json:"projection,omitempty"`
 }
 
 type configurationResponse struct {
@@ -43,10 +45,12 @@ type workspaceResponse struct {
 }
 
 type workspacesResponse struct {
-	Service    string                 `json:"service"`
-	Backend    string                 `json:"backend,omitempty"`
-	DataRoot   string                 `json:"dataRoot,omitempty"`
-	Workspaces []appservice.Workspace `json:"workspaces"`
+	Service    string                    `json:"service"`
+	Backend    string                    `json:"backend,omitempty"`
+	DataRoot   string                    `json:"dataRoot,omitempty"`
+	Projection workspaceProjectionStatus `json:"projection"`
+	Workspaces []appservice.Workspace    `json:"workspaces"`
+	Error      string                    `json:"error,omitempty"`
 }
 
 type goalResponse struct {
@@ -213,10 +217,12 @@ type runsResponse struct {
 }
 
 type workspaceSnapshotResponse struct {
-	Service  string                       `json:"service"`
-	Backend  string                       `json:"backend,omitempty"`
-	DataRoot string                       `json:"dataRoot,omitempty"`
-	Snapshot appservice.WorkspaceSnapshot `json:"snapshot"`
+	Service    string                       `json:"service"`
+	Backend    string                       `json:"backend,omitempty"`
+	DataRoot   string                       `json:"dataRoot,omitempty"`
+	Projection workspaceProjectionStatus    `json:"projection"`
+	Snapshot   appservice.WorkspaceSnapshot `json:"snapshot"`
+	Error      string                       `json:"error,omitempty"`
 }
 
 type workspaceExecutionActivationResponse struct {
@@ -499,11 +505,8 @@ type readRunObservabilityFunc func(context.Context, string, string, string) (app
 type readArtifactContentFunc func(context.Context, string, string, string) (appservice.ArtifactContent, error)
 type readRuntimeRawContentFunc func(context.Context, string, string, string) (appservice.RuntimeRawContent, error)
 type readRunTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
-type readWorkspaceTaskProgressFunc func(context.Context, string, string, string) (appservice.TaskProgress, error)
 type readRunContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
-type readWorkspaceContextBundleFunc func(context.Context, string, string, string) (appservice.ContextBundle, error)
 type readRunTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
-type readWorkspaceTaskDecompositionsFunc func(context.Context, string, string, string) ([]appservice.TaskDecomposition, error)
 type listMemoryRecallTracesFunc func(context.Context, string, string, appservice.MemoryRecallTraceQuery) ([]appservice.MemoryRecallTrace, error)
 type listEventRecordsFunc func(context.Context, string, string, appservice.EventRecordQuery) ([]appservice.EventRecord, error)
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
@@ -553,120 +556,121 @@ type searchMemoryFunc func(context.Context, string, string, appservice.MemoryQue
 type validateFunc func(context.Context, string, string) error
 type readConfigurationFunc func() (appservice.ServiceConfiguration, error)
 type updateServerConfigurationFunc func(appservice.UpdateServerConfigurationCommand) (appservice.ServiceConfiguration, error)
+type updateRuntimeConfigurationFunc func(appservice.UpdateRuntimeConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateLLMConfigurationFunc func(appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error)
 type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurationCommand) (appservice.ServiceConfiguration, error)
 
 type serverState struct {
-	config                          Config
-	eventHub                        events.Hub
-	eventReplay                     *sseReplayBuffer
-	metrics                         *serverMetrics
-	validate                        validateFunc
-	createWorkspace                 createWorkspaceFunc
-	deleteWorkspace                 deleteWorkspaceFunc
-	readWorkspace                   readWorkspaceFunc
-	readWorkspaceSnapshot           readWorkspaceSnapshotFunc
-	readWorkspaceSoulBindings       readWorkspaceSoulBindingsFunc
-	updateWorkspaceSoulBindings     updateWorkspaceSoulBindingsFunc
-	listWorkspaces                  listWorkspacesFunc
-	defineGoal                      defineGoalFunc
-	updateGoal                      updateGoalFunc
-	readGoal                        readGoalFunc
-	listGoals                       listGoalsFunc
-	defineDoD                       defineDoDFunc
-	updateDoD                       updateDoDFunc
-	readDoD                         readDoDFunc
-	listDoDs                        listDoDsFunc
-	checkGoalDoDQuality             checkGoalDoDQualityFunc
-	generateWorkspaceSetupDraft     generateWorkspaceSetupDraftFunc
-	createRun                       createRunInstanceFunc
-	readRun                         readRunInstanceFunc
-	readRunSnapshot                 readRunSnapshotFunc
-	listRunSteps                    listRunStepsFunc
-	listRunToolCalls                listRunToolCallsFunc
-	listRunRuntimeCheckpoints       listRunRuntimeCheckpointsFunc
-	listRunResults                  listRunResultsFunc
-	listRunPatches                  listRunPatchesFunc
-	listRunValidationResults        listRunValidationResultsFunc
-	listRunArtifacts                listRunArtifactsFunc
-	readRunStatus                   readRunStatusFunc
-	readRunObservability            readRunObservabilityFunc
-	readArtifactContent             readArtifactContentFunc
-	readRuntimeRawContent           readRuntimeRawContentFunc
-	readRunTaskProgress             readRunTaskProgressFunc
-	readWorkspaceTaskProgress       readWorkspaceTaskProgressFunc
-	readRunContextBundle            readRunContextBundleFunc
-	readWorkspaceContextBundle      readWorkspaceContextBundleFunc
-	readRunTaskDecompositions       readRunTaskDecompositionsFunc
-	readWorkspaceTaskDecompositions readWorkspaceTaskDecompositionsFunc
-	listMemoryRecallTraces          listMemoryRecallTracesFunc
-	listEventRecords                listEventRecordsFunc
-	listRuns                        listRunInstancesFunc
-	startRun                        startRunInstanceFunc
-	resumeRun                       resumeRunInstanceFunc
-	activateWorkspace               activateWorkspaceExecutionFunc
-	listDecisions                   listDecisionsFunc
-	listDecisionPage                listDecisionPageFunc
-	readDecision                    readDecisionFunc
-	resolveDecision                 resolveDecisionFunc
-	batchResolveDecisions           batchResolveDecisionsFunc
-	listApprovals                   listApprovalsFunc
-	listApprovalPage                listApprovalPageFunc
-	readApproval                    readApprovalFunc
-	approveApproval                 approveApprovalFunc
-	rejectApproval                  rejectApprovalFunc
-	batchResolveApprovals           batchResolveApprovalsFunc
-	createSoul                      createSoulFunc
-	updateSoul                      updateSoulFunc
-	deleteSoul                      deleteSoulFunc
-	readSoul                        readSoulFunc
-	listSouls                       listSoulsFunc
-	createWorkspaceTemplate         createWorkspaceTemplateFunc
-	updateWorkspaceTemplate         updateWorkspaceTemplateFunc
-	deleteWorkspaceTemplate         deleteWorkspaceTemplateFunc
-	listWorkspaceTemplates          listWorkspaceTemplatesFunc
-	createSkill                     createSkillFunc
-	readSkill                       readSkillFunc
-	listSkills                      listSkillsFunc
-	createMCPServer                 createMCPServerFunc
-	updateMCPServer                 updateMCPServerFunc
-	readMCPServer                   readMCPServerFunc
-	listMCPServers                  listMCPServersFunc
-	listMCPServerTools              listMCPServerToolsFunc
-	listMCPServerResources          listMCPServerResourcesFunc
-	listMCPServerPrompts            listMCPServerPromptsFunc
-	createMCPCapability             createMCPCapabilityFunc
-	updateMCPCapability             updateMCPCapabilityFunc
-	readMCPCapability               readMCPCapabilityFunc
-	listMCPCapabilities             listMCPCapabilitiesFunc
-	createMemoryItem                createMemoryItemFunc
-	readMemoryItem                  readMemoryItemFunc
-	updateMemoryItem                updateMemoryItemFunc
-	deleteMemoryItem                deleteMemoryItemFunc
-	listMemoryByWorkspace           listMemoryByWorkspaceFunc
-	searchMemory                    searchMemoryFunc
-	readConfiguration               readConfigurationFunc
-	updateServerConfiguration       updateServerConfigurationFunc
-	updateLLMConfiguration          updateLLMConfigurationFunc
-	updateWebSearchConfiguration    updateWebSearchConfigurationFunc
-	runQueueMu                      sync.Mutex
-	runQueueWaiters                 []*runQueueWaiter
-	runQueueSequence                uint64
-	activeRunSlots                  int64
-	backgroundRoutine               task.BackgroundRoutine
-	backgroundWG                    sync.WaitGroup
-	backgroundCtx                   context.Context
-	backgroundCancel                context.CancelFunc
-	runStatusNotifyMu               sync.Mutex
-	runStatusNotify                 chan struct{}
-	eventUnsubscribes               []func()
-	runContinuations                *runContinuationScheduler
-	runSnapshotCacheMu              sync.Mutex
-	runSnapshotCache                map[string]cachedRunSnapshot
-	runSnapshotInflight             map[string]*runSnapshotInflight
-	sharedSession                   *appservice.RuntimeSession
-	workspaceSetupDraftMu           sync.Mutex
-	workspaceSetupDraftSessions     map[string]*workspaceSetupDraftSession
+	config                       Config
+	eventHub                     events.Hub
+	eventReplay                  *sseReplayBuffer
+	metrics                      *serverMetrics
+	validate                     validateFunc
+	createWorkspace              createWorkspaceFunc
+	deleteWorkspace              deleteWorkspaceFunc
+	readWorkspace                readWorkspaceFunc
+	readWorkspaceSnapshot        readWorkspaceSnapshotFunc
+	readWorkspaceSoulBindings    readWorkspaceSoulBindingsFunc
+	updateWorkspaceSoulBindings  updateWorkspaceSoulBindingsFunc
+	listWorkspaces               listWorkspacesFunc
+	defineGoal                   defineGoalFunc
+	updateGoal                   updateGoalFunc
+	readGoal                     readGoalFunc
+	listGoals                    listGoalsFunc
+	defineDoD                    defineDoDFunc
+	updateDoD                    updateDoDFunc
+	readDoD                      readDoDFunc
+	listDoDs                     listDoDsFunc
+	checkGoalDoDQuality          checkGoalDoDQualityFunc
+	generateWorkspaceSetupDraft  generateWorkspaceSetupDraftFunc
+	createRun                    createRunInstanceFunc
+	readRun                      readRunInstanceFunc
+	readRunSnapshot              readRunSnapshotFunc
+	listRunSteps                 listRunStepsFunc
+	listRunToolCalls             listRunToolCallsFunc
+	listRunRuntimeCheckpoints    listRunRuntimeCheckpointsFunc
+	listRunResults               listRunResultsFunc
+	listRunPatches               listRunPatchesFunc
+	listRunValidationResults     listRunValidationResultsFunc
+	listRunArtifacts             listRunArtifactsFunc
+	readRunStatus                readRunStatusFunc
+	readRunObservability         readRunObservabilityFunc
+	readArtifactContent          readArtifactContentFunc
+	readRuntimeRawContent        readRuntimeRawContentFunc
+	readRunTaskProgress          readRunTaskProgressFunc
+	readRunContextBundle         readRunContextBundleFunc
+	readRunTaskDecompositions    readRunTaskDecompositionsFunc
+	listMemoryRecallTraces       listMemoryRecallTracesFunc
+	listEventRecords             listEventRecordsFunc
+	listRuns                     listRunInstancesFunc
+	startRun                     startRunInstanceFunc
+	resumeRun                    resumeRunInstanceFunc
+	activateWorkspace            activateWorkspaceExecutionFunc
+	listDecisions                listDecisionsFunc
+	listDecisionPage             listDecisionPageFunc
+	readDecision                 readDecisionFunc
+	resolveDecision              resolveDecisionFunc
+	batchResolveDecisions        batchResolveDecisionsFunc
+	listApprovals                listApprovalsFunc
+	listApprovalPage             listApprovalPageFunc
+	readApproval                 readApprovalFunc
+	approveApproval              approveApprovalFunc
+	rejectApproval               rejectApprovalFunc
+	batchResolveApprovals        batchResolveApprovalsFunc
+	createSoul                   createSoulFunc
+	updateSoul                   updateSoulFunc
+	deleteSoul                   deleteSoulFunc
+	readSoul                     readSoulFunc
+	listSouls                    listSoulsFunc
+	createWorkspaceTemplate      createWorkspaceTemplateFunc
+	updateWorkspaceTemplate      updateWorkspaceTemplateFunc
+	deleteWorkspaceTemplate      deleteWorkspaceTemplateFunc
+	listWorkspaceTemplates       listWorkspaceTemplatesFunc
+	createSkill                  createSkillFunc
+	readSkill                    readSkillFunc
+	listSkills                   listSkillsFunc
+	createMCPServer              createMCPServerFunc
+	updateMCPServer              updateMCPServerFunc
+	readMCPServer                readMCPServerFunc
+	listMCPServers               listMCPServersFunc
+	listMCPServerTools           listMCPServerToolsFunc
+	listMCPServerResources       listMCPServerResourcesFunc
+	listMCPServerPrompts         listMCPServerPromptsFunc
+	createMCPCapability          createMCPCapabilityFunc
+	updateMCPCapability          updateMCPCapabilityFunc
+	readMCPCapability            readMCPCapabilityFunc
+	listMCPCapabilities          listMCPCapabilitiesFunc
+	createMemoryItem             createMemoryItemFunc
+	readMemoryItem               readMemoryItemFunc
+	updateMemoryItem             updateMemoryItemFunc
+	deleteMemoryItem             deleteMemoryItemFunc
+	listMemoryByWorkspace        listMemoryByWorkspaceFunc
+	searchMemory                 searchMemoryFunc
+	readConfiguration            readConfigurationFunc
+	updateServerConfiguration    updateServerConfigurationFunc
+	updateRuntimeConfiguration   updateRuntimeConfigurationFunc
+	updateLLMConfiguration       updateLLMConfigurationFunc
+	updateWebSearchConfiguration updateWebSearchConfigurationFunc
+	runQueueMu                   sync.Mutex
+	runQueueWaiters              []*runQueueWaiter
+	runQueueSequence             uint64
+	activeRunSlots               int64
+	backgroundRoutine            task.BackgroundRoutine
+	backgroundWG                 sync.WaitGroup
+	backgroundCtx                context.Context
+	backgroundCancel             context.CancelFunc
+	runStatusNotifyMu            sync.Mutex
+	runStatusNotify              chan struct{}
+	eventUnsubscribes            []func()
+	runContinuations             *runContinuationScheduler
+	workspaceProjection          *workspaceProjectionManager
+	runSnapshotCacheMu           sync.Mutex
+	runSnapshotCache             map[string]cachedRunSnapshot
+	runSnapshotInflight          map[string]*runSnapshotInflight
+	sharedSessionMu              sync.RWMutex
+	sharedSession                *appservice.RuntimeSession
+	workspaceSetupDraftMu        sync.Mutex
+	workspaceSetupDraftSessions  map[string]*workspaceSetupDraftSession
 }
 
 type cachedRunSnapshot struct {
@@ -687,74 +691,71 @@ type runQueueWaiter struct {
 }
 
 type serverMetrics struct {
-	healthzRequests                    atomic.Uint64
-	readyzRequests                     atomic.Uint64
-	metricsRequests                    atomic.Uint64
-	workspaceCreateRequests            atomic.Uint64
-	workspaceDeleteRequests            atomic.Uint64
-	workspaceListRequests              atomic.Uint64
-	workspaceGetRequests               atomic.Uint64
-	workspaceSnapshotRequests          atomic.Uint64
-	goalDefineRequests                 atomic.Uint64
-	goalListRequests                   atomic.Uint64
-	goalGetRequests                    atomic.Uint64
-	dodDefineRequests                  atomic.Uint64
-	dodListRequests                    atomic.Uint64
-	dodGetRequests                     atomic.Uint64
-	goalDoDQualityCheckRequests        atomic.Uint64
-	runCreateRequests                  atomic.Uint64
-	runListRequests                    atomic.Uint64
-	runGetRequests                     atomic.Uint64
-	runSnapshotRequests                atomic.Uint64
-	runStatusRequests                  atomic.Uint64
-	runObservabilityRequests           atomic.Uint64
-	artifactContentRequests            atomic.Uint64
-	runTaskProgressRequests            atomic.Uint64
-	workspaceTaskProgressRequests      atomic.Uint64
-	runContextBundleRequests           atomic.Uint64
-	workspaceContextBundleRequests     atomic.Uint64
-	runTaskDecompositionRequests       atomic.Uint64
-	workspaceTaskDecompositionRequests atomic.Uint64
-	eventListRequests                  atomic.Uint64
-	runStartRequests                   atomic.Uint64
-	runResumeRequests                  atomic.Uint64
-	workspaceActivationRequests        atomic.Uint64
-	decisionListRequests               atomic.Uint64
-	decisionGetRequests                atomic.Uint64
-	decisionResolveRequests            atomic.Uint64
-	approvalListRequests               atomic.Uint64
-	approvalGetRequests                atomic.Uint64
-	approvalApproveRequests            atomic.Uint64
-	approvalRejectRequests             atomic.Uint64
-	soulCreateRequests                 atomic.Uint64
-	soulUpdateRequests                 atomic.Uint64
-	soulDeleteRequests                 atomic.Uint64
-	soulListRequests                   atomic.Uint64
-	soulGetRequests                    atomic.Uint64
-	skillCreateRequests                atomic.Uint64
-	skillListRequests                  atomic.Uint64
-	skillGetRequests                   atomic.Uint64
-	mcpServerCreateRequests            atomic.Uint64
-	mcpServerListRequests              atomic.Uint64
-	mcpServerGetRequests               atomic.Uint64
-	mcpToolListRequests                atomic.Uint64
-	mcpResourceListRequests            atomic.Uint64
-	mcpPromptListRequests              atomic.Uint64
-	mcpCapabilityCreateRequests        atomic.Uint64
-	mcpCapabilityUpdateRequests        atomic.Uint64
-	mcpCapabilityListRequests          atomic.Uint64
-	mcpCapabilityGetRequests           atomic.Uint64
-	memoryCreateRequests               atomic.Uint64
-	memoryListRequests                 atomic.Uint64
-	configurationReadRequests          atomic.Uint64
-	configurationUpdateRequests        atomic.Uint64
-	runSucceeded                       atomic.Uint64
-	runFailed                          atomic.Uint64
-	runRejected                        atomic.Uint64
-	runCanceled                        atomic.Uint64
-	runInFlight                        atomic.Int64
-	runQueueWaiting                    atomic.Int64
-	runQueuedTotal                     atomic.Uint64
+	healthzRequests              atomic.Uint64
+	readyzRequests               atomic.Uint64
+	metricsRequests              atomic.Uint64
+	workspaceCreateRequests      atomic.Uint64
+	workspaceDeleteRequests      atomic.Uint64
+	workspaceListRequests        atomic.Uint64
+	workspaceGetRequests         atomic.Uint64
+	workspaceSnapshotRequests    atomic.Uint64
+	goalDefineRequests           atomic.Uint64
+	goalListRequests             atomic.Uint64
+	goalGetRequests              atomic.Uint64
+	dodDefineRequests            atomic.Uint64
+	dodListRequests              atomic.Uint64
+	dodGetRequests               atomic.Uint64
+	goalDoDQualityCheckRequests  atomic.Uint64
+	runCreateRequests            atomic.Uint64
+	runListRequests              atomic.Uint64
+	runGetRequests               atomic.Uint64
+	runSnapshotRequests          atomic.Uint64
+	runStatusRequests            atomic.Uint64
+	runObservabilityRequests     atomic.Uint64
+	artifactContentRequests      atomic.Uint64
+	runTaskProgressRequests      atomic.Uint64
+	runContextBundleRequests     atomic.Uint64
+	runTaskDecompositionRequests atomic.Uint64
+	eventListRequests            atomic.Uint64
+	runStartRequests             atomic.Uint64
+	runResumeRequests            atomic.Uint64
+	workspaceActivationRequests  atomic.Uint64
+	decisionListRequests         atomic.Uint64
+	decisionGetRequests          atomic.Uint64
+	decisionResolveRequests      atomic.Uint64
+	approvalListRequests         atomic.Uint64
+	approvalGetRequests          atomic.Uint64
+	approvalApproveRequests      atomic.Uint64
+	approvalRejectRequests       atomic.Uint64
+	soulCreateRequests           atomic.Uint64
+	soulUpdateRequests           atomic.Uint64
+	soulDeleteRequests           atomic.Uint64
+	soulListRequests             atomic.Uint64
+	soulGetRequests              atomic.Uint64
+	skillCreateRequests          atomic.Uint64
+	skillListRequests            atomic.Uint64
+	skillGetRequests             atomic.Uint64
+	mcpServerCreateRequests      atomic.Uint64
+	mcpServerListRequests        atomic.Uint64
+	mcpServerGetRequests         atomic.Uint64
+	mcpToolListRequests          atomic.Uint64
+	mcpResourceListRequests      atomic.Uint64
+	mcpPromptListRequests        atomic.Uint64
+	mcpCapabilityCreateRequests  atomic.Uint64
+	mcpCapabilityUpdateRequests  atomic.Uint64
+	mcpCapabilityListRequests    atomic.Uint64
+	mcpCapabilityGetRequests     atomic.Uint64
+	memoryCreateRequests         atomic.Uint64
+	memoryListRequests           atomic.Uint64
+	configurationReadRequests    atomic.Uint64
+	configurationUpdateRequests  atomic.Uint64
+	runSucceeded                 atomic.Uint64
+	runFailed                    atomic.Uint64
+	runRejected                  atomic.Uint64
+	runCanceled                  atomic.Uint64
+	runInFlight                  atomic.Int64
+	runQueueWaiting              atomic.Int64
+	runQueuedTotal               atomic.Uint64
 }
 
 func (m *serverMetrics) observeRunOutcome(run appservice.Run) {
@@ -906,7 +907,7 @@ func NewHTTPServerWithEventHub(config Config, eventHub events.Hub) *HTTPServer {
 func NewHTTPServerWithEventHubAndBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *HTTPServer {
 	config = normalizeConfig(config)
 	state := newServerStateWithBackground(config, eventHub, backgroundRoutine)
-	handler := newMuxWithState(state)
+	handler := newMuxWithStateNoStart(state)
 	return &HTTPServer{
 		config: config,
 		state:  state,
@@ -924,6 +925,9 @@ func NewHTTPServerWithEventHubAndBackground(config Config, eventHub events.Hub, 
 func (s *HTTPServer) Start() error {
 	if s == nil || s.http == nil {
 		return errors.New("http server is not configured")
+	}
+	if err := s.state.startWorkspaceProjection(s.state.backgroundContext()); err != nil {
+		return err
 	}
 	s.state.scheduleStartupRecovery()
 	err := s.http.ListenAndServe()
@@ -957,6 +961,11 @@ func newMux(config Config) http.Handler {
 }
 
 func newMuxWithState(state *serverState) http.Handler {
+	_ = state.startWorkspaceProjection(state.backgroundContext())
+	return newMuxWithStateNoStart(state)
+}
+
+func newMuxWithStateNoStart(state *serverState) http.Handler {
 	router := engine.NewRouteRegistry()
 	registerSystemRoutes(router, state)
 	registerConfigurationRoutes(router, state)
@@ -979,104 +988,103 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 func newServerStateWithBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	state := &serverState{
-		config:                          config,
-		eventHub:                        eventHub,
-		eventReplay:                     newSSEReplayBuffer(defaultSSEReplayLimit),
-		metrics:                         &serverMetrics{},
-		validate:                        defaultValidate,
-		createWorkspace:                 defaultCreateWorkspace,
-		deleteWorkspace:                 defaultDeleteWorkspace,
-		readWorkspace:                   defaultReadWorkspace,
-		readWorkspaceSnapshot:           defaultReadWorkspaceSnapshot,
-		readWorkspaceSoulBindings:       defaultReadWorkspaceSoulBindings,
-		updateWorkspaceSoulBindings:     defaultUpdateWorkspaceSoulBindings,
-		listWorkspaces:                  defaultListWorkspaces,
-		defineGoal:                      defaultDefineGoal,
-		updateGoal:                      defaultUpdateGoal,
-		readGoal:                        defaultReadGoal,
-		listGoals:                       defaultListGoals,
-		defineDoD:                       defaultDefineDoD,
-		updateDoD:                       defaultUpdateDoD,
-		readDoD:                         defaultReadDoD,
-		listDoDs:                        defaultListDoDs,
-		checkGoalDoDQuality:             defaultCheckGoalDoDQuality,
-		generateWorkspaceSetupDraft:     defaultGenerateWorkspaceSetupDraft,
-		createRun:                       defaultCreateRun,
-		readRun:                         defaultReadRun,
-		readRunSnapshot:                 defaultReadRunSnapshot,
-		listRunSteps:                    defaultListRunSteps,
-		listRunToolCalls:                defaultListRunToolCalls,
-		listRunRuntimeCheckpoints:       defaultListRunRuntimeCheckpoints,
-		listRunResults:                  defaultListRunResults,
-		listRunPatches:                  defaultListRunPatches,
-		listRunValidationResults:        defaultListRunValidationResults,
-		listRunArtifacts:                defaultListRunArtifacts,
-		readRunStatus:                   defaultReadRunStatus,
-		readRunObservability:            defaultReadRunObservability,
-		readArtifactContent:             defaultReadArtifactContent,
-		readRuntimeRawContent:           defaultReadRuntimeRawContent,
-		readRunTaskProgress:             defaultReadRunTaskProgress,
-		readWorkspaceTaskProgress:       defaultReadWorkspaceTaskProgress,
-		readRunContextBundle:            defaultReadRunContextBundle,
-		readWorkspaceContextBundle:      defaultReadWorkspaceContextBundle,
-		readRunTaskDecompositions:       defaultReadRunTaskDecompositions,
-		readWorkspaceTaskDecompositions: defaultReadWorkspaceTaskDecompositions,
-		listMemoryRecallTraces:          defaultListMemoryRecallTraces,
-		listEventRecords:                defaultListEventRecords,
-		listRuns:                        defaultListRuns,
-		startRun:                        defaultStartRun,
-		resumeRun:                       defaultResumeRun,
-		activateWorkspace:               defaultActivateWorkspaceExecution,
-		listDecisions:                   defaultListDecisions,
-		listDecisionPage:                defaultListDecisionPage,
-		readDecision:                    defaultReadDecision,
-		resolveDecision:                 defaultResolveDecision,
-		batchResolveDecisions:           defaultBatchResolveDecisions,
-		listApprovals:                   defaultListApprovals,
-		listApprovalPage:                defaultListApprovalPage,
-		readApproval:                    defaultReadApproval,
-		approveApproval:                 defaultApproveApproval,
-		rejectApproval:                  defaultRejectApproval,
-		batchResolveApprovals:           defaultBatchResolveApprovals,
-		createSoul:                      defaultCreateSoul,
-		updateSoul:                      defaultUpdateSoul,
-		deleteSoul:                      defaultDeleteSoul,
-		readSoul:                        defaultReadSoul,
-		listSouls:                       defaultListSouls,
-		createWorkspaceTemplate:         defaultCreateWorkspaceTemplate,
-		updateWorkspaceTemplate:         defaultUpdateWorkspaceTemplate,
-		deleteWorkspaceTemplate:         defaultDeleteWorkspaceTemplate,
-		listWorkspaceTemplates:          defaultListWorkspaceTemplates,
-		createSkill:                     defaultCreateSkill,
-		readSkill:                       defaultReadSkill,
-		listSkills:                      defaultListSkills,
-		createMCPServer:                 defaultCreateMCPServer,
-		updateMCPServer:                 defaultUpdateMCPServer,
-		readMCPServer:                   defaultReadMCPServer,
-		listMCPServers:                  defaultListMCPServers,
-		listMCPServerTools:              defaultListMCPServerTools,
-		listMCPServerResources:          defaultListMCPServerResources,
-		listMCPServerPrompts:            defaultListMCPServerPrompts,
-		createMCPCapability:             defaultCreateMCPCapability,
-		updateMCPCapability:             defaultUpdateMCPCapability,
-		readMCPCapability:               defaultReadMCPCapability,
-		listMCPCapabilities:             defaultListMCPCapabilities,
-		createMemoryItem:                defaultCreateMemoryItem,
-		readMemoryItem:                  defaultReadMemoryItem,
-		updateMemoryItem:                defaultUpdateMemoryItem,
-		deleteMemoryItem:                defaultDeleteMemoryItem,
-		listMemoryByWorkspace:           defaultListMemoryByWorkspace,
-		searchMemory:                    defaultSearchMemory,
-		readConfiguration:               defaultReadConfiguration,
-		updateServerConfiguration:       appservice.UpdateServerConfiguration,
-		updateLLMConfiguration:          appservice.UpdateLLMConfiguration,
-		updateWebSearchConfiguration:    appservice.UpdateWebSearchConfiguration,
-		backgroundRoutine:               backgroundRoutine,
-		backgroundCtx:                   backgroundCtx,
-		backgroundCancel:                backgroundCancel,
-		workspaceSetupDraftSessions:     map[string]*workspaceSetupDraftSession{},
+		config:                       config,
+		eventHub:                     eventHub,
+		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
+		metrics:                      &serverMetrics{},
+		validate:                     defaultValidate,
+		createWorkspace:              defaultCreateWorkspace,
+		deleteWorkspace:              defaultDeleteWorkspace,
+		readWorkspace:                defaultReadWorkspace,
+		readWorkspaceSnapshot:        defaultReadWorkspaceSnapshot,
+		readWorkspaceSoulBindings:    defaultReadWorkspaceSoulBindings,
+		updateWorkspaceSoulBindings:  defaultUpdateWorkspaceSoulBindings,
+		listWorkspaces:               defaultListWorkspaces,
+		defineGoal:                   defaultDefineGoal,
+		updateGoal:                   defaultUpdateGoal,
+		readGoal:                     defaultReadGoal,
+		listGoals:                    defaultListGoals,
+		defineDoD:                    defaultDefineDoD,
+		updateDoD:                    defaultUpdateDoD,
+		readDoD:                      defaultReadDoD,
+		listDoDs:                     defaultListDoDs,
+		checkGoalDoDQuality:          defaultCheckGoalDoDQuality,
+		generateWorkspaceSetupDraft:  defaultGenerateWorkspaceSetupDraft,
+		createRun:                    defaultCreateRun,
+		readRun:                      defaultReadRun,
+		readRunSnapshot:              defaultReadRunSnapshot,
+		listRunSteps:                 defaultListRunSteps,
+		listRunToolCalls:             defaultListRunToolCalls,
+		listRunRuntimeCheckpoints:    defaultListRunRuntimeCheckpoints,
+		listRunResults:               defaultListRunResults,
+		listRunPatches:               defaultListRunPatches,
+		listRunValidationResults:     defaultListRunValidationResults,
+		listRunArtifacts:             defaultListRunArtifacts,
+		readRunStatus:                defaultReadRunStatus,
+		readRunObservability:         defaultReadRunObservability,
+		readArtifactContent:          defaultReadArtifactContent,
+		readRuntimeRawContent:        defaultReadRuntimeRawContent,
+		readRunTaskProgress:          defaultReadRunTaskProgress,
+		readRunContextBundle:         defaultReadRunContextBundle,
+		readRunTaskDecompositions:    defaultReadRunTaskDecompositions,
+		listMemoryRecallTraces:       defaultListMemoryRecallTraces,
+		listEventRecords:             defaultListEventRecords,
+		listRuns:                     defaultListRuns,
+		startRun:                     defaultStartRun,
+		resumeRun:                    defaultResumeRun,
+		activateWorkspace:            defaultActivateWorkspaceExecution,
+		listDecisions:                defaultListDecisions,
+		listDecisionPage:             defaultListDecisionPage,
+		readDecision:                 defaultReadDecision,
+		resolveDecision:              defaultResolveDecision,
+		batchResolveDecisions:        defaultBatchResolveDecisions,
+		listApprovals:                defaultListApprovals,
+		listApprovalPage:             defaultListApprovalPage,
+		readApproval:                 defaultReadApproval,
+		approveApproval:              defaultApproveApproval,
+		rejectApproval:               defaultRejectApproval,
+		batchResolveApprovals:        defaultBatchResolveApprovals,
+		createSoul:                   defaultCreateSoul,
+		updateSoul:                   defaultUpdateSoul,
+		deleteSoul:                   defaultDeleteSoul,
+		readSoul:                     defaultReadSoul,
+		listSouls:                    defaultListSouls,
+		createWorkspaceTemplate:      defaultCreateWorkspaceTemplate,
+		updateWorkspaceTemplate:      defaultUpdateWorkspaceTemplate,
+		deleteWorkspaceTemplate:      defaultDeleteWorkspaceTemplate,
+		listWorkspaceTemplates:       defaultListWorkspaceTemplates,
+		createSkill:                  defaultCreateSkill,
+		readSkill:                    defaultReadSkill,
+		listSkills:                   defaultListSkills,
+		createMCPServer:              defaultCreateMCPServer,
+		updateMCPServer:              defaultUpdateMCPServer,
+		readMCPServer:                defaultReadMCPServer,
+		listMCPServers:               defaultListMCPServers,
+		listMCPServerTools:           defaultListMCPServerTools,
+		listMCPServerResources:       defaultListMCPServerResources,
+		listMCPServerPrompts:         defaultListMCPServerPrompts,
+		createMCPCapability:          defaultCreateMCPCapability,
+		updateMCPCapability:          defaultUpdateMCPCapability,
+		readMCPCapability:            defaultReadMCPCapability,
+		listMCPCapabilities:          defaultListMCPCapabilities,
+		createMemoryItem:             defaultCreateMemoryItem,
+		readMemoryItem:               defaultReadMemoryItem,
+		updateMemoryItem:             defaultUpdateMemoryItem,
+		deleteMemoryItem:             defaultDeleteMemoryItem,
+		listMemoryByWorkspace:        defaultListMemoryByWorkspace,
+		searchMemory:                 defaultSearchMemory,
+		readConfiguration:            defaultReadConfiguration,
+		updateServerConfiguration:    appservice.UpdateServerConfiguration,
+		updateRuntimeConfiguration:   appservice.UpdateRuntimeConfiguration,
+		updateLLMConfiguration:       appservice.UpdateLLMConfiguration,
+		updateWebSearchConfiguration: appservice.UpdateWebSearchConfiguration,
+		backgroundRoutine:            backgroundRoutine,
+		backgroundCtx:                backgroundCtx,
+		backgroundCancel:             backgroundCancel,
+		workspaceSetupDraftSessions:  map[string]*workspaceSetupDraftSession{},
 	}
 	state.runContinuations = newRunContinuationScheduler(state)
+	state.workspaceProjection = newWorkspaceProjectionManager(state)
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
 	state.registerEventReplayRecorder()
@@ -1086,7 +1094,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 }
 
 func (s *serverState) configureApplicationRuntimeSession() {
-	if s == nil || s.sharedSession != nil {
+	if s == nil || s.hasSharedSession() {
 		return
 	}
 	session, err := appservice.NewRuntimeSessionFromInitiator()
@@ -1097,7 +1105,7 @@ func (s *serverState) configureApplicationRuntimeSession() {
 }
 
 func (s *serverState) configureSharedMemorySession() {
-	if s == nil || s.sharedSession != nil || !isMemoryBackend(s.config.Backend) {
+	if s == nil || s.hasSharedSession() || !isMemoryBackend(s.config.Backend) {
 		return
 	}
 	session, err := appservice.NewRuntimeSessionWithBackendAndEventHub(s.config.Backend, s.config.DataRoot, s.eventHub)
@@ -1116,7 +1124,7 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 			s.eventHub = exports.Infrastructure.EventHub
 		}
 	}
-	s.sharedSession = session
+	s.setSharedSession(session)
 	s.validate = func(ctx context.Context, _, _ string) error {
 		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			_, err := session.Exports()
@@ -1169,33 +1177,6 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
 			ret, err = appservice.UpdateWorkspaceSoulBindingsWithSession(ctx, session, workspaceID, cmd)
-			return err
-		})
-		return ret, err
-	}
-	s.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
-		var ret appservice.TaskProgress
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ReadWorkspaceTaskProgressWithSession(ctx, session, workspaceID)
-			return err
-		})
-		return ret, err
-	}
-	s.readWorkspaceContextBundle = func(ctx context.Context, _, _, workspaceID string) (appservice.ContextBundle, error) {
-		var ret appservice.ContextBundle
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ReadWorkspaceContextBundleWithSession(ctx, session, workspaceID)
-			return err
-		})
-		return ret, err
-	}
-	s.readWorkspaceTaskDecompositions = func(ctx context.Context, _, _, workspaceID string) ([]appservice.TaskDecomposition, error) {
-		var ret []appservice.TaskDecomposition
-		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
-			var err error
-			ret, err = appservice.ReadWorkspaceTaskDecompositionsWithSession(ctx, session, workspaceID)
 			return err
 		})
 		return ret, err
@@ -1870,11 +1851,11 @@ func (s *serverState) registerEventReplayRecorder() {
 	if s == nil || s.eventHub == nil || s.eventReplay == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+	unsubscribers := subscribeServerStreamEvents(s.eventHub, func(_ context.Context, envelope events.Envelope) error {
 		s.eventReplay.Append(envelope)
 		return nil
 	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribers...)
 }
 
 func (s *serverState) registerAutoGovernanceResumeWatcher() {
@@ -1922,7 +1903,8 @@ func enqueueEventStreamEnvelope(ch chan events.Envelope, envelope events.Envelop
 
 func isEventStreamCriticalTopic(topic string) bool {
 	switch topic {
-	case workspaceevents.TopicWorkspaceCreated,
+	case workorchdevents.TopicWorkspaceProjectionChanged,
+		workspaceevents.TopicWorkspaceCreated,
 		workspaceevents.TopicWorkspaceDeleted,
 		workspaceevents.TopicWorkspaceStateChanged,
 		runevents.TopicRunStateChanged,
@@ -1957,7 +1939,12 @@ func writeSSEEnvelope(w http.ResponseWriter, flusher http.Flusher, envelope even
 }
 
 func (s *serverState) withSharedSession(ctx context.Context, fn func(*appservice.RuntimeSession) error) error {
-	if s == nil || s.sharedSession == nil {
+	if s == nil {
+		return common.ErrInvalidArgument
+	}
+	s.sharedSessionMu.RLock()
+	defer s.sharedSessionMu.RUnlock()
+	if s.sharedSession == nil {
 		return common.ErrInvalidArgument
 	}
 	session := s.sharedSession.Borrow()
@@ -1965,9 +1952,30 @@ func (s *serverState) withSharedSession(ctx context.Context, fn func(*appservice
 	return errors.Join(err, session.Close(ctx))
 }
 
+func (s *serverState) hasSharedSession() bool {
+	if s == nil {
+		return false
+	}
+	s.sharedSessionMu.RLock()
+	defer s.sharedSessionMu.RUnlock()
+	return s.sharedSession != nil
+}
+
+func (s *serverState) setSharedSession(session *appservice.RuntimeSession) {
+	if s == nil {
+		return
+	}
+	s.sharedSessionMu.Lock()
+	defer s.sharedSessionMu.Unlock()
+	s.sharedSession = session
+}
+
 func (s *serverState) close(ctx context.Context) error {
 	if s == nil {
 		return nil
+	}
+	if s.workspaceProjection != nil {
+		s.workspaceProjection.Close()
 	}
 	if s.backgroundCancel != nil {
 		s.backgroundCancel()
@@ -1981,12 +1989,14 @@ func (s *serverState) close(ctx context.Context) error {
 	if err := s.waitBackground(ctx); err != nil {
 		return err
 	}
-	if s.sharedSession == nil {
+	s.sharedSessionMu.Lock()
+	session := s.sharedSession
+	s.sharedSession = nil
+	s.sharedSessionMu.Unlock()
+	if session == nil {
 		return nil
 	}
-	err := s.sharedSession.Close(ctx)
-	s.sharedSession = nil
-	return err
+	return session.Close(ctx)
 }
 
 func (s *serverState) waitBackground(ctx context.Context) error {
@@ -2024,8 +2034,9 @@ func (s *serverState) scheduleBackground(name string, fn func(context.Context)) 
 		}
 		return true
 	}
-	go run()
-	return true
+	s.backgroundWG.Done()
+	slog.Warn("workorch background task scheduling skipped because background routine is not configured", "task", name)
+	return false
 }
 
 func (s *serverState) backgroundContext() context.Context {

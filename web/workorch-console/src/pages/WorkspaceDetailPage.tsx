@@ -39,6 +39,67 @@ const {
   workspaceSetupSmartDraftStep, defaultSoulBindingStages
 } = helpers;
 
+function terminalRunState(state?: string) {
+  return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'superseded';
+}
+
+function runScopedItems<T>(items: T[] | undefined, runId: string): T[] {
+  return (items ?? []).filter((item) => {
+    const itemRunId = (item as { runId?: unknown }).runId;
+    return typeof itemRunId !== 'string' || itemRunId === '' || itemRunId === runId;
+  });
+}
+
+function projectedRunSnapshot(snapshot: WorkspaceSnapshot, run: Run): RunSnapshot {
+  const taskProgress: RunSnapshot['taskProgress'] = snapshot.taskProgress ?? {
+    workspaceId: snapshot.workspace.id,
+    runId: run.id,
+    state: run.state,
+    recovery: { mode: 'unknown' },
+    repairLoop: { state: 'idle', attemptCount: 0, escalated: false }
+  };
+  const outcome: RunSnapshot['outcome'] = snapshot.outcome && (!snapshot.outcome.runId || snapshot.outcome.runId === run.id)
+    ? {
+      runId: snapshot.outcome.runId || run.id,
+      state: snapshot.outcome.state || run.state,
+      rawState: snapshot.outcome.rawWorkspaceState || run.state,
+      accepted: snapshot.outcome.accepted,
+      terminal: snapshot.outcome.terminal,
+      resultId: snapshot.outcome.resultId,
+      summary: snapshot.outcome.summary,
+      reason: snapshot.outcome.reason,
+      evidenceRefs: snapshot.outcome.evidenceRefs,
+      artifactRefs: snapshot.outcome.artifactRefs
+    }
+    : {
+      runId: run.id,
+      state: run.state,
+      rawState: run.state,
+      accepted: false,
+      terminal: terminalRunState(run.state)
+    };
+  return {
+    workspace: snapshot.workspace,
+    run,
+    outcome,
+    taskProgress,
+    repairLoop: taskProgress.repairLoop,
+    taskDecompositions: runScopedItems(snapshot.taskDecompositions, run.id),
+    executionSections: runScopedItems(snapshot.executionSections, run.id),
+    webSources: runScopedItems(snapshot.webSources, run.id),
+    llmContextBudgets: runScopedItems(snapshot.llmContextBudgets, run.id),
+    llmUsageTraces: runScopedItems(snapshot.llmUsageTraces, run.id),
+    llmUsageSummary: snapshot.llmUsageSummary,
+    patches: runScopedItems(snapshot.patches, run.id),
+    results: runScopedItems(snapshot.results, run.id),
+    artifacts: runScopedItems(snapshot.artifacts, run.id),
+    artifactContinuations: runScopedItems(snapshot.artifactContinuations, run.id),
+    eventRecords: runScopedItems(snapshot.eventRecords, run.id),
+    decisions: runScopedItems(snapshot.decisions, run.id),
+    approvals: runScopedItems(snapshot.approvals, run.id)
+  };
+}
+
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
   const { message } = AntApp.useApp();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -113,7 +174,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
   const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
-  const activeRunIdRef = useRef<string | undefined>(undefined);
   const lastEventRevisionRef = useRef(0);
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
   const [activationForm] = Form.useForm();
@@ -131,10 +191,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     currentWorkspaceIdRef.current = workspaceId;
     lastEventRevisionRef.current = 0;
   }, [workspaceId]);
-
-  useEffect(() => {
-    activeRunIdRef.current = workspaceProjectionRun(snapshot)?.id;
-  }, [snapshot]);
 
   useEffect(() => {
     setWorkspaceListReady(false);
@@ -171,16 +227,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     if (!workspaceListReady) {
       return;
     }
-    const topic = String(event.topic ?? '');
     const selected = currentWorkspaceIdRef.current;
-    const eventWorkspaceId = event.workspaceId;
-    if (eventWorkspaceId && selected && eventWorkspaceId !== selected) {
-      if (topic === '/workspace/created' || topic === '/workspace/deleted') {
-        scheduleWorkspaceEventRefresh(true, selected);
-      }
+    if (!isWorkspaceProjectionChangedEvent(event)) {
       return;
     }
-    const revision = event.revision ?? numericValue(event.stateSummary?.revision);
+    const eventWorkspaceId = projectionEventWorkspaceID(event);
+    const revision = projectionEventRevision(event);
     if (revision && lastEventRevisionRef.current && revision > lastEventRevisionRef.current + 1) {
       lastEventRevisionRef.current = revision;
       scheduleWorkspaceEventRefresh(true, selected);
@@ -189,7 +241,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     if (revision && revision > lastEventRevisionRef.current) {
       lastEventRevisionRef.current = revision;
     }
-    routeWorkspaceEvent(topic, eventWorkspaceId || selected, event.runId, event.stateSummary, event.payload);
+    if (eventWorkspaceId && selected && eventWorkspaceId !== selected) {
+      scheduleWorkspaceEventRefresh(true, selected, false);
+      return;
+    }
+    scheduleWorkspaceEventRefresh(true, eventWorkspaceId || selected);
   }, {
     enabled: workspaceListReady,
     debounceMs: 0,
@@ -268,6 +324,83 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setRunArtifactCursorAfterId(undefined);
     setRunArtifactHasMore(false);
     setRunArtifactLoading(false);
+  }
+
+  function clearRunProcessView(nextContextBundle?: ContextBundle) {
+    setRunSnapshot(undefined);
+    setRunObservability(undefined);
+    setContextBundle(nextContextBundle);
+    setRunEventRecords([]);
+    setRunEventCursorAfterId(undefined);
+    setRunEventHasMore(false);
+    setRunEventLoading(false);
+    setRunStepRecords([]);
+    setRunStepCursorAfterId(undefined);
+    setRunStepHasMore(false);
+    setRunStepLoading(false);
+    setRunToolCallRecords([]);
+    setRunToolCallCursorAfterId(undefined);
+    setRunToolCallHasMore(false);
+    setRunToolCallLoading(false);
+    setRunCheckpointRecords([]);
+    setRunCheckpointCursorAfterId(undefined);
+    setRunCheckpointHasMore(false);
+    setRunCheckpointLoading(false);
+    setRunResultRecords([]);
+    setRunResultCursorAfterId(undefined);
+    setRunResultHasMore(false);
+    setRunResultLoading(false);
+    setRunPatchRecords([]);
+    setRunPatchCursorAfterId(undefined);
+    setRunPatchHasMore(false);
+    setRunPatchLoading(false);
+    setRunValidationRecords([]);
+    setRunValidationCursorAfterId(undefined);
+    setRunValidationHasMore(false);
+    setRunValidationLoading(false);
+    setRunArtifactRecords([]);
+    setRunArtifactCursorAfterId(undefined);
+    setRunArtifactHasMore(false);
+    setRunArtifactLoading(false);
+  }
+
+  function applyProjectedRunView(nextSnapshot: WorkspaceSnapshot, projectedRun: Run) {
+    const nextRunSnapshot = projectedRunSnapshot(nextSnapshot, projectedRun);
+    setRunSnapshot(nextRunSnapshot);
+    setRunObservability(undefined);
+    setContextBundle(nextSnapshot.contextBundle);
+    setRunStepRecords(nextRunSnapshot.steps ?? []);
+    setRunStepCursorAfterId(undefined);
+    setRunStepHasMore(false);
+    setRunStepLoading(false);
+    setRunToolCallRecords(nextRunSnapshot.toolCalls ?? []);
+    setRunToolCallCursorAfterId(undefined);
+    setRunToolCallHasMore(false);
+    setRunToolCallLoading(false);
+    setRunCheckpointRecords(nextRunSnapshot.runtimeCheckpoints ?? []);
+    setRunCheckpointCursorAfterId(undefined);
+    setRunCheckpointHasMore(false);
+    setRunCheckpointLoading(false);
+    setRunResultRecords(nextRunSnapshot.results ?? []);
+    setRunResultCursorAfterId(undefined);
+    setRunResultHasMore(false);
+    setRunResultLoading(false);
+    setRunPatchRecords(nextRunSnapshot.patches ?? []);
+    setRunPatchCursorAfterId(undefined);
+    setRunPatchHasMore(false);
+    setRunPatchLoading(false);
+    setRunValidationRecords(nextRunSnapshot.validationResults ?? []);
+    setRunValidationCursorAfterId(undefined);
+    setRunValidationHasMore(false);
+    setRunValidationLoading(false);
+    setRunArtifactRecords(nextRunSnapshot.artifacts ?? []);
+    setRunArtifactCursorAfterId(undefined);
+    setRunArtifactHasMore(false);
+    setRunArtifactLoading(false);
+    setRunEventRecords(nextRunSnapshot.eventRecords ?? []);
+    setRunEventCursorAfterId(undefined);
+    setRunEventHasMore(false);
+    setRunEventLoading(false);
   }
 
   function applyRunStepPage(page: StepPage, append: boolean) {
@@ -520,7 +653,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setRunEventHasMore(items.length >= runtimeEventPageLimit);
   }
 
-  function scheduleWorkspaceEventRefresh(refreshList: boolean, targetWorkspaceId?: string) {
+  function scheduleWorkspaceEventRefresh(refreshList: boolean, targetWorkspaceId?: string, refreshDetail = true) {
     if (workspaceEventRefreshTimerRef.current !== undefined) {
       window.clearTimeout(workspaceEventRefreshTimerRef.current);
     }
@@ -533,7 +666,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           message.error(errorMessage(error));
         });
       }
-      if (nextWorkspaceId && nextWorkspaceId === selected) {
+      if (refreshDetail && nextWorkspaceId && nextWorkspaceId === selected) {
         void loadWorkspaceContext(nextWorkspaceId).catch((error: unknown) => {
           if (isNotFoundError(error)) {
             void loadWorkspaceList(undefined, nextWorkspaceId).catch((refreshError: unknown) => {
@@ -547,144 +680,25 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }, 500);
   }
 
-  function routeWorkspaceEvent(topic: string, targetWorkspaceId?: string, runId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
-    const selected = currentWorkspaceIdRef.current;
-    const activeRunId = activeRunIdRef.current;
-    switch (topic) {
-      case '/workspace/created':
-      case '/workspace/deleted':
-        scheduleWorkspaceEventRefresh(true, targetWorkspaceId || selected);
-        return;
-      case '/workspace/state/changed':
-        applyWorkspaceStateSummary(targetWorkspaceId || selected, summary, payload);
-        return;
-      case '/run/state/changed':
-      case '/run/created':
-        applyRunStateSummary(runId || activeRunId, summary, payload);
-        if (isTerminalState(stringValue(summary?.runState) || stringValue(payload?.state))) {
-          scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
-        }
-        return;
-      case '/step/dispatched':
-      case '/step/state/changed':
-      case '/run/llm_stream/progress':
-        if (runId && runId !== activeRunId) {
-          return;
-        }
-        return;
-      case '/run/llm_usage/recorded':
-        if (runId && runId !== activeRunId) {
-          return;
-        }
-        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
-        return;
-      case '/patch/previewed':
-      case '/patch/applied':
-      case '/patch/failed':
-      case '/patch/reverted':
-        if (runId && runId === activeRunId) {
-          void loadRunPatchPage(runId).catch((error: unknown) => message.error(errorMessage(error)));
-        }
-        return;
-      case '/result/accepted':
-      case '/result/rejected':
-      case '/result/superseded':
-      case '/goal/defined':
-      case '/dod/defined':
-      case '/ticket/created':
-      case '/approval/created':
-        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
-        return;
-      case '/memory/recall/recorded':
-        return;
-      default:
-        scheduleWorkspaceEventRefresh(false, targetWorkspaceId || selected);
-    }
+  function isWorkspaceProjectionChangedEvent(event: { topic?: string; payload?: Record<string, unknown> }) {
+    return event.topic === '/workorchd/workspace/projection/changed' || event.payload?.type === 'workspace_projection_changed';
   }
 
-  function applyWorkspaceStateSummary(targetWorkspaceId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
-    if (!targetWorkspaceId) {
-      return;
-    }
-    const workspaceState = stringValue(summary?.workspaceState) || stringValue(payload?.state);
-    const activeRunId = stringValue(summary?.activeRunId) || stringValue(payload?.activeRunId);
-    if (!workspaceState && !activeRunId) {
-      return;
-    }
-    setSnapshot((current) => {
-      if (!current || current.workspace.id !== targetWorkspaceId) {
-        return current;
-      }
-      return {
-        ...current,
-        workspace: {
-          ...current.workspace,
-          state: workspaceState || current.workspace.state,
-          activeRunId: activeRunId || current.workspace.activeRunId
-        }
-      };
-    });
-    setWorkspaces((current) => current.map((item) => item.id === targetWorkspaceId ? {
-      ...item,
-      state: workspaceState || item.state,
-      activeRunId: activeRunId || item.activeRunId
-    } : item));
+  function projectionEventWorkspaceID(event: { workspaceId?: string; payload?: Record<string, unknown> }) {
+    const payloadWorkspaceId = event.payload?.workspaceId;
+    return typeof payloadWorkspaceId === 'string' && payloadWorkspaceId.trim() !== '' ? payloadWorkspaceId.trim() : event.workspaceId;
   }
 
-  function applyRunStateSummary(runId?: string, summary?: Record<string, unknown>, payload?: Record<string, unknown>) {
-    if (!runId) {
-      return;
+  function projectionEventRevision(event: { revision?: number; payload?: Record<string, unknown> }) {
+    const workspaceRevision = event.payload?.workspaceRevision;
+    if (typeof workspaceRevision === 'number' && workspaceRevision > 0) {
+      return workspaceRevision;
     }
-    const runState = stringValue(summary?.runState) || stringValue(payload?.state);
-    const blockingTicketId = stringValue(summary?.blockingTicketId) || stringValue(payload?.blockingTicketId);
-    const blockingApprovalId = stringValue(summary?.blockingApprovalId) || stringValue(payload?.blockingApprovalId);
-    if (!runState && !blockingTicketId && !blockingApprovalId) {
-      return;
+    const globalRevision = event.payload?.globalRevision;
+    if (typeof globalRevision === 'number' && globalRevision > 0) {
+      return globalRevision;
     }
-    setSnapshot((current) => {
-      if (!current?.runs) {
-        return current;
-      }
-      return {
-        ...current,
-        runs: current.runs.map((item) => item.id === runId ? {
-          ...item,
-          state: runState || item.state,
-          blockingTicketId: blockingTicketId || item.blockingTicketId,
-          blockingApprovalId: blockingApprovalId || item.blockingApprovalId
-        } : item)
-      };
-    });
-    setRunSnapshot((current) => current?.run.id === runId ? {
-      ...current,
-      run: {
-        ...current.run,
-        state: runState || current.run.state,
-        blockingTicketId: blockingTicketId || current.run.blockingTicketId,
-        blockingApprovalId: blockingApprovalId || current.run.blockingApprovalId
-      }
-    } : current);
-    setRunObservability((current) => current?.run.id === runId ? {
-      ...current,
-      run: {
-        ...current.run,
-        state: runState || current.run.state,
-        blockingTicketId: blockingTicketId || current.run.blockingTicketId,
-        blockingApprovalId: blockingApprovalId || current.run.blockingApprovalId
-      }
-    } : current);
-  }
-
-  function stringValue(value: unknown) {
-    return typeof value === 'string' ? value.trim() : '';
-  }
-
-  function numericValue(value: unknown) {
-    return typeof value === 'number' ? value : 0;
-  }
-
-  function isTerminalState(state: string) {
-    return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'superseded' || state === 'accepted';
+    return event.revision ?? 0;
   }
 
   async function loadRunEventPage(runId: string, cursorAfterId?: string) {
@@ -760,7 +774,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   async function loadWorkspaceList(preferredWorkspaceId?: string, ignoredWorkspaceId?: string) {
     const requestSeq = ++workspaceListRequestSeq.current;
-    const items = await workorchApi.listWorkspaces();
+    const projection = await workorchApi.listWorkspaceProjection();
+    const items = projection.workspaces;
     if (requestSeq !== workspaceListRequestSeq.current) {
       return workspaceId;
     }
@@ -782,11 +797,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshot, nextContextBundle, nextGoals, nextDoDs, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMCPCapabilities, nextMemoryItems, nextConfiguration] = await Promise.all([
-      workorchApi.readWorkspaceSnapshot(targetWorkspaceId),
-      workorchApi.readWorkspaceContextBundle(targetWorkspaceId),
-      workorchApi.listGoals(targetWorkspaceId),
-      workorchApi.listDoDs(targetWorkspaceId),
+    const [nextSnapshotProjection, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMCPCapabilities, nextMemoryItems, nextConfiguration] = await Promise.all([
+      workorchApi.readWorkspaceSnapshotProjection(targetWorkspaceId),
       workorchApi.listSouls(),
       workorchApi.readWorkspaceSoulBindings(targetWorkspaceId),
       workorchApi.listSkills(targetWorkspaceId),
@@ -798,10 +810,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     if (requestSeq !== workspaceContextRequestSeq.current) {
       return;
     }
+    const nextSnapshot = nextSnapshotProjection.snapshot;
     setSnapshot(nextSnapshot);
-    setContextBundle(nextContextBundle);
-    setGoals(nextGoals);
-    setDoDs(nextDoDs);
+    setContextBundle(nextSnapshot.contextBundle);
+    setGoals(nextSnapshot.goals ?? []);
+    setDoDs(nextSnapshot.dods ?? []);
     setSouls(nextSouls);
     setSoulBindings(nextSoulBindings);
     soulBindingsForm.setFieldsValue({
@@ -815,78 +828,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setConfiguration(nextConfiguration);
     const projectedRun = workspaceProjectionRun(nextSnapshot);
     if (projectedRun) {
-      setRunEventLoading(true);
-      setRunStepLoading(true);
-      setRunToolCallLoading(true);
-      setRunCheckpointLoading(true);
-      setRunResultLoading(true);
-      setRunPatchLoading(true);
-      setRunValidationLoading(true);
-      setRunArtifactLoading(true);
-      const [nextRunSnapshot, nextRunObservability, nextRunContextBundle, nextRunSteps, nextRunToolCalls, nextRunCheckpoints, nextRunResults, nextRunPatches, nextRunValidations, nextRunArtifacts, nextRunEvents] = await Promise.all([
-        workorchApi.readRunSnapshot(projectedRun.id, targetWorkspaceId),
-        workorchApi.readRunObservability(projectedRun.id, targetWorkspaceId),
-        workorchApi.readRunContextBundle(projectedRun.id, targetWorkspaceId),
-        workorchApi.listRunSteps(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeStepPageLimit }),
-        workorchApi.listRunToolCalls(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeToolCallPageLimit }),
-        workorchApi.listRunRuntimeCheckpoints(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeCheckpointPageLimit }),
-        workorchApi.listRunResults(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeResultPageLimit }),
-        workorchApi.listRunPatches(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimePatchPageLimit }),
-        workorchApi.listRunValidationResults(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeValidationPageLimit }),
-        workorchApi.listRunArtifacts(projectedRun.id, { workspaceId: targetWorkspaceId, limit: runtimeArtifactPageLimit }),
-        workorchApi.listEventRecords({ workspaceId: targetWorkspaceId, runId: projectedRun.id, limit: runtimeEventPageLimit })
-      ]).finally(() => {
-        setRunEventLoading(false);
-        setRunStepLoading(false);
-        setRunToolCallLoading(false);
-        setRunCheckpointLoading(false);
-        setRunResultLoading(false);
-        setRunPatchLoading(false);
-        setRunValidationLoading(false);
-        setRunArtifactLoading(false);
-      });
-      if (requestSeq !== workspaceContextRequestSeq.current) {
-        return;
-      }
-      setRunSnapshot(nextRunSnapshot);
-      setRunObservability(nextRunObservability);
-      setContextBundle(nextRunContextBundle);
-      applyRunStepPage(nextRunSteps, false);
-      applyRunToolCallPage(nextRunToolCalls, false);
-      applyRunCheckpointPage(nextRunCheckpoints, false);
-      applyRunResultPage(nextRunResults, false);
-      applyRunPatchPage(nextRunPatches, false);
-      applyRunValidationPage(nextRunValidations, false);
-      applyRunArtifactPage(nextRunArtifacts, false);
-      applyRunEventPage(nextRunEvents, false);
+      applyProjectedRunView(nextSnapshot, projectedRun);
     } else {
-      setRunSnapshot(undefined);
-      setRunObservability(undefined);
-      setContextBundle(nextContextBundle);
-      setRunStepRecords([]);
-      setRunStepCursorAfterId(undefined);
-      setRunStepHasMore(false);
-      setRunToolCallRecords([]);
-      setRunToolCallCursorAfterId(undefined);
-      setRunToolCallHasMore(false);
-      setRunCheckpointRecords([]);
-      setRunCheckpointCursorAfterId(undefined);
-      setRunCheckpointHasMore(false);
-      setRunResultRecords([]);
-      setRunResultCursorAfterId(undefined);
-      setRunResultHasMore(false);
-      setRunPatchRecords([]);
-      setRunPatchCursorAfterId(undefined);
-      setRunPatchHasMore(false);
-      setRunValidationRecords([]);
-      setRunValidationCursorAfterId(undefined);
-      setRunValidationHasMore(false);
-      setRunArtifactRecords([]);
-      setRunArtifactCursorAfterId(undefined);
-      setRunArtifactHasMore(false);
-      setRunEventRecords([]);
-      setRunEventCursorAfterId(undefined);
-      setRunEventHasMore(false);
+      clearRunProcessView(nextSnapshot.contextBundle);
     }
   }
 

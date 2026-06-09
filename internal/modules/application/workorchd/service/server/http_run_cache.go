@@ -133,7 +133,7 @@ func (s *serverState) readRunSnapshotCached(ctx context.Context, runID string) (
 }
 
 func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
-	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.sharedSession != nil {
+	if cached, ok := s.cachedRunSnapshotByWorkspace(workspaceID); ok && s.hasSharedSession() {
 		var ret appservice.WorkspaceSnapshot
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
@@ -146,7 +146,7 @@ func (s *serverState) readWorkspaceSnapshotCached(ctx context.Context, workspace
 }
 
 func (s *serverState) readArtifactContentCached(ctx context.Context, artifactURI string) (appservice.ArtifactContent, error) {
-	if cached, ok := s.cachedRunSnapshotByArtifactURI(artifactURI); ok && s.sharedSession != nil {
+	if cached, ok := s.cachedRunSnapshotByArtifactURI(artifactURI); ok && s.hasSharedSession() {
 		var ret appservice.ArtifactContent
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error

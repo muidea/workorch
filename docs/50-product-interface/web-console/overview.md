@@ -95,9 +95,6 @@ Web Console 是 WorkOrch 的远程控制与观察面，主要服务：
 主要 API：
 
 - `GET /api/v1/workorch/workspaces/:workspaceId/snapshot`
-- `GET /api/v1/workorch/workspaces/:workspaceId/context-bundle`
-- `GET /api/v1/workorch/workspaces/:workspaceId/task-progress`
-- `GET /api/v1/workorch/workspaces/:workspaceId/task-decompositions`
 - `GET /api/v1/workorch/workspaces/:workspaceId/memory-recalls`
 - `GET /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
 - `PUT /api/v1/workorch/workspaces/:workspaceId/soul-bindings`

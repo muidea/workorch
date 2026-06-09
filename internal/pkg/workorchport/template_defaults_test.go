@@ -87,6 +87,14 @@ func (b fakeWorkspaceBackend) List(context.Context) ([]backend.WorkspaceInfo, er
 	return append([]backend.WorkspaceInfo(nil), b.b.workspaces...), nil
 }
 
+func (b fakeWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	workspace, err := b.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+}
+
 func (b fakeWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {
 	return nil
 }

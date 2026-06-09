@@ -72,6 +72,9 @@ func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*b
 func (agentCommandWorkspaceBackend) List(context.Context) ([]backend.WorkspaceInfo, error) {
 	return nil, nil
 }
+func (agentCommandWorkspaceBackend) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	return nil, common.ErrNotFound
+}
 func (agentCommandWorkspaceBackend) Delete(context.Context, common.WorkspaceID, bool) error {
 	return nil
 }

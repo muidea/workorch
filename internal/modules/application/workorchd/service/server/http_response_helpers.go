@@ -41,11 +41,8 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_http_requests_total{endpoint=\"run_observability\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"artifact_content\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_task_progress\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"workspace_task_progress\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_context_bundle\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"workspace_context_bundle\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_task_decomposition\"} %d\n"+
-			"workorch_http_requests_total{endpoint=\"workspace_task_decomposition\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_start\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"run_resume\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"workspace_execution_activation\"} %d\n"+
@@ -93,11 +90,8 @@ func (m *serverMetrics) render(config Config) string {
 		m.runObservabilityRequests.Load(),
 		m.artifactContentRequests.Load(),
 		m.runTaskProgressRequests.Load(),
-		m.workspaceTaskProgressRequests.Load(),
 		m.runContextBundleRequests.Load(),
-		m.workspaceContextBundleRequests.Load(),
 		m.runTaskDecompositionRequests.Load(),
-		m.workspaceTaskDecompositionRequests.Load(),
 		m.runStartRequests.Load(),
 		m.runResumeRequests.Load(),
 		m.workspaceActivationRequests.Load(),

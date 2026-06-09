@@ -14,6 +14,23 @@ type Workspace struct {
 	SoulBindings         map[string]string `json:"soulBindings,omitempty"`
 }
 
+type ProjectionStatus struct {
+	State               string `json:"state"`
+	GlobalRevision      int64  `json:"globalRevision"`
+	WorkspaceRevision   int64  `json:"workspaceRevision,omitempty"`
+	SourceEventRevision int64  `json:"sourceEventRevision,omitempty"`
+	WorkspaceTotal      int    `json:"workspaceTotal,omitempty"`
+	UpdatedAt           string `json:"updatedAt,omitempty"`
+	RebuiltAt           string `json:"rebuiltAt,omitempty"`
+	Degraded            bool   `json:"degraded,omitempty"`
+	Error               string `json:"error,omitempty"`
+}
+
+type WorkspaceListProjection struct {
+	Projection ProjectionStatus `json:"projection"`
+	Workspaces []Workspace      `json:"workspaces"`
+}
+
 type Goal struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspaceId"`
@@ -531,6 +548,7 @@ type WorkspaceSnapshot struct {
 	Workspace             Workspace              `json:"workspace"`
 	Outcome               RunOutcome             `json:"outcome"`
 	TaskProgress          TaskProgress           `json:"taskProgress"`
+	ContextBundle         map[string]any         `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
 	DoDs                  []DoD                  `json:"dods,omitempty"`
@@ -579,6 +597,11 @@ type Activation struct {
 	Workspace Workspace         `json:"workspace"`
 	Run       Run               `json:"run"`
 	Snapshot  WorkspaceSnapshot `json:"snapshot"`
+}
+
+type WorkspaceSnapshotProjection struct {
+	Projection ProjectionStatus  `json:"projection"`
+	Snapshot   WorkspaceSnapshot `json:"snapshot"`
 }
 
 type RunObservability struct {

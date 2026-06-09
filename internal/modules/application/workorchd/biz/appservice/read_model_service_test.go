@@ -3831,6 +3831,63 @@ func TestReadWorkspaceSnapshotWithBackendReturnsPersistedEventRecords(t *testing
 	}
 }
 
+func TestReadWorkspaceSnapshotWithBackendSummarizesRunScopedLLMUsageRecords(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-run-scoped-llm-usage")
+	runID := common.RunID("run-scoped-llm-usage")
+	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, string(workspaceID), "run scoped llm usage", "", "workspaces/run scoped llm usage"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateCompleted,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := exports.Repositories.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+		ID:          "run-scoped-llm-usage/event/llm-usage-recorded",
+		Version:     events.WorkorchEventVersion,
+		Topic:       runevents.TopicRunLLMUsageRecorded,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      "run-scoped-llm-usage/step-1",
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:  string(workspaceID),
+			events.PayloadKeyRunID:        string(runID),
+			events.PayloadKeyStepID:       "run-scoped-llm-usage/step-1",
+			events.PayloadKeyProviderID:   "provider-run-scoped",
+			events.PayloadKeyProvider:     "compatible",
+			events.PayloadKeyModel:        "model-run-scoped",
+			events.PayloadKeyOperation:    "chat_completions",
+			events.PayloadKeyInputTokens:  32,
+			events.PayloadKeyOutputTokens: 8,
+			events.PayloadKeyTotalTokens:  40,
+			events.PayloadKeyEstimated:    true,
+			events.PayloadKeyUsageSource:  "stream_estimated",
+			events.PayloadKeyStatus:       "completed",
+		},
+	}); err != nil {
+		t.Fatalf("append run scoped llm usage event: %v", err)
+	}
+
+	item, err := ReadWorkspaceSnapshotWithBackend(context.Background(), "file", dataRoot, string(workspaceID))
+	if err != nil {
+		t.Fatalf("ReadWorkspaceSnapshotWithBackend: %v", err)
+	}
+	if item.LLMUsageSummary.EntryTotal != 1 || item.LLMUsageSummary.EstimatedEntries != 1 {
+		t.Fatalf("llm usage summary = %+v, want one estimated run-scoped entry", item.LLMUsageSummary)
+	}
+	if len(item.LLMUsageSummary.ProviderModelBreakdown) != 1 ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].ProviderID != "provider-run-scoped" ||
+		item.LLMUsageSummary.ProviderModelBreakdown[0].Model != "model-run-scoped" {
+		t.Fatalf("provider/model breakdown = %+v, want run scoped provider/model", item.LLMUsageSummary.ProviderModelBreakdown)
+	}
+}
+
 func TestReadWorkspaceSnapshotProjectsWorkspaceStateFromRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	session, ctx := newTestRuntimeSession(t, "file", dataRoot)

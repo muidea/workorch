@@ -261,6 +261,25 @@ wait_mock() {
     -d '{"messages":[{"role":"user","content":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}]}' >/dev/null
 }
 
+wait_run_state() {
+  local workspace_id="$1"
+  local run_id="$2"
+  local expected_state="$3"
+  local output_file="$4"
+  local deadline=$((SECONDS + 180))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
+    if grep '"state": "'"$expected_state"'"' "$output_file" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$output_file" >&2
+  return 1
+}
+
 write_llm_update_payloads() {
   python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" "$PROVIDER_ID" <<'PY'
 import json
@@ -374,6 +393,21 @@ if errors:
 PY
 }
 
+wait_long_result_snapshot() {
+  local deadline=$((SECONDS + 180))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+    if assert_long_result >/dev/null 2>"$TMP_DIR/snapshot-assert.err"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  cat "$TMP_DIR/snapshot-assert.err" >&2 || true
+  return 1
+}
+
 mkdir -p "$TMP_DIR"
 acquire_llm_config_lock
 start_mock_provider
@@ -411,10 +445,8 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 [[ -n "$run_id" ]]
 
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$TMP_DIR/status.json"
-grep '"state": "completed"' "$TMP_DIR/status.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
-assert_long_result
+wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/status.json"
+wait_long_result_snapshot
 
 cat <<EOF
 TUI long output e2e passed.

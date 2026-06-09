@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -97,6 +98,7 @@ type RuntimeOrchestrator struct {
 	approvals   repository.ApprovalRepository
 	evidence    RuntimeEvidenceRepositories
 	eventHub    events.Hub
+	policyMu    sync.RWMutex
 	policy      RuntimePolicy
 	checkpoints *checkpointSubsystem
 	eventer     *eventSubsystem
@@ -109,6 +111,25 @@ type RuntimeOrchestrator struct {
 	results     *resultSubsystem
 	runState    *runStateSubsystem
 	decision    *decisionResumeSubsystem
+}
+
+func (o *RuntimeOrchestrator) RuntimePolicy() RuntimePolicy {
+	if o == nil {
+		return NormalizeRuntimePolicy(RuntimePolicy{})
+	}
+	o.policyMu.RLock()
+	defer o.policyMu.RUnlock()
+	return NormalizeRuntimePolicy(o.policy)
+}
+
+func (o *RuntimeOrchestrator) UpdateRuntimePolicy(policy RuntimePolicy) error {
+	if o == nil {
+		return common.ErrInvalidArgument
+	}
+	o.policyMu.Lock()
+	defer o.policyMu.Unlock()
+	o.policy = NormalizeRuntimePolicy(policy)
+	return nil
 }
 
 type RuntimeEvidenceRepositories struct {

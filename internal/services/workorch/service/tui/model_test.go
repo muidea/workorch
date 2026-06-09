@@ -327,8 +327,8 @@ func TestModelPlainInputWithActiveRunQueuesOperatorInput(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if be.lastGetWorkspace != "ws-1" || be.lastResumeWorkspace != "ws-1" {
-		t.Fatalf("run get/resume workspace scope = %q/%q, want ws-1/ws-1", be.lastGetWorkspace, be.lastResumeWorkspace)
+	if be.lastSnapshotWorkspace != "ws-1" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "ws-1" {
+		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-1/empty/empty/ws-1", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
 	if len(be.resumePatches) != 1 {
 		t.Fatalf("resumePatches = %v, want one operator input patch", be.resumePatches)
@@ -546,8 +546,8 @@ func TestModelRunContinueIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
 		t.Fatalf("resumes = %v, want current workspace run to be resumed", be.resumes)
 	}
-	if be.lastGetWorkspace != "ws-2" || be.lastListWorkspace != "ws-2" || be.lastResumeWorkspace != "ws-2" {
-		t.Fatalf("run get/list/resume workspace scope = %q/%q/%q, want ws-2/ws-2/ws-2", be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
+	if be.lastSnapshotWorkspace != "ws-2" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "ws-2" {
+		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-2/empty/empty/ws-2", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
 	if len(be.activations) != 0 || msg.Run.WorkspaceID != "ws-2" {
 		t.Fatalf("activation/run = %d/%+v, want resumed run for ws-2", len(be.activations), msg.Run)
@@ -2064,7 +2064,7 @@ func TestModelApprovalContextualParameterInputApproves(t *testing.T) {
 
 func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
 	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateBlockedOnApproval}
-	msg := ResolveApproval(be, "approval-1", true)()
+	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want approved without error", msg)
@@ -2076,7 +2076,7 @@ func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
 
 func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
 	be := &conflictApprovalBE{fakeBE: newFake(t), runState: common.RunStateRunning}
-	msg := ResolveApproval(be, "approval-1", true)()
+	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
 		t.Fatalf("approval msg = %#v, want approved without error", msg)
@@ -3216,6 +3216,24 @@ func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceProjectionChangedEventRefreshesListAndActiveDetail(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+
+	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
+	if cmd == nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("projection changed event should refresh list and detail: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.BatchMsg); !ok {
+		t.Fatalf("projection changed command = %T, want tea.BatchMsg", msg)
+	}
+}
+
 func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -3331,26 +3349,6 @@ func TestModelLLMStreamProgressUpdatesStatus(t *testing.T) {
 	}
 	if m.progress != progressRunning || !strings.Contains(m.progressText, "LLM streaming") || len(m.runtimeEvents) != 1 {
 		t.Fatalf("stream progress not applied: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
-	}
-}
-
-func TestModelActiveWorkspaceNeedsLiveRefresh(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-live", "")
-	m.activeWorkspaceID = "ws-live"
-	m.workspaces = []backend.WorkspaceInfo{{
-		ID:          "ws-live",
-		State:       common.WorkspaceStateRunning,
-		ActiveRunID: "run-live",
-	}}
-	if !m.activeWorkspaceNeedsLiveRefresh() {
-		t.Fatal("running workspace should need periodic live refresh")
-	}
-
-	m.workspaces[0].State = common.WorkspaceStateCompleted
-	m.running = false
-	m.progress = progressIdle
-	if m.activeWorkspaceNeedsLiveRefresh() {
-		t.Fatal("completed idle workspace should not need periodic live refresh")
 	}
 }
 
@@ -3671,21 +3669,29 @@ func (f *workspaceCreateWS) List(ctx context.Context) ([]backend.WorkspaceInfo, 
 	}
 	return []backend.WorkspaceInfo{*f.parent.workspace}, nil
 }
+func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	workspace, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+}
 func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }
 
 type recordingBE struct {
 	*fakeBE
-	runState            common.RunState
-	goals               []string
-	activations         []backend.ActivateRunRequest
-	resumes             []common.RunID
-	resumePatches       []map[string]any
-	lastGetWorkspace    common.WorkspaceID
-	lastListWorkspace   common.WorkspaceID
-	lastResumeWorkspace common.WorkspaceID
-	lastStatusWorkspace common.WorkspaceID
+	runState              common.RunState
+	goals                 []string
+	activations           []backend.ActivateRunRequest
+	resumes               []common.RunID
+	resumePatches         []map[string]any
+	lastGetWorkspace      common.WorkspaceID
+	lastListWorkspace     common.WorkspaceID
+	lastSnapshotWorkspace common.WorkspaceID
+	lastResumeWorkspace   common.WorkspaceID
+	lastStatusWorkspace   common.WorkspaceID
 }
 
 func newRecordingBE(t *testing.T, runState common.RunState) *recordingBE {
@@ -3720,6 +3726,36 @@ func (f *decisionRecordingBackend) Get(ctx context.Context, id common.TicketID) 
 
 func (b *recordingBE) Goal() backend.GoalBackend { return &recordingGoal{parent: b} }
 func (b *recordingBE) Run() backend.RunBackend   { return &recordingRun{parent: b} }
+func (b *recordingBE) Workspace() backend.WorkspaceBackend {
+	return &recordingWorkspace{parent: b}
+}
+
+type recordingWorkspace struct{ parent *recordingBE }
+
+func (f *recordingWorkspace) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+	return (&fakeWS{}).Create(ctx, req)
+}
+func (f *recordingWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+	f.parent.lastGetWorkspace = id
+	return &backend.WorkspaceInfo{ID: id, ActiveRunID: "run-continue"}, nil
+}
+func (f *recordingWorkspace) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+	return nil, nil
+}
+func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	f.parent.lastSnapshotWorkspace = id
+	return &backend.WorkspaceSnapshotInfo{
+		Workspace: backend.WorkspaceInfo{ID: id, ActiveRunID: "run-continue"},
+		Runs: []backend.RunInfo{{
+			ID:          "run-continue",
+			WorkspaceID: id,
+			State:       f.parent.runState,
+		}},
+	}, nil
+}
+func (f *recordingWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+	return nil
+}
 
 type recordingGoal struct{ parent *recordingBE }
 
@@ -3785,6 +3821,40 @@ type conflictApprovalBE struct {
 
 func (b *conflictApprovalBE) Approval() backend.ApprovalBackend { return &conflictApprovalBackend{} }
 func (b *conflictApprovalBE) Run() backend.RunBackend           { return &conflictRunBackend{parent: b} }
+func (b *conflictApprovalBE) Workspace() backend.WorkspaceBackend {
+	return &conflictWorkspaceBackend{parent: b}
+}
+
+type conflictWorkspaceBackend struct{ parent *conflictApprovalBE }
+
+func (f *conflictWorkspaceBackend) Create(ctx context.Context, req backend.CreateWorkspaceRequest) (*backend.WorkspaceInfo, error) {
+	return (&fakeWS{}).Create(ctx, req)
+}
+func (f *conflictWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
+	return &backend.WorkspaceInfo{ID: id, ActiveRunID: "run-1"}, nil
+}
+func (f *conflictWorkspaceBackend) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
+	return nil, nil
+}
+func (f *conflictWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	return &backend.WorkspaceSnapshotInfo{
+		Workspace: backend.WorkspaceInfo{ID: id, ActiveRunID: "run-1"},
+		Runs: []backend.RunInfo{{
+			ID:          "run-1",
+			WorkspaceID: id,
+			State:       f.parent.runState,
+		}},
+		Approvals: []backend.ApprovalInfo{{
+			ID:          "approval-1",
+			WorkspaceID: id,
+			RunID:       "run-1",
+			State:       string(common.ApprovalStateApproved),
+		}},
+	}, nil
+}
+func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+	return nil
+}
 
 type conflictApprovalBackend struct{}
 
@@ -3831,7 +3901,10 @@ func (f *fakeWS) Create(ctx context.Context, req backend.CreateWorkspaceRequest)
 func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceInfo, error) {
 	return &backend.WorkspaceInfo{ID: id}, nil
 }
-func (f *fakeWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error)           { return nil, nil }
+func (f *fakeWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error) { return nil, nil }
+func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	return &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: id}}, nil
+}
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
 
 type fakeG struct{}

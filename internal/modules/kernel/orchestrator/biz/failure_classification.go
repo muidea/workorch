@@ -731,5 +731,5 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 	if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err
 	}
-	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
+	return o.blockOnDecisionAtStep(ctx, run, nil, spec.TicketID, failedStep.ID)
 }

@@ -2,17 +2,32 @@ package workorchclient
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
 // ListWorkspaces returns all workspaces.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
+	projection, err := c.ListWorkspaceProjection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return projection.Workspaces, nil
+}
+
+// ListWorkspaceProjection returns workspace overviews with server projection metadata.
+func (c *Client) ListWorkspaceProjection(ctx context.Context) (*WorkspaceListProjection, error) {
 	resp, err := c.do(ctx, "GET", "/api/v1/workorch/workspaces", nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelopeSlice[Workspace](resp, "workspaces")
+	defer resp.Body.Close()
+	var result WorkspaceListProjection
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode workspace projection envelope: %w", err)
+	}
+	return &result, nil
 }
 
 // GetWorkspace returns a single workspace by ID.
@@ -56,11 +71,25 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string, purge bool) err
 
 // GetWorkspaceSnapshot returns the workspace snapshot (aggregated read model).
 func (c *Client) GetWorkspaceSnapshot(ctx context.Context, id string) (*WorkspaceSnapshot, error) {
+	projection, err := c.GetWorkspaceSnapshotProjection(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &projection.Snapshot, nil
+}
+
+// GetWorkspaceSnapshotProjection returns workspace detail with server projection metadata.
+func (c *Client) GetWorkspaceSnapshotProjection(ctx context.Context, id string) (*WorkspaceSnapshotProjection, error) {
 	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/snapshot", escapePath(id)), nil)
 	if err != nil {
 		return nil, err
 	}
-	return decodeEnvelope[WorkspaceSnapshot](resp, "snapshot")
+	defer resp.Body.Close()
+	var result WorkspaceSnapshotProjection
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode workspace snapshot projection envelope: %w", err)
+	}
+	return &result, nil
 }
 
 // ListGoals returns goals for a workspace.

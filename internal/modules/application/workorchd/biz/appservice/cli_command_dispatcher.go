@@ -11,12 +11,18 @@ import (
 // CLICommandDispatcher owns /cli/command handling for workorchd. The CLI/TUI
 // backend publishes command envelopes only; owner state is read or changed here.
 type CLICommandDispatcher struct {
-	session *RuntimeSession
-	core    *clicore.Dispatcher
+	session    *RuntimeSession
+	viewReader WorkspaceViewReader
+	core       *clicore.Dispatcher
 }
 
-func NewCLICommandDispatcher(session *RuntimeSession, eventHub events.Hub) *CLICommandDispatcher {
-	ret := &CLICommandDispatcher{session: session}
+type WorkspaceViewReader interface {
+	ListWorkspaceView(ctx context.Context) ([]Workspace, error)
+	ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (WorkspaceSnapshot, error)
+}
+
+func NewCLICommandDispatcher(session *RuntimeSession, eventHub events.Hub, viewReader WorkspaceViewReader) *CLICommandDispatcher {
+	ret := &CLICommandDispatcher{session: session, viewReader: viewReader}
 	ret.core = clicore.NewDispatcher(eventHub, func(ctx context.Context, cmd events.CLICommandPayload) (map[string]any, []map[string]any, error) {
 		return ret.handleCommand(ContextWithEventHub(ctx, eventHub), cmd)
 	})

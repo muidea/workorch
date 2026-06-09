@@ -1,0 +1,78 @@
+package server
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	magicevent "github.com/muidea/magicCommon/event"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+)
+
+func TestSubscribeServerStreamEventsReceivesProjectionAcrossHubWrappers(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
+	publisher := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
+	received := make(chan events.Envelope, 1)
+	unsubscribers := subscribeServerStreamEvents(subscriber, func(_ context.Context, envelope events.Envelope) error {
+		received <- envelope
+		return nil
+	})
+	defer unsubscribeAll(unsubscribers)
+
+	if err := publisher.Publish(ctx, events.Envelope{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: "ws-projection",
+		Payload:     map[string]any{"changeKind": "detail"},
+	}); err != nil {
+		t.Fatalf("publish projection event: %v", err)
+	}
+
+	select {
+	case envelope := <-received:
+		if envelope.Topic != workorchdevents.TopicWorkspaceProjectionChanged || envelope.WorkspaceID != "ws-projection" {
+			t.Fatalf("envelope = %+v, want projection event for ws-projection", envelope)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for projection event across hub wrappers")
+	}
+}
+
+func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
+	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/workspace")
+	received := make(chan events.Envelope, 1)
+	unsubscribers := subscribeServerStreamEvents(subscriber, func(_ context.Context, envelope events.Envelope) error {
+		received <- envelope
+		return nil
+	})
+	defer unsubscribeAll(unsubscribers)
+
+	if err := publisher.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
+		WorkspaceID: "ws-owner",
+		Payload:     events.WorkspacePayload("owner workspace", "", "/tmp/ws-owner", "", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish owner event: %v", err)
+	}
+
+	select {
+	case envelope := <-received:
+		if envelope.Topic != workspaceevents.TopicWorkspaceCreated || envelope.WorkspaceID != "ws-owner" {
+			t.Fatalf("envelope = %+v, want workspace created event for ws-owner", envelope)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for owner event across hub wrappers")
+	}
+}

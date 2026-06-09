@@ -130,7 +130,10 @@ func (fakeWorkspace) Create(context.Context, backend.CreateWorkspaceRequest) (*b
 func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*backend.WorkspaceInfo, error) {
 	return &backend.WorkspaceInfo{ID: "ws-1"}, nil
 }
-func (fakeWorkspace) List(context.Context) ([]backend.WorkspaceInfo, error)  { return nil, nil }
+func (fakeWorkspace) List(context.Context) ([]backend.WorkspaceInfo, error) { return nil, nil }
+func (fakeWorkspace) Snapshot(context.Context, common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	return &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-1"}}, nil
+}
 func (fakeWorkspace) Delete(context.Context, common.WorkspaceID, bool) error { return nil }
 
 type fakeGoal struct{}

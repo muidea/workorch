@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-29
+Last Updated: 2026-06-09
 
 ## Purpose
 
@@ -24,12 +24,13 @@ Last Updated: 2026-05-29
 1. [architecture-overview.md](architecture-overview.md)
 2. [repository-structure.md](repository-structure.md)
 3. [application-workorchd.md](application-workorchd.md)
-4. [kernel-workspace-run-result.md](kernel-workspace-run-result.md)
-5. [kernel-orchestrator-governance.md](kernel-orchestrator-governance.md)
-6. [kernel-context-capability.md](kernel-context-capability.md)
-7. [blocks-runtime-adapters.md](blocks-runtime-adapters.md)
-8. [llm-provider-assembly.md](llm-provider-assembly.md)
-9. [storage-readmodel.md](storage-readmodel.md)
+4. [mvvp-workspace-viewmodel-architecture.md](mvvp-workspace-viewmodel-architecture.md)
+5. [kernel-workspace-run-result.md](kernel-workspace-run-result.md)
+6. [kernel-orchestrator-governance.md](kernel-orchestrator-governance.md)
+7. [kernel-context-capability.md](kernel-context-capability.md)
+8. [blocks-runtime-adapters.md](blocks-runtime-adapters.md)
+9. [llm-provider-assembly.md](llm-provider-assembly.md)
+10. [storage-readmodel.md](storage-readmodel.md)
 
 ## Cross-Layer Boundary
 

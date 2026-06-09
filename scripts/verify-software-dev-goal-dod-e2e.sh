@@ -28,6 +28,11 @@ acquire_llm_config_lock() {
 }
 
 cleanup() {
+  if [[ -f "$TMP_DIR/original-runtime-update.json" ]]; then
+    curl -fsS -H "Content-Type: application/json" -X PUT \
+      "$BASE_URL/api/v1/workorch/configuration/runtime" \
+      -d @"$TMP_DIR/original-runtime-update.json" >/dev/null 2>&1 || true
+  fi
   if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
     curl -fsS -H "Content-Type: application/json" -X PUT \
       "$BASE_URL/api/v1/workorch/configuration/llm" \
@@ -386,6 +391,7 @@ original = {
     "defaultEmbeddingProviderId": default_embedding_provider,
     "providers": [clean_provider(item) for item in providers if item.get("id")],
 }
+
 if not original["providers"]:
     original["providers"].append({
         "id": "verify",
@@ -445,6 +451,53 @@ update = {
 }
 with open(update_path, "w", encoding="utf-8") as handle:
     json.dump(update, handle, separators=(",", ":"))
+PY
+}
+
+write_runtime_update_payloads() {
+  python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-runtime-update.json" "$TMP_DIR/verify-runtime-update.json" <<'PY'
+import json
+import sys
+
+config_path, original_path, update_path = sys.argv[1:]
+data = json.load(open(config_path, encoding="utf-8"))
+runtime = data.get("configuration", {}).get("runtime", {})
+
+def clean_llm_output(value):
+    value = value or {}
+    keys = [
+        "maxPatchContentBytes",
+        "maxGraphBytes",
+        "maxGraphFileWrites",
+        "schemaInvalidLargePreviewThreshold",
+        "maxArtifactChunkBytes",
+        "previousChunkTailBytes",
+        "maxChunkRetryAttempts",
+        "maxArtifactPlanAttempts",
+        "maxArtifactReplanAttempts",
+    ]
+    ret = {}
+    for key in keys:
+        try:
+            parsed = int(value.get(key) or 0)
+        except Exception:
+            parsed = 0
+        if parsed > 0:
+            ret[key] = parsed
+    return ret
+
+original = {
+    "maxRuntimeRepairAttempts": int(runtime.get("maxRuntimeRepairAttempts") or 10),
+    "maxProviderRetryAttempts": int(runtime.get("maxProviderRetryAttempts") or 10),
+    "shellCommandTimeout": runtime.get("shellCommandTimeout") or "60s",
+    "llmOutput": clean_llm_output(runtime.get("llmOutput") or {}),
+}
+updated = dict(original)
+updated["maxRuntimeRepairAttempts"] = 3
+with open(original_path, "w", encoding="utf-8") as handle:
+    json.dump(original, handle, separators=(",", ":"))
+with open(update_path, "w", encoding="utf-8") as handle:
+    json.dump(updated, handle, separators=(",", ":"))
 PY
 }
 
@@ -2094,6 +2147,9 @@ curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.jso
 write_llm_update_payloads
 curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
+write_runtime_update_payloads
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/runtime" -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/verify-runtime-update.json" >"$TMP_DIR/configuration-runtime-updated.json"
 
 workspace_workdir="$TMP_DIR/workspace-dev"
 mkdir -p "$workspace_workdir"

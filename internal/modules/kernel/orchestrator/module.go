@@ -128,12 +128,36 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandSupersedeRun, m.handleCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandFailRun, m.handleCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandPurgeRun, m.handlePurgeRunCommand),
+		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy, m.handleRuntimePolicyCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListPatchesByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, m.handleEvidenceReadCommand),
 		m.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun, m.handleEvidenceReadCommand),
 	)
 	return nil
+}
+
+func (m *Module) handleRuntimePolicyCommand(ctx context.Context, envelope events.Envelope) error {
+	_ = ctx
+	if m == nil || m.bizPtr == nil {
+		return common.ErrInvalidArgument
+	}
+	cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.UpdateRuntimePolicyCommand)
+	if !ok {
+		return common.ErrInvalidArgument
+	}
+	if err := m.bizPtr.UpdateRuntimePolicy(cmd.Policy); err != nil {
+		return err
+	}
+	return events.Response(events.Envelope{
+		Topic:        envelope.Topic + "/response",
+		SourceModule: ModuleID,
+		SubjectType:  envelope.SubjectType,
+		SubjectID:    envelope.SubjectID,
+		WorkspaceID:  envelope.WorkspaceID,
+		RunID:        envelope.RunID,
+		StepID:       envelope.StepID,
+	})
 }
 
 func (m *Module) Stop(ctx context.Context) error {

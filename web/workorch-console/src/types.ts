@@ -262,6 +262,23 @@ export type Workspace = {
   soulBindings?: Record<string, string>;
 };
 
+export type ProjectionStatus = {
+  state: string;
+  globalRevision: number;
+  workspaceRevision?: number;
+  sourceEventRevision?: number;
+  workspaceTotal?: number;
+  updatedAt?: string;
+  rebuiltAt?: string;
+  degraded?: boolean;
+  error?: string;
+};
+
+export type WorkspaceListProjection = {
+  projection: ProjectionStatus;
+  workspaces: Workspace[];
+};
+
 export type Goal = {
   id: string;
   workspaceId: string;
@@ -1197,6 +1214,7 @@ export type WorkspaceSnapshot = {
   workspace: Workspace;
   outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
+  contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
@@ -1214,6 +1232,11 @@ export type WorkspaceSnapshot = {
   eventRecords?: EventRecord[];
   decisions?: Decision[];
   approvals?: Approval[];
+};
+
+export type WorkspaceSnapshotProjection = {
+  projection: ProjectionStatus;
+  snapshot: WorkspaceSnapshot;
 };
 
 export type WorkspaceExecutionActivation = {
@@ -1289,6 +1312,4 @@ export type ControlPlaneProps = {
 
 export type WorkspaceBoardItem = {
   snapshot: WorkspaceSnapshot;
-  goals: Goal[];
-  dods: DoD[];
 };

@@ -6,6 +6,9 @@ import (
 
 func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {
 	ret := snapshot
+	if ret.ContextBundle == nil {
+		ret = WorkspaceSnapshotWithContextBundle(ret)
+	}
 	if len(ret.Decisions) > 0 {
 		limit := min(len(ret.Decisions), decisionPageLimit)
 		projected := make([]readmodelcore.Decision, 0, limit)

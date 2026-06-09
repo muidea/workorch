@@ -3,6 +3,8 @@ package readmodelports
 import (
 	"context"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -25,6 +27,36 @@ func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, 
 			}
 			models.Patches = append(models.Patches, items...)
 		}
+		if readers.EventRecords != nil {
+			items, err := readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordRepositoryQuery(runItem.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+			if err != nil {
+				return err
+			}
+			models.appendLLMUsageEventRecords(items...)
+		}
 	}
 	return nil
+}
+
+func (models *workspaceSnapshotModels) appendLLMUsageEventRecords(items ...*eventstreammodel.EventRecord) {
+	if models == nil || len(items) == 0 {
+		return
+	}
+	seen := make(map[common.EventRecordID]struct{}, len(models.LLMUsageEventRecords)+len(items))
+	for _, item := range models.LLMUsageEventRecords {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+	}
+	for _, item := range items {
+		if item == nil || item.ID == "" {
+			continue
+		}
+		if _, ok := seen[item.ID]; ok {
+			continue
+		}
+		models.LLMUsageEventRecords = append(models.LLMUsageEventRecords, item)
+		seen[item.ID] = struct{}{}
+	}
 }

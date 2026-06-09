@@ -4,7 +4,7 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-05-29
+Last Updated: 2026-06-09
 
 ## Purpose
 
@@ -16,10 +16,13 @@ Last Updated: 2026-05-29
 
 TUI 必须使用与 backend/Web 一致的状态源语义：
 
-- 当前 workspace state 来自 `WorkspaceInfo.State`
-- 当前 active run 来自 `WorkspaceInfo.ActiveRunID`
+- workspace list 来自 workorchd `WorkspaceOverview` projection
+- 当前 workspace detail 来自 workorchd `WorkspaceDetail` projection
+- 当前 workspace state 来自 projection 中的 workspace state
+- 当前 active run 来自 projection 中的 active run 字段
 - blocker、run status、result/outcome 都必须以 active workspace + active run 为准
 - superseded / failed / completed 的旧 run 只能作为历史摘要，不得驱动当前状态栏、prompt mode 或 active blocker
+- TUI 不自行组合 run/status/goal/dod/decision/approval/result 状态
 
 ### Main Viewport
 
@@ -52,9 +55,12 @@ TUI 必须使用与 backend/Web 一致的状态源语义：
 
 ### Refresh Rules
 
-- 本地 TUI 刷新必须继续通过 shared backend + EventHub callbacks
+- 本地 TUI 刷新必须继续通过 shared backend + EventHub/SSE projection change callbacks
 - 不允许恢复 HTTP polling、`time.Tick`、`tea.Tick` 或 fixed-interval refresh
 - non-active workspace 事件只能刷新 monitor，不得污染 active session 的主结果区
+- workspace switch 后必须读取目标 workspace detail projection，并丢弃旧 workspace
+  scope 的异步响应
+- command 返回只表示请求已提交，最终显示状态以服务端 projection revision 为准
 
 ### Terminal Usability
 
@@ -64,4 +70,5 @@ TUI 必须使用与 backend/Web 一致的状态源语义：
 
 ## Source Documents
 
+- `../../30-module-architecture/mvvp-workspace-viewmodel-architecture.md`
 - `../../60-verification/tui/display-closure-tracking.md`

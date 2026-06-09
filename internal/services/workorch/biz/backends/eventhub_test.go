@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
@@ -79,6 +80,43 @@ func TestEventHubBackendCLICommandUsesAsyncDispatchWithoutSendTimeout(t *testing
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("workspace create blocked waiting for nested CLI result event")
+	}
+}
+
+func TestEventHubEventsBackendReceivesProjectionAcrossHubWrappers(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	subscriberHub := events.NewMagicHubWithHubOwner(rawHub, "workorch/tui")
+	publisherHub := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
+	be := NewEventHub(subscriberHub)
+	received := make(chan Event, 1)
+	unsubscribe, err := be.Events().Subscribe(ctx, func(_ context.Context, evt Event) {
+		if evt.Type == EventWorkspaceProjectionChanged {
+			received <- evt
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe events: %v", err)
+	}
+	defer unsubscribe()
+
+	if err := publisherHub.Publish(ctx, events.Envelope{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: "ws-projection",
+		Payload:     map[string]any{"changeKind": "detail"},
+	}); err != nil {
+		t.Fatalf("publish projection event: %v", err)
+	}
+
+	select {
+	case evt := <-received:
+		if evt.WorkspaceID != "ws-projection" || evt.Payload["changeKind"] != "detail" {
+			t.Fatalf("event = %+v, want projection detail for ws-projection", evt)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for projection event across hub wrappers")
 	}
 }
 
@@ -185,6 +223,19 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 }
 
 func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
+	projectionEvent := convertEnvelope(events.Envelope{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: "ws-1",
+		Payload: map[string]any{
+			"globalRevision":    float64(2),
+			"workspaceRevision": float64(1),
+			"changeKind":        "detail",
+		},
+	})
+	if projectionEvent.Type != EventWorkspaceProjectionChanged || projectionEvent.WorkspaceID != "ws-1" || projectionEvent.Payload["changeKind"] != "detail" {
+		t.Fatalf("projection event = %+v, want workspace projection changed", projectionEvent)
+	}
+
 	goalEvent := convertEnvelope(events.Envelope{
 		Topic:       workspaceevents.TopicGoalDefined,
 		SubjectID:   "goal-1",
@@ -349,12 +400,24 @@ func newEventHubBackendWithDispatcher(t *testing.T, ctx context.Context) (Backen
 	if err != nil {
 		t.Fatalf("exports: %v", err)
 	}
-	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub)
+	dispatcher := appservice.NewCLICommandDispatcher(session, exports.Infrastructure.EventHub, testWorkspaceViewReader{session: session})
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("run dispatcher: %v", err)
 	}
 	t.Cleanup(dispatcher.Close)
 	return NewEventHub(exports.Infrastructure.EventHub), exports.Infrastructure.EventHub
+}
+
+type testWorkspaceViewReader struct {
+	session *appservice.RuntimeSession
+}
+
+func (r testWorkspaceViewReader) ListWorkspaceView(ctx context.Context) ([]appservice.Workspace, error) {
+	return appservice.ListWorkspacesWithSession(ctx, r.session.Borrow())
+}
+
+func (r testWorkspaceViewReader) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	return appservice.ReadWorkspaceSnapshotWithSession(ctx, r.session.Borrow(), workspaceID)
 }
 
 func TestConvertEnvelopeAddsBlockingSubjectIDs(t *testing.T) {

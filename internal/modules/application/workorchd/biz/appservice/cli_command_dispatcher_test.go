@@ -9,7 +9,7 @@ import (
 
 func TestCLICommandDispatcherRunIsIdempotent(t *testing.T) {
 	hub := &countingCLIHub{}
-	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub)
+	dispatcher := NewCLICommandDispatcher(&RuntimeSession{}, hub, nil)
 	if err := dispatcher.Run(); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}

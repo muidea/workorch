@@ -2464,8 +2464,6 @@ export type ControlPlaneProps = {
 
 export type WorkspaceBoardItem = {
   snapshot: WorkspaceSnapshot;
-  goals: Goal[];
-  dods: DoD[];
 };
 
 export function readyDoDs(dods: DoD[]) {
@@ -2478,23 +2476,25 @@ export function workspaceBoardActivationRequest(item: WorkspaceBoardItem): Works
     return { goalId: projectedRun.goalId, doDId: projectedRun.doDId };
   }
 
-  const availableDoDs = readyDoDs(item.dods);
-  if (item.goals.length === 1 && availableDoDs.length === 1) {
-    return { goalId: item.goals[0].id, doDId: availableDoDs[0].id };
+  const goals = item.snapshot.goals ?? [];
+  const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
+  if (goals.length === 1 && availableDoDs.length === 1) {
+    return { goalId: goals[0].id, doDId: availableDoDs[0].id };
   }
 
   return undefined;
 }
 
 export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
-  if (item.goals.length === 0) {
+  const goals = item.snapshot.goals ?? [];
+  const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
+  if (goals.length === 0) {
     return `当前工作空间尚未定义目标，请进入工作空间补齐${modelLabels.goal}后再启动执行`;
   }
-  const availableDoDs = readyDoDs(item.dods);
   if (availableDoDs.length === 0) {
     return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再启动执行`;
   }
-  if (item.goals.length > 1 || availableDoDs.length > 1) {
+  if (goals.length > 1 || availableDoDs.length > 1) {
     return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再启动执行`;
   }
   return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';

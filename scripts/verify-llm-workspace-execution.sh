@@ -876,15 +876,15 @@ PY
 assert_workspace_recovery_read_models() {
   local label="$1"
 
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/task-progress" >"$TMP_DIR/$label-workspace-task-progress.json"
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/context-bundle" >"$TMP_DIR/$label-workspace-context-bundle.json"
-  python3 - "$TMP_DIR/$label-workspace-task-progress.json" "$TMP_DIR/$label-workspace-context-bundle.json" "$workspace_id" <<'PY'
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/$label-workspace-snapshot.json"
+  python3 - "$TMP_DIR/$label-workspace-snapshot.json" "$workspace_id" <<'PY'
 import json
 import sys
 
-progress = json.load(open(sys.argv[1], encoding="utf-8"))["taskProgress"]
-bundle = json.load(open(sys.argv[2], encoding="utf-8"))["contextBundle"]
-workspace_id = sys.argv[3]
+snapshot = json.load(open(sys.argv[1], encoding="utf-8"))["snapshot"]
+progress = snapshot["taskProgress"]
+bundle = snapshot["contextBundle"]
+workspace_id = sys.argv[2]
 errors = []
 if progress.get("workspaceId") != workspace_id:
     errors.append(f"workspace taskProgress identity mismatch: {progress}")
@@ -932,8 +932,11 @@ PY
 
 assert_workspace_llm_usage_breakdown() {
   local workspace_id="$1"
-  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-llm-usage-snapshot.json"
-  python3 - "$TMP_DIR/workspace-llm-usage-snapshot.json" <<'PY'
+  local deadline=$((SECONDS + 15))
+  local error_file="$TMP_DIR/workspace-llm-usage-error.txt"
+  while true; do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-llm-usage-snapshot.json"
+    if python3 - "$TMP_DIR/workspace-llm-usage-snapshot.json" >"$error_file" 2>&1 <<'PY'
 import json
 import sys
 
@@ -958,6 +961,15 @@ for item in breakdown:
     if (item.get("providerId"), item.get("model")) in required and int(item.get("entryTotal") or 0) <= 0:
         raise SystemExit(f"workspace provider/model breakdown has empty entryTotal: {item}")
 PY
+    then
+      return 0
+    fi
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      cat "$error_file" >&2 || true
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 trap report_failure ERR

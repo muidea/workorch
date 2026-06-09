@@ -172,6 +172,7 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if r == nil || r.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	originalResumeState := runResumeStateSnapshotFromRun(r)
 	var resumeAfterStepID common.StepID
 	var resumeInput map[string]any
 	switch r.State {
@@ -188,12 +189,13 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 				r.BlockingTicketID = ""
 				break
 			}
-			if duplicateRuntimeFailureBlockerCanAutoResume(ctx, o.steps, o.repairManager(), o.policy, r, ticket) {
+			policy := o.RuntimePolicy()
+			if duplicateRuntimeFailureBlockerCanAutoResume(ctx, o.steps, o.repairManager(), policy, r, ticket) {
 				resumeAfterStepID = ticket.StepID
 				r.BlockingTicketID = ""
 				break
 			}
-			if runtimeRepairExhaustionBlockerCanAutoResume(ctx, o.steps, o.repairManager(), o.policy, r, ticket) {
+			if runtimeRepairExhaustionBlockerCanAutoResume(ctx, o.steps, o.repairManager(), policy, r, ticket) {
 				ticket.State = common.DecisionTicketStateDismissed
 				if err := o.tickets.Update(ctx, ticket); err != nil {
 					return err
@@ -320,9 +322,38 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		return common.ErrConflict
 	}
 
-	r.State = common.RunStateRunning
-	r.FailureReason = ""
-	mergeRunExecutionContextPatch(r, executionContextPatch)
+	resumeRun := cloneRunForResume(r)
+	resumeRun.State = common.RunStateRunning
+	resumeRun.FailureReason = ""
+	mergeRunExecutionContextPatch(resumeRun, executionContextPatch)
+	specs, err := nextDispatchSpecsAfterResolvedDecision(
+		ctx,
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.RuntimePolicy(), run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
+			return runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID)
+		},
+		func(ctx context.Context, run *runModel.Run, stepID common.StepID, input map[string]any) ([]stepDispatchSpec, bool, error) {
+			return contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, input)
+		},
+		o.nextDispatchSpecsAfterStep,
+		resumeRun,
+		resumeAfterStepID,
+		resumeInput,
+	)
+	if err != nil {
+		return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
+	}
+	mergeResumeInput(specs, resumeInput)
+	r.State = resumeRun.State
+	r.FailureReason = resumeRun.FailureReason
+	r.BlockingTicketID = resumeRun.BlockingTicketID
+	r.BlockingApprovalID = resumeRun.BlockingApprovalID
+	r.ExecutionContext = cloneStepPayload(resumeRun.ExecutionContext)
 	workspace, err := o.runStateManager().syncRunAndWorkspaceForActiveState(ctx, r, common.WorkspaceStateRunning, nil)
 	if err != nil {
 		return err
@@ -333,31 +364,65 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 	if err := o.eventPublisher().publishWorkspaceStateChanged(ctx, workspace, r.ID); err != nil {
 		return err
 	}
-	specs, err := nextDispatchSpecsAfterResolvedDecision(
-		ctx,
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return knownReadableDecisionRepairSpecs(ctx, o.steps, o.workspaces, o.repairManager(), o, run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return providerRetrySpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o.policy, run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID) ([]stepDispatchSpec, bool, error) {
-			return runtimeRepairSpecsAfterResolvedDecision(ctx, o.steps, o.repairManager(), o, run, stepID)
-		},
-		func(ctx context.Context, run *runModel.Run, stepID common.StepID, input map[string]any) ([]stepDispatchSpec, bool, error) {
-			return contextIntegritySpecsAfterResolvedDecision(ctx, o.steps, run, stepID, input)
-		},
-		o.nextDispatchSpecsAfterStep,
-		r,
-		resumeAfterStepID,
-		resumeInput,
-	)
-	if err != nil {
-		return o.failRunningResume(ctx, r.ID, err)
-	}
-	mergeResumeInput(specs, resumeInput)
 	if err := dispatchStepSpecsWithWorkspace(ctx, o.dispatchStepWithWorkspace, o.dispatchGraphStepBatchWithWorkspace, r, specs, workspace); err != nil {
 		return errors.Join(o.failRunningResume(ctx, r.ID, err), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 	}
 	return o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID)
+}
+
+type runResumeStateSnapshot struct {
+	state              common.RunState
+	blockingTicketID   common.TicketID
+	blockingApprovalID common.ApprovalID
+}
+
+func runResumeStateSnapshotFromRun(run *runModel.Run) runResumeStateSnapshot {
+	if run == nil {
+		return runResumeStateSnapshot{}
+	}
+	return runResumeStateSnapshot{
+		state:              run.State,
+		blockingTicketID:   run.BlockingTicketID,
+		blockingApprovalID: run.BlockingApprovalID,
+	}
+}
+
+func (s runResumeStateSnapshot) matches(run *runModel.Run) bool {
+	return run != nil &&
+		run.State == s.state &&
+		run.BlockingTicketID == s.blockingTicketID &&
+		run.BlockingApprovalID == s.blockingApprovalID
+}
+
+func cloneRunForResume(run *runModel.Run) *runModel.Run {
+	if run == nil {
+		return nil
+	}
+	cloned := *run
+	cloned.ExecutionContext = cloneStepPayload(run.ExecutionContext)
+	return &cloned
+}
+
+func (o *RuntimeOrchestrator) failResolvedDecisionResume(ctx context.Context, run *runModel.Run, original runResumeStateSnapshot, executionContextPatch map[string]any, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if o == nil || run == nil || run.ID == "" || o.runs == nil {
+		return cause
+	}
+	if errors.Is(cause, common.ErrBlocked) {
+		return cause
+	}
+	current, err := o.runs.Get(ctx, run.ID)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if !original.matches(current) {
+		return cause
+	}
+	mergeRunExecutionContextPatch(current, executionContextPatch)
+	if err := o.closeLoadedRun(ctx, current, common.RunStateFailed, cause.Error()); err != nil {
+		return errors.Join(cause, err)
+	}
+	return nil
 }

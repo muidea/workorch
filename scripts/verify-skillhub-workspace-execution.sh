@@ -8,6 +8,7 @@ MOCK_ADDR="${WORKORCH_SKILLHUB_VERIFY_MOCK_ADDR:-127.0.0.1:18191}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_SKILLHUB_VERIFY_SUFFIX:-$$}"
 GLOBAL_SKILL_ID="${WORKORCH_VERIFY_GLOBAL_SKILL_ID:-go-multi-module-dev}"
+RUN_WAIT_SECONDS="${WORKORCH_SKILLHUB_VERIFY_RUN_WAIT_SECONDS:-90}"
 MCP_SERVER_ID="mcp-skillhub-auto-$VERIFY_SUFFIX"
 REPOSITORY_SKILL_ID="skill-skillhub-auto-mcp-$VERIFY_SUFFIX"
 SOUL_ID="soul-skillhub-auto-$VERIFY_SUFFIX"
@@ -274,6 +275,33 @@ if errors:
 PY
 }
 
+wait_run_state() {
+  local run_id="$1"
+  local expected_state="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + RUN_WAIT_SECONDS))
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
+    if python3 - "$output_file" "$expected_state" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+state = (data.get("status") or {}).get("state")
+raise SystemExit(0 if state == sys.argv[2] else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "timed out waiting for run $run_id state $expected_state" >&2
+  cat "$output_file" >&2
+  return 1
+}
+
 trap report_failure ERR
 trap cleanup EXIT
 
@@ -323,8 +351,8 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
   -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify-skillhub","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"priority":2}' >"$TMP_DIR/activation.json"
-grep '"state": "completed"' "$TMP_DIR/activation.json" >/dev/null
 run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
+wait_run_state "$run_id" "completed" "$TMP_DIR/run-status-completed.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/run-snapshot.json"
 validate_snapshot
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory.json"

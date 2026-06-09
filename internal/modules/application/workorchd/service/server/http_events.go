@@ -55,14 +55,14 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return true
 		}
 		eventCh := make(chan events.Envelope, 128)
-		unsubscribe := state.eventHub.Subscribe("*", func(_ context.Context, envelope events.Envelope) error {
+		unsubscribers := subscribeServerStreamEvents(state.eventHub, func(_ context.Context, envelope events.Envelope) error {
 			if !filterEnvelope(envelope) {
 				return nil
 			}
 			enqueueEventStreamEnvelope(eventCh, envelope)
 			return nil
 		})
-		defer unsubscribe()
+		defer unsubscribeAll(unsubscribers)
 		_, _ = fmt.Fprint(w, ": connected\n\n")
 		flusher.Flush()
 		lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))

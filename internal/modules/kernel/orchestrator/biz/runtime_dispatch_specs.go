@@ -592,10 +592,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 		}}, nil
 	}
 	if last.State == common.StepStateFailed && requiresDoDAssessmentCompletionGate(run) {
-		action := runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), o.policy, o.runtime != nil, o.tickets != nil, run, last)
+		policy := o.RuntimePolicy()
+		action := runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), policy, o.runtime != nil, o.tickets != nil, run, last)
 		switch action {
 		case runtimeRecoveryActionProviderRetry:
-			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(o.policy), o, false)
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(policy), o, false)
 			if err != nil {
 				return nil, err
 			}
@@ -604,7 +605,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsFromStep(
 			}
 			return []stepDispatchSpec{spec}, nil
 		case runtimeRecoveryActionRuntimeRepair:
-			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(o.policy), o, false)
+			spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, last, nil, action, maxProviderRetryAttemptsForPolicy(policy), o, false)
 			if err != nil {
 				return nil, err
 			}

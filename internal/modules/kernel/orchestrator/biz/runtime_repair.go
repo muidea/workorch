@@ -368,9 +368,10 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		}
 		return o.FailRun(ctx, run.ID, reason)
 	}
-	switch runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), o.policy, o.runtime != nil, o.tickets != nil, run, failedStep) {
+	policy := o.RuntimePolicy()
+	switch runtimeRecoveryActionForFailedStep(ctx, o.repairManager(), policy, o.runtime != nil, o.tickets != nil, run, failedStep) {
 	case runtimeRecoveryActionProviderRetry:
-		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, maxProviderRetryAttemptsForPolicy(o.policy), o, true)
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionProviderRetry, maxProviderRetryAttemptsForPolicy(policy), o, true)
 		if err != nil {
 			return err
 		}
@@ -387,7 +388,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 	case runtimeRecoveryActionContextIntegrityBlocked:
 		return o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepair:
-		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttemptsForPolicy(o.policy), o, true)
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttemptsForPolicy(policy), o, true)
 		if err != nil {
 			return err
 		}
@@ -698,7 +699,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := maxRuntimeRepairAttemptsForPolicy(o.policy)
+	maxAttempts := maxRuntimeRepairAttemptsForPolicy(o.RuntimePolicy())
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
@@ -734,7 +735,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err
 	}
-	return o.BlockOnDecision(ctx, run.ID, spec.TicketID)
+	return o.blockOnDecisionAtStep(ctx, run, nil, spec.TicketID, failedStep.ID)
 }
 
 func shouldAttemptRuntimeRepair(ctx context.Context, repair *repairSubsystem, policy RuntimePolicy, runtimeAvailable bool, run *runModel.Run, failedStep *runModel.Step) bool {
@@ -790,7 +791,7 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := maxProviderRetryAttemptsForPolicy(o.policy)
+	maxAttempts := maxProviderRetryAttemptsForPolicy(o.RuntimePolicy())
 	rootStepID := providerRetryRootStepID(failedStep)
 	attempts := o.repairManager().providerRetryAttemptCount(ctx, run.ID, rootStepID)
 	if attempts > maxAttempts {
@@ -820,7 +821,7 @@ func (o *RuntimeOrchestrator) blockOnProviderRetryExhaustion(
 	if err != nil {
 		return err
 	}
-	return o.BlockOnDecision(ctx, run.ID, ticketID)
+	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, failedStep.ID)
 }
 
 func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
@@ -869,7 +870,7 @@ func (o *RuntimeOrchestrator) blockOnContextIntegrityGate(
 	if err != nil {
 		return err
 	}
-	return o.BlockOnDecision(ctx, run.ID, ticketID)
+	return o.blockOnDecisionAtStep(ctx, run, nil, ticketID, failedStep.ID)
 }
 
 func (o *RuntimeOrchestrator) createOrReuseRuntimeBlockerTicket(

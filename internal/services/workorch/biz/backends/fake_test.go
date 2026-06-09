@@ -102,6 +102,22 @@ func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*backend.Works
 func (f *fakeWS) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
 	return f.b.workspaces, nil
 }
+func (f *fakeWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	workspace, err := f.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	f.b.mu.Lock()
+	defer f.b.mu.Unlock()
+	return &backend.WorkspaceSnapshotInfo{
+		Workspace: *workspace,
+		Goals:     append([]backend.GoalInfo(nil), f.b.goals...),
+		DoDs:      append([]backend.DoDInfo(nil), f.b.dods...),
+		Runs:      append([]backend.RunInfo(nil), f.b.runs...),
+		Decisions: append([]backend.DecisionInfo(nil), f.b.decisions...),
+		Approvals: append([]backend.ApprovalInfo(nil), f.b.approvals...),
+	}, nil
+}
 func (f *fakeWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error { return nil }
 
 // ── Goal ──

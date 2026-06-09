@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,15 +16,22 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		state.metrics.workspaceListRequests.Add(1)
-		items, err := state.listWorkspaces(r.Context(), state.config.Backend, state.config.DataRoot)
+		items, projection, err := state.listProjectedWorkspaces()
 		if err != nil {
-			writeBusinessError(w, err)
+			writeJSON(w, projectionHTTPStatus(err), workspacesResponse{
+				Service:    "workorch",
+				Backend:    state.config.Backend,
+				DataRoot:   state.config.DataRoot,
+				Projection: projection,
+				Error:      err.Error(),
+			})
 			return
 		}
 		writeJSON(w, http.StatusOK, workspacesResponse{
 			Service:    "workorch",
 			Backend:    state.config.Backend,
 			DataRoot:   state.config.DataRoot,
+			Projection: projection,
 			Workspaces: items,
 		})
 	})
@@ -55,76 +63,23 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			return
 		}
 		state.metrics.workspaceSnapshotRequests.Add(1)
-		item, err := state.readWorkspaceSnapshotCached(r.Context(), workspaceID)
+		item, projection, err := state.readProjectedWorkspaceSnapshot(workspaceID)
 		if err != nil {
-			writeBusinessError(w, err)
+			writeJSON(w, projectionHTTPStatus(err), workspaceSnapshotResponse{
+				Service:    "workorch",
+				Backend:    state.config.Backend,
+				DataRoot:   state.config.DataRoot,
+				Projection: projection,
+				Error:      err.Error(),
+			})
 			return
 		}
 		writeJSON(w, http.StatusOK, workspaceSnapshotResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Snapshot: appservice.ProjectWorkspaceSnapshotDetail(item),
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/task-progress", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "task-progress" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.workspaceTaskProgressRequests.Add(1)
-		item, err := state.readWorkspaceTaskProgress(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, taskProgressResponse{
-			Service:      "workorch",
-			Backend:      state.config.Backend,
-			DataRoot:     state.config.DataRoot,
-			TaskProgress: item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/context-bundle", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "context-bundle" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.workspaceContextBundleRequests.Add(1)
-		item, err := state.readWorkspaceContextBundle(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, contextBundleResponse{
-			Service:       "workorch",
-			Backend:       state.config.Backend,
-			DataRoot:      state.config.DataRoot,
-			ContextBundle: item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/task-decompositions", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "task-decompositions" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.workspaceTaskDecompositionRequests.Add(1)
-		items, err := state.readWorkspaceTaskDecompositions(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, taskDecompositionsResponse{
-			Service:            "workorch",
-			Backend:            state.config.Backend,
-			DataRoot:           state.config.DataRoot,
-			TaskDecompositions: items,
+			Service:    "workorch",
+			Backend:    state.config.Backend,
+			DataRoot:   state.config.DataRoot,
+			Projection: projection,
+			Snapshot:   appservice.ProjectWorkspaceSnapshotDetail(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/memory-recalls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -257,6 +212,19 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 	})
 }
 
+func projectionHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, common.ErrInvalidArgument):
+		return http.StatusBadRequest
+	case errors.Is(err, common.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, common.ErrConflict), errors.Is(err, common.ErrBlocked):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -280,6 +248,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.upsertProjectedWorkspace(item)
 		writeJSON(w, http.StatusCreated, workspaceResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -313,6 +282,9 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		if err := state.deleteWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, cmd); err != nil {
 			writeBusinessError(w, err)
 			return
+		}
+		if state.workspaceProjection != nil {
+			state.workspaceProjection.DeleteWorkspace(workspaceID)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -360,6 +332,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			state.scheduleReplanContinuationIfNeeded(r.Context(), item.Run.WorkspaceID, item.Run.ID, priority)
 		}
 		state.notifyRunStatusChangedForRun(item.Run)
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
 			Service:    "workorch",
 			Backend:    state.config.Backend,
@@ -384,6 +357,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusOK, workspaceSoulBindingsResponse{
 			Service:      "workorch",
 			Backend:      state.config.Backend,
@@ -409,6 +383,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusCreated, goalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -443,6 +418,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusOK, goalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -468,6 +444,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusCreated, dodResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -502,6 +479,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeBusinessError(w, err)
 			return
 		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
 		writeJSON(w, http.StatusOK, dodResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,

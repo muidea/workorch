@@ -13,6 +13,7 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -29,6 +30,19 @@ func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t
 	ticketRepo := memory.NewDecisionTicketRepository()
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
+	workspaceID := common.WorkspaceID("ws-decision-no-continuation")
+	runID := common.RunID("run-decision-no-continuation")
+	stepID := common.StepID("run-decision-no-continuation/step-1")
+	ticketID := common.TicketID("ticket-decision-no-continuation")
+	hub := events.NewMemoryHub()
+	var runStates []string
+	unsubscribe := hub.Subscribe(runevents.TopicRunStateChanged, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.RunID == string(runID) {
+			runStates = append(runStates, stringFromMap(envelope.Payload, events.PayloadKeyState))
+		}
+		return nil
+	})
+	defer unsubscribe()
 	orch := NewRuntimeOrchestratorWithResolutions(
 		&stubRuntimeAdapter{},
 		runRepo,
@@ -37,13 +51,9 @@ func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t
 		ticketRepo,
 		resolutionRepo,
 		approvalRepo,
-		events.NewMemoryHub(),
+		hub,
 	)
 
-	workspaceID := common.WorkspaceID("ws-decision-no-continuation")
-	runID := common.RunID("run-decision-no-continuation")
-	stepID := common.StepID("run-decision-no-continuation/step-1")
-	ticketID := common.TicketID("ticket-decision-no-continuation")
 	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
@@ -95,6 +105,14 @@ func TestRuntimeOrchestrator_ResumeRunFailsResolvedDecisionWithoutContinuation(t
 	}
 	if runItem.BlockingTicketID != "" || !strings.Contains(runItem.FailureReason, common.ErrConflict.Error()) {
 		t.Fatalf("run terminal details = %+v, want cleared blocker and conflict reason", runItem)
+	}
+	for _, state := range runStates {
+		if state == string(common.RunStateRunning) {
+			t.Fatalf("run states = %v, want no intermediate running event for failed resolved-decision resume", runStates)
+		}
+	}
+	if len(runStates) == 0 || runStates[len(runStates)-1] != string(common.RunStateFailed) {
+		t.Fatalf("run states = %v, want terminal failed event", runStates)
 	}
 }
 

@@ -65,6 +65,7 @@ type EventsBackend = port.EventsBackend
 const (
 	EventWorkspaceCreated            = port.EventWorkspaceCreated
 	EventWorkspaceListChanged        = port.EventWorkspaceListChanged
+	EventWorkspaceProjectionChanged  = port.EventWorkspaceProjectionChanged
 	EventWorkspaceStateChanged       = port.EventWorkspaceStateChanged
 	EventWorkspaceDeleted            = port.EventWorkspaceDeleted
 	EventGoalDefined                 = port.EventGoalDefined

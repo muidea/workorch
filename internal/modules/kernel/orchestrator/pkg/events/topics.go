@@ -11,6 +11,7 @@ const (
 	TopicOrchestratorCommandSupersedeRun                   = "/orchestrator/command/supersede-run"
 	TopicOrchestratorCommandFailRun                        = "/orchestrator/command/fail-run"
 	TopicOrchestratorCommandPurgeRun                       = "/orchestrator/command/purge-run"
+	TopicOrchestratorCommandUpdateRuntimePolicy            = "/orchestrator/command/update-runtime-policy"
 	TopicOrchestratorCommandListToolCallsByRun             = "/orchestrator/command/list-tool-calls-by-run"
 	TopicOrchestratorCommandListPatchesByRun               = "/orchestrator/command/list-patches-by-run"
 	TopicOrchestratorCommandListValidationResultsByRun     = "/orchestrator/command/list-validation-results-by-run"

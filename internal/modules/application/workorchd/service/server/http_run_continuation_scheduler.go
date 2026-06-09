@@ -55,7 +55,7 @@ func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) 
 	state := s.state
 	var recovered []appservice.Run
 	var err error
-	if state.sharedSession != nil {
+	if state.hasSharedSession() {
 		err = state.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var recoverErr error
 			recovered, recoverErr = appservice.RecoverStuckRunningRunsWithSession(ctx, session)

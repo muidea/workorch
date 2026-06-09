@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-09
 
 ## Purpose
 
@@ -20,6 +20,16 @@ Last Updated: 2026-05-30
 - request-scoped runtime session
 - HTTP service 暴露
 - appservice 级 use-case 组合
+- workspace ViewModel projection 的服务端管理和输出适配
+
+应用层不负责：
+
+- 拥有 workspace/run/decision/approval/result 等正式业务状态
+- 绕过 owner module 直接执行状态机转换
+- 让 Web/TUI 在端侧重建 workspace 状态投影
+
+workspace ViewModel 的完整设计以
+`mvvp-workspace-viewmodel-architecture.md` 为准。
 
 ## Main Components
 
@@ -78,6 +88,8 @@ Last Updated: 2026-05-30
 - activation / recovery / governance / read-model 等 use-case 组合应留在 appservice
 - appservice 优先通过 module service 或 grouped runtime face 访问下层能力
 - read-model DTO 与 read-model construction 逻辑应分离
+- workspace overview/detail ViewModel core、projection store、baseline loader
+  应落在 appservice focused package，而不是 HTTP server package
 
 ### `internal/modules/application/workorchd/service/server`
 
@@ -92,6 +104,13 @@ server 层不应复制业务逻辑；其职责应止于：
 - 请求解析与参数校验
 - 调用 appservice
 - 输出 HTTP response / SSE
+
+server 层可以接线 projection manager lifecycle，但不拥有 projection core：
+
+- 不在 handler 内逐 workspace 做 heavy snapshot/result/evidence 聚合
+- 不直接访问 kernel owner repository/service
+- 不把 projection store、baseline rebuild、field mapping 长期放在 server 包内
+- 只把 projection store 的只读结果映射为 REST/SSE response
 
 ## Lifecycle Upgrade Note
 
@@ -174,7 +193,20 @@ workorchd 启动恢复属于应用层 use-case 组合，职责是把 repository 
 - 与 `service-api.md` 的 response family 保持一致
 - 与 `service-acceptance.md` 的 direct verification 证据保持一致
 
+### Workspace ViewModel Boundary
+
+workspace list/detail 面向 Web/TUI 时应优先读取 workorchd 启动后维护的
+ViewModel projection：
+
+- overview list: `GET /api/v1/workorch/workspaces`
+- detail projection: `GET /api/v1/workorch/workspaces/:workspaceId/snapshot`
+- refresh signal: `GET /api/v1/workorch/events`
+
+旧的 request-time snapshot 聚合只能作为 projection baseline/rebuild 的内部实现
+细节，不再作为 Web/TUI 的主刷新路径。
+
 ## Source Documents
 
 - `repository-structure.md`
+- `mvvp-workspace-viewmodel-architecture.md`
 - `../50-product-interface/service-api.md`

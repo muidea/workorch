@@ -126,6 +126,9 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 	unsubscribe := func() {}
 	if be != nil {
 		if unsub, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
+			if !shouldConsumeBackendSubscriptionEvent(evt.Type) {
+				return
+			}
 			enqueueBackendEvent(eventCh, evt)
 		}); err == nil {
 			unsubscribe = unsub
@@ -172,6 +175,16 @@ func enqueueBackendEvent(ch chan backend.Event, evt backend.Event) {
 	}
 }
 
+func shouldConsumeBackendSubscriptionEvent(eventType backend.EventType) bool {
+	switch eventType {
+	case backend.EventWorkspaceListChanged,
+		backend.EventWorkspaceProjectionChanged:
+		return true
+	default:
+		return false
+	}
+}
+
 func isBackendEventQueueCritical(eventType backend.EventType) bool {
 	switch eventType {
 	case backend.EventWorkspaceCreated,
@@ -198,7 +211,7 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh), ScheduleLiveRefreshTick()}
+	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
 			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
@@ -321,12 +334,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BackendEventMsg:
 		cmd := m.applyBackendEvent(msg.Event)
 		return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
-	case LiveRefreshTickMsg:
-		cmds := []tea.Cmd{ScheduleLiveRefreshTick()}
-		if m.activeWorkspaceNeedsLiveRefresh() {
-			cmds = append(cmds, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
-		}
-		return m, tea.Batch(cmds...)
 	case RunStartedMsg:
 		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
 			return m, nil
@@ -604,7 +611,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.clearInput()
 		m.lastError = nil
 		m.appendTranscript("Approval", text)
-		return m, ResolveApproval(m.be, approvalID, approve)
+		return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, approve)
 	}
 	if m.activeWorkspaceID == "" {
 		m.lastError = fmt.Errorf("no active workspace")
@@ -827,7 +834,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "approve")
-			return m, ResolveApproval(m.be, approvalID, true), true
+			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, true), true
 		case "reject", "no":
 			if m.blockingApproval == nil {
 				m.lastError = fmt.Errorf("no blocking approval")
@@ -837,7 +844,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Approval", "reject")
-			return m, ResolveApproval(m.be, approvalID, false), true
+			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, false), true
 		default:
 			m.lastError = fmt.Errorf("unknown approval subcommand: %s", subcommand)
 			return m, nil, true
@@ -1765,6 +1772,12 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	switch evt.Type {
 	case backend.EventWorkspaceListChanged:
 		return m.requestWorkspaceListRefresh()
+	case backend.EventWorkspaceProjectionChanged:
+		listCmd := m.requestWorkspaceListRefresh()
+		if m.activeWorkspaceID != "" && (evt.WorkspaceID == "" || string(evt.WorkspaceID) == m.activeWorkspaceID) {
+			return tea.Batch(listCmd, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+		}
+		return listCmd
 	case backend.EventWorkspaceCreated:
 		m.upsertWorkspaceFromEvent(evt)
 		return m.requestWorkspaceListRefresh()
@@ -1981,16 +1994,6 @@ func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
 		FetchWorkspaceContext(m.be, m.activeWorkspaceID),
 		m.requestWorkspaceListRefresh(),
 	)
-}
-
-func (m *AppModel) activeWorkspaceNeedsLiveRefresh() bool {
-	if strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return false
-	}
-	if m.running || m.progress == progressRunning || m.progress == progressSubmitting {
-		return true
-	}
-	return m.activeWorkspaceStateIsLive()
 }
 
 func (m *AppModel) workspaceMessageBelongsToActiveWorkspace(workspaceID string) bool {

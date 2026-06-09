@@ -71,7 +71,7 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 		return err
 	}
 	if m.eventHub != nil {
-		m.cliDispatcher = appservice.NewCLICommandDispatcher(m.session, m.eventHub)
+		m.cliDispatcher = appservice.NewCLICommandDispatcher(m.session, m.eventHub, m.service)
 		if err := m.cliDispatcher.Run(); err != nil {
 			m.cliDispatcher = nil
 			m.service.Shutdown(ctx)

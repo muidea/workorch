@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
-import { App as AntApp, Badge, Button, Descriptions, Empty, Space, Steps, Typography } from 'antd';
+import { App as AntApp, Badge, Button, Descriptions, Empty, Space, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
-import { workspaceBoardActivationRequest, workspaceBoardActivationHint, workspaceProjectionRun, runStateSummary, pendingCount, isTerminalRunState, workspaceProcessItems, runtimeSummaryTags } from '../helpers';
-import type { ControlPlaneProps, WorkspaceBoardItem, WorkspaceExecutionActivationRequest } from '../types';
+import { workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
+import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionActivationRequest } from '../types';
+
+type WorkspaceBoardCardItem = {
+  workspace: Workspace;
+};
+
+function isWorkspaceProjectionChangedEvent(event: { topic?: string; payload?: Record<string, unknown> }) {
+  return event.topic === '/workorchd/workspace/projection/changed' || event.payload?.type === 'workspace_projection_changed';
+}
 
 export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const { message } = AntApp.useApp();
-  const [boardItems, setBoardItems] = useState<WorkspaceBoardItem[]>([]);
+  const [boardItems, setBoardItems] = useState<WorkspaceBoardCardItem[]>([]);
+  const [projection, setProjection] = useState<ProjectionStatus | undefined>(undefined);
   const [loading, setLoading] = useState(false);
 
   const loadBoard = useCallback(async (showLoading = true) => {
@@ -18,16 +27,9 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       setLoading(true);
     }
     try {
-      const workspaces = await workorchApi.listWorkspaces();
-      const nextBoardItems = await Promise.all(workspaces.map(async (item) => {
-        const [snapshot, goals, dods] = await Promise.all([
-          workorchApi.readWorkspaceSnapshot(item.id),
-          workorchApi.listGoals(item.id),
-          workorchApi.listDoDs(item.id)
-        ]);
-        return { snapshot, goals, dods };
-      }));
-      setBoardItems(nextBoardItems);
+      const nextProjection = await workorchApi.listWorkspaceProjection();
+      setProjection(nextProjection.projection);
+      setBoardItems(nextProjection.workspaces.map((workspace) => ({ workspace })));
     } catch (error) {
       message.error(errorMessage(error));
     } finally {
@@ -41,7 +43,10 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     void loadBoard();
   }, [loadBoard]);
 
-  useSSE(() => {
+  useSSE((event) => {
+    if (!isWorkspaceProjectionChangedEvent(event)) {
+      return;
+    }
     void loadBoard(false);
   }, {
     debounceMs: 250,
@@ -60,20 +65,22 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       });
   };
 
-  const activateWorkspaceExecution = async (item: WorkspaceBoardItem) => {
+  const activateWorkspaceExecution = async (workspace: Workspace) => {
+    const detail = await workorchApi.readWorkspaceSnapshotProjection(workspace.id);
+    const item = { snapshot: detail.snapshot };
     const request = workspaceBoardActivationRequest(item);
     if (!request) {
       message.warning(workspaceBoardActivationHint(item));
       return;
     }
     message.info('工作空间执行已提交，正在后台启动');
-    trackWorkspaceActivationInBackground(item.snapshot.workspace.id, request);
+    trackWorkspaceActivationInBackground(workspace.id, request);
   };
 
   return (
     <PageContainer
       title="业务总览"
-      subTitle="从工作空间视角查看目标、运行、治理阻塞和交付状态"
+      subTitle={projection ? `投影：${projection.state} / revision ${projection.globalRevision}` : '从工作空间视角查看目标、运行、治理阻塞和交付状态'}
       extra={<Button onClick={() => void loadBoard()} loading={loading}>刷新</Button>}
     >
       {boardItems.length === 0 && !loading ? (
@@ -81,60 +88,48 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       ) : (
         <CardGrid className="workspace-board-grid" loading={loading}>
           {boardItems.map((item) => {
-            const { snapshot, goals, dods } = item;
-            const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
-            const currentRun = workspaceProjectionRun(snapshot);
-            const runSummary = runStateSummary(snapshot.runs);
-            const pendingDecisions = pendingCount(snapshot.decisions);
-            const pendingApprovals = pendingCount(snapshot.approvals);
-            const canStartRun = !currentRun || isTerminalRunState(currentRun.state);
+            const { workspace } = item;
+            const hasActiveRun = Boolean(workspace.activeRunId);
+            const canStartRun = !hasActiveRun;
             return (
               <ProCard
-                key={snapshot.workspace.id}
-                title={snapshot.workspace.title || snapshot.workspace.id}
-                subTitle={snapshot.workspace.id}
+                key={workspace.id}
+                title={workspace.title || workspace.id}
+                subTitle={workspace.id}
                 colSpan={{ xs: 24, md: 12, xl: 8 }}
                 bordered
-                extra={stateTag(snapshot.workspace.state)}
+                extra={stateTag(workspace.state)}
               >
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   <div className="workorch-card-summary">
                     <div>
                       <Typography.Text type="secondary">当前运行（Run）</Typography.Text>
-                      <div>{currentRun ? <Space>{shortId(currentRun.id)}{stateTag(currentRun.state)}</Space> : '-'}</div>
+                      <div>{workspace.activeRunId ? <Space>{shortId(workspace.activeRunId)}<Tag>{stateLabel(workspace.state)}</Tag></Space> : '-'}</div>
                     </div>
                     <div>
                       <Typography.Text type="secondary">治理阻塞</Typography.Text>
-                      <div><Badge count={pendingDecisions + pendingApprovals} showZero color={pendingDecisions + pendingApprovals > 0 ? '#faad14' : '#52c41a'} /></div>
+                      <div><Badge status={workspace.state === 'blocked' || workspace.state === 'waiting_decision' ? 'warning' : 'success'} text={stateLabel(workspace.state)} /></div>
                     </div>
                   </div>
                   {metricGrid([
-                    { key: 'goal', label: modelLabels.goal, value: goals.length },
-                    { key: 'dod', label: modelLabels.dod, value: dods.length },
-                    { key: 'run', label: modelLabels.run, value: runSummary.total },
-                    { key: 'completed', label: '完成', value: runSummary.completed, color: '#389e0d' },
-                    { key: 'failed', label: '失败', value: runSummary.failed, color: '#cf1322' }
+                    { key: 'workspace', label: modelLabels.workspace, value: 1 },
+                    { key: 'activeRun', label: modelLabels.run, value: hasActiveRun ? 1 : 0 },
+                    { key: 'state', label: '状态', value: stateLabel(workspace.state) }
                   ])}
                   <Descriptions
                     column={1}
                     size="small"
                     items={[
-                      { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
-                      { key: 'activeRun', label: '活跃运行', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
-                      { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
-                      { key: 'runtimeSummary', label: '运行摘要', children: runtimeSummaryTags(snapshot.runs) }
+                      { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(workspace.deliverableDirectory, { rows: 1, copyText: workspace.deliverableDirectory }) },
+                      { key: 'activeRun', label: '活跃运行', children: workspace.activeRunId || '-' },
+                      { key: 'defaultSoul', label: '默认 Soul', children: workspace.defaultSoulId || '-' }
                     ]}
                   />
                 </Space>
-                <Steps
-                  size="small"
-                  className="workorch-section"
-                  items={workspaceProcessItems(snapshot, goals, dods)}
-                />
                 <Space className="workorch-section" wrap>
-                  <Button type="primary" onClick={() => onOpenWorkspace(snapshot.workspace.id)}>进入工作空间</Button>
-                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(item)}>{currentRun ? '重新启动执行' : '启动执行'}</Button> : null}
-                  {currentRun && !isTerminalRunState(currentRun.state) ? <Button onClick={() => void workorchApi.resumeRun(currentRun.id, undefined, snapshot.workspace.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
+                  <Button type="primary" onClick={() => onOpenWorkspace(workspace.id)}>进入工作空间</Button>
+                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(workspace).catch((error: unknown) => message.error(errorMessage(error)))}>启动执行</Button> : null}
+                  {workspace.activeRunId ? <Button onClick={() => void workorchApi.resumeRun(workspace.activeRunId || '', undefined, workspace.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
                 </Space>
               </ProCard>
             );

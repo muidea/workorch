@@ -23,6 +23,8 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
+	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
@@ -46,6 +48,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
+	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
 
 	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
 	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -71,6 +74,39 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("condition was not met within %v", timeout)
+}
+
+func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverState {
+	t.Helper()
+	routine := magictask.NewBackgroundRoutine(128)
+	state := newServerStateWithBackground(config, hub, routine)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(ctx)
+		_ = routine.Shutdown(ctx)
+	})
+	return state
+}
+
+func newTestMux(t *testing.T, config Config) http.Handler {
+	t.Helper()
+	return newMuxWithState(newTestServerState(t, normalizeConfig(config), nil))
+}
+
+func newTestHTTPServer(t *testing.T, config Config) *HTTPServer {
+	t.Helper()
+	routine := magictask.NewBackgroundRoutine(128)
+	server := NewHTTPServerWithEventHubAndBackground(config, nil, routine)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("shutdown test http server: %v", err)
+		}
+		_ = routine.Shutdown(ctx)
+	})
+	return server
 }
 
 func publishHTTPTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
@@ -172,7 +208,7 @@ func numericTestValue(value any) int64 {
 
 func newFileMuxWithCleanup(t *testing.T, dataRoot string) http.Handler {
 	t.Helper()
-	state := newServerState(normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -187,7 +223,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	newMux(Config{}).ServeHTTP(rec, req)
+	newTestMux(t, Config{}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -202,7 +238,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 }
 
 func TestPprofRoutesAreExposed(t *testing.T) {
-	handler := newMux(Config{})
+	handler := newTestMux(t, Config{})
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/goroutine?debug=1"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -283,7 +319,7 @@ func TestReadyzReturnsServiceUnavailableWhenBackendInvalid(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
-	newMux(Config{Backend: "unsupported"}).ServeHTTP(rec, req)
+	newTestMux(t, Config{Backend: "unsupported"}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
@@ -292,7 +328,7 @@ func TestReadyzReturnsServiceUnavailableWhenBackendInvalid(t *testing.T) {
 
 func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	state.validate = func(ctx context.Context, _, _ string) error {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("event hub from context = %#v, want injected hub", got)
@@ -331,7 +367,7 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 		t.Fatalf("run runtime modules: %v", err)
 	}
 
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	if state.sharedSession == nil {
 		t.Fatal("expected shared runtime session")
 	}
@@ -370,7 +406,7 @@ func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 }
 
 func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	state.readConfiguration = func() (appservice.ServiceConfiguration, error) {
 		return appservice.ServiceConfiguration{
 			Server:     appservice.ServerConfiguration{Addr: ":8080", MaxConcurrentRuns: 1},
@@ -413,7 +449,7 @@ func TestConfigurationEndpointReturnsRedactedLLMProviders(t *testing.T) {
 }
 
 func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	state.updateLLMConfiguration = func(cmd appservice.UpdateLLMConfigurationCommand) (appservice.ServiceConfiguration, error) {
 		if cmd.DefaultProviderID == nil || *cmd.DefaultProviderID != "local" ||
 			cmd.Providers == nil || len(*cmd.Providers) != 1 ||
@@ -460,8 +496,50 @@ func TestUpdateLLMConfigurationEndpointReturnsRedactedConfiguration(t *testing.T
 	}
 }
 
+func TestUpdateRuntimeConfigurationEndpointSyncsOrchestratorPolicy(t *testing.T) {
+	useWorkorchRuntimeTestConfig(t, "file", t.TempDir())
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: t.TempDir()}), nil)
+	state.eventHub = events.NewMemoryHub()
+	var gotPolicy workorchruntimepolicy.RuntimePolicy
+	state.eventHub.Subscribe(orchestratorevents.TopicOrchestratorCommandUpdateRuntimePolicy, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(orchestratorcontracts.UpdateRuntimePolicyCommand)
+		if !ok {
+			t.Fatalf("runtime policy command payload = %#v, want UpdateRuntimePolicyCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		gotPolicy = cmd.Policy
+		return events.Response(events.Envelope{
+			Topic:        envelope.Topic + "/response",
+			SourceModule: "test",
+			SubjectType:  envelope.SubjectType,
+			SubjectID:    envelope.SubjectID,
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/configuration/runtime", strings.NewReader(`{
+		"maxRuntimeRepairAttempts":3,
+		"shellCommandTimeout":"30s"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+	var body configurationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal configuration: %v", err)
+	}
+	if body.Configuration.Runtime.MaxRuntimeRepairAttempts != 3 ||
+		body.Configuration.Runtime.ShellCommandTimeout != "30s" ||
+		gotPolicy.MaxRuntimeRepairAttempts != 3 {
+		t.Fatalf("configuration=%+v policy=%+v, want runtime repair attempts synced to 3", body.Configuration.Runtime, gotPolicy)
+	}
+}
+
 func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
-	mux := newMux(Config{Backend: "memory"})
+	mux := newTestMux(t, Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "memory http", "workspaces/ws-memory-http")
 	workspaceID := workspace.ID
@@ -525,7 +603,7 @@ func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
 }
 
 func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
-	mux := newMux(Config{Backend: "memory"})
+	mux := newTestMux(t, Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "context registry http", "workspaces/ws-context-registry")
 
@@ -668,7 +746,7 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 
 func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
-	mux := newMux(Config{Backend: "memory"})
+	mux := newTestMux(t, Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "activation http", "workspaces/ws-activation-http")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, mux, workspace.ID)
@@ -719,7 +797,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 }
 
 func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -782,7 +860,7 @@ func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun
 
 func TestWorkspaceExecutionActivationReportsDisallowedSoulCapability(t *testing.T) {
 	useUnavailableLLMProvider(t)
-	mux := newMux(Config{Backend: "memory"})
+	mux := newTestMux(t, Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "activation soul capability", "workspaces/ws-activation-soul-capability")
 	defineGoalAndDoDForHTTP(t, mux, workspace.ID)
@@ -852,7 +930,7 @@ disabled = false
 
 func TestAcceptedAPIRoutesAreRegisteredNatively(t *testing.T) {
 	router := engine.NewRouteRegistry()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	registerSystemRoutes(router, state)
 	registerConfigurationRoutes(router, state)
 	registerReadRoutes(router, state)
@@ -898,9 +976,6 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-progress"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/context-bundle"},
-		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/task-decompositions"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
@@ -964,7 +1039,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 }
 
 func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -1012,7 +1087,7 @@ func TestMemoryRecallTraceEndpointsReturnFilteredTraces(t *testing.T) {
 
 func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1085,7 +1160,7 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 
 func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1128,7 +1203,7 @@ func TestEventStreamWritesIDRevisionAndStateSummary(t *testing.T) {
 
 func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1188,7 +1263,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 
 func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	state.listEventRecords = func(_ context.Context, _, _ string, query appservice.EventRecordQuery) ([]appservice.EventRecord, error) {
 		if query.WorkspaceID != "ws-persist" || query.RunID != "run-persist" || query.CursorAfterID != "evt-old" {
 			t.Fatalf("query = %+v, want workspace/run cursor replay query", query)
@@ -1237,7 +1312,7 @@ func TestEventStreamReplaysPersistedRecordsAfterLastEventID(t *testing.T) {
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 	hub := events.NewMagicHub()
 	defer hub.Terminate(context.Background())
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1296,7 +1371,7 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t *testing.T) {
 	hub := events.NewMagicHub()
 	defer hub.Terminate(context.Background())
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	server := httptest.NewServer(newMuxWithState(state))
 	defer server.Close()
 
@@ -1422,7 +1497,7 @@ func TestEnqueueEventStreamEnvelopeKeepsStepStateWhenChannelFull(t *testing.T) {
 }
 
 func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
-	mux := newMux(Config{Backend: "memory"})
+	mux := newTestMux(t, Config{Backend: "memory"})
 
 	faviconReq := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
 	faviconRec := httptest.NewRecorder()
@@ -1509,7 +1584,7 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 
 func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 	hub := events.NewMemoryHub()
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), hub)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	state.validate = func(context.Context, string, string) error { return nil }
 	state.listWorkspaces = func(ctx context.Context, _, _ string) ([]appservice.Workspace, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1586,33 +1661,6 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 			VerificationScore: 90,
 			Status:            "ready",
 		}, nil
-	}
-	state.readWorkspaceTaskProgress = func(ctx context.Context, _, _, workspaceID string) (appservice.TaskProgress, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("workspace task progress event hub = %#v, want injected hub", got)
-		}
-		if workspaceID != "ws-native-read" {
-			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-		}
-		return appservice.TaskProgress{WorkspaceID: workspaceID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
-	}
-	state.readWorkspaceContextBundle = func(ctx context.Context, _, _, workspaceID string) (appservice.ContextBundle, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("workspace context bundle event hub = %#v, want injected hub", got)
-		}
-		if workspaceID != "ws-native-read" {
-			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-		}
-		return appservice.ContextBundle{WorkspaceID: workspaceID, Mode: "workspace", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
-	}
-	state.readWorkspaceTaskDecompositions = func(ctx context.Context, _, _, workspaceID string) ([]appservice.TaskDecomposition, error) {
-		if got := appservice.EventHubFromContext(ctx); got != hub {
-			t.Fatalf("workspace task decomposition event hub = %#v, want injected hub", got)
-		}
-		if workspaceID != "ws-native-read" {
-			t.Fatalf("workspaceID = %q, want ws-native-read", workspaceID)
-		}
-		return []appservice.TaskDecomposition{{ID: "task-native", WorkspaceID: workspaceID, RunID: "run-native-read", State: "running"}}, nil
 	}
 	state.readRun = func(ctx context.Context, _, _, runID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1984,11 +2032,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces", body: `{"title":"native write","description":"native description","deliverableDirectory":"workspaces/native-write","templateId":"software-dev"}`, status: http.StatusCreated},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read", status: http.StatusOK},
-		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/snapshot", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-progress", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/context-bundle", status: http.StatusOK},
-		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/task-decompositions", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", status: http.StatusOK},
 		{method: http.MethodPut, path: "/api/v1/workorch/workspaces/ws-native-read/soul-bindings", body: `{"defaultSoulId":"soul-native","bindings":{"execution":"soul-native-execution"}}`, status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/goal-dod-quality-check", body: `{"goalId":"goal-native","doDId":"dod-native"}`, status: http.StatusOK},
@@ -2020,6 +2064,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/approve", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/approval-native-read/reject", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/approvals/resolve-batch", body: `{"approvalIds":["approval-native-read"],"action":"approve"}`, status: http.StatusOK},
+		{method: http.MethodDelete, path: "/api/v1/workorch/workspaces/ws-native-read?purge=true", status: http.StatusNoContent},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		if tc.body != "" {
@@ -2034,7 +2079,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 }
 
 func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
-	handler := newMux(Config{Backend: "memory"})
+	handler := newTestMux(t, Config{Backend: "memory"})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http workspace","description":"http description","deliverableDirectory":"workspaces/ws-http"}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -2058,7 +2103,7 @@ func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
 		return []appservice.WorkspaceTemplate{{
 			ID:       "generic-template",
@@ -2155,7 +2200,7 @@ func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
 }
 
 func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	state.listWorkspaceTemplates = func(context.Context, string, string) ([]appservice.WorkspaceTemplate, error) {
 		return []appservice.WorkspaceTemplate{{
 			ID:       "generic-template",
@@ -2214,7 +2259,7 @@ func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
 
 func TestWorkspaceCreateEndpointDefaultsDeliverableDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http default directory workspace"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -2274,7 +2319,7 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 		t.Fatalf("Close session: %v", err)
 	}
 
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	artifactURI := "workorch://workspaces/ws-http-artifact/artifacts/run-http-artifact/result-summary.txt"
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/artifacts/content?uri="+url.QueryEscape(artifactURI), nil)
 	rec := httptest.NewRecorder()
@@ -2307,7 +2352,7 @@ func TestRuntimePayloadEndpointReturnsLLMRawRefContent(t *testing.T) {
 		t.Fatalf("write request.json: %v", err)
 	}
 
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	ref := "workorch://workspaces/ws-http-raw/runs/run-http-raw/llm-calls/" + stepPath + "/request.json"
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/runtime/payloads?ref="+url.QueryEscape(ref), nil)
 	rec := httptest.NewRecorder()
@@ -2344,7 +2389,7 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
 	}
-	state := newServerState(normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
 	state.configureSessionBackedOperations(session)
 	state.cacheRunSnapshot(appservice.RunSnapshot{
 		Run: appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)},
@@ -2380,7 +2425,7 @@ func TestArtifactContentEndpointReusesCachedRunSnapshotArtifacts(t *testing.T) {
 }
 
 func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "http workspace", "workspaces/ws-http")
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil)
@@ -2416,7 +2461,7 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 
 func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http delete workspace"}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -2449,7 +2494,7 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 }
 
 func TestWorkspaceCreateEndpointRejectsClientWorkspaceID(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","deliverableDirectory":"workspaces/ws-client"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -2465,7 +2510,7 @@ func TestWorkspaceCreateEndpointReturnsBadRequestForInvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	newMux(Config{Backend: "memory"}).ServeHTTP(rec, req)
+	newTestMux(t, Config{Backend: "memory"}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
@@ -2476,7 +2521,7 @@ func TestWorkspaceGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-missing", nil)
 	rec := httptest.NewRecorder()
 
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
+	newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
@@ -2484,7 +2529,7 @@ func TestWorkspaceGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 }
 
 func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 	workspace := createWorkspaceForHTTP(t, handler, "definition update workspace", "workspaces/definition-update")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
 
@@ -2520,7 +2565,7 @@ func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
 }
 
 func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run http workspace", "workspaces/run-http")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -2546,7 +2591,7 @@ func TestRunCreateEndpointReturnsCreatedRun(t *testing.T) {
 }
 
 func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "run workspace a", "workspaces/run-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "run workspace b", "workspaces/run-b")
@@ -2627,7 +2672,7 @@ func TestRunListAndGetEndpointsReturnPersistedRuns(t *testing.T) {
 }
 
 func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate run workspace a", "workspaces/dup-run-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate run workspace b", "workspaces/dup-run-b")
@@ -2669,7 +2714,7 @@ func TestUnscopedRunGetReturnsWorkspaceRequiredForDuplicateRunIDs(t *testing.T) 
 }
 
 func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace a", "workspaces/dup-scoped-run-a")
 	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate scoped run workspace b", "workspaces/dup-scoped-run-b")
@@ -2717,7 +2762,7 @@ func TestUnscopedRunEndpointsReturnWorkspaceRequiredForDuplicateRunIDs(t *testin
 func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 	dataRoot := t.TempDir()
 	ctx := context.Background()
-	first := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
 	firstHandler := first.http.Handler
 
 	workspace := createWorkspaceForHTTP(t, firstHandler, "event replay workspace", "workspaces/event-replay")
@@ -2733,7 +2778,7 @@ func TestEventStreamEndpointReplaysFileBackedRecordsAfterRestart(t *testing.T) {
 		t.Fatalf("shutdown first server: %v", err)
 	}
 
-	second := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	second := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
 	t.Cleanup(func() {
 		if err := second.Shutdown(ctx); err != nil {
 			t.Fatalf("shutdown second server: %v", err)
@@ -2807,7 +2852,7 @@ func TestEventRecordQueryFromRequestAppliesBoundedDefaultLimit(t *testing.T) {
 
 func TestRunSnapshotEndpointReturnsPersistedRunSnapshot(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-snapshot-http"
 
 	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run snapshot http workspace", runID)
@@ -2914,7 +2959,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 		t.Fatalf("create runtime checkpoint: %v", err)
 	}
 
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/runs/"+string(runID)+"/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
@@ -2942,7 +2987,7 @@ func TestRunSnapshotEndpointReturnsExecutionEvidence(t *testing.T) {
 
 func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-status-http"
 
 	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run status http workspace", runID)
@@ -2970,7 +3015,7 @@ func TestRunStatusEndpointReturnsPersistedRunStatus(t *testing.T) {
 }
 
 func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var calls atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		call := calls.Add(1)
@@ -3002,7 +3047,7 @@ func TestRunStatusEndpointCanWaitForTargetState(t *testing.T) {
 }
 
 func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var completed atomic.Bool
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		status := "running"
@@ -3047,7 +3092,7 @@ func TestRunStatusWaitUsesStatusChangeNotification(t *testing.T) {
 }
 
 func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
@@ -3095,7 +3140,7 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 }
 
 func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	state.readRunStatus = func(_ context.Context, _, _, runID string) (appservice.RunStatus, error) {
 		return appservice.RunStatus{ID: runID, WorkspaceID: "ws-status-warm-cache", State: string(common.RunStateCompleted)}, nil
@@ -3133,7 +3178,7 @@ func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 }
 
 func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	state.readRunSnapshot = func(_ context.Context, _, _, runID string) (appservice.RunSnapshot, error) {
 		snapshotReads.Add(1)
@@ -3167,7 +3212,7 @@ func TestRunStatusNotificationForTerminalRunWarmsSnapshotCache(t *testing.T) {
 }
 
 func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	releaseRead := make(chan struct{})
 	readStarted := make(chan struct{})
@@ -3223,7 +3268,7 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 }
 
 func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
 	var observabilityReads atomic.Int32
 	releaseRead := make(chan struct{})
@@ -3291,7 +3336,8 @@ func TestRunObservabilityReadWaitsForTerminalStatusWarmupInflight(t *testing.T) 
 
 func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	handler := newMuxWithState(state)
 
 	workspace := createWorkspaceForHTTP(t, handler, "workspace snapshot http", "workspaces/workspace-snapshot-http")
 	ctx := context.Background()
@@ -3314,6 +3360,7 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	if err := workspaceRepo.Update(ctx, workspaceItem); err != nil {
 		t.Fatalf("update workspace active run: %v", err)
 	}
+	state.rebuildProjectedWorkspace(ctx, workspace.ID)
 
 	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/snapshot", nil)
 	snapshotRec := httptest.NewRecorder()
@@ -3344,7 +3391,7 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 }
 
 func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run dup workspace", "workspaces/run-dup")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -3368,7 +3415,7 @@ func TestRunCreateEndpointReturnsNotFoundWhenWorkspaceMissing(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
+	newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
@@ -3379,7 +3426,7 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/ws-run-missing/runs/run-missing", nil)
 	rec := httptest.NewRecorder()
 
-	newMux(Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
+	newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
@@ -3387,7 +3434,7 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 }
 
 func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -3421,7 +3468,7 @@ func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
 
 func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-http"
 
 	workspace, seeded := seedBlockedDecisionRunForHTTP(t, dataRoot, "run start blocked http workspace", runID)
@@ -3443,7 +3490,7 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 
 func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuation(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-resume-http"
 
 	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "run resume decision http workspace", runID)
@@ -3471,7 +3518,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuati
 
 func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuation(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-resume-http"
 
 	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval http workspace", runID)
@@ -3499,7 +3546,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuati
 
 func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-rejected-http"
 
 	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume approval rejected http workspace", runID)
@@ -3527,7 +3574,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 
 func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-pending-http"
 
 	workspace, started := seedBlockedApprovalRunForHTTP(t, dataRoot, "run resume pending http workspace", runID)
@@ -3545,7 +3592,7 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 }
 
 func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
-	handler := newMux(Config{Backend: "file", DataRoot: t.TempDir()})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 	workspace := createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-resume-created-http/resume", nil)
@@ -3559,7 +3606,7 @@ func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
 
 func TestDecisionListAndGetEndpointsReturnPersistedTickets(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runA := "run-decision-list-a"
 	runB := "run-decision-list-b"
 
@@ -3719,7 +3766,7 @@ func TestDecisionBatchResolveEndpointResolvesOpenTickets(t *testing.T) {
 }
 
 func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -3765,7 +3812,7 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 }
 
 func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -3808,7 +3855,7 @@ func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing
 }
 
 func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -3879,7 +3926,7 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 }
 
 func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -3914,7 +3961,7 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 }
 
 func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -3981,7 +4028,7 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 }
 
 func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -4046,7 +4093,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 }
 
 func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)
@@ -4101,7 +4148,7 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 }
 
 func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)
@@ -4137,7 +4184,7 @@ func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
 }
 
 func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
-	state := newServerState(normalizeConfig(Config{Backend: "memory"}), nil)
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -4246,7 +4293,7 @@ func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
 
 func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runA := "run-approval-list-a"
 	runB := "run-approval-list-b"
 
@@ -4388,7 +4435,7 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 
 func TestMetricsEndpointReportsCounters(t *testing.T) {
 	dataRoot := t.TempDir()
-	handler := newMux(Config{Backend: "file", DataRoot: dataRoot})
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
 	workspace := createWorkspaceForHTTP(t, handler, "metrics workspace", "workspaces/metrics")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
@@ -4489,7 +4536,7 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 	dataRoot := t.TempDir()
 	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
 	ctx := context.Background()
-	first := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
 	firstHandler := first.http.Handler
 	workspace := createWorkspaceForHTTP(t, firstHandler, "stuck running validation workspace", "workspaces/stuck-running-validation")
 	goalID, dodID := defineGoalAndDoDForHTTP(t, firstHandler, workspace.ID)
@@ -4521,7 +4568,7 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 		t.Fatalf("close seed session: %v", err)
 	}
 
-	second := NewHTTPServer(Config{Backend: "file", DataRoot: dataRoot})
+	second := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
 	if err := second.Validate(ctx); err != nil {
 		t.Fatalf("validate second server: %v", err)
 	}
@@ -5023,7 +5070,7 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan struct{})
 	secondDone := make(chan int, 1)
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)
@@ -5102,7 +5149,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 	release := make(chan struct{})
 	firstDone := make(chan struct{})
 	secondDone := make(chan int, 1)
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)
@@ -5191,7 +5238,7 @@ func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
 	lowStarted := make(chan struct{}, 1)
 	releaseHeld := make(chan struct{})
 	releaseHigh := make(chan struct{})
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)
@@ -5276,7 +5323,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	done := make(chan struct{})
-	state := newServerState(normalizeConfig(Config{
+	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
 		MaxConcurrentRuns: 1,
 	}), nil)

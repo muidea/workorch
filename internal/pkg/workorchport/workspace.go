@@ -43,6 +43,7 @@ type WorkspaceSnapshotInfo struct {
 	Workspace             WorkspaceInfo
 	Outcome               WorkspaceOutcomeInfo
 	TaskProgress          TaskProgressInfo
+	ContextBundle         map[string]any
 	CoverageSummary       map[string]any
 	TaskDecompositions    []TaskDecompositionInfo
 	Goals                 []GoalInfo
@@ -65,5 +66,6 @@ type WorkspaceBackend interface {
 	Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error)
 	Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error)
 	List(ctx context.Context) ([]WorkspaceInfo, error)
+	Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error)
 	Delete(ctx context.Context, id common.WorkspaceID, purge bool) error
 }

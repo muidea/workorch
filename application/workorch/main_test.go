@@ -134,6 +134,13 @@ func (b *startupFakeWorkspace) Get(ctx context.Context, id common.WorkspaceID) (
 func (b *startupFakeWorkspace) List(ctx context.Context) ([]backend.WorkspaceInfo, error) {
 	return b.parent.workspaces, nil
 }
+func (b *startupFakeWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
+	workspace, err := b.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &backend.WorkspaceSnapshotInfo{Workspace: *workspace}, nil
+}
 func (b *startupFakeWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
 	return nil
 }

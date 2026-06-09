@@ -4,7 +4,7 @@ Status: active
 
 Type: product-interface
 
-Last Updated: 2026-05-30
+Last Updated: 2026-06-09
 
 ## Purpose
 
@@ -21,6 +21,16 @@ Last Updated: 2026-05-30
 
 当前以 `internal/modules/application/workorchd/service/server/http.go` 中的
 response struct 为准，而不是单独维护 schema registry。
+
+workspace list/detail 的状态源语义以
+`../30-module-architecture/mvvp-workspace-viewmodel-architecture.md` 为准：
+
+- `GET /api/v1/workorch/workspaces` 返回 workorchd 维护的
+  `WorkspaceOverview` projection list。
+- `GET /api/v1/workorch/workspaces/:workspaceId/snapshot` 当前 path 保留，
+  语义调整为 workspace detail projection。
+- Web/TUI 不通过多个 heavy endpoint 自行拼出 workspace 列表状态。
+- projection response 必须包含 projection health/revision 信息。
 
 ## Resource Families
 
@@ -66,8 +76,8 @@ response struct 为准，而不是单独维护 schema registry。
 | Endpoint Family | 主要响应族 |
 | --- | --- |
 | workspace singleton | `workspaceResponse` |
-| workspace list | `workspacesResponse` |
-| workspace snapshot | `workspaceSnapshotResponse` |
+| workspace list | `workspacesResponse` with projection metadata |
+| workspace snapshot/detail projection | `workspaceSnapshotResponse` with projection metadata |
 | workspace task/context/decomposition | `taskProgressResponse` / `contextBundleResponse` / `taskDecompositionsResponse` |
 | workspace memory recall | `memoryRecallTracesResponse` |
 | run singleton | `runInstanceResponse` |
@@ -100,9 +110,6 @@ response struct 为准，而不是单独维护 schema registry。
 - `GET /api/v1/workorch/workspaces/:workspaceId`
 - `DELETE /api/v1/workorch/workspaces/:workspaceId`
 - `GET /api/v1/workorch/workspaces/:workspaceId/snapshot`
-- `GET /api/v1/workorch/workspaces/:workspaceId/task-progress`
-- `GET /api/v1/workorch/workspaces/:workspaceId/context-bundle`
-- `GET /api/v1/workorch/workspaces/:workspaceId/task-decompositions`
 - `GET /api/v1/workorch/workspaces/:workspaceId/memory-recalls`
 - `GET /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
 - `PUT /api/v1/workorch/workspaces/:workspaceId/soul-bindings`
@@ -111,10 +118,17 @@ response struct 为准，而不是单独维护 schema registry。
 - `POST /api/v1/workorch/workspaces/:workspaceId/execution-activations`
 - `POST /api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check`
 
-Workspace scoped read endpoints must resolve active/projection run IDs inside
-the requested workspace. If another workspace has the same run ID, the endpoint
-must still return the current workspace projection instead of surfacing a
-repository-level `409 Conflict`.
+Workspace scoped snapshot projection must include the workspace-level
+`taskProgress`, `contextBundle`, and `taskDecompositions` fields. These fields
+are no longer exposed as separate workspace-level request-time aggregation
+endpoints.
+
+`GET /api/v1/workorch/workspaces` 必须读取服务端 projection store，禁止在
+HTTP handler 请求路径逐 workspace 执行 snapshot/result/evidence heavy 聚合。
+
+`GET /api/v1/workorch/workspaces/:workspaceId/snapshot` 必须优先读取 detail
+projection。detail 未 ready 时应返回 projection state 或 partial detail，不能要求
+Web/TUI 自行 fallback 聚合。
 
 ### Goal And DoD
 
@@ -227,6 +241,7 @@ repository-level `409 Conflict`.
 - 面向列表/概览
 - 只返回 compact metadata
 - 不默认展开 raw payload
+- workspace summary 必须来自 workorchd projection store
 
 ### Detail / Snapshot
 
@@ -243,6 +258,7 @@ repository-level `409 Conflict`.
 - 返回结构化详情投影
 - 允许包含 result、taskProgress、contextBundle、observability 等聚合视图
 - 仍应避免无界 raw payload 加载
+- workspace detail 是服务端 ViewModel projection，不是端侧临时拼装结果
 
 ### Raw / Content
 
@@ -1234,8 +1250,8 @@ workorch://workspaces/<workspace-id>/artifacts/<run-id>/<relative-path>
 
 - 错误正文当前统一通过 `errorResponse{error}` 返回
 - `409` 在本服务中很关键，常表示业务状态冲突，而不仅是 HTTP 级资源冲突
-- workspace scoped `snapshot` / `context-bundle` 不应因为其他 workspace 存在同名
-  run id 返回 `409`；这类端点必须先绑定 workspace scope 再解析 active/projection run
+- workspace scoped `snapshot` 不应因为其他 workspace 存在同名 run id 返回
+  `409`；该端点必须先绑定 workspace scope 再解析 active/projection run
 - `408` 目前主要与 `run status` 的 wait 模式相关
 
 ## Pagination And Detail Direction

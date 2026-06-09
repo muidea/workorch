@@ -110,6 +110,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromDecisions([]appservice.Decision{item}), runPriorityFromRequest(r, 0))
+		state.rebuildProjectedWorkspacesForDecisions(r.Context(), []appservice.Decision{item})
 		writeJSON(w, http.StatusOK, decisionResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -135,6 +136,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromDecisions(items), runPriorityFromRequest(r, 0))
+		state.rebuildProjectedWorkspacesForDecisions(r.Context(), items)
 		writeJSON(w, http.StatusOK, decisionsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,
@@ -156,6 +158,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0))
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -177,6 +180,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals([]appservice.Approval{item}), runPriorityFromRequest(r, 0))
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), []appservice.Approval{item})
 		writeJSON(w, http.StatusOK, approvalResponse{
 			Service:  "workorch",
 			Backend:  state.config.Backend,
@@ -205,6 +209,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			return
 		}
 		state.scheduleGovernanceRunResumeRefs(runResumeRefsFromApprovals(items), runPriorityFromRequest(r, 0))
+		state.rebuildProjectedWorkspacesForApprovals(r.Context(), items)
 		writeJSON(w, http.StatusOK, approvalsResponse{
 			Service:   "workorch",
 			Backend:   state.config.Backend,

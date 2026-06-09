@@ -9,6 +9,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -59,15 +60,25 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	}
 
 	s.runStarted.Store(true)
-	if s.backgroundRoutine != nil {
-		if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
-			s.runStarted.Store(false)
-			return cd.NewError(cd.Unexpected, err.Error())
-		}
-		return nil
+	if s.backgroundRoutine == nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.IllegalParam, "workorch background routine is not configured")
 	}
-
-	go runHTTPServer()
+	if s.http.state == nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.IllegalParam, "workorch http server state is not configured")
+	}
+	if s.http.state != nil && s.http.state.backgroundRoutine == nil {
+		s.http.state.backgroundRoutine = s.backgroundRoutine
+	}
+	if err := s.http.state.startWorkspaceProjection(s.http.state.backgroundContext()); err != nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
 	return nil
 }
 
@@ -95,6 +106,20 @@ func (s *Service) Shutdown(ctx context.Context) {
 	case <-ctx.Done():
 		slog.Warn("workorch http server shutdown timed out", "err", ctx.Err())
 	}
+}
+
+func (s *Service) ListWorkspaceView(ctx context.Context) ([]appservice.Workspace, error) {
+	if s == nil || s.http == nil {
+		return nil, errors.New("workorch http server is not configured")
+	}
+	return s.http.ListWorkspaceView(ctx)
+}
+
+func (s *Service) ReadWorkspaceViewSnapshot(ctx context.Context, workspaceID string) (appservice.WorkspaceSnapshot, error) {
+	if s == nil || s.http == nil {
+		return appservice.WorkspaceSnapshot{}, errors.New("workorch http server is not configured")
+	}
+	return s.http.ReadWorkspaceViewSnapshot(ctx, workspaceID)
 }
 
 func (s *Service) Done() <-chan error {
