@@ -310,7 +310,7 @@ func TestModelSubmitGoalStartsRun(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputWithActiveRunQueuesOperatorInput(t *testing.T) {
+func TestModelPlainInputWithActiveRunningRunDoesNotResume(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
@@ -327,15 +327,15 @@ func TestModelPlainInputWithActiveRunQueuesOperatorInput(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal created for plain input", be.goals)
 	}
-	if be.lastSnapshotWorkspace != "ws-1" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "ws-1" {
-		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-1/empty/empty/ws-1", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
+	if be.lastSnapshotWorkspace != "ws-1" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "" {
+		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-1/empty/empty/empty", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
-	if len(be.resumePatches) != 1 {
-		t.Fatalf("resumePatches = %v, want one operator input patch", be.resumePatches)
+	if len(be.resumes) != 0 || len(be.resumePatches) != 0 {
+		t.Fatalf("resumes/patches = %v/%v, want no resume for already-running run", be.resumes, be.resumePatches)
 	}
-	queue, ok := be.resumePatches[0]["operatorInputQueue"].([]map[string]any)
-	if !ok || len(queue) != 1 || queue[0]["content"] != "继续处理" {
-		t.Fatalf("operatorInputQueue = %#v, want plain input queued", be.resumePatches[0]["operatorInputQueue"])
+	runMsg, ok := msg.(RunControlMsg)
+	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateRunning {
+		t.Fatalf("message = %#v, want running RunControlMsg", msg)
 	}
 }
 
@@ -467,7 +467,7 @@ func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
 	}
 }
 
-func TestModelRunContinueCommandQueuesOperatorInput(t *testing.T) {
+func TestModelRunContinueCommandDoesNotResumeAlreadyRunningRun(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-1", "")
 	m.activeRunID = "run-continue"
@@ -483,22 +483,57 @@ func TestModelRunContinueCommandQueuesOperatorInput(t *testing.T) {
 	if len(be.goals) != 0 {
 		t.Fatalf("goals = %v, want no goal for active-run operator input", be.goals)
 	}
-	if len(be.resumePatches) != 1 {
-		t.Fatalf("resume patches = %v, want one patch", be.resumePatches)
+	if len(be.resumes) != 0 || len(be.resumePatches) != 0 {
+		t.Fatalf("resumes/patches = %v/%v, want no resume for already-running run", be.resumes, be.resumePatches)
 	}
-	queue, ok := be.resumePatches[0]["operatorInputQueue"].([]map[string]any)
-	if !ok || len(queue) != 1 || queue[0]["content"] != "补充约束：优先修复当前失败项" {
-		t.Fatalf("operatorInputQueue = %#v, want queued input", be.resumePatches[0]["operatorInputQueue"])
+	if len(be.activations) != 0 {
+		t.Fatalf("activations = %d, want no activation for already-running run", len(be.activations))
+	}
+	runMsg, ok := msg.(RunControlMsg)
+	if !ok || runMsg.Run == nil || runMsg.Run.State != common.RunStateRunning {
+		t.Fatalf("message = %#v, want running RunControlMsg", msg)
+	}
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+	if m.progress != progressRunning || !m.running {
+		t.Fatalf("progress/running = %s/%v, want running state", m.progress, m.running)
+	}
+	if !strings.Contains(m.progressText, "already running") {
+		t.Fatalf("progressText = %q, want already-running guidance", m.progressText)
 	}
 }
 
 func TestModelRunContinueWithoutLiveRunDoesNotPredeclareContinuation(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateFailed)
+	be.snapshot = &backend.WorkspaceSnapshotInfo{
+		Workspace: backend.WorkspaceInfo{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed},
+		Outcome: backend.WorkspaceOutcomeInfo{
+			WorkspaceID: "ws-1",
+			State:       string(common.RunStateFailed),
+			RunID:       "run-failed",
+			Terminal:    true,
+			Reason:      "stuck running run recovered: no active execution, blocker, or continuation checkpoint",
+		},
+		TaskProgress: backend.TaskProgressInfo{
+			WorkspaceID: "ws-1",
+			RunID:       "run-failed",
+			State:       string(common.RunStateFailed),
+			Recovery: backend.RecoveryPlanInfo{
+				Reason:     "stuck running run recovered: no active execution, blocker, or continuation checkpoint",
+				NextAction: "inspect_failure_reason_and_evidence",
+			},
+		},
+		Runs: []backend.RunInfo{{
+			ID:            "run-failed",
+			WorkspaceID:   "ws-1",
+			State:         common.RunStateFailed,
+			FailureReason: "stuck running run recovered: no active execution, blocker, or continuation checkpoint",
+		}},
+	}
 	m := NewAppModel(be, "ws-1", "")
 	m.workspaces = []backend.WorkspaceInfo{
-		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed, ActiveRunID: "run-stale"},
+		{ID: "ws-1", Title: "failed", State: common.WorkspaceStateFailed},
 	}
-	m.activeRunID = "run-stale"
 	m.setInput("/run continue retry with current workspace")
 
 	next, cmd := m.submitInput()
@@ -511,21 +546,24 @@ func TestModelRunContinueWithoutLiveRunDoesNotPredeclareContinuation(t *testing.
 	}
 	msg, ok := cmd().(RunControlMsg)
 	if !ok || msg.Error != nil || msg.Run == nil {
-		t.Fatalf("run continue msg = %#v, want RunControlMsg with activated run", msg)
+		t.Fatalf("run continue msg = %#v, want RunControlMsg with terminal run", msg)
 	}
-	if msg.Message != "Restarting workspace run" {
-		t.Fatalf("message = %q, want restart message from backend activation path", msg.Message)
+	if msg.Run.State != common.RunStateFailed || !strings.Contains(msg.Message, "use /run restart") {
+		t.Fatalf("run/message = %+v/%q, want failed terminal guidance", msg.Run, msg.Message)
 	}
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want no terminal/stale run resume", be.resumes)
 	}
-	if len(be.activations) != 1 {
-		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	if len(be.activations) != 0 {
+		t.Fatalf("activations = %d, want no implicit activation for /run continue", len(be.activations))
 	}
-	patch := be.activations[0].ExecutionContextPatch
-	latest, _ := patch["latestOperatorInput"].(map[string]any)
-	if latest["content"] != "retry with current workspace" {
-		t.Fatalf("latestOperatorInput = %#v, want slash input queued", latest)
+	next, _ = m.Update(msg)
+	m = asModel(next)
+	if m.progress != progressFailed || m.running {
+		t.Fatalf("progress/running = %s/%v, want failed/not running", m.progress, m.running)
+	}
+	if !strings.Contains(m.progressText, "use /run restart") {
+		t.Fatalf("progressText = %q, want restart guidance", m.progressText)
 	}
 }
 
@@ -543,20 +581,20 @@ func TestModelRunContinueIgnoresStaleRunIDFromAnotherWorkspace(t *testing.T) {
 	if !ok || msg.Error != nil || msg.Run == nil {
 		t.Fatalf("continue msg = %#v, want RunControlMsg with run", msg)
 	}
-	if len(be.resumes) != 1 || be.resumes[0] != "run-continue" {
-		t.Fatalf("resumes = %v, want current workspace run to be resumed", be.resumes)
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for already-running current workspace run", be.resumes)
 	}
-	if be.lastSnapshotWorkspace != "ws-2" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "ws-2" {
-		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-2/empty/empty/ws-2", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
+	if be.lastSnapshotWorkspace != "ws-2" || be.lastGetWorkspace != "" || be.lastListWorkspace != "" || be.lastResumeWorkspace != "" {
+		t.Fatalf("snapshot/get/list/resume workspace scope = %q/%q/%q/%q, want ws-2/empty/empty/empty", be.lastSnapshotWorkspace, be.lastGetWorkspace, be.lastListWorkspace, be.lastResumeWorkspace)
 	}
 	if len(be.activations) != 0 || msg.Run.WorkspaceID != "ws-2" {
-		t.Fatalf("activation/run = %d/%+v, want resumed run for ws-2", len(be.activations), msg.Run)
+		t.Fatalf("activation/run = %d/%+v, want current run for ws-2", len(be.activations), msg.Run)
 	}
 
 	updated, _ := next.(*AppModel).Update(msg)
 	got := asModel(updated)
-	if got.activeRunID != "run-continue" || !got.running {
-		t.Fatalf("run state = %q/%v, want current workspace run", got.activeRunID, got.running)
+	if got.activeRunID != "run-continue" || got.progress != progressRunning || !got.running {
+		t.Fatalf("run state = %q/%s/%v, want current workspace run", got.activeRunID, got.progress, got.running)
 	}
 }
 
@@ -3143,6 +3181,30 @@ func TestModelStaleWorkspaceEventIgnoredByMainView(t *testing.T) {
 	}
 }
 
+func TestModelUnscopedRunEventIgnoredDuringWorkspaceSwitch(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-501", "")
+	m.activeWorkspaceID = "ws-501"
+	m.activeRunID = ""
+	m.progressText = "Workspace switched; refreshing state"
+	m.currentTask = "fresh workspace pending context"
+	m.runtimeEvents = nil
+
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:    backend.EventStepDispatched,
+		RunID:   "run-from-previous-workspace",
+		Payload: map[string]any{"kind": "old workspace step"},
+	})
+	if cmd != nil {
+		t.Fatal("unscoped stale run event should not trigger refresh command")
+	}
+	if m.progress != progressIdle || m.progressText != "Workspace switched; refreshing state" || len(m.runtimeEvents) != 0 {
+		t.Fatalf("unscoped stale run event polluted switched view: progress=%s text=%q events=%v", m.progress, m.progressText, m.runtimeEvents)
+	}
+	if m.currentTask != "fresh workspace pending context" {
+		t.Fatalf("currentTask = %q, want fresh workspace content preserved", m.currentTask)
+	}
+}
+
 func TestModelWorkspaceCreatedEventRefreshesWorkspaceList(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -3776,6 +3838,7 @@ func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, p
 type recordingBE struct {
 	*fakeBE
 	runState              common.RunState
+	snapshot              *backend.WorkspaceSnapshotInfo
 	goals                 []string
 	activations           []backend.ActivateRunRequest
 	resumes               []common.RunID
@@ -3837,6 +3900,9 @@ func (f *recordingWorkspace) List(ctx context.Context) ([]backend.WorkspaceInfo,
 }
 func (f *recordingWorkspace) Snapshot(ctx context.Context, id common.WorkspaceID) (*backend.WorkspaceSnapshotInfo, error) {
 	f.parent.lastSnapshotWorkspace = id
+	if f.parent.snapshot != nil {
+		return f.parent.snapshot, nil
+	}
 	return &backend.WorkspaceSnapshotInfo{
 		Workspace: backend.WorkspaceInfo{ID: id, ActiveRunID: "run-continue"},
 		Runs: []backend.RunInfo{{

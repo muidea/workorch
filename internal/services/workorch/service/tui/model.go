@@ -406,6 +406,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeRunID = string(msg.Run.ID)
 			m.applyRunControlState(msg.Run, msg.Message)
 		} else if msg.Message != "" {
+			m.running = false
+			if m.progress == progressSubmitting {
+				m.progress = progressIdle
+			}
 			m.progressText = msg.Message
 		}
 		m.lastError = nil
@@ -1804,13 +1808,10 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	if evt.WorkspaceID != "" {
 		m.upsertWorkspaceFromEvent(evt)
 	}
-	if evt.WorkspaceID != "" && m.activeWorkspaceID != "" && string(evt.WorkspaceID) != m.activeWorkspaceID {
+	if !m.backendEventBelongsToActiveWorkspace(evt) {
 		if !knownWorkspace {
 			return m.requestWorkspaceListRefresh()
 		}
-		return nil
-	}
-	if evt.RunID != "" && m.activeRunID != "" && string(evt.RunID) != m.activeRunID {
 		return nil
 	}
 	switch evt.Type {
@@ -1967,6 +1968,19 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	return nil
 }
 
+func (m *AppModel) backendEventBelongsToActiveWorkspace(evt backend.Event) bool {
+	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return true
+	}
+	if evt.WorkspaceID != "" {
+		return string(evt.WorkspaceID) == m.activeWorkspaceID
+	}
+	if evt.RunID != "" {
+		return strings.TrimSpace(m.activeRunID) != "" && string(evt.RunID) == m.activeRunID
+	}
+	return false
+}
+
 func (m *AppModel) recordWorkspaceEventRevision(evt backend.Event) tea.Cmd {
 	if evt.Revision <= 0 || evt.WorkspaceID == "" {
 		return nil
@@ -2038,6 +2052,16 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 		m.progress = progressFailed
 		m.failureReason = nonEmpty(failureMessageFromPayload(payload), m.failureHint)
 		m.progressText = nonEmpty(m.failureReason, "Run failed")
+	case common.RunStateCreated:
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = "Run created"
+	case common.RunStateCancelled, common.RunStateSuperseded:
+		m.running = false
+		m.blockingDecision = nil
+		m.blockingApproval = nil
+		m.progress = progressInterrupted
+		m.progressText = string(state)
 	case common.RunStateBlockedOnDecision:
 		m.running = false
 		m.progress = progressWaitingDecision
@@ -2093,6 +2117,16 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 		m.progress = progressFailed
 		m.failureReason = run.FailureReason
 		m.progressText = nonEmpty(message, m.failureReason, "Run failed")
+	case common.RunStateCreated:
+		m.running = false
+		m.progress = progressIdle
+		m.progressText = nonEmpty(message, "Run created")
+	case common.RunStateCancelled, common.RunStateSuperseded:
+		m.running = false
+		m.blockingDecision = nil
+		m.blockingApproval = nil
+		m.progress = progressInterrupted
+		m.progressText = nonEmpty(message, string(run.State))
 	case common.RunStateBlockedOnDecision:
 		m.running = false
 		m.progress = progressWaitingDecision

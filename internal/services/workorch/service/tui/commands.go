@@ -364,25 +364,33 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			return RunControlMsg{WorkspaceID: workspaceID, Error: common.ErrInvalidArgument}
 		}
 		if targetRunID != "" {
-			run = selectWorkspaceRun(targetRunID, snapshot.Runs)
+			run = findWorkspaceRun(targetRunID, snapshot.Runs)
 			if !runBelongsToWorkspace(run, wsID) {
 				run = nil
 				targetRunID = ""
 			}
 		}
-		if run == nil {
-			run = selectWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
+		if run == nil && snapshot.Workspace.ActiveRunID != "" {
+			run = findWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
 		}
 		if run == nil {
-			return activateWorkspaceRun(ctx, be, wsID, nil, operatorInput)
+			displayRun := selectWorkspaceDisplayRun(snapshot)
+			if displayRun != nil && runStateIsTerminal(displayRun.State) {
+				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Message: terminalRunContinueMessage(displayRun)}
+			}
+			return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Message: "No active workspace run; submit a goal or use /run restart."}
 		}
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-			return activateWorkspaceRun(ctx, be, wsID, run, operatorInput)
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: terminalRunContinueMessage(run)}
+		case common.RunStateRunning:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is already running; refreshing workspace state."}
 		case common.RunStateBlockedOnDecision:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before continuing."}
 		case common.RunStateBlockedOnApproval:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before continuing."}
+		case common.RunStateCreated:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is created but not running; refreshing workspace state."}
 		case common.RunStateValidating:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
@@ -392,6 +400,52 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			}
 			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Continuing active run"}
 		}
+	}
+}
+
+func findWorkspaceRun(id common.RunID, runs []backend.RunInfo) *backend.RunInfo {
+	if id == "" {
+		return nil
+	}
+	for i := range runs {
+		if runs[i].ID == id {
+			return &runs[i]
+		}
+	}
+	return nil
+}
+
+func selectWorkspaceDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *backend.RunInfo {
+	if snapshot == nil {
+		return nil
+	}
+	if run := findWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs); run != nil {
+		return run
+	}
+	if run := findWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs); run != nil {
+		return run
+	}
+	if run := findWorkspaceRun(snapshot.TaskProgress.RunID, snapshot.Runs); run != nil {
+		return run
+	}
+	return selectWorkspaceRun("", snapshot.Runs)
+}
+
+func terminalRunContinueMessage(run *backend.RunInfo) string {
+	if run == nil {
+		return "No active workspace run; submit a goal or use /run restart."
+	}
+	switch run.State {
+	case common.RunStateCompleted:
+		return "Workspace run is completed; use /run restart to start a new run."
+	case common.RunStateFailed:
+		return "Workspace run is failed; inspect failure or use /run restart."
+	case common.RunStateCancelled:
+		return "Workspace run is cancelled; use /run restart to start a new run."
+	case common.RunStateSuperseded:
+		return "Workspace run is superseded; use /run restart to start a new run."
+	default:
+		return "No active workspace run; submit a goal or use /run restart."
 	}
 }
 
