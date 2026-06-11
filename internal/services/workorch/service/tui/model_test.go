@@ -827,6 +827,7 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.activeRunID = "run-1"
+	entry := m.ensureWorkspaceRuntimeState("ws-1")
 
 	if cmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventPatchApplied,
@@ -865,6 +866,8 @@ func TestModelPatchMemoryAndLLMUsageEventsUpdateIncrementally(t *testing.T) {
 		t.Fatalf("memoryRecalls = %+v, want incremental recall", m.memoryRecalls)
 	}
 
+	entry.ContextInFlight = false
+	entry.ContextPending = false
 	if cmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventLLMUsageRecorded,
 		WorkspaceID: "ws-1",
@@ -3522,6 +3525,7 @@ func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
+	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
 	previousActiveSeq := m.workspaceContextRequestSeqFor("ws-a")
 
 	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
@@ -3536,26 +3540,26 @@ func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing
 	}
 }
 
-func TestModelActiveWorkspacePollRefreshesLiveWorkspace(t *testing.T) {
+func TestModelWorkspaceProjectionEventRefreshesLiveWorkspaceWithoutPolling(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
 	}})
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
+	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
 	previousSeq := m.workspaceContextRequestSeqFor("ws-a")
 
-	next, cmd := m.Update(ActiveWorkspacePollMsg{})
-	m = asModel(next)
+	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 2})
 	if cmd == nil {
-		t.Fatal("active workspace poll should reschedule itself")
+		t.Fatal("active workspace projection event should refresh workspace state")
 	}
 	if !m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousSeq+1 {
-		t.Fatalf("poll refresh state = list:%v seq:%d want list refresh and seq %d", m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousSeq+1)
+		t.Fatalf("event refresh state = list:%v seq:%d want list refresh and seq %d", m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousSeq+1)
 	}
 }
 
-func TestModelActiveWorkspacePollSkipsIdleWorkspace(t *testing.T) {
+func TestModelInitDoesNotScheduleActiveWorkspacePoll(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: common.WorkspaceStateActive},
@@ -3564,13 +3568,12 @@ func TestModelActiveWorkspacePollSkipsIdleWorkspace(t *testing.T) {
 	m.activeWorkspaceID = "ws-a"
 	previousSeq := m.workspaceContextRequestSeqFor("ws-a")
 
-	next, cmd := m.Update(ActiveWorkspacePollMsg{})
-	m = asModel(next)
+	cmd := m.Init()
 	if cmd == nil {
-		t.Fatal("active workspace poll should reschedule itself")
+		t.Fatal("init should still fetch initial data and wait for backend events")
 	}
 	if m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousSeq {
-		t.Fatalf("idle poll refresh state = list:%v seq:%d want no refresh and seq %d", m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousSeq)
+		t.Fatalf("init refresh state = list:%v seq:%d want no active polling refresh and seq %d", m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousSeq)
 	}
 }
 
@@ -3677,8 +3680,8 @@ func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t 
 
 	previousSeq := m.workspaceContextRequestSeqFor("ws-b")
 	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b", Revision: 11})
-	if cmd == nil || m.workspaceContextRequestSeqFor("ws-b") != previousSeq+1 {
-		t.Fatalf("projection event did not request active workspace refresh: cmd=%v seq=%d want %d", cmd != nil, m.workspaceContextRequestSeqFor("ws-b"), previousSeq+1)
+	if cmd != nil || !m.ensureWorkspaceRuntimeState("ws-b").ContextPending || m.workspaceContextRequestSeqFor("ws-b") != previousSeq {
+		t.Fatalf("projection event should coalesce with switch refresh: cmd=%v pending=%v seq=%d want %d", cmd != nil, m.ensureWorkspaceRuntimeState("ws-b").ContextPending, m.workspaceContextRequestSeqFor("ws-b"), previousSeq)
 	}
 
 	seq := m.workspaceContextRequestSeqFor("ws-b")
@@ -3980,6 +3983,34 @@ func TestModelWorkspaceListRefreshCoalescesWhileInFlight(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceContextRefreshCoalescesWhileInFlight(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+	entry := m.ensureWorkspaceRuntimeState("ws-a")
+	entry.ContextInFlight = false
+	previousSeq := entry.ContextRequestSeq
+
+	cmd := m.requestWorkspaceContextRefresh(false)
+	if cmd == nil || !entry.ContextInFlight || entry.ContextRequestSeq != previousSeq+1 {
+		t.Fatalf("first context refresh = cmd:%v inFlight:%v seq:%d want %d", cmd != nil, entry.ContextInFlight, entry.ContextRequestSeq, previousSeq+1)
+	}
+	cmd = m.requestWorkspaceContextRefresh(false)
+	if cmd != nil || !entry.ContextPending || entry.ContextRequestSeq != previousSeq+1 {
+		t.Fatalf("second context refresh should coalesce = cmd:%v pending:%v seq:%d want %d", cmd != nil, entry.ContextPending, entry.ContextRequestSeq, previousSeq+1)
+	}
+
+	next, cmd = m.Update(WorkspaceContextMsg{RequestSeq: previousSeq + 1, WorkspaceID: "ws-a", Workspace: &backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning}, Snapshot: &backend.WorkspaceSnapshotInfo{Workspace: backend.WorkspaceInfo{ID: "ws-a", State: common.WorkspaceStateRunning}}})
+	m = asModel(next)
+	entry = m.ensureWorkspaceRuntimeState("ws-a")
+	if cmd == nil || !entry.ContextInFlight || entry.ContextPending || entry.ContextRequestSeq != previousSeq+2 {
+		t.Fatalf("pending context refresh not released = cmd:%v inFlight:%v pending:%v seq:%d want %d", cmd != nil, entry.ContextInFlight, entry.ContextPending, entry.ContextRequestSeq, previousSeq+2)
+	}
+}
+
 func TestModelNonActiveWorkspaceStateEventOnlyUpdatesMonitor(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
@@ -4008,6 +4039,7 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 		{ID: "ws-b", Title: "B", State: "active"},
 	}})
 	m = asModel(next)
+	m.ensureWorkspaceRuntimeState("ws-a").ContextInFlight = false
 
 	cmd := m.applyBackendEvent(backend.Event{
 		Type:        backend.EventWorkspaceStateChanged,

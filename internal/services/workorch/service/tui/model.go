@@ -220,7 +220,7 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh), WaitForActiveWorkspacePoll()}
+	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
 			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
@@ -268,6 +268,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.RequestSeq > 0 && msg.RequestSeq != m.workspaceContextRequestSeqFor(msg.WorkspaceID) {
 			return m, nil
 		}
+		contextPendingRefresh := false
+		if entry := m.workspaceRuntimeState(msg.WorkspaceID); entry != nil {
+			contextPendingRefresh = entry.ContextPending
+			entry.ContextInFlight = false
+			entry.ContextPending = false
+		}
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
 			return m, nil
 		}
@@ -289,21 +295,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncMainViewportToCurrentContent()
 			}
 		}
-		return m, m.fetchActiveBlockerDetails()
+		cmds := []tea.Cmd{m.fetchActiveBlockerDetails()}
+		if contextPendingRefresh {
+			cmds = append(cmds, m.requestWorkspaceContextFor(msg.WorkspaceID, false))
+		}
+		return m, tea.Batch(cmds...)
 	case WorkspaceContextRetryMsg:
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
 			return m, nil
 		}
 		return m, m.requestWorkspaceContextFor(msg.WorkspaceID, msg.ResetMainViewport)
-	case ActiveWorkspacePollMsg:
-		if m.mode == modeQuit {
-			return m, nil
-		}
-		cmds := []tea.Cmd{WaitForActiveWorkspacePoll()}
-		if m.shouldPollActiveWorkspace() {
-			cmds = append(cmds, m.refreshActiveWorkspaceState())
-		}
-		return m, tea.Batch(cmds...)
 	case WorkspaceCreatedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -2133,6 +2134,11 @@ func (m *AppModel) requestWorkspaceContextFor(workspaceID string, resetMainViewp
 	if entry == nil {
 		return nil
 	}
+	if entry.ContextInFlight {
+		entry.ContextPending = true
+		return nil
+	}
+	entry.ContextInFlight = true
 	entry.ContextRequestSeq++
 	requestSeq := entry.ContextRequestSeq
 	if resetMainViewport {
@@ -2157,21 +2163,6 @@ func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
 		m.requestWorkspaceContextRefresh(false),
 		m.requestWorkspaceListRefresh(),
 	)
-}
-
-func (m AppModel) shouldPollActiveWorkspace() bool {
-	if strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return false
-	}
-	if m.activeWorkspaceStateIsLive() {
-		return true
-	}
-	switch m.progress {
-	case progressSubmitting, progressRunning, progressWaitingDecision, progressWaitingApproval:
-		return true
-	default:
-		return m.running
-	}
 }
 
 func isTransientProjectionError(err error) bool {

@@ -52,6 +52,8 @@ type workspaceRuntimeState struct {
 	RevisionGapCount  int64
 	LastRevisionGap   int64
 	ContextRequestSeq int64
+	ContextInFlight   bool
+	ContextPending    bool
 	ResolvedTickets   map[common.TicketID]struct{}
 	ResolvedApprovals map[common.ApprovalID]struct{}
 	OptimisticRunID   common.RunID
