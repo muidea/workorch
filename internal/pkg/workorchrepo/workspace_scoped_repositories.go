@@ -1987,8 +1987,10 @@ func (r *workspaceScopedEventRecordRepository) Get(ctx context.Context, id commo
 
 func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
 	listQuery := query
-	listQuery.CursorAfterID = ""
-	listQuery.Limit = 0
+	if query.RunID == "" || query.WorkspaceID == "" {
+		listQuery.CursorAfterID = ""
+		listQuery.Limit = 0
+	}
 	ret := []*eventstreammodel.EventRecord{}
 	if query.RunID == "" {
 		systemItems, err := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).List(ctx, listQuery)
@@ -2022,7 +2024,9 @@ func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query r
 		ret = append(ret, items...)
 	}
 	sortEventRecords(ret)
-	ret = applyEventRecordCursorAndLimit(ret, query)
+	if query.RunID == "" || query.WorkspaceID == "" {
+		ret = applyEventRecordCursorAndLimit(ret, query)
+	}
 	return nilIfEmpty(ret), nil
 }
 

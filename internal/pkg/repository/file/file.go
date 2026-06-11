@@ -1354,6 +1354,14 @@ func repositorySequenceScopedDir(root string, scopeID string, itemID string) str
 	return filepath.Join(root, filepath.FromSlash(runtimepath.SequenceScopedPath(root, scopeID, itemID)))
 }
 
+func repositorySequenceScopeRoot(root string, scopeID string) string {
+	scopeSafe := runtimepath.SafeSegment(scopeID)
+	if scopeSafe == "" {
+		scopeSafe = "scope"
+	}
+	return filepath.Join(root, scopeSafe)
+}
+
 func repositoryMetadataDirByID[T any](root string, id string, idOf func(T) string) (string, error) {
 	dirs, err := repositoryMetadataDirs(root)
 	if err != nil {
@@ -1914,7 +1922,14 @@ func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*ru
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	dirs, err := repositoryMetadataDirs(r.stepRoot())
+	root := r.stepRoot()
+	dirs, err := repositoryMetadataDirs(repositorySequenceScopeRoot(root, string(runID)))
+	if err != nil {
+		return nil, err
+	}
+	if len(dirs) == 0 {
+		dirs, err = repositoryMetadataDirs(root)
+	}
 	if err != nil {
 		return nil, err
 	}

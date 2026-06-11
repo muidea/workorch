@@ -7,9 +7,11 @@ import (
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func TestWorkspaceScopedGovernanceGetRequiresUniqueUnscopedID(t *testing.T) {
@@ -166,5 +168,73 @@ func TestWorkspaceScopedRunLocalGetRequiresUniqueUnscopedID(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].ID != "run-shared-local/step-001" {
 		t.Fatalf("scoped step list = %#v, want one scoped step", steps)
+	}
+}
+
+func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T) {
+	ctx := context.Background()
+	repos := NewWorkspaceScopedFileRepositorySet(t.TempDir())
+	workspaceID := common.WorkspaceID("ws-event-scope")
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	for _, runID := range []common.RunID{"run-a", "run-b"} {
+		if err := repos.Runs.Create(scoped, &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+	}
+	records := []*eventstreammodel.EventRecord{
+		{
+			ID:          "evt-run-a-001",
+			Topic:       "/run/state/changed",
+			WorkspaceID: workspaceID,
+			RunID:       "run-a",
+			Payload:     map[string]any{"state": "running"},
+		},
+		{
+			ID:          "evt-run-a-002",
+			Topic:       "/step/state/changed",
+			WorkspaceID: workspaceID,
+			RunID:       "run-a",
+			Payload:     map[string]any{"state": "completed"},
+		},
+		{
+			ID:          "evt-run-b-001",
+			Topic:       "/run/state/changed",
+			WorkspaceID: workspaceID,
+			RunID:       "run-b",
+			Payload:     map[string]any{"state": "running"},
+		},
+	}
+	for _, record := range records {
+		if err := repos.EventRecords.Append(scoped, record); err != nil {
+			t.Fatalf("append event %s: %v", record.ID, err)
+		}
+	}
+
+	firstPage, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+		WorkspaceID: workspaceID,
+		RunID:       "run-a",
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("list first run page: %v", err)
+	}
+	if len(firstPage) != 1 || firstPage[0].ID != "evt-run-a-001" {
+		t.Fatalf("first run page = %+v, want only evt-run-a-001", firstPage)
+	}
+	nextPage, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+		WorkspaceID:   workspaceID,
+		RunID:         "run-a",
+		CursorAfterID: "evt-run-a-001",
+		Limit:         1,
+	})
+	if err != nil {
+		t.Fatalf("list next run page: %v", err)
+	}
+	if len(nextPage) != 1 || nextPage[0].ID != "evt-run-a-002" {
+		t.Fatalf("next run page = %+v, want only evt-run-a-002", nextPage)
 	}
 }

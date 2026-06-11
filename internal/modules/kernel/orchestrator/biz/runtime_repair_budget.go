@@ -269,17 +269,24 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForStep(ctx context.Context, 
 }
 
 func (r *repairSubsystem) runtimeRepairAttemptCountForEffectiveScope(ctx context.Context, runID common.RunID, failedStep *runModel.Step) int {
-	exactAttempts := r.runtimeRepairAttemptCountForStep(ctx, runID, failedStep)
+	if r == nil || r.steps == nil || runID == "" || failedStep == nil {
+		return 0
+	}
+	steps, err := r.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return 0
+	}
+	exactAttempts := runtimeRepairAttemptCountForScopeInSteps(runID, steps, runtimeRepairScopeFromFailedStep(failedStep), runtimeRepairTargetBudgetWindowRoot(failedStep))
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	if targetScope == "" {
-		rootClassAttempts := r.runtimeRepairAttemptCountForRootClassInWindow(ctx, runID, failedStep)
+		rootClassAttempts := runtimeRepairAttemptCountForRootClassInSteps(runID, steps, failedStep)
 		if rootClassAttempts > exactAttempts {
 			return rootClassAttempts
 		}
 		return exactAttempts
 	}
 	class, _ := runtimeRepairScopeClassAndSignature(failedStep)
-	targetAttempts := r.runtimeRepairAttemptCountForFailureTargetInWindow(ctx, runID, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
+	targetAttempts := runtimeRepairAttemptCountForFailureTargetInSteps(runID, steps, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
 	if targetAttempts > exactAttempts {
 		return targetAttempts
 	}
@@ -298,19 +305,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForScopeInWindow(ctx context.
 	if err != nil {
 		return 0
 	}
-	count := 0
-	for _, step := range steps {
-		if !isRuntimeRepairBudgetStep(runID, step) {
-			continue
-		}
-		if windowRoot != "" && runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
-			continue
-		}
-		if runtimeRepairStepMatchesScope(step, scope) {
-			count++
-		}
-	}
-	return count
+	return runtimeRepairAttemptCountForScopeInSteps(runID, steps, scope, windowRoot)
 }
 
 func (r *repairSubsystem) runtimeRepairAttemptCountForRootClassInWindow(ctx context.Context, runID common.RunID, failedStep *runModel.Step) int {
@@ -330,24 +325,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForRootClassInWindow(ctx cont
 	if err != nil {
 		return 0
 	}
-	count := 0
-	for _, step := range steps {
-		if !isRuntimeRepairBudgetStep(runID, step) {
-			continue
-		}
-		if runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
-			continue
-		}
-		stepClass := strings.TrimSpace(firstNonEmptyString(
-			stringFromMap(step.Input, stepInputKeyRepairOfFailureClass),
-			stringFromMap(step.Input, failureOutputKeyClass),
-			stringFromMap(step.Output, failureOutputKeyClass),
-		))
-		if stepClass == failureClass {
-			count++
-		}
-	}
-	return count
+	return runtimeRepairAttemptCountForRootClassInSteps(runID, steps, failedStep)
 }
 
 func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTarget(ctx context.Context, runID common.RunID, failureClass string, targetScope string) int {
@@ -367,6 +345,60 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTargetInWindow(ctx 
 	if err != nil {
 		return 0
 	}
+	return runtimeRepairAttemptCountForFailureTargetInSteps(runID, steps, failureClass, targetScope, windowRoot)
+}
+
+func runtimeRepairAttemptCountForScopeInSteps(runID common.RunID, steps []*runModel.Step, scope runtimeRepairScope, windowRoot common.StepID) int {
+	count := 0
+	for _, step := range steps {
+		if !isRuntimeRepairBudgetStep(runID, step) {
+			continue
+		}
+		if windowRoot != "" && runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
+			continue
+		}
+		if runtimeRepairStepMatchesScope(step, scope) {
+			count++
+		}
+	}
+	return count
+}
+
+func runtimeRepairAttemptCountForRootClassInSteps(runID common.RunID, steps []*runModel.Step, failedStep *runModel.Step) int {
+	if failedStep == nil || !boolValue(failedStep.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return 0
+	}
+	windowRoot := runtimeRepairTargetBudgetWindowRoot(failedStep)
+	if windowRoot == "" {
+		return 0
+	}
+	failureClass, _ := runtimeRepairScopeClassAndSignature(failedStep)
+	failureClass = strings.TrimSpace(failureClass)
+	if failureClass == "" {
+		return 0
+	}
+	count := 0
+	for _, step := range steps {
+		if !isRuntimeRepairBudgetStep(runID, step) {
+			continue
+		}
+		if runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
+			continue
+		}
+		stepClass := runtimeRepairStepFailureClass(step)
+		if stepClass == failureClass {
+			count++
+		}
+	}
+	return count
+}
+
+func runtimeRepairAttemptCountForFailureTargetInSteps(runID common.RunID, steps []*runModel.Step, failureClass string, targetScope string, windowRoot common.StepID) int {
+	targetScope = strings.TrimSpace(targetScope)
+	if targetScope == "" {
+		return 0
+	}
+	failureClass = strings.TrimSpace(failureClass)
 	count := 0
 	for _, step := range steps {
 		if !isRuntimeRepairBudgetStep(runID, step) {
@@ -379,11 +411,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTargetInWindow(ctx 
 			continue
 		}
 		if failureClass != "" {
-			stepClass := strings.TrimSpace(firstNonEmptyString(
-				stringFromMap(step.Input, stepInputKeyRepairOfFailureClass),
-				stringFromMap(step.Input, failureOutputKeyClass),
-				stringFromMap(step.Output, failureOutputKeyClass),
-			))
+			stepClass := runtimeRepairStepFailureClass(step)
 			if stepClass != "" && stepClass != failureClass {
 				continue
 			}
@@ -391,6 +419,17 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTargetInWindow(ctx 
 		count++
 	}
 	return count
+}
+
+func runtimeRepairStepFailureClass(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(step.Input, stepInputKeyRepairOfFailureClass),
+		stringFromMap(step.Input, failureOutputKeyClass),
+		stringFromMap(step.Output, failureOutputKeyClass),
+	))
 }
 
 func duplicateRuntimeFailureBlockerCanAutoResume(

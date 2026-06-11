@@ -235,6 +235,52 @@ func TestStepRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	}
 }
 
+func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "step.json")
+	repo := NewStepRepository(root)
+	for _, item := range []*runmodel.Step{
+		{
+			ID:     "run-a/step-1",
+			RunID:  "run-a",
+			Kind:   "shell",
+			State:  common.StepStateCompleted,
+			Output: map[string]any{"value": "a1"},
+		},
+		{
+			ID:     "run-a/step-2",
+			RunID:  "run-a",
+			Kind:   "shell",
+			State:  common.StepStateCompleted,
+			Output: map[string]any{"value": "a2"},
+		},
+		{
+			ID:     "run-b/step-1",
+			RunID:  "run-b",
+			Kind:   "shell",
+			State:  common.StepStateCompleted,
+			Output: map[string]any{"value": "b1"},
+		},
+	} {
+		if err := repo.Create(ctx, item); err != nil {
+			t.Fatalf("create step %s: %v", item.ID, err)
+		}
+	}
+
+	items, err := repo.ListByRun(ctx, "run-a")
+	if err != nil {
+		t.Fatalf("list run-a steps: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != "run-a/step-1" || items[1].ID != "run-a/step-2" {
+		t.Fatalf("run-a steps = %+v, want only run-a steps in order", items)
+	}
+	for _, item := range items {
+		if item.RunID != "run-a" {
+			t.Fatalf("listed step run = %q, want run-a", item.RunID)
+		}
+	}
+}
+
 func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "tool_call.json")
