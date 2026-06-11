@@ -1,14 +1,30 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { App as AntApp, Button, Descriptions, Space } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
-import { errorMessage } from '../utils';
+import { compactJSON, errorMessage } from '../utils';
+import type { ServiceStatus } from '../types';
+
+function statusDescriptionItems(status: ServiceStatus) {
+  return Object.entries(status).map(([key, value]) => ({ key, label: key, children: renderStatusValue(value) }));
+}
+
+function renderStatusValue(value: unknown): ReactNode {
+  if (value === undefined || value === null) {
+    return '-';
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return <pre className="json-panel">{compactJSON(value)}</pre>;
+}
 
 export function ServicePage() {
   const { message } = AntApp.useApp();
-  const [health, setHealth] = useState<Record<string, string>>({});
-  const [ready, setReady] = useState<Record<string, string>>({});
+  const [health, setHealth] = useState<ServiceStatus>({});
+  const [ready, setReady] = useState<ServiceStatus>({});
   const [metrics, setMetrics] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -42,10 +58,10 @@ export function ServicePage() {
     >
       <CardGrid className="workorch-card-grid" loading={loading}>
         <ProCard title="健康检查" colSpan="50%">
-          <Descriptions items={Object.entries(health).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
+          <Descriptions items={statusDescriptionItems(health)} column={1} />
         </ProCard>
         <ProCard title="就绪检查" colSpan="50%">
-          <Descriptions items={Object.entries(ready).map(([key, value]) => ({ key, label: key, children: value }))} column={1} />
+          <Descriptions items={statusDescriptionItems(ready)} column={1} />
         </ProCard>
       </CardGrid>
       <ProCard title={modelLabels.metrics} className="workorch-section">

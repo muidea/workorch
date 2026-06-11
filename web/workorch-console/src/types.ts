@@ -1,8 +1,3 @@
-export type ServiceStatus = {
-  service: string;
-  status: string;
-};
-
 export type ServiceConfiguration = {
   server: ServerConfiguration;
   repository: RepositoryConfiguration;
@@ -274,6 +269,13 @@ export type ProjectionStatus = {
   degraded?: boolean;
   staleReason?: string;
   error?: string;
+};
+
+export type ServiceStatus = {
+  service?: string;
+  status?: string;
+  projection?: ProjectionStatus;
+  [key: string]: unknown;
 };
 
 export type WorkspaceListProjection = {
