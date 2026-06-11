@@ -425,6 +425,35 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 	}
 }
 
+func (m *AppModel) activeWorkspaceHasDecisionBlocker() bool {
+	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
+		return true
+	}
+	ws := m.activeWorkspaceOverview()
+	return ws != nil && ws.State == common.WorkspaceStateWaitingDecision && ws.BlockingTicketID != ""
+}
+
+func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
+	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
+		return true
+	}
+	ws := m.activeWorkspaceOverview()
+	return ws != nil && ws.State == common.WorkspaceStateBlocked && ws.BlockingApprovalID != ""
+}
+
+func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {
+	ws := m.activeWorkspaceOverview()
+	if ws == nil {
+		return nil
+	}
+	switch ws.State {
+	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+		return m.syncActiveWorkspaceOverview()
+	default:
+		return nil
+	}
+}
+
 func (m *AppModel) blockActiveWorkspaceContinue(reason string) tea.Cmd {
 	blockerProgress, ok := m.activeWorkspaceBlockerProgress()
 	if !ok {
@@ -450,12 +479,18 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 		m.workspaceSelectMode = false
 		return m, nil
 	}
+	_, cached := m.cachedWorkspaceDisplayState(m.selectedWorkspaceID)
 	m.setActiveWorkspace(m.selectedWorkspaceID)
 	m.workspaceSelectMode = false
-	if _, ok := m.cachedWorkspaceDisplayState(m.activeWorkspaceID); !ok {
+	cmds := []tea.Cmd{}
+	if cmd := m.syncActiveWorkspaceBlockerOverview(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if !cached && m.progress != progressWaitingDecision && m.progress != progressWaitingApproval {
 		m.progressText = "Workspace switched; refreshing state"
 	}
-	return m, tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(true))
+	cmds = append(cmds, m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(true))
+	return m, tea.Batch(cmds...)
 }
 
 func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {

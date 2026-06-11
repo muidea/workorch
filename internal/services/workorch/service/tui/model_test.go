@@ -3653,6 +3653,50 @@ func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) 
 	}
 }
 
+func TestModelWorkspaceSwitchToDecisionWorkspaceSuggestsDecisionCommandsBeforeDetail(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.width = 120
+	m.height = 18
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b460b00b639f57e4", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+	m.currentTask = "workspace A active task"
+	m.result = "workspace A output"
+
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = "ws-b460b00b639f57e4"
+	next, cmd := m.confirmWorkspaceSelection()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("workspace switch should request refreshes")
+	}
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-b" {
+		t.Fatalf("blocking decision = %+v, want ticket-b from workspace overview", m.blockingDecision)
+	}
+	m.setInput("/")
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "ws-b460b00 decision > /") {
+		t.Fatalf("decision prompt missing after switch:\n%s", view)
+	}
+	if !strings.Contains(view, "/decision answer") || !strings.Contains(view, "/decision replan") {
+		t.Fatalf("decision command suggestions missing before detail load:\n%s", view)
+	}
+	suggestions := m.slashCommandSuggestions("/")
+	if len(suggestions) < 2 || suggestions[0].Command != "/decision answer" || suggestions[1].Command != "/decision replan" {
+		t.Fatalf("suggestions = %+v, want decision commands first", suggestions)
+	}
+
+	m.setInput("/decision ")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = asModel(next)
+	if m.input != "/decision answer " {
+		t.Fatalf("completion = %q, want /decision answer with trailing space", m.input)
+	}
+}
+
 func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

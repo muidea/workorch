@@ -391,7 +391,7 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 
 func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	switch {
-	case m.blockingDecision != nil:
+	case m.activeWorkspaceHasDecisionBlocker():
 		return []slashCommandSuggestion{
 			{Command: "/decision answer", Insert: "/decision answer ", Description: "answer current ticket", Contextual: true},
 			{Command: "/decision replan", Insert: "/decision replan ", Description: "request replan", Contextual: true},
@@ -399,7 +399,7 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 			{Command: "/decision show", Description: "show current ticket", Contextual: true},
 			{Command: "/decision list", Description: "list open tickets", Contextual: true},
 		}
-	case m.blockingApproval != nil:
+	case m.activeWorkspaceHasApprovalBlocker():
 		return []slashCommandSuggestion{
 			{Command: "/approval approve", Description: "approve current request", Contextual: true},
 			{Command: "/approval reject", Description: "reject current request", Contextual: true},
