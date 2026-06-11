@@ -6,6 +6,7 @@ import (
 
 type WorkspaceListMsg struct {
 	RequestSeq int64
+	Projection backend.ProjectionInfo
 	Workspaces []backend.WorkspaceInfo
 	Error      error
 }
@@ -15,6 +16,7 @@ type WorkspaceContextMsg struct {
 	WorkspaceID       string
 	ResetMainViewport bool
 	Workspace         *backend.WorkspaceInfo
+	Projection        backend.ProjectionInfo
 	Snapshot          *backend.WorkspaceSnapshotInfo
 	Runs              []backend.RunInfo
 	ActiveRun         *backend.RunInfo

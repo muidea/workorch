@@ -566,7 +566,7 @@ func renderGovernanceCompact(decisions []backend.DecisionInfo, approvals []backe
 }
 
 func (m AppModel) renderActiveWorkspace(width int) string {
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
 	if ws == nil {
 		return Dim.Render("Workspace: " + shortID(m.activeWorkspaceID))
 	}
@@ -578,7 +578,7 @@ func (m AppModel) renderActiveWorkspace(width int) string {
 }
 
 func (m AppModel) renderWorkspaceTemplateInfo(width int) string {
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
 	if ws == nil {
 		return ""
 	}
@@ -717,7 +717,7 @@ func (m AppModel) renderInput(width int) string {
 		prompt += " decision"
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
-	} else if ws := findWorkspace(m.workspaces, m.activeWorkspaceID); ws != nil {
+	} else if ws := m.activeWorkspaceOverview(); ws != nil {
 		switch ws.State {
 		case common.WorkspaceStateWaitingDecision:
 			prompt += " decision"

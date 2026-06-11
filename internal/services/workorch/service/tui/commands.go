@@ -23,7 +23,13 @@ func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
 		if err != nil {
 			return WorkspaceListMsg{RequestSeq: seq, Error: err}
 		}
-		return WorkspaceListMsg{RequestSeq: seq, Workspaces: workspaces}
+		projection := backend.ProjectionInfo{}
+		for _, ws := range workspaces {
+			if ws.Projection.GlobalRevision > projection.GlobalRevision {
+				projection = ws.Projection
+			}
+		}
+		return WorkspaceListMsg{RequestSeq: seq, Projection: projection, Workspaces: workspaces}
 	}
 }
 
@@ -93,6 +99,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				WorkspaceID:       workspaceID,
 				ResetMainViewport: resetMainViewport,
 				Workspace:         &snapshot.Workspace,
+				Projection:        snapshot.Projection,
 				Snapshot:          snapshot,
 				Runs:              snapshot.Runs,
 				ActiveRun:         activeRun,

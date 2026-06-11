@@ -5,6 +5,7 @@ import port "github.com/muidea/workorch/internal/pkg/workorchport"
 type Backend = port.Backend
 type CreateWorkspaceRequest = port.CreateWorkspaceRequest
 type WorkspaceInfo = port.WorkspaceInfo
+type ProjectionInfo = port.ProjectionInfo
 type WorkspaceOutcomeInfo = port.WorkspaceOutcomeInfo
 type ResultSummaryInfo = port.ResultSummaryInfo
 type ResultInfo = port.ResultInfo

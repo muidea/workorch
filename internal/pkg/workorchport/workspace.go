@@ -26,6 +26,20 @@ type WorkspaceInfo struct {
 	ProfileID            string
 	DefaultSoulID        common.SoulID
 	SoulBindings         map[string]common.SoulID
+	Projection           ProjectionInfo
+}
+
+type ProjectionInfo struct {
+	State                   string
+	GlobalRevision          int64
+	WorkspaceRevision       int64
+	SourceEventRevision     int64
+	ProjectedSourceRevision int64
+	UpdatedAt               string
+	RebuiltAt               string
+	Degraded                bool
+	StaleReason             string
+	Error                   string
 }
 
 type WorkspaceOutcomeInfo struct {
@@ -43,6 +57,7 @@ type WorkspaceOutcomeInfo struct {
 
 type WorkspaceSnapshotInfo struct {
 	Workspace             WorkspaceInfo
+	Projection            ProjectionInfo
 	Outcome               WorkspaceOutcomeInfo
 	TaskProgress          TaskProgressInfo
 	RunHeartbeat          RunHeartbeatInfo

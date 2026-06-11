@@ -76,17 +76,8 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 	if err != nil {
 		return nil, err
 	}
-	return &WorkspaceInfo{
-		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID:        common.RunID(ws.ActiveRunID),
-		BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
-		TemplateID:         ws.TemplateID,
-		ProfileID:          ws.ProfileID,
-		DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
-		SoulBindings:       commonSoulBindings(ws.SoulBindings),
-	}, nil
+	info := workspaceInfoFromClient(ws)
+	return &info, nil
 }
 
 func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*WorkspaceInfo, error) {
@@ -94,47 +85,37 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	return &WorkspaceInfo{
-		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID:        common.RunID(ws.ActiveRunID),
-		BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
-		TemplateID:         ws.TemplateID,
-		ProfileID:          ws.ProfileID,
-		DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
-		SoulBindings:       commonSoulBindings(ws.SoulBindings),
-	}, nil
+	info := workspaceInfoFromClient(ws)
+	return &info, nil
 }
 
 func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, error) {
-	list, err := b.cl.ListWorkspaces(ctx)
+	projection, err := b.cl.ListWorkspaceProjection(ctx)
 	if err != nil {
 		return nil, err
 	}
+	list := projection.Workspaces
 	result := make([]WorkspaceInfo, 0, len(list))
 	for _, ws := range list {
-		result = append(result, WorkspaceInfo{
-			ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
-			DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-			ActiveRunID:        common.RunID(ws.ActiveRunID),
-			BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
-			BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
-			TemplateID:         ws.TemplateID,
-			ProfileID:          ws.ProfileID,
-			DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
-			SoulBindings:       commonSoulBindings(ws.SoulBindings),
-		})
+		item := workspaceInfoFromClient(&ws)
+		item.Projection = projectionInfoFromClient(projection.Projection)
+		result = append(result, item)
 	}
 	return result, nil
 }
 
 func (b *remoteWorkspaceBackend) Snapshot(ctx context.Context, id common.WorkspaceID) (*WorkspaceSnapshotInfo, error) {
-	snapshot, err := b.cl.GetWorkspaceSnapshot(ctx, string(id))
+	projection, err := b.cl.GetWorkspaceSnapshotProjection(ctx, string(id))
 	if err != nil {
 		return nil, err
 	}
-	return decodeSnapshotInfo(snapshot)
+	snapshot, err := decodeSnapshotInfo(projection.Snapshot)
+	if err != nil || snapshot == nil {
+		return snapshot, err
+	}
+	snapshot.Projection = projectionInfoFromClient(projection.Projection)
+	snapshot.Workspace.Projection = snapshot.Projection
+	return snapshot, nil
 }
 
 func (b *remoteWorkspaceBackend) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {

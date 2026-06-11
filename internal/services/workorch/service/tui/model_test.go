@@ -4116,6 +4116,79 @@ func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
 	}
 }
 
+func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
+	}}})
+	m = asModel(next)
+	m.width = 120
+	m.height = 32
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+
+	next, _ = m.Update(DecisionResolvedMsg{Decision: &backend.DecisionInfo{
+		ID:          "ticket-1",
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		State:       "resolved",
+	}})
+	m = asModel(next)
+	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+		t.Fatalf("resolved prompt/blocker = %q/%+v, want running without blocker", stripANSI(m.renderInput(120)), m.blockingDecision)
+	}
+
+	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
+	}}})
+	m = asModel(next)
+	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+		t.Fatalf("stale list restored decision prompt/blocker = %q/%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
+	}
+
+	next, _ = m.Update(WorkspaceContextMsg{
+		WorkspaceID: "ws-a",
+		Workspace: &backend.WorkspaceInfo{
+			ID:               "ws-a",
+			Title:            "A",
+			State:            common.WorkspaceStateWaitingDecision,
+			ActiveRunID:      "run-1",
+			BlockingTicketID: "ticket-1",
+		},
+		ActiveRun:  &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		DisplayRun: &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace: backend.WorkspaceInfo{
+				ID:               "ws-a",
+				Title:            "A",
+				State:            common.WorkspaceStateWaitingDecision,
+				ActiveRunID:      "run-1",
+				BlockingTicketID: "ticket-1",
+			},
+			Decisions: []backend.DecisionInfo{{
+				ID:          "ticket-1",
+				WorkspaceID: "ws-a",
+				RunID:       "run-1",
+				State:       "open",
+			}},
+		},
+		Decisions:        []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+		t.Fatalf("stale snapshot restored decision prompt/blocker = %q/%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
+	}
+}
+
 func TestModelWorkspaceDeletedEventClearsActiveWorkspaceView(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

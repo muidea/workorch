@@ -251,7 +251,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		previousActive := m.activeWorkspaceID
-		m.workspaces = msg.Workspaces
+		m.replaceWorkspaceList(msg.Workspaces, msg.Projection)
 		m.ensureActiveWorkspace()
 		cmds := []tea.Cmd{}
 		if cmd := m.syncActiveWorkspaceOverview(); cmd != nil {
@@ -463,6 +463,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Decision.RunID != "" {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
+			m.markDecisionResolvedForWorkspace(msg.Decision.ID, msg.Decision.RunID)
 			m.markDecisionResolved(msg.Decision.ID)
 			m.markActiveWorkspaceRunningFromResolution(msg.Decision.RunID)
 		}
@@ -480,6 +481,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Approval.RunID != "" {
 				m.activeRunID = string(msg.Approval.RunID)
 			}
+			m.markApprovalResolvedForWorkspace(msg.Approval.ID, msg.Approval.RunID)
 			m.markApprovalResolved(msg.Approval.ID)
 			m.markActiveWorkspaceRunningFromResolution(msg.Approval.RunID)
 		}
@@ -1684,6 +1686,9 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 	if m.blockingDecision != nil {
 		matched := false
 		for _, item := range m.decisions {
+			if m.decisionAlreadyResolved(item.ID) {
+				continue
+			}
 			if item.ID == m.blockingDecision.ID {
 				matched = true
 				merged := mergeDecisionInfo(*m.blockingDecision, item)
@@ -1705,6 +1710,9 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 		}
 	}
 	for _, item := range filterOpenDecisions(m.decisions) {
+		if m.decisionAlreadyResolved(item.ID) {
+			continue
+		}
 		if m.decisionMatchesActiveScope(item) {
 			m.blockingDecision = &item
 			if m.progress == progressWaitingDecision {
@@ -1719,6 +1727,9 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 	if m.blockingApproval != nil {
 		matched := false
 		for _, item := range m.approvals {
+			if m.approvalAlreadyResolved(item.ID) {
+				continue
+			}
 			if item.ID == m.blockingApproval.ID {
 				matched = true
 				merged := mergeApprovalInfo(*m.blockingApproval, item)
@@ -1740,6 +1751,9 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 		}
 	}
 	for _, item := range filterPendingApprovals(m.approvals) {
+		if m.approvalAlreadyResolved(item.ID) {
+			continue
+		}
 		if m.approvalMatchesActiveScope(item) {
 			m.blockingApproval = &item
 			if m.progress == progressWaitingApproval {
@@ -1748,6 +1762,24 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 			return
 		}
 	}
+}
+
+func (m *AppModel) decisionAlreadyResolved(id common.TicketID) bool {
+	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil || id == "" {
+		return false
+	}
+	_, ok := entry.ResolvedTickets[id]
+	return ok
+}
+
+func (m *AppModel) approvalAlreadyResolved(id common.ApprovalID) bool {
+	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil || id == "" {
+		return false
+	}
+	_, ok := entry.ResolvedApprovals[id]
+	return ok
 }
 
 func (m *AppModel) clearWaitingProgressIfUnblocked() {
@@ -1960,14 +1992,18 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.blockingDecision = nil
 		m.progress = progressRunning
 		m.progressText = "Decision resolved; resuming run"
-		m.markDecisionResolved(common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)))
+		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID))
+		m.markDecisionResolvedForWorkspace(ticketID, evt.RunID)
+		m.markDecisionResolved(ticketID)
 		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
 		m.blockingApproval = nil
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
-		m.markApprovalResolved(common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)))
+		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID))
+		m.markApprovalResolvedForWorkspace(approvalID, evt.RunID)
+		m.markApprovalResolved(approvalID)
 		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventGovernanceResolved:

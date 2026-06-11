@@ -39,13 +39,22 @@ type workspaceDisplayState struct {
 	LastError             error
 }
 
+// workspaceRuntimeState is the TUI ViewModel for one workspace.
+// Server projection remains authoritative; local fields only protect UI
+// command intent while projection refresh is catching up.
 type workspaceRuntimeState struct {
+	Overview          backend.WorkspaceInfo
+	HasOverview       bool
+	Projection        backend.ProjectionInfo
 	Display           workspaceDisplayState
 	HasDisplay        bool
 	LastRevision      int64
 	RevisionGapCount  int64
 	LastRevisionGap   int64
 	ContextRequestSeq int64
+	ResolvedTickets   map[common.TicketID]struct{}
+	ResolvedApprovals map[common.ApprovalID]struct{}
+	OptimisticRunID   common.RunID
 }
 
 func (m *AppModel) ensureWorkspaceRuntimeState(workspaceID string) *workspaceRuntimeState {
@@ -79,6 +88,97 @@ func findWorkspace(workspaces []backend.WorkspaceInfo, id string) *backend.Works
 		}
 	}
 	return nil
+}
+
+func projectionRevision(input backend.ProjectionInfo) int64 {
+	for _, value := range []int64{
+		input.WorkspaceRevision,
+		input.ProjectedSourceRevision,
+		input.SourceEventRevision,
+	} {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func mergeProjectionInfo(current, incoming backend.ProjectionInfo) backend.ProjectionInfo {
+	if projectionRevision(incoming) == 0 && incoming.GlobalRevision == 0 && incoming.State == "" {
+		return current
+	}
+	if projectionRevision(current) > 0 && projectionRevision(incoming) > 0 && projectionRevision(incoming) < projectionRevision(current) {
+		return current
+	}
+	return incoming
+}
+
+func (m *AppModel) activeWorkspaceOverview() *backend.WorkspaceInfo {
+	if entry := m.workspaceRuntimeState(m.activeWorkspaceID); entry != nil && entry.HasOverview {
+		return &entry.Overview
+	}
+	return findWorkspace(m.workspaces, m.activeWorkspaceID)
+}
+
+func (m *AppModel) mergeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
+	entry := m.ensureWorkspaceRuntimeState(string(ws.ID))
+	if entry == nil {
+		return ws
+	}
+	if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 && entry.Projection.State != "" {
+		ws.Projection = entry.Projection
+	}
+	ws = entry.normalizeWorkspaceOverview(ws)
+	currentRevision := projectionRevision(entry.Overview.Projection)
+	incomingRevision := projectionRevision(ws.Projection)
+	if entry.HasOverview && currentRevision > 0 && incomingRevision > 0 && incomingRevision < currentRevision {
+		return entry.Overview
+	}
+	entry.Projection = mergeProjectionInfo(entry.Projection, ws.Projection)
+	if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 {
+		ws.Projection = entry.Projection
+	}
+	entry.Overview = ws
+	entry.HasOverview = true
+	return ws
+}
+
+func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.WorkspaceInfo) backend.WorkspaceInfo {
+	if entry == nil {
+		return ws
+	}
+	if _, ok := entry.ResolvedTickets[ws.BlockingTicketID]; ok && ws.BlockingTicketID != "" {
+		ws.State = common.WorkspaceStateRunning
+		if entry.OptimisticRunID != "" {
+			ws.ActiveRunID = entry.OptimisticRunID
+		}
+		ws.BlockingTicketID = ""
+		ws.BlockingApprovalID = ""
+	}
+	if _, ok := entry.ResolvedApprovals[ws.BlockingApprovalID]; ok && ws.BlockingApprovalID != "" {
+		ws.State = common.WorkspaceStateRunning
+		if entry.OptimisticRunID != "" {
+			ws.ActiveRunID = entry.OptimisticRunID
+		}
+		ws.BlockingTicketID = ""
+		ws.BlockingApprovalID = ""
+	}
+	if workspaceStateIsLive(ws.State) {
+		ws.BlockingTicketID = ""
+		ws.BlockingApprovalID = ""
+	}
+	return ws
+}
+
+func (m *AppModel) replaceWorkspaceList(workspaces []backend.WorkspaceInfo, projection backend.ProjectionInfo) {
+	next := make([]backend.WorkspaceInfo, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.Projection.State == "" && projectionRevision(ws.Projection) == 0 {
+			ws.Projection = projection
+		}
+		next = append(next, m.mergeWorkspaceOverview(ws))
+	}
+	m.workspaces = next
 }
 
 func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
@@ -121,10 +221,14 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 			if blockingApprovalID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyBlockingApprovalID, "BlockingApprovalID", "blockingApprovalId") {
 				m.workspaces[i].BlockingApprovalID = blockingApprovalID
 			}
+			if evt.Revision > 0 {
+				m.workspaces[i].Projection.SourceEventRevision = evt.Revision
+			}
+			m.workspaces[i] = m.mergeWorkspaceOverview(m.workspaces[i])
 			return
 		}
 	}
-	m.workspaces = append(m.workspaces, backend.WorkspaceInfo{
+	ws := backend.WorkspaceInfo{
 		ID:                   evt.WorkspaceID,
 		Title:                title,
 		Description:          description,
@@ -133,7 +237,11 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 		ActiveRunID:          activeRunID,
 		BlockingTicketID:     blockingTicketID,
 		BlockingApprovalID:   blockingApprovalID,
-	})
+	}
+	if evt.Revision > 0 {
+		ws.Projection.SourceEventRevision = evt.Revision
+	}
+	m.workspaces = append(m.workspaces, m.mergeWorkspaceOverview(ws))
 }
 
 func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
@@ -265,7 +373,7 @@ func (m *AppModel) selectedWorkspaceIndex() int {
 }
 
 func (m *AppModel) activeWorkspaceRunID() string {
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
 	if ws != nil {
 		if !workspaceStateIsLive(ws.State) {
 			return ""
@@ -284,7 +392,7 @@ func (m *AppModel) activeWorkspaceRunID() string {
 }
 
 func (m *AppModel) activeWorkspaceStateIsLive() bool {
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
 	if ws == nil {
 		return false
 	}
@@ -299,6 +407,9 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 		return progressWaitingApproval, true
 	}
 	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if overview := m.activeWorkspaceOverview(); overview != nil {
+		ws = overview
+	}
 	if ws == nil {
 		return "", false
 	}
@@ -356,6 +467,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	previousTask := m.currentTask
 	previousTranscript := append([]transcriptItem(nil), m.transcript...)
 	previousDoDItems := append([]string(nil), m.dodItems...)
+	if msg.Workspace.Projection.State == "" && projectionRevision(msg.Workspace.Projection) == 0 {
+		msg.Workspace.Projection = msg.Projection
+	}
 	m.upsertWorkspace(*msg.Workspace)
 	if msg.Decisions != nil {
 		m.decisions = append([]backend.DecisionInfo(nil), msg.Decisions...)
@@ -746,6 +860,7 @@ func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
 }
 
 func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
+	ws = m.mergeWorkspaceOverview(ws)
 	for i := range m.workspaces {
 		if m.workspaces[i].ID == ws.ID {
 			m.workspaces[i] = ws
@@ -785,7 +900,7 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 }
 
 func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
-	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	ws := m.activeWorkspaceOverview()
 	if ws == nil {
 		return nil
 	}
@@ -827,6 +942,10 @@ func (m *AppModel) markActiveWorkspaceRunningFromResolution(runID common.RunID) 
 	if runID != "" {
 		m.activeRunID = string(runID)
 	}
+	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+	if entry != nil && runID != "" {
+		entry.OptimisticRunID = runID
+	}
 	for i := range m.workspaces {
 		if string(m.workspaces[i].ID) != m.activeWorkspaceID {
 			continue
@@ -840,6 +959,35 @@ func (m *AppModel) markActiveWorkspaceRunningFromResolution(runID common.RunID) 
 		}
 		m.workspaces[i].BlockingTicketID = ""
 		m.workspaces[i].BlockingApprovalID = ""
+		m.workspaces[i] = m.mergeWorkspaceOverview(m.workspaces[i])
 		return
+	}
+}
+
+func (m *AppModel) markDecisionResolvedForWorkspace(id common.TicketID, runID common.RunID) {
+	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil || id == "" {
+		return
+	}
+	if entry.ResolvedTickets == nil {
+		entry.ResolvedTickets = map[common.TicketID]struct{}{}
+	}
+	entry.ResolvedTickets[id] = struct{}{}
+	if runID != "" {
+		entry.OptimisticRunID = runID
+	}
+}
+
+func (m *AppModel) markApprovalResolvedForWorkspace(id common.ApprovalID, runID common.RunID) {
+	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil || id == "" {
+		return
+	}
+	if entry.ResolvedApprovals == nil {
+		entry.ResolvedApprovals = map[common.ApprovalID]struct{}{}
+	}
+	entry.ResolvedApprovals[id] = struct{}{}
+	if runID != "" {
+		entry.OptimisticRunID = runID
 	}
 }
