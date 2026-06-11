@@ -8,6 +8,8 @@ type Workspace struct {
 	DeliverableDirectory string            `json:"deliverableDirectory,omitempty"`
 	State                string            `json:"state"`
 	ActiveRunID          string            `json:"activeRunId,omitempty"`
+	BlockingTicketID     string            `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID   string            `json:"blockingApprovalId,omitempty"`
 	TemplateID           string            `json:"templateId,omitempty"`
 	ProfileID            string            `json:"profileId,omitempty"`
 	DefaultSoulID        string            `json:"defaultSoulId,omitempty"`

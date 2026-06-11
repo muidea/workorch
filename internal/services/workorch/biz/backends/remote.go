@@ -79,8 +79,13 @@ func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspace
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID: common.RunID(ws.ActiveRunID), TemplateID: ws.TemplateID, ProfileID: ws.ProfileID, DefaultSoulID: common.SoulID(ws.DefaultSoulID),
-		SoulBindings: commonSoulBindings(ws.SoulBindings),
+		ActiveRunID:        common.RunID(ws.ActiveRunID),
+		BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
+		TemplateID:         ws.TemplateID,
+		ProfileID:          ws.ProfileID,
+		DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
+		SoulBindings:       commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -92,11 +97,13 @@ func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID)
 	return &WorkspaceInfo{
 		ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 		DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-		ActiveRunID:   common.RunID(ws.ActiveRunID),
-		TemplateID:    ws.TemplateID,
-		ProfileID:     ws.ProfileID,
-		DefaultSoulID: common.SoulID(ws.DefaultSoulID),
-		SoulBindings:  commonSoulBindings(ws.SoulBindings),
+		ActiveRunID:        common.RunID(ws.ActiveRunID),
+		BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
+		TemplateID:         ws.TemplateID,
+		ProfileID:          ws.ProfileID,
+		DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
+		SoulBindings:       commonSoulBindings(ws.SoulBindings),
 	}, nil
 }
 
@@ -110,11 +117,13 @@ func (b *remoteWorkspaceBackend) List(ctx context.Context) ([]WorkspaceInfo, err
 		result = append(result, WorkspaceInfo{
 			ID: common.WorkspaceID(ws.ID), Title: ws.Title, Description: ws.Description,
 			DeliverableDirectory: ws.DeliverableDirectory, State: common.WorkspaceState(ws.State),
-			ActiveRunID:   common.RunID(ws.ActiveRunID),
-			TemplateID:    ws.TemplateID,
-			ProfileID:     ws.ProfileID,
-			DefaultSoulID: common.SoulID(ws.DefaultSoulID),
-			SoulBindings:  commonSoulBindings(ws.SoulBindings),
+			ActiveRunID:        common.RunID(ws.ActiveRunID),
+			BlockingTicketID:   common.TicketID(ws.BlockingTicketID),
+			BlockingApprovalID: common.ApprovalID(ws.BlockingApprovalID),
+			TemplateID:         ws.TemplateID,
+			ProfileID:          ws.ProfileID,
+			DefaultSoulID:      common.SoulID(ws.DefaultSoulID),
+			SoulBindings:       commonSoulBindings(ws.SoulBindings),
 		})
 	}
 	return result, nil
@@ -223,7 +232,11 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 	return &RunInfo{
 		ID: common.RunID(act.Run.ID), WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
 		GoalID: common.GoalID(act.Run.GoalID), DoDID: common.DoDID(act.Run.DoDID),
-		ExecutionContext: act.Run.ExecutionContext, State: common.RunState(act.Run.State),
+		ExecutionContext:   act.Run.ExecutionContext,
+		State:              common.RunState(act.Run.State),
+		BlockingTicketID:   common.TicketID(act.Run.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(act.Run.BlockingApprovalID),
+		FailureReason:      act.Run.FailureReason,
 	}, nil
 }
 func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
@@ -237,7 +250,11 @@ func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, 
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-		ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+		ExecutionContext:   r.ExecutionContext,
+		State:              common.RunState(r.State),
+		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
+		FailureReason:      r.FailureReason,
 	}, nil
 }
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
@@ -251,7 +268,11 @@ func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 		GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-		ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+		ExecutionContext:   r.ExecutionContext,
+		State:              common.RunState(r.State),
+		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
+		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
+		FailureReason:      r.FailureReason,
 	}, nil
 }
 func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error) {
@@ -264,7 +285,11 @@ func (b *remoteRunBackend) List(ctx context.Context, wsID common.WorkspaceID) ([
 		result = append(result, RunInfo{
 			ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
 			GoalID: common.GoalID(r.GoalID), DoDID: common.DoDID(r.DoDID),
-			ExecutionContext: r.ExecutionContext, State: common.RunState(r.State),
+			ExecutionContext:   r.ExecutionContext,
+			State:              common.RunState(r.State),
+			BlockingTicketID:   common.TicketID(r.BlockingTicketID),
+			BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
+			FailureReason:      r.FailureReason,
 		})
 	}
 	return result, nil

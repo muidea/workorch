@@ -20,6 +20,8 @@ type WorkspaceInfo struct {
 	DeliverableDirectory string
 	State                common.WorkspaceState
 	ActiveRunID          common.RunID
+	BlockingTicketID     common.TicketID
+	BlockingApprovalID   common.ApprovalID
 	TemplateID           string
 	ProfileID            string
 	DefaultSoulID        common.SoulID

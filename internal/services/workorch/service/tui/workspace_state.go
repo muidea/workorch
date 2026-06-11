@@ -93,6 +93,8 @@ func workspaceIndex(workspaces []backend.WorkspaceInfo, id string) int {
 func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 	state := common.WorkspaceState(firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState))
 	activeRunID := common.RunID(firstPayloadString(evt.Payload, "activeRunId", "ActiveRunID", events.PayloadKeyActiveRunID))
+	blockingTicketID := common.TicketID(firstPayloadString(evt.Payload, "blockingTicketId", "BlockingTicketID", events.PayloadKeyBlockingTicketID))
+	blockingApprovalID := common.ApprovalID(firstPayloadString(evt.Payload, "blockingApprovalId", "BlockingApprovalID", events.PayloadKeyBlockingApprovalID))
 	title := firstPayloadString(evt.Payload, "title", "Title", events.PayloadKeyTitle)
 	description := firstPayloadString(evt.Payload, "description", "Description", events.PayloadKeyDescription)
 	deliverableDirectory := firstPayloadString(evt.Payload, "deliverableDirectory", "DeliverableDirectory", events.PayloadKeyDeliverableDirectory)
@@ -113,6 +115,12 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 			if activeRunID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyActiveRunID, "ActiveRunID", "activeRunId") {
 				m.workspaces[i].ActiveRunID = activeRunID
 			}
+			if blockingTicketID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyBlockingTicketID, "BlockingTicketID", "blockingTicketId") {
+				m.workspaces[i].BlockingTicketID = blockingTicketID
+			}
+			if blockingApprovalID != "" || hasPayloadKey(evt.Payload, events.PayloadKeyBlockingApprovalID, "BlockingApprovalID", "blockingApprovalId") {
+				m.workspaces[i].BlockingApprovalID = blockingApprovalID
+			}
 			return
 		}
 	}
@@ -123,6 +131,8 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 		DeliverableDirectory: deliverableDirectory,
 		State:                state,
 		ActiveRunID:          activeRunID,
+		BlockingTicketID:     blockingTicketID,
+		BlockingApprovalID:   blockingApprovalID,
 	})
 }
 
@@ -772,4 +782,41 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 		m.progress = progressIdle
 		m.progressText = ""
 	}
+}
+
+func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
+	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
+	if ws == nil {
+		return nil
+	}
+	if ws.ActiveRunID != "" {
+		m.activeRunID = string(ws.ActiveRunID)
+	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateWaitingDecision && ws.State != common.WorkspaceStateBlocked {
+		m.activeRunID = ""
+	}
+	m.applyWorkspaceProgress(ws.State)
+	switch ws.State {
+	case common.WorkspaceStateWaitingDecision:
+		m.running = false
+		m.progress = progressWaitingDecision
+		if ws.BlockingTicketID != "" {
+			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
+			m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+			return m.fetchActiveBlockerDetails()
+		}
+		m.progressText = "Waiting for decision"
+	case common.WorkspaceStateBlocked:
+		m.running = false
+		m.progress = progressWaitingApproval
+		if ws.BlockingApprovalID != "" {
+			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
+			m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+			return m.fetchActiveBlockerDetails()
+		}
+		m.progressText = "Waiting for approval"
+	default:
+		m.blockingDecision = nil
+		m.blockingApproval = nil
+	}
+	return nil
 }

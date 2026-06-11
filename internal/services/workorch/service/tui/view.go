@@ -717,6 +717,26 @@ func (m AppModel) renderInput(width int) string {
 		prompt += " decision"
 	} else if m.blockingApproval != nil {
 		prompt += " approval"
+	} else if ws := findWorkspace(m.workspaces, m.activeWorkspaceID); ws != nil {
+		switch ws.State {
+		case common.WorkspaceStateWaitingDecision:
+			prompt += " decision"
+		case common.WorkspaceStateBlocked:
+			prompt += " approval"
+		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+			prompt += " running"
+		}
+	} else {
+		switch m.progress {
+		case progressSubmitting:
+			prompt += " submitting"
+		case progressRunning:
+			prompt += " running"
+		case progressWaitingDecision:
+			prompt += " decision"
+		case progressWaitingApproval:
+			prompt += " approval"
+		}
 	}
 	input := m.renderInputBuffer(prompt, width)
 	if suggestions := m.renderSlashCommandSuggestions(width); suggestions != "" {

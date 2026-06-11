@@ -374,7 +374,7 @@ const maxOperatorInputQueueItems = 20
 
 func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if strings.TrimSpace(workspaceID) == "" {
 			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
@@ -485,7 +485,7 @@ func runBelongsToWorkspace(run *backend.RunInfo, workspaceID common.WorkspaceID)
 
 func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if strings.TrimSpace(workspaceID) == "" {
 			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}

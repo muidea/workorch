@@ -1274,19 +1274,17 @@ func TestModelInputPromptUsesActiveWorkspace(t *testing.T) {
 	}
 }
 
-func TestModelInputPromptStaysNeutralForLiveActiveRun(t *testing.T) {
+func TestModelInputPromptReflectsLiveActiveRun(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-1", State: common.WorkspaceStateRunning, ActiveRunID: "run-1"}}
 	m.activeRunID = "run-1"
 	m.progress = progressRunning
 	m.running = true
 	m.width = 80
 	m.height = 12
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "ws-1 >") {
-		t.Fatalf("view missing neutral workspace input prompt:\n%s", view)
-	}
-	if strings.Contains(view, "ws-1 run >") || strings.Contains(view, "ws-1 continue >") {
-		t.Fatalf("view should not expose run command state as input prompt:\n%s", view)
+	if !strings.Contains(view, "ws-1 running >") {
+		t.Fatalf("view missing running workspace input prompt:\n%s", view)
 	}
 	if !strings.Contains(view, "run run-1") {
 		t.Fatalf("status bar missing active run:\n%s", view)
@@ -1316,7 +1314,7 @@ func TestModelTerminalRunWithRetainedRunIDReturnsGoalPrompt(t *testing.T) {
 	}
 }
 
-func TestModelRunContinueCommandClearsInputAndReturnsNeutralPrompt(t *testing.T) {
+func TestModelRunContinueCommandClearsInputAndReturnsRunningPrompt(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateRunning)
 	m := NewAppModel(be, "ws-97549a108e19d500", "")
 	m.activeRunID = "run-continue"
@@ -1338,14 +1336,11 @@ func TestModelRunContinueCommandClearsInputAndReturnsNeutralPrompt(t *testing.T)
 		t.Fatalf("input = %q cursor=%d, want cleared", m.input, m.inputCursor)
 	}
 	view := stripANSI(m.View())
-	if strings.Contains(view, "ws-97549a1 continue >") {
+	if strings.Contains(view, "ws-97549a1 continue >") || strings.Contains(view, "ws-97549a1 run >") {
 		t.Fatalf("view should not keep /run continue command text as prompt:\n%s", view)
 	}
-	if strings.Contains(view, "ws-97549a1 run >") {
-		t.Fatalf("live run should not add run prompt suffix after /run continue:\n%s", view)
-	}
-	if !strings.Contains(view, "ws-97549a1 > |") {
-		t.Fatalf("live run should return to neutral input prompt after /run continue:\n%s", view)
+	if !strings.Contains(view, "ws-97549a1 running > |") {
+		t.Fatalf("live run should return to running input prompt after /run continue:\n%s", view)
 	}
 }
 
@@ -3515,13 +3510,14 @@ func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing
 	previousActiveSeq := m.workspaceContextRequestSeqFor("ws-a")
 
 	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
-	if cmd == nil || m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousActiveSeq+1 {
-		t.Fatalf("active detail projection event cmd/list/seq = %v/%v/%d, want detail refresh only with seq %d", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousActiveSeq+1)
+	if cmd == nil || !m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousActiveSeq+1 {
+		t.Fatalf("active detail projection event cmd/list/seq = %v/%v/%d, want list and detail refresh with seq %d", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousActiveSeq+1)
 	}
+	m.workspaceListRefreshInFlight = false
 
 	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b"})
-	if cmd != nil || m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-b") != 0 {
-		t.Fatalf("inactive detail projection event cmd/list/seq = %v/%v/%d, want no main refresh", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-b"))
+	if cmd == nil || !m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-b") != 0 {
+		t.Fatalf("inactive detail projection event cmd/list/seq = %v/%v/%d, want list refresh only", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-b"))
 	}
 }
 
@@ -3560,6 +3556,34 @@ func TestModelActiveWorkspacePollSkipsIdleWorkspace(t *testing.T) {
 	}
 	if m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousSeq {
 		t.Fatalf("idle poll refresh state = list:%v seq:%d want no refresh and seq %d", m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousSeq)
+	}
+}
+
+func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.progress = progressSubmitting
+	m.progressText = "Checking workspace run state"
+	next, cmd := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{
+			ID:               "ws-a",
+			Title:            "A",
+			State:            common.WorkspaceStateWaitingDecision,
+			ActiveRunID:      "run-a",
+			BlockingTicketID: "ticket-a",
+		},
+	}})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("waiting decision overview should request blocker/context refresh")
+	}
+	if m.progress != progressWaitingDecision || m.activeRunID != "run-a" || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" {
+		t.Fatalf("overview sync failed: progress=%s run=%q blocker=%+v", m.progress, m.activeRunID, m.blockingDecision)
+	}
+	m.width = 100
+	m.height = 16
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Waiting for decision") || !strings.Contains(view, "ws-a decision >") {
+		t.Fatalf("view did not reflect waiting decision overview:\n%s", view)
 	}
 }
 

@@ -254,6 +254,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspaces = msg.Workspaces
 		m.ensureActiveWorkspace()
 		cmds := []tea.Cmd{}
+		if cmd := m.syncActiveWorkspaceOverview(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.activeWorkspaceID != "" && (previousActive != m.activeWorkspaceID || m.activeRunID != "" || len(msg.Workspaces) > 0) {
 			cmds = append(cmds, m.requestWorkspaceContextRefresh(false))
 		}
@@ -413,7 +416,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Error != nil {
 			if isTransientContextError(msg.Error) {
-				return m, nil
+				m.progressText = "Workspace state refresh timed out; retrying"
+				return m, m.refreshActiveWorkspaceState()
 			}
 			if errors.Is(msg.Error, common.ErrBlocked) {
 				if msg.Run != nil {
@@ -1675,6 +1679,7 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 				merged := mergeDecisionInfo(*m.blockingDecision, item)
 				if merged.State != "open" || !m.decisionMatchesActiveScope(merged) {
 					m.blockingDecision = nil
+					m.clearWaitingProgressIfUnblocked()
 					return
 				}
 				m.blockingDecision = &merged
@@ -1686,6 +1691,7 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 		}
 		if !matched {
 			m.blockingDecision = nil
+			m.clearWaitingProgressIfUnblocked()
 		}
 	}
 	for _, item := range filterOpenDecisions(m.decisions) {
@@ -1708,6 +1714,7 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 				merged := mergeApprovalInfo(*m.blockingApproval, item)
 				if merged.State != "pending" || !m.approvalMatchesActiveScope(merged) {
 					m.blockingApproval = nil
+					m.clearWaitingProgressIfUnblocked()
 					return
 				}
 				m.blockingApproval = &merged
@@ -1719,6 +1726,7 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 		}
 		if !matched {
 			m.blockingApproval = nil
+			m.clearWaitingProgressIfUnblocked()
 		}
 	}
 	for _, item := range filterPendingApprovals(m.approvals) {
@@ -1729,6 +1737,17 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 			}
 			return
 		}
+	}
+}
+
+func (m *AppModel) clearWaitingProgressIfUnblocked() {
+	if m.blockingDecision != nil || m.blockingApproval != nil {
+		return
+	}
+	switch m.progress {
+	case progressWaitingDecision, progressWaitingApproval:
+		m.progress = progressIdle
+		m.progressText = ""
 	}
 }
 
@@ -1816,9 +1835,9 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			return m.requestWorkspaceListRefresh()
 		}
 		if m.activeWorkspaceID != "" && string(evt.WorkspaceID) == m.activeWorkspaceID {
-			return m.requestWorkspaceContextRefresh(false)
+			return tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(false))
 		}
-		return nil
+		return m.requestWorkspaceListRefresh()
 	case backend.EventWorkspaceCreated:
 		m.upsertWorkspaceFromEvent(evt)
 		return m.requestWorkspaceListRefresh()
