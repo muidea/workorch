@@ -1979,6 +1979,8 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
 				"If multiple dependent operations are needed, executionGraph is allowed only when it contains an accepted state-changing path declared by requiredOutput",
 				"Do not return read-only, inspection-only, or shell-only executionGraph",
+				"When failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots already contains a complete current target snapshot, do not return file/read for that target; use the snapshot to produce patch/apply, an accepted declared state-changing shell/mcp operation, failed dodAssessment, or a real blocker",
+				"If more current evidence is truly required, return a real blocker or wait for an explicit acquire_concrete_failure_evidence contract; do not satisfy this state-changing contract with file/read-only nodes",
 				"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
 				"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
 				"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",

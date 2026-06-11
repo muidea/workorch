@@ -1070,6 +1070,8 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 		"Do not return run snapshot",
 		"context rehydration",
 		"update those targets directly",
+		"do not return file/read for that target",
+		"do not satisfy this state-changing contract with file/read-only nodes",
 		"hunk/context/base mismatch",
 		"Do not use shell commands to modify workspace files",
 		"complete fresh JSON object",
