@@ -86,6 +86,9 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	}
 	normalized := normalizeDoDAssessmentGoalCoverageForRun(assessment, run)
 	normalized = normalizeDoDAssessmentDeliverableCoverageForRun(normalized, run)
+	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
+		normalized = completeDoDAssessmentDeliverableCoverageForRun(normalized, run, step)
+	}
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) &&
 		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
 		normalized = normalizeDoDAssessmentGoalCoverageForRepairInput(normalized, step.Input)
@@ -272,6 +275,137 @@ func normalizeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, 
 	coverage["items"] = items
 	normalizedAssessment[coverageKey] = coverage
 	return normalizedAssessment
+}
+
+func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, run *runModel.Run, step *runModel.Step) map[string]any {
+	if len(assessment) == 0 || run == nil || step == nil {
+		return assessment
+	}
+	required := requiredProfileDeliverableExpectations(run)
+	if len(required) == 0 {
+		return assessment
+	}
+	if !doDAssessmentStructurallySatisfiedExceptDeliverableCoverage(assessment) {
+		return assessment
+	}
+	fallbackRefs := doDAssessmentEvidenceRefs(step.ID, assessment)
+	if len(fallbackRefs) == 0 && step.ID != "" {
+		fallbackRefs = []string{string(step.ID)}
+	}
+	if len(fallbackRefs) == 0 {
+		return assessment
+	}
+
+	coverageKey, coverage := deliverableCoverageContainerFromAssessment(assessment)
+	items, ok := doDAssessmentItemMaps(coverage["items"])
+	if len(coverage) > 0 {
+		if satisfied, ok := coverage["satisfied"].(bool); ok && !satisfied {
+			return assessment
+		}
+	}
+	if len(coverage) > 0 && (!ok || !deliverableCoverageItemsRecoverable(items)) {
+		return assessment
+	}
+
+	existing := map[string]bool{}
+	for _, item := range items {
+		id := strings.TrimSpace(firstNonEmptyString(
+			stringFromMap(item, "id"),
+			stringFromMap(item, "item"),
+			stringFromMap(item, "deliverable"),
+			stringFromMap(item, "name"),
+			stringFromMap(item, "path"),
+		))
+		if id == "" {
+			continue
+		}
+		existing[id] = true
+	}
+	missing := make([]string, 0)
+	for _, id := range required {
+		if !existing[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return assessment
+	}
+	if coverageKey == "" {
+		coverageKey = "deliverableCoverage"
+	}
+	if len(coverage) == 0 {
+		coverage = map[string]any{
+			"satisfied": true,
+			"summary":   "Required deliverable coverage was derived from the accepted DoD and goal evidence.",
+		}
+	} else {
+		coverage = cloneStepPayload(coverage)
+		if _, ok := coverage["satisfied"].(bool); !ok {
+			coverage["satisfied"] = true
+		}
+	}
+
+	completed := make([]map[string]any, 0, len(items)+len(missing))
+	for _, item := range items {
+		completed = append(completed, item)
+	}
+	for _, id := range missing {
+		completed = append(completed, map[string]any{
+			"id":           id,
+			"item":         id,
+			"state":        "satisfied",
+			"evidenceRefs": append([]string(nil), fallbackRefs...),
+			"reason":       "auto-derived from accepted DoD/Goal evidence and profile deliverable contract",
+		})
+	}
+	coverage["items"] = completed
+
+	normalizedAssessment := cloneStepPayload(assessment)
+	normalizedAssessment[coverageKey] = coverage
+	return normalizedAssessment
+}
+
+func doDAssessmentStructurallySatisfiedExceptDeliverableCoverage(assessment map[string]any) bool {
+	if len(assessment) == 0 {
+		return false
+	}
+	current, ok := assessment["satisfied"].(bool)
+	if ok && !current {
+		return false
+	}
+	if len(mapSliceFromValue(assessment["evidenceGaps"])) > 0 ||
+		len(mapSliceFromValue(assessment["verificationEvidenceGaps"])) > 0 {
+		return false
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) == 0 || !assessmentItemsAllSatisfied(items, false) {
+		return false
+	}
+	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "branchCoverage"} {
+		value := assessment[key]
+		if value == nil {
+			continue
+		}
+		if !coverageContainerStructurallySatisfied(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func deliverableCoverageItemsRecoverable(items []map[string]any) bool {
+	for _, item := range items {
+		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+		switch state {
+		case "", "satisfied", "available", "produced":
+		default:
+			return false
+		}
+		if state != "" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func deliverableCoverageContainerFromAssessment(assessment map[string]any) (string, map[string]any) {

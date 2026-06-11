@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -358,6 +359,188 @@ func TestNormalizeCompletionGateDoDAssessmentOutputFillsDeliverableCoverageIDsBy
 	items := deliverableCoverageItemsFromAssessment(assessment)
 	if len(items) != 2 || stringFromMap(items[0], "id") != "source_change" || stringFromMap(items[1], "id") != "validation_report" {
 		t.Fatalf("deliverableCoverage.items = %+v, want required ids filled by order", items)
+	}
+}
+
+func TestNormalizeCompletionGateDoDAssessmentOutputCompletesMissingDeliverableCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-missing-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-missing-normalize",
+		DoDID:           "dod-deliverable-coverage-missing-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+							{"id": "coverage_map", "required": true},
+							{"id": "version_control_snapshot", "required": true},
+							{"id": "user_deliverable", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-missing-normalize/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD and goal requirements are covered by the recorded evidence.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-missing-normalize/graph-001/002-test"},
+			}},
+			"goalCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{{
+					"item":         "ship the requested code change",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-deliverable-coverage-missing-normalize/graph-001/001-change"},
+				}},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) != 5 {
+		t.Fatalf("deliverableCoverage.items = %+v, want all required deliverables synthesized", items)
+	}
+	wantIDs := []string{"source_change", "validation_report", "coverage_map", "version_control_snapshot", "user_deliverable"}
+	for idx, want := range wantIDs {
+		if got := stringFromMap(items[idx], "id"); got != want {
+			t.Fatalf("deliverableCoverage.items[%d].id = %q, want %q; items=%+v", idx, got, want, items)
+		}
+		if got := stringFromMap(items[idx], "state"); got != "satisfied" {
+			t.Fatalf("deliverableCoverage.items[%d].state = %q, want satisfied", idx, got)
+		}
+		refs := evidenceRefsFromValue(items[idx]["evidenceRefs"])
+		if len(refs) == 0 {
+			t.Fatalf("deliverableCoverage.items[%d].evidenceRefs is empty", idx)
+		}
+	}
+}
+
+func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotMaskFailedDeliverableCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-failed-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-failed-normalize",
+		DoDID:           "dod-deliverable-coverage-failed-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-failed-normalize/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD item is covered, but deliverable coverage is explicitly failed.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-failed-normalize/graph-001/002-test"},
+			}},
+			"deliverableCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{{
+					"id":            "source_change",
+					"state":         "failed",
+					"failureReason": "source change was not produced",
+				}},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	_, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want explicit deliverable failure preserved", err)
+	}
+}
+
+func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotCompleteRepairFollowUpDeliverableCoverage(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-repair-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-repair-normalize",
+		DoDID:           "dod-deliverable-coverage-repair-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-repair-normalize/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD item is covered, but repair omitted required deliverable coverage.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-repair-normalize/graph-001/002-test"},
+			}},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	_, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "deliverableCoverage missing required deliverables: source_change") {
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want repair follow-up deliverable gap preserved", err)
 	}
 }
 
