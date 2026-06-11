@@ -283,7 +283,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyWorkspaceContext(msg)
 		m.lastError = nil
 		if msg.ResetMainViewport {
-			m.syncMainViewportToCurrentContent()
+			if m.blockingDecision != nil || m.blockingApproval != nil {
+				m.followMainViewportTail()
+			} else {
+				m.syncMainViewportToCurrentContent()
+			}
 		}
 		return m, m.fetchActiveBlockerDetails()
 	case WorkspaceContextRetryMsg:
@@ -325,6 +329,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.decisions = msg.Decisions
 		m.syncBlockingDecisionFromList()
+		m.followBlockerTailUnlessUserScrolled()
 		return m, nil
 	case DecisionDetailMsg:
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
@@ -339,6 +344,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.blockingDecision != nil && m.blockingDecision.ID == msg.Decision.ID {
 				m.blockingDecision = msg.Decision
 				m.progressText = nonEmpty(msg.Decision.Question, msg.Decision.Reason, string(msg.Decision.ID))
+				m.followBlockerTailUnlessUserScrolled()
 			}
 		}
 		return m, nil
@@ -352,6 +358,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.approvals = msg.Approvals
 		m.syncBlockingApprovalFromList()
+		m.followBlockerTailUnlessUserScrolled()
 		return m, nil
 	case ApprovalDetailMsg:
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
@@ -366,6 +373,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.blockingApproval != nil && m.blockingApproval.ID == msg.Approval.ID {
 				m.blockingApproval = msg.Approval
 				m.progressText = nonEmpty(msg.Approval.Reason, string(msg.Approval.ID))
+				m.followBlockerTailUnlessUserScrolled()
 			}
 		}
 		return m, nil
@@ -456,6 +464,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
 			m.markDecisionResolved(msg.Decision.ID)
+			m.markActiveWorkspaceRunningFromResolution(msg.Decision.RunID)
 		}
 		m.blockingDecision = nil
 		m.clearInput()
@@ -472,6 +481,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeRunID = string(msg.Approval.RunID)
 			}
 			m.markApprovalResolved(msg.Approval.ID)
+			m.markActiveWorkspaceRunningFromResolution(msg.Approval.RunID)
 		}
 		m.blockingApproval = nil
 		m.clearInput()
@@ -1751,6 +1761,13 @@ func (m *AppModel) clearWaitingProgressIfUnblocked() {
 	}
 }
 
+func (m *AppModel) followBlockerTailUnlessUserScrolled() {
+	if m.blockingDecision == nil && m.blockingApproval == nil {
+		return
+	}
+	m.followMainViewportTailUnlessUserScrolled()
+}
+
 func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
 	if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
 		return false
@@ -1944,12 +1961,14 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progress = progressRunning
 		m.progressText = "Decision resolved; resuming run"
 		m.markDecisionResolved(common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)))
+		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
 		m.blockingApproval = nil
 		m.progress = progressRunning
 		m.progressText = "Approval resolved; resuming run"
 		m.markApprovalResolved(common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID)))
+		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventGovernanceResolved:
 		m.progressText = governanceProgressText("resolved", evt.Payload)

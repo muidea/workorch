@@ -2203,6 +2203,12 @@ func TestModelConversationRendersMultipleSubmissions(t *testing.T) {
 
 func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:               "ws-1",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
+	}}
 	m.decisions = []backend.DecisionInfo{{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}}
 	m.blockingDecision = &m.decisions[0]
 	m.input = "补充上下文"
@@ -2221,6 +2227,15 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	}
 	if m.blockingDecision != nil || m.input != "" || m.activeRunID != "run-1" {
 		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingDecision, m.input, m.activeRunID)
+	}
+	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != common.WorkspaceStateRunning || ws.BlockingTicketID != "" {
+		t.Fatalf("workspace overview after resolve = %+v, want running without blocker", ws)
+	}
+	m.width = 100
+	m.height = 16
+	view := stripANSI(m.View())
+	if strings.Contains(view, "ws-1 decision >") || !strings.Contains(view, "ws-1 running >") {
+		t.Fatalf("prompt did not refresh after decision resolve:\n%s", view)
 	}
 	if m.decisions[0].State != "resolved" {
 		t.Fatalf("decision state = %q, want resolved", m.decisions[0].State)
@@ -3584,6 +3599,54 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Waiting for decision") || !strings.Contains(view, "ws-a decision >") {
 		t.Fatalf("view did not reflect waiting decision overview:\n%s", view)
+	}
+}
+
+func TestModelWorkspaceSwitchToDecisionWorkspaceShowsDecisionTail(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.width = 120
+	m.height = 16
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+	m.currentTask = "workspace A active task"
+	m.result = strings.Repeat("old workspace output\n", 40)
+	_ = m.View()
+	m.scrollMain(8)
+
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = "ws-b"
+	next, _ = m.confirmWorkspaceSelection()
+	m = asModel(next)
+	if m.mainViewportUserScrolled || m.mainViewportPendingUpdate {
+		t.Fatalf("workspace switch should reset viewport scroll flags")
+	}
+
+	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+	}})
+	m = asModel(next)
+	next, _ = m.Update(DecisionDetailMsg{
+		WorkspaceID: "ws-b",
+		Decision: &backend.DecisionInfo{
+			ID:          "ticket-b",
+			WorkspaceID: "ws-b",
+			RunID:       "run-b",
+			State:       "open",
+			Question:    "choose replan or reject",
+		},
+	})
+	m = asModel(next)
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Decision required") || !strings.Contains(view, "choose replan or reject") {
+		t.Fatalf("decision workspace tail not visible after switch:\n%s", view)
+	}
+	if strings.Contains(view, "workspace A active task") || strings.Contains(view, "old workspace output") {
+		t.Fatalf("decision workspace view still shows previous workspace content:\n%s", view)
 	}
 }
 

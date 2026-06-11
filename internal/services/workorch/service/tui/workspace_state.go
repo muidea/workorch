@@ -802,6 +802,7 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		if ws.BlockingTicketID != "" {
 			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
 			m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+			m.followBlockerTailUnlessUserScrolled()
 			return m.fetchActiveBlockerDetails()
 		}
 		m.progressText = "Waiting for decision"
@@ -811,6 +812,7 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		if ws.BlockingApprovalID != "" {
 			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
 			m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+			m.followBlockerTailUnlessUserScrolled()
 			return m.fetchActiveBlockerDetails()
 		}
 		m.progressText = "Waiting for approval"
@@ -819,4 +821,25 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 		m.blockingApproval = nil
 	}
 	return nil
+}
+
+func (m *AppModel) markActiveWorkspaceRunningFromResolution(runID common.RunID) {
+	if runID != "" {
+		m.activeRunID = string(runID)
+	}
+	for i := range m.workspaces {
+		if string(m.workspaces[i].ID) != m.activeWorkspaceID {
+			continue
+		}
+		if runID != "" {
+			m.workspaces[i].ActiveRunID = runID
+		}
+		switch m.workspaces[i].State {
+		case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+			m.workspaces[i].State = common.WorkspaceStateRunning
+		}
+		m.workspaces[i].BlockingTicketID = ""
+		m.workspaces[i].BlockingApprovalID = ""
+		return
+	}
 }
