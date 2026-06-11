@@ -2238,10 +2238,10 @@ func TestResolveApprovalIsIdempotentWhenAlreadyApproved(t *testing.T) {
 	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
-		t.Fatalf("approval msg = %#v, want approved without error", msg)
+		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
 	}
-	if !be.resumed {
-		t.Fatal("expected blocked run to resume after already-approved conflict")
+	if be.resumed {
+		t.Fatal("TUI must not resume blocked run after approval conflict")
 	}
 }
 
@@ -2250,10 +2250,10 @@ func TestResolveApprovalSkipsResumeWhenRunAlreadyRunning(t *testing.T) {
 	msg := ResolveApproval(be, "ws-1", "approval-1", true)()
 	resolved, ok := msg.(ApprovalResolvedMsg)
 	if !ok || resolved.Error != nil || resolved.Approval == nil || resolved.Approval.State != "approved" {
-		t.Fatalf("approval msg = %#v, want approved without error", msg)
+		t.Fatalf("approval msg = %#v, want idempotent approved without client resume", msg)
 	}
 	if be.resumed {
-		t.Fatal("running run should not be resumed again")
+		t.Fatal("TUI must not resume running run after approval conflict")
 	}
 }
 
@@ -2304,13 +2304,13 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	if m.blockingDecision != nil || m.input != "" || m.activeRunID != "run-1" {
 		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingDecision, m.input, m.activeRunID)
 	}
-	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != common.WorkspaceStateRunning || ws.BlockingTicketID != "" {
-		t.Fatalf("workspace overview after resolve = %+v, want running without blocker", ws)
+	if ws := findWorkspace(m.workspaces, "ws-1"); ws == nil || ws.State != common.WorkspaceStateWaitingDecision {
+		t.Fatalf("workspace overview after resolve = %+v, want unchanged until server projection updates", ws)
 	}
 	m.width = 100
 	m.height = 16
 	view := stripANSI(m.View())
-	if strings.Contains(view, "ws-1 decision >") || !strings.Contains(view, "ws-1 running >") {
+	if strings.Contains(view, "ws-1 decision >") || !strings.Contains(view, "ws-1 submitting >") {
 		t.Fatalf("prompt did not refresh after decision resolve:\n%s", view)
 	}
 	if m.decisions[0].State != "resolved" {
@@ -2341,6 +2341,9 @@ func TestModelApprovalResolvedRefreshesWorkspaceState(t *testing.T) {
 	}
 	if m.blockingApproval != nil || m.input != "" || m.activeRunID != "run-1" {
 		t.Fatalf("state not cleared/refreshed: blocker=%+v input=%q activeRun=%q", m.blockingApproval, m.input, m.activeRunID)
+	}
+	if m.progress != progressSubmitting || !strings.Contains(m.progressText, "waiting for server continuation") {
+		t.Fatalf("approval resolve progress = %s/%q, want server continuation wait", m.progress, m.progressText)
 	}
 	if m.approvals[0].State != "resolved" {
 		t.Fatalf("approval state = %q, want resolved", m.approvals[0].State)
@@ -4021,6 +4024,35 @@ func TestModelTransientProjectionErrorSchedulesContextRetry(t *testing.T) {
 	}
 }
 
+func TestModelTransientProjectionErrorKeepsOverviewDecisionState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:               "ws-a",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-a",
+		BlockingTicketID: "ticket-a",
+	}}
+	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		RequestSeq:  1,
+		WorkspaceID: "ws-a",
+		Error:       errors.New("conflict: workspace projection detail not ready"),
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("transient projection error did not schedule retry")
+	}
+	if m.progress != progressWaitingDecision || m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" {
+		t.Fatalf("progress/blocker = %s/%+v, want overview decision state", m.progress, m.blockingDecision)
+	}
+	if strings.Contains(m.progressText, "projection is refreshing") || !strings.Contains(m.progressText, "ticket-a") {
+		t.Fatalf("progressText = %q, want active decision blocker instead of projection refresh", m.progressText)
+	}
+}
+
 func TestModelWorkspaceContextSuccessClearsProjectionError(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
@@ -4260,7 +4292,7 @@ func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
 	if cmd == nil || !m.workspaceListRefreshInFlight {
 		t.Fatalf("resolved event should refresh workspace state: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
-	if m.blockingDecision != nil || m.decisions[0].State != "resolved" || m.progress != progressRunning {
+	if m.blockingDecision != nil || m.decisions[0].State != "resolved" || m.progress != progressSubmitting {
 		t.Fatalf("resolved event not applied: blocker=%+v decision=%+v progress=%s", m.blockingDecision, m.decisions[0], m.progress)
 	}
 }
@@ -4287,8 +4319,8 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 		State:       "resolved",
 	}})
 	m = asModel(next)
-	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
-		t.Fatalf("resolved prompt/blocker = %q/%+v, want running without blocker", stripANSI(m.renderInput(120)), m.blockingDecision)
+	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a submitting >") {
+		t.Fatalf("resolved prompt/blocker = %q/%+v, want submitting without blocker", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
@@ -4299,7 +4331,7 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 		BlockingTicketID: "ticket-1",
 	}}})
 	m = asModel(next)
-	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+	if m.blockingDecision != nil || strings.Contains(stripANSI(m.renderInput(120)), "decision >") {
 		t.Fatalf("stale list restored decision prompt/blocker = %q/%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 

@@ -720,9 +720,21 @@ func (m AppModel) renderInput(width int) string {
 	} else if ws := m.activeWorkspaceOverview(); ws != nil {
 		switch ws.State {
 		case common.WorkspaceStateWaitingDecision:
-			prompt += " decision"
+			if ws.BlockingTicketID != "" && !m.decisionAlreadyResolved(ws.BlockingTicketID) {
+				prompt += " decision"
+			} else if m.progress == progressRunning {
+				prompt += " running"
+			} else if m.progress == progressSubmitting {
+				prompt += " submitting"
+			}
 		case common.WorkspaceStateBlocked:
-			prompt += " approval"
+			if ws.BlockingApprovalID != "" && !m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+				prompt += " approval"
+			} else if m.progress == progressRunning {
+				prompt += " running"
+			} else if m.progress == progressSubmitting {
+				prompt += " submitting"
+			}
 		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
 			prompt += " running"
 		}

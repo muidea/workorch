@@ -588,10 +588,6 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 		if err != nil {
 			return DecisionResolvedMsg{WorkspaceID: wsID, Error: err}
 		}
-		if decision.RunID != "" {
-			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, decision.WorkspaceID)
-			_, err = be.Run().Resume(resumeCtx, decision.WorkspaceID, decision.RunID)
-		}
 		return DecisionResolvedMsg{WorkspaceID: wsID, Decision: decision, Error: err}
 	}
 }
@@ -614,54 +610,25 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		}
 		var approval *backend.ApprovalInfo
 		var err error
-		resumeHandled := false
 		if approve {
 			approval, err = be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
 		} else {
 			approval, err = be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID))
 		}
-		if err != nil && errors.Is(err, common.ErrConflict) {
-			var snapshot *backend.WorkspaceSnapshotInfo
-			if wsID == "" {
-				err = common.ErrInvalidArgument
-			} else {
-				snapshot, err = be.Workspace().Snapshot(ctx, wsID)
-			}
-			approval = findSnapshotApproval(snapshot, common.ApprovalID(approvalID))
-			if err == nil && approval == nil {
-				err = common.ErrNotFound
-			}
-			if err == nil && approval != nil {
-				if approval.WorkspaceID == "" {
-					approval.WorkspaceID = wsID
+		if err != nil && errors.Is(err, common.ErrConflict) && wsID != "" {
+			current, getErr := be.Approval().Get(ctx, wsID, common.ApprovalID(approvalID))
+			if getErr == nil && current != nil {
+				if current.WorkspaceID == "" {
+					current.WorkspaceID = wsID
 				}
 				switch {
-				case approve && approval.State == string(common.ApprovalStateApproved):
-					err = resumeApprovalRunFromSnapshot(ctx, be, approval, snapshot)
-					resumeHandled = true
-				case !approve && approval.State == string(common.ApprovalStateRejected):
-					err = resumeApprovalRunFromSnapshot(ctx, be, approval, snapshot)
-					resumeHandled = true
+				case approve && current.State == string(common.ApprovalStateApproved):
+					approval, err = current, nil
+				case !approve && current.State == string(common.ApprovalStateRejected):
+					approval, err = current, nil
 				}
 			}
-		}
-		if err == nil && !resumeHandled && approval != nil && approval.RunID != "" {
-			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-			_, err = be.Run().Resume(resumeCtx, approval.WorkspaceID, approval.RunID)
 		}
 		return ApprovalResolvedMsg{Approval: approval, Error: err}
 	}
-}
-
-func resumeApprovalRunFromSnapshot(ctx context.Context, be backend.Backend, approval *backend.ApprovalInfo, snapshot *backend.WorkspaceSnapshotInfo) error {
-	if approval == nil || approval.RunID == "" || snapshot == nil {
-		return nil
-	}
-	ctx = common.ContextWithRuntimeWorkspaceID(ctx, approval.WorkspaceID)
-	run := selectWorkspaceRun(approval.RunID, snapshot.Runs)
-	if run == nil || run.State != common.RunStateBlockedOnApproval {
-		return nil
-	}
-	_, err := be.Run().Resume(ctx, approval.WorkspaceID, approval.RunID)
-	return err
 }

@@ -150,7 +150,6 @@ func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.Worksp
 		return ws
 	}
 	if _, ok := entry.ResolvedTickets[ws.BlockingTicketID]; ok && ws.BlockingTicketID != "" {
-		ws.State = common.WorkspaceStateRunning
 		if entry.OptimisticRunID != "" {
 			ws.ActiveRunID = entry.OptimisticRunID
 		}
@@ -158,7 +157,6 @@ func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.Worksp
 		ws.BlockingApprovalID = ""
 	}
 	if _, ok := entry.ResolvedApprovals[ws.BlockingApprovalID]; ok && ws.BlockingApprovalID != "" {
-		ws.State = common.WorkspaceStateRunning
 		if entry.OptimisticRunID != "" {
 			ws.ActiveRunID = entry.OptimisticRunID
 		}
@@ -491,6 +489,21 @@ func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {
 		return m.syncActiveWorkspaceOverview()
 	default:
 		return nil
+	}
+}
+
+func (m *AppModel) restoreActiveWorkspaceBlockerFromOverview() bool {
+	ws := m.activeWorkspaceOverview()
+	if ws == nil {
+		return false
+	}
+	switch ws.State {
+	case common.WorkspaceStateWaitingDecision:
+		return m.ensureActiveBlockingDecisionFromOverview()
+	case common.WorkspaceStateBlocked:
+		return m.ensureActiveBlockingApprovalFromOverview()
+	default:
+		return false
 	}
 }
 
@@ -996,27 +1009,39 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateWaitingDecision && ws.State != common.WorkspaceStateBlocked {
 		m.activeRunID = ""
 	}
+	if m.workspaceHasResolvedBlocker(ws) && m.progress == progressSubmitting {
+		m.running = false
+		return nil
+	}
 	m.applyWorkspaceProgress(ws.State)
 	switch ws.State {
 	case common.WorkspaceStateWaitingDecision:
 		m.running = false
-		m.progress = progressWaitingDecision
 		if ws.BlockingTicketID != "" {
+			if m.decisionAlreadyResolved(ws.BlockingTicketID) {
+				return nil
+			}
+			m.progress = progressWaitingDecision
 			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
 			m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
 			m.followBlockerTailUnlessUserScrolled()
 			return m.fetchActiveBlockerDetails()
 		}
+		m.progress = progressWaitingDecision
 		m.progressText = "Waiting for decision"
 	case common.WorkspaceStateBlocked:
 		m.running = false
-		m.progress = progressWaitingApproval
 		if ws.BlockingApprovalID != "" {
+			if m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+				return nil
+			}
+			m.progress = progressWaitingApproval
 			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
 			m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
 			m.followBlockerTailUnlessUserScrolled()
 			return m.fetchActiveBlockerDetails()
 		}
+		m.progress = progressWaitingApproval
 		m.progressText = "Waiting for approval"
 	default:
 		m.blockingDecision = nil
@@ -1025,30 +1050,17 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	return nil
 }
 
-func (m *AppModel) markActiveWorkspaceRunningFromResolution(runID common.RunID) {
-	if runID != "" {
-		m.activeRunID = string(runID)
+func (m *AppModel) workspaceHasResolvedBlocker(ws *backend.WorkspaceInfo) bool {
+	if ws == nil {
+		return false
 	}
-	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
-	if entry != nil && runID != "" {
-		entry.OptimisticRunID = runID
+	if ws.BlockingTicketID != "" && m.decisionAlreadyResolved(ws.BlockingTicketID) {
+		return true
 	}
-	for i := range m.workspaces {
-		if string(m.workspaces[i].ID) != m.activeWorkspaceID {
-			continue
-		}
-		if runID != "" {
-			m.workspaces[i].ActiveRunID = runID
-		}
-		switch m.workspaces[i].State {
-		case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
-			m.workspaces[i].State = common.WorkspaceStateRunning
-		}
-		m.workspaces[i].BlockingTicketID = ""
-		m.workspaces[i].BlockingApprovalID = ""
-		m.workspaces[i] = m.mergeWorkspaceOverview(m.workspaces[i])
-		return
+	if ws.BlockingApprovalID != "" && m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+		return true
 	}
+	return false
 }
 
 func (m *AppModel) markDecisionResolvedForWorkspace(id common.TicketID, runID common.RunID) {

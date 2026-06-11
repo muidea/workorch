@@ -280,7 +280,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != nil {
 			if isTransientProjectionError(msg.Error) {
 				m.lastError = nil
-				m.progressText = "Workspace projection is refreshing; retrying state load"
+				if !m.restoreActiveWorkspaceBlockerFromOverview() {
+					m.progressText = "Workspace projection is refreshing; retrying state load"
+				}
 				return m, RetryWorkspaceContext(msg.WorkspaceID, msg.ResetMainViewport)
 			}
 			m.setLastError(msg.Error)
@@ -473,12 +475,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.markDecisionResolvedForWorkspace(msg.Decision.ID, msg.Decision.RunID)
 			m.markDecisionResolved(msg.Decision.ID)
-			m.markActiveWorkspaceRunningFromResolution(msg.Decision.RunID)
 		}
 		m.blockingDecision = nil
 		m.clearInput()
-		m.progress = progressRunning
-		m.progressText = "Decision resolved; resuming run"
+		m.progress = progressSubmitting
+		m.progressText = "Decision resolved; waiting for server continuation"
 		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
 		if refreshWorkspaceID != "" {
 			cmds = append(cmds, FetchWorkspaceContext(m.be, string(refreshWorkspaceID)), FetchDecisions(m.be, string(refreshWorkspaceID)))
@@ -495,12 +496,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.markApprovalResolvedForWorkspace(msg.Approval.ID, msg.Approval.RunID)
 			m.markApprovalResolved(msg.Approval.ID)
-			m.markActiveWorkspaceRunningFromResolution(msg.Approval.RunID)
 		}
 		m.blockingApproval = nil
 		m.clearInput()
-		m.progress = progressRunning
-		m.progressText = "Approval resolved; resuming run"
+		m.progress = progressSubmitting
+		m.progressText = "Approval resolved; waiting for server continuation"
 		return m, m.refreshActiveWorkspaceState()
 	case ConfigMsg:
 		if msg.Error != nil {
@@ -2024,21 +2024,19 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		return m.fetchActiveBlockerDetails()
 	case backend.EventDecisionResolved:
 		m.blockingDecision = nil
-		m.progress = progressRunning
-		m.progressText = "Decision resolved; resuming run"
+		m.progress = progressSubmitting
+		m.progressText = "Decision resolved; waiting for server continuation"
 		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID))
 		m.markDecisionResolvedForWorkspace(ticketID, evt.RunID)
 		m.markDecisionResolved(ticketID)
-		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
 		m.blockingApproval = nil
-		m.progress = progressRunning
-		m.progressText = "Approval resolved; resuming run"
+		m.progress = progressSubmitting
+		m.progressText = "Approval resolved; waiting for server continuation"
 		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID))
 		m.markApprovalResolvedForWorkspace(approvalID, evt.RunID)
 		m.markApprovalResolved(approvalID)
-		m.markActiveWorkspaceRunningFromResolution(evt.RunID)
 		return m.refreshActiveWorkspaceState()
 	case backend.EventGovernanceResolved:
 		m.progressText = governanceProgressText("resolved", evt.Payload)
