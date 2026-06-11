@@ -237,6 +237,8 @@ func applyRuntimeRepairAssessmentOnlyCoverageProjection(
 		"Preserve every still-valid DoD item assessment and add any missing DoD items exactly as listed in missingDoDItems.",
 		"Add one independent dodAssessment.goalCoverage.items entry for every missingGoalCoverage entry; copy its goalRequirementId when present and cover the exact raw requirement without merging multiple missing entries into a broader item.",
 		"Add one independent dodAssessment.deliverableCoverage.items entry for every missingDeliverableCoverage entry or required deliverableExpectation id; each satisfied entry must copy the exact id and cite evidenceRefs or artifactRefs.",
+		"Set dodAssessment.deliverableCoverage.satisfied=true when every required deliverableCoverage item is satisfied/available/produced and cites evidenceRefs or artifactRefs; do not leave the parent flag false while all child items are satisfied.",
+		"Set dodAssessment.satisfied=true only when every required DoD, Goal, acceptance dimension, and deliverable coverage container is satisfied; keep parent summaries consistent with child states.",
 		"Treat evidenceCandidates as neutral candidates, not automatic proof; use them only when their concrete output supports the exact Goal requirement.",
 		"When latestClosureEvidence is present, compare the latest successful evidence against older failed evidence in the same neutral scope; do not reject solely because an earlier superseded failure exists.",
 		"If latestClosureEvidence is still insufficient, explain the exact missing dimension and cite the latest evidence that was considered.",

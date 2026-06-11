@@ -207,6 +207,93 @@ func TestNormalizeCompletionGateDoDAssessmentOutputRepairsContradictoryTopLevelS
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputRepairsContradictoryDeliverableParentSatisfied(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-dod-deliverable-parent-satisfied-normalize",
+		WorkspaceID:     "ws-dod-deliverable-parent-satisfied-normalize",
+		DoDID:           "dod-deliverable-parent-satisfied-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"verification passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+							{"id": "coverage_map", "required": true},
+							{"id": "version_control_snapshot", "required": true},
+							{"id": "user_deliverable", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-dod-deliverable-parent-satisfied-normalize/step-1",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "All DoD and deliverable items are satisfied, but the parent flags were stale.",
+			"items": []map[string]any{{
+				"item":         "verification passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/graph-001/002-test"},
+			}},
+			"deliverableCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{
+					{
+						"id":           "source_change",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/graph-001/001-change"},
+					},
+					{
+						"id":           "validation_report",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/graph-001/002-test"},
+					},
+					{
+						"id":           "coverage_map",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/graph-001/003-coverage"},
+					},
+					{
+						"id":           "version_control_snapshot",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/graph-001/004-git"},
+					},
+					{
+						"id":           "user_deliverable",
+						"state":        "produced",
+						"artifactRefs": []string{"run-dod-deliverable-parent-satisfied-normalize/artifacts/result"},
+					},
+				},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if assessment["satisfied"] != true {
+		t.Fatalf("dodAssessment.satisfied = %v, want normalized true", assessment["satisfied"])
+	}
+	coverage := mapFromValue(assessment["deliverableCoverage"])
+	if coverage["satisfied"] != true {
+		t.Fatalf("deliverableCoverage.satisfied = %v, want normalized true", coverage["satisfied"])
+	}
+}
+
 func TestEvidenceQualityDiagnosticsUsesScopeSpecificCoverageGap(t *testing.T) {
 	err := evidenceKindRequirementError(profileEvidenceKindRequirement{
 		Scope:                "goal_coverage",

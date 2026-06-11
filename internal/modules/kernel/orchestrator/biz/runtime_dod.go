@@ -86,6 +86,7 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	}
 	normalized := normalizeDoDAssessmentGoalCoverageForRun(assessment, run)
 	normalized = normalizeDoDAssessmentDeliverableCoverageForRun(normalized, run)
+	normalized = normalizeDoDAssessmentCoverageParentSatisfied(normalized)
 	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
 		normalized = completeDoDAssessmentDeliverableCoverageForRun(normalized, run, step)
 	}
@@ -154,18 +155,48 @@ func doDAssessmentStructurallySatisfied(assessment map[string]any) bool {
 	return true
 }
 
+func normalizeDoDAssessmentCoverageParentSatisfied(assessment map[string]any) map[string]any {
+	if len(assessment) == 0 {
+		return assessment
+	}
+	normalized := assessment
+	changed := false
+	for _, key := range []string{"goalCoverage", "goalOutcomeCoverage", "acceptanceDimensions", "dimensionCoverage", "deliverableCoverage", "deliverables", "producedArtifacts", "branchCoverage"} {
+		coverage := mapFromValue(normalized[key])
+		if len(coverage) == 0 {
+			continue
+		}
+		current, ok := coverage["satisfied"].(bool)
+		if !ok || current || !coverageContainerItemsStructurallySatisfied(coverage) {
+			continue
+		}
+		if !changed {
+			normalized = cloneStepPayload(assessment)
+			changed = true
+		}
+		nextCoverage := cloneStepPayload(coverage)
+		nextCoverage["satisfied"] = true
+		normalized[key] = nextCoverage
+	}
+	return normalized
+}
+
 func coverageContainerStructurallySatisfied(value any) bool {
 	if mapped := mapFromValue(value); len(mapped) > 0 {
 		if satisfied, ok := mapped["satisfied"].(bool); ok && !satisfied {
 			return false
 		}
-		items, ok := doDAssessmentItemMaps(mapped["items"])
-		if !ok || len(items) == 0 {
-			return false
-		}
-		return assessmentItemsAllSatisfied(items, true)
+		return coverageContainerItemsStructurallySatisfied(mapped)
 	}
 	items, ok := doDAssessmentItemMaps(value)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	return assessmentItemsAllSatisfied(items, true)
+}
+
+func coverageContainerItemsStructurallySatisfied(coverage map[string]any) bool {
+	items, ok := doDAssessmentItemMaps(coverage["items"])
 	if !ok || len(items) == 0 {
 		return false
 	}
