@@ -412,6 +412,51 @@ func TestRuntimeAdapterUsesNativeProviderUsageForStreamingWhenAvailable(t *testi
 	}
 }
 
+func TestRuntimeAdapterEmitsProviderStreamProgressWithoutRawDelta(t *testing.T) {
+	provider := &streamingProvider{
+		events: []llmmodels.ProviderStreamEvent{
+			{Type: "delta", Delta: `{"completionState"`},
+			{Type: "delta", Delta: `:"continue","secret":"raw-delta-must-not-leak"}`},
+			{Type: "done"},
+		},
+		payload: []byte(`{"completionState":"continue"}`),
+	}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "streaming-provider",
+		Provider: llmcommon.ProviderCompatible,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Capabilities: llmmodels.ProviderCapabilities{
+			ChatCompletions: true,
+			Streaming:       true,
+		},
+	}, provider)
+
+	request := llmStepRequest()
+	var progressItems []runtimemodel.StepExecutionProgress
+	request.Progress = func(progress runtimemodel.StepExecutionProgress) error {
+		progressItems = append(progressItems, progress)
+		return nil
+	}
+
+	if _, err := adapter.ExecuteRuntimeStep(context.Background(), request); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(progressItems) == 0 {
+		t.Fatal("progress items = 0, want provider progress diagnostics")
+	}
+	joined := fmt.Sprint(progressItems)
+	if strings.Contains(joined, "raw-delta-must-not-leak") || strings.Contains(joined, "completionState") {
+		t.Fatalf("progress leaked raw provider stream content: %s", joined)
+	}
+	if !hasProgressEvent(progressItems, "runtime_step_started") || !hasProgressEvent(progressItems, "runtime_step_done") {
+		t.Fatalf("progress = %+v, want started and done events", progressItems)
+	}
+	if !hasProviderStreamProgressMetrics(progressItems, 2) {
+		t.Fatalf("progress = %+v, want provider stream counts and bytes", progressItems)
+	}
+}
+
 func TestRuntimeAdapterRepairsInvalidDecisionOnce(t *testing.T) {
 	provider := &sequenceProvider{payloads: [][]byte{
 		[]byte(`{
@@ -1450,11 +1495,24 @@ func TestRuntimeAdapterAssessmentOnlyPromptProjectsDecisionAndExecutionSoulPolic
 		"runtimeStageMode",
 		"Before returning blocked_on_decision",
 		"later runtime repair or replan",
-		"Do not ask for source code when an empty workspace can be initialized as a new project",
-		"When the workspace is empty and existing source is not required",
+		"Decision Soul",
+		"Execution Soul",
+		"Validation Soul",
+		"policyDigest",
+		"compacted_current_stage_policy",
+		"Assess every DoD item before completion",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("prompt context missing %q:\n%s", want, joined)
+		}
+	}
+	for _, forbidden := range []string{
+		"Do not ask for source code when an empty workspace can be initialized as a new project",
+		"When the workspace is empty and existing source is not required",
+		`"soulMd"`,
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("prompt context leaked raw non-current soul policy %q:\n%s", forbidden, joined)
 		}
 	}
 }
@@ -3203,6 +3261,29 @@ func llmStepRequest() runtimemodel.StepExecutionRequest {
 			"doDId":  "dod-1",
 		},
 	}
+}
+
+func hasProgressEvent(items []runtimemodel.StepExecutionProgress, event string) bool {
+	for _, item := range items {
+		if item.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
+func hasProviderStreamProgressMetrics(items []runtimemodel.StepExecutionProgress, minimumDeltas int) bool {
+	for _, item := range items {
+		if item.Stage != "llm_provider_stream" || item.Data == nil {
+			continue
+		}
+		deltaCount, _ := item.Data["receivedDeltaCount"].(int)
+		receivedBytes, _ := item.Data["receivedBytes"].(int)
+		if deltaCount >= minimumDeltas && receivedBytes > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseLLMExecutionDecisionNormalizesValidationPlanAdvisoryField(t *testing.T) {

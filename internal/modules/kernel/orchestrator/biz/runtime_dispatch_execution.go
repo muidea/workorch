@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -110,6 +112,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		StepID:                        step.ID,
 		Kind:                          step.Kind,
 		Input:                         runtimeInput,
+		Progress:                      o.runtimeStepProgressRecorder(ctx, run, step),
 	})
 	if err != nil {
 		if degradedOutput, ok := degradedRuntimeFailureOutput(run, step, result.Output, err); ok {
@@ -320,6 +323,44 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, run *runModel.Run, step *runModel.Step) runtimemodel.StepExecutionProgressFunc {
+	if o == nil || run == nil || step == nil || o.checkpointManager() == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	last := time.Time{}
+	return func(progress runtimemodel.StepExecutionProgress) error {
+		event := strings.TrimSpace(progress.Event)
+		if event == "" {
+			event = "step_progress"
+		}
+		now := time.Now().UTC()
+		if event != "runtime_step_done" && event != "runtime_step_failed" && !last.IsZero() && now.Sub(last) < 5*time.Second {
+			return nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if event != "runtime_step_done" && event != "runtime_step_failed" && !last.IsZero() && now.Sub(last) < 5*time.Second {
+			return nil
+		}
+		last = now
+		data := map[string]any{}
+		for key, value := range progress.Data {
+			if key == "" || value == nil {
+				continue
+			}
+			data[key] = value
+		}
+		if stage := strings.TrimSpace(progress.Stage); stage != "" {
+			data["stage"] = stage
+		}
+		if summary := strings.TrimSpace(progress.Summary); summary != "" {
+			data["summary"] = summary
+		}
+		return o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data)
+	}
 }
 
 func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(

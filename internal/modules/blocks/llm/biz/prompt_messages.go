@@ -466,8 +466,6 @@ func stageContractPromptSection(input map[string]any) string {
 		"runtimeStage",
 		"runtimeStageMode",
 		"currentSoulStage",
-		"currentSoul",
-		"currentSoulBinding",
 		"stateChangingOutputRequired",
 		"repairObjective",
 		"stateChangingRecoveryMode",
@@ -481,6 +479,12 @@ func stageContractPromptSection(input map[string]any) string {
 		"artifactOutputContract",
 	} {
 		copyMapValue(section, key, input[key])
+	}
+	if soul := compactPromptSoul(recordFromAny(input["currentSoul"]), true); len(soul) > 0 {
+		section["currentSoul"] = soul
+	}
+	if binding := compactPromptSoulBinding(recordFromAny(input["currentSoulBinding"]), false); len(binding) > 0 {
+		section["currentSoulBinding"] = binding
 	}
 	if contract := recordFromAny(input["artifactOutputContract"]); len(contract) > 0 {
 		copyMapValue(section, "artifactOutputPhase", contract["phase"])
@@ -573,7 +577,7 @@ func governanceSoulPolicyPromptSection(input map[string]any) string {
 		selectedBindings := map[string]any{}
 		for _, stage := range []string{"planning", "execution", "validation", "decision", "approval"} {
 			if binding := recordFromAny(bindings[stage]); len(binding) > 0 {
-				selectedBindings[stage] = binding
+				selectedBindings[stage] = compactPromptSoulBinding(binding, false)
 			}
 		}
 		if len(selectedBindings) > 0 {
@@ -584,6 +588,74 @@ func governanceSoulPolicyPromptSection(input map[string]any) string {
 		return ""
 	}
 	return marshalPromptSection("Governance and Soul Policy View", section)
+}
+
+func compactPromptSoulBinding(binding map[string]any, includePolicyDigest bool) map[string]any {
+	if len(binding) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"source", "soulId", "stage", "bindingStage"} {
+		copyMapValue(out, key, binding[key])
+	}
+	if soul := compactPromptSoul(recordFromAny(binding["soul"]), includePolicyDigest); len(soul) > 0 {
+		out["soul"] = soul
+	}
+	return out
+}
+
+func compactPromptSoul(soul map[string]any, includePolicyDigest bool) map[string]any {
+	if len(soul) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"id", "name", "description",
+		"allowedToolKinds", "allowedSkillRefs", "allowedMCPServerRefs",
+		"businessDomains",
+	} {
+		copyMapValue(out, key, soul[key])
+	}
+	if includePolicyDigest {
+		if digest := compactSoulMarkdownDigest(strings.TrimSpace(stringValue(firstNonNilValue(soul["soulMd"], soul["soulMD"])))); digest != "" {
+			out["policyDigest"] = digest
+			out["policyDigestSource"] = "compacted_current_stage_policy"
+		}
+	}
+	return out
+}
+
+func compactSoulMarkdownDigest(value string) string {
+	value = normalizePromptTextForDigest(value)
+	if value == "" {
+		return ""
+	}
+	const limit = 1800
+	if len([]rune(value)) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:limit]) + "\n[truncated: full policy text omitted from LLM prompt; use policyDigest as bounded current-stage guidance]"
+}
+
+func normalizePromptTextForDigest(value string) string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if blank {
+				continue
+			}
+			blank = true
+			out = append(out, "")
+			continue
+		}
+		blank = false
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 func previousDecisionPromptSection(input map[string]any) string {
@@ -649,7 +721,7 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 		appendEvent("C5.trace-refs", "Trace References", request.TraceRefs)
 	}
 	if request.ContextBudget != nil {
-		appendEvent("C5.context-budget", "Context Budget Audit", request.ContextBudget)
+		appendEvent("C5.context-budget", "Context Budget Audit", compactPromptContextBudget(request.ContextBudget))
 	}
 	if request.Repair != nil {
 		appendEvent("C4.repair-json-output", "Structured JSON Repair Signal", request.Repair)
@@ -658,6 +730,67 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 		appendEvent("C4.execution-signals", "Execution Context and Evidence Signals", executionSignalsPayload(request))
 	}
 	return events
+}
+
+func compactPromptContextBudget(budget *llmmodels.ProviderContextBudget) map[string]any {
+	if budget == nil {
+		return nil
+	}
+	out := map[string]any{
+		"maxBytes":              budget.MaxBytes,
+		"actualBytes":           budget.ActualBytes,
+		"maxTokens":             budget.MaxTokens,
+		"estimatedInputTokens":  budget.EstimatedInputTokens,
+		"estimatedOutputTokens": budget.EstimatedOutputTokens,
+		"shrinkLevel":           budget.ShrinkLevel,
+		"truncated":             budget.Truncated,
+		"overBudget":            budget.OverBudget,
+		"p0Overflow":            budget.P0Overflow,
+		"contextGateAction":     budget.ContextGateAction,
+		"contextGateReason":     budget.ContextGateReason,
+		"stageBudgetRatio":      budget.StageBudgetRatio,
+		"stageBudgetSource":     budget.StageBudgetSource,
+		"tracePolicy":           budget.TracePolicy,
+	}
+	if len(budget.Rules) > 0 {
+		out["rules"] = limitedStringSlice(budget.Rules, 6)
+	}
+	if len(budget.IncludedSections) > 0 {
+		out["includedSectionCount"] = len(budget.IncludedSections)
+	}
+	if len(budget.NormalizedSections) > 0 {
+		out["normalizedSectionCount"] = len(budget.NormalizedSections)
+	}
+	if len(budget.CompressedSections) > 0 {
+		out["compressedSections"] = limitedStringSlice(budget.CompressedSections, 8)
+	}
+	if len(budget.OmittedSections) > 0 {
+		out["omittedSections"] = limitedStringSlice(budget.OmittedSections, 8)
+	}
+	if len(budget.RedactedPaths) > 0 {
+		out["redactedPathCount"] = len(budget.RedactedPaths)
+	}
+	if len(budget.ProtectedFields) > 0 {
+		out["protectedFields"] = limitedStringSlice(budget.ProtectedFields, 12)
+	}
+	if len(budget.IntegrityWarnings) > 0 {
+		out["integrityWarnings"] = limitedStringSlice(budget.IntegrityWarnings, 8)
+	}
+	if budget.CachePlan != nil {
+		out["cachePlan"] = map[string]any{
+			"cacheKey":                budget.CachePlan.CacheKey,
+			"stablePrefixHash":        budget.CachePlan.StablePrefixHash,
+			"workspaceDefinitionHash": budget.CachePlan.WorkspaceDefinitionHash,
+			"capabilityContractHash":  budget.CachePlan.CapabilityContractHash,
+			"stageBundleHash":         budget.CachePlan.StageBundleHash,
+			"volatileTailHash":        budget.CachePlan.VolatileTailHash,
+			"largeRefsHash":           budget.CachePlan.LargeRefsHash,
+			"cacheablePrefixCount":    len(budget.CachePlan.AdapterHint.CacheablePrefix),
+			"volatileSectionCount":    len(budget.CachePlan.AdapterHint.VolatileSections),
+			"cacheBreakerCount":       len(budget.CachePlan.CacheBreakers),
+		}
+	}
+	return out
 }
 
 func runtimeCapabilitySummaryPromptSection(request llmmodels.ProviderRequest) string {

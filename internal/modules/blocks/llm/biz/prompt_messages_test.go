@@ -1226,3 +1226,196 @@ func TestBuildProviderPromptMessagesUsesPromptContextWithoutDuplicatingSystem(t 
 		t.Fatalf("first system content=%q, want existing prompt context system content", build.Messages[0].Content)
 	}
 }
+
+func TestBuildPromptContextCompactsSoulMarkdownInPolicySections(t *testing.T) {
+	longPolicy := "# Execution\n\n" + strings.Repeat("very detailed execution policy that should not be duplicated in full. ", 200)
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-soul-compact",
+		RunID:          "run-soul-compact",
+		StepID:         "step-soul-compact",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"currentRuntimeStage": "execution",
+			"currentSoul": map[string]any{
+				"id":               "soul-execution",
+				"name":             "Execution",
+				"description":      "Execute the task",
+				"allowedToolKinds": []any{"file/read", "shell/command"},
+				"soulMd":           longPolicy,
+			},
+			"currentSoulBinding": map[string]any{
+				"source": "workspace_stage_binding",
+				"soulId": "soul-execution",
+				"soul": map[string]any{
+					"id":          "soul-execution",
+					"description": "Execute the task",
+					"soulMd":      longPolicy,
+				},
+			},
+			"executionContext": map[string]any{
+				"soulRouting": map[string]any{
+					"bindings": map[string]any{
+						"execution": map[string]any{
+							"source": "workspace_stage_binding",
+							"soulId": "soul-execution",
+							"soul": map[string]any{
+								"id":          "soul-execution",
+								"description": "Execute the task",
+								"soulMd":      longPolicy,
+							},
+						},
+						"decision": map[string]any{
+							"source": "workspace_stage_binding",
+							"soulId": "soul-decision",
+							"soul": map[string]any{
+								"id":          "soul-decision",
+								"description": "Ask only for real blockers",
+								"soulMd":      strings.Repeat("decision policy should not appear in full. ", 100),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	context := buildPromptContextFromRequest(req)
+	stage, ok := promptContextSectionByID(context, "C3.stage-contract")
+	if !ok {
+		t.Fatalf("missing C3.stage-contract; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if strings.Contains(stage.Content, `"soulMd"`) || strings.Contains(stage.Content, `"soulMD"`) {
+		t.Fatalf("stage contract leaked raw soulMd: %s", stage.Content)
+	}
+	if !strings.Contains(stage.Content, "policyDigest") || !strings.Contains(stage.Content, "compacted_current_stage_policy") {
+		t.Fatalf("stage contract missing bounded policy digest: %s", stage.Content)
+	}
+	if strings.Count(stage.Content, `"policyDigest"`) != 1 {
+		t.Fatalf("stage contract duplicated policy digest: %s", stage.Content)
+	}
+	if len(stage.Content) > 7000 {
+		t.Fatalf("stage contract too large after soul compaction: %d bytes", len(stage.Content))
+	}
+
+	policy, ok := promptContextSectionByID(context, "C2.governance-soul-policy")
+	if !ok {
+		t.Fatalf("missing C2.governance-soul-policy; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if strings.Contains(policy.Content, "soulMd") || strings.Contains(policy.Content, "policyDigest") {
+		t.Fatalf("governance policy should contain binding summary only: %s", policy.Content)
+	}
+	if len(policy.Content) > 2500 {
+		t.Fatalf("governance policy too large after soul compaction: %d bytes", len(policy.Content))
+	}
+}
+
+func TestBuildPromptContextCompactsContextBudgetAuditForLLM(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-context-budget",
+		RunID:          "run-context-budget",
+		StepID:         "step-context-budget",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "goal"},
+				"dod":  map[string]any{"items": []any{"dod"}},
+			},
+		},
+		ContextBudget: &llmmodels.ProviderContextBudget{
+			MaxBytes:              100000,
+			ActualBytes:           90000,
+			MaxTokens:             25000,
+			EstimatedInputTokens:  20000,
+			EstimatedOutputTokens: 4096,
+			ShrinkLevel:           2,
+			Truncated:             true,
+			OverBudget:            false,
+			P0Overflow:            false,
+			Rules:                 []string{"protect goal and dod", "compact volatile history"},
+			IncludedSections:      []string{"C0.system", "C1.goal-contract-original", "C5.context-budget", "secret-section-marker"},
+			NormalizedSections:    []string{"C2.capability-contract", "C4.current-progress"},
+			CompressedSections:    []string{"C4.process-evidence-timeline"},
+			RedactedPaths: []string{
+				"input.executionContext.secrets.apiKey",
+				"input.repairActionPackage.targetSnapshots[0].content",
+				"input.large.private.audit.path",
+			},
+			ProtectedFields:    []string{"goal", "dod"},
+			IntegrityWarnings:  []string{"truncated volatile timeline"},
+			ContextGateAction:  "allow",
+			ContextGateReason:  "within budget after compaction",
+			StageBudgetRatio:   0.75,
+			StageBudgetSource:  "provider_context_profile",
+			TracePolicy:        "refs_only",
+			RedactionApplied:   true,
+			PromptCaptured:     true,
+			ProfileMode:        "auto",
+			CapabilitySource:   "explicit_config",
+			ContextUtilization: 0.65,
+			MaxRequestBytes:    1024 * 1024,
+			Estimator:          "heuristic",
+			ActualTokens:       21000,
+			SourceRefs:         []string{"large-source-ref-should-not-be-needed-by-llm"},
+			GoalDoDCompressed:  true,
+			CachePlan: &llmmodels.ProviderCachePlan{
+				CacheKey:                "cache-key",
+				StablePrefixHash:        "sha256:stable",
+				WorkspaceDefinitionHash: "sha256:workspace",
+				CapabilityContractHash:  "sha256:capability",
+				StageBundleHash:         "sha256:stage",
+				VolatileTailHash:        "sha256:tail",
+				LargeRefsHash:           "sha256:large",
+				AdapterHint: llmmodels.ProviderAdapterCacheHint{
+					CacheablePrefix:  []string{"C0.system", "C1.goal-contract-original"},
+					VolatileSections: []string{"C4.current-progress", "C5.context-budget"},
+				},
+				CacheBreakers: []llmmodels.ProviderCacheBreaker{{SectionID: "C3.stage-contract", Reason: "stage changed"}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	section, ok := promptContextSectionByID(context, "C5.context-budget")
+	if !ok {
+		t.Fatalf("missing C5.context-budget; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"Context Budget Audit",
+		`"redactedPathCount":3`,
+		`"includedSectionCount":4`,
+		`"normalizedSectionCount":2`,
+		`"stablePrefixHash":"sha256:stable"`,
+		`"cacheablePrefixCount":2`,
+		`"volatileSectionCount":2`,
+		`"cacheBreakerCount":1`,
+		`"contextGateAction":"allow"`,
+	} {
+		if !strings.Contains(section.Content, want) {
+			t.Fatalf("context budget prompt missing %q: %s", want, section.Content)
+		}
+	}
+	for _, forbidden := range []string{
+		"input.executionContext.secrets.apiKey",
+		"targetSnapshots[0].content",
+		"input.large.private.audit.path",
+		"secret-section-marker",
+		"large-source-ref-should-not-be-needed-by-llm",
+		`"redactedPaths"`,
+		`"includedSections"`,
+		`"sourceRefs"`,
+		`"profile"`,
+		`"sectionHashes"`,
+	} {
+		if strings.Contains(section.Content, forbidden) {
+			t.Fatalf("context budget prompt leaked %q: %s", forbidden, section.Content)
+		}
+	}
+	if len(section.Content) > 3000 {
+		t.Fatalf("context budget prompt too large after compaction: %d bytes", len(section.Content))
+	}
+}

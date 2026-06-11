@@ -655,6 +655,77 @@ func TestRuntimeOrchestrator_StartRunRecordsExecutionEvidence(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	runtime := &stubRuntimeAdapter{
+		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if request.Progress == nil {
+				t.Fatal("request.Progress is nil, want runtime progress recorder")
+			}
+			if err := request.Progress(runtimemodel.StepExecutionProgress{
+				Event:   "runtime_step_progress",
+				Stage:   "llm_provider_stream",
+				Summary: "provider stream receiving",
+				Data: map[string]any{
+					"streaming":          true,
+					"receivedDeltaCount": 2,
+					"receivedBytes":      42,
+				},
+			}); err != nil {
+				t.Fatalf("record progress: %v", err)
+			}
+			return map[string]any{"status": "ok"}, nil
+		},
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          memory.NewToolCallRepository(),
+			Patches:            memory.NewPatchRepository(),
+			ValidationResults:  memory.NewValidationResultRepository(),
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-progress-evidence")
+	runID := common.RunID("run-progress-evidence")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+
+	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if !hasCheckpointEvent(checkpoints, "runtime_step_progress") {
+		t.Fatalf("checkpoints = %+v, want runtime_step_progress checkpoint", checkpoints)
+	}
+	if !hasRuntimeProgressCheckpointData(checkpoints, "llm_provider_stream", 42) {
+		t.Fatalf("checkpoints = %+v, want provider stream progress diagnostics", checkpoints)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunRecordsFailedExecutionEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -718,6 +789,20 @@ func TestRuntimeOrchestrator_StartRunRecordsFailedExecutionEvidence(t *testing.T
 	if !hasRunCheckpointState(checkpoints, common.RunStateFailed) || !hasCheckpointEvent(checkpoints, "step_failed") {
 		t.Fatalf("checkpoints = %+v, want failed run and step checkpoints", checkpoints)
 	}
+}
+
+func hasRuntimeProgressCheckpointData(items []*runmodel.RuntimeCheckpoint, stage string, receivedBytes int) bool {
+	for _, item := range items {
+		if item == nil || item.Data == nil {
+			continue
+		}
+		if item.Data["event"] == "runtime_step_progress" &&
+			item.Data["stage"] == stage &&
+			item.Data["receivedBytes"] == receivedBytes {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {

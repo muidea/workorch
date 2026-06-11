@@ -70,6 +70,24 @@ func (c *checkpointSubsystem) recordStepCheckpoint(ctx context.Context, run *run
 	return c.createRuntimeCheckpoint(ctx, run, step.ID, common.CheckpointTypeRunState, data)
 }
 
+func (c *checkpointSubsystem) recordStepProgressCheckpoint(ctx context.Context, run *runModel.Run, step *runModel.Step, event string, data map[string]any) error {
+	if c == nil || run == nil || step == nil || c.evidence.RuntimeCheckpoints == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"event":     event,
+		"stepState": string(step.State),
+		"stepKind":  step.Kind,
+	}
+	for key, value := range data {
+		if key == "" || value == nil {
+			continue
+		}
+		payload[key] = value
+	}
+	return c.createRuntimeCheckpoint(ctx, run, step.ID, common.CheckpointTypeRunState, payload)
+}
+
 func (c *checkpointSubsystem) createRuntimeCheckpoint(
 	ctx context.Context,
 	run *runModel.Run,

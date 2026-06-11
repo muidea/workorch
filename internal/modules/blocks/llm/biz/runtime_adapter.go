@@ -418,7 +418,9 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 	operation string,
 ) providerCallResult {
 	providerReq := providerRequest(request, primaryRuntime.Config)
-	payload, usage, streamEvents, callErr := completeProvider(ctx, primaryRuntime, providerReq)
+	stopHeartbeat := startProviderProgressHeartbeat(ctx, request.Progress, primaryRuntime.Config.Capabilities.Streaming)
+	payload, usage, streamEvents, callErr := completeProvider(ctx, primaryRuntime, providerReq, request.Progress)
+	stopHeartbeat()
 	result := providerCallResult{
 		runtime:      primaryRuntime,
 		request:      providerReq,
@@ -454,7 +456,9 @@ func (a *RuntimeAdapter) executeProviderWithFailover(
 	}
 
 	backupReq := providerRequest(request, backupRuntime.Config)
-	backupPayload, backupUsage, backupEvents, backupErr := completeProvider(ctx, backupRuntime, backupReq)
+	stopBackupHeartbeat := startProviderProgressHeartbeat(ctx, request.Progress, backupRuntime.Config.Capabilities.Streaming)
+	backupPayload, backupUsage, backupEvents, backupErr := completeProvider(ctx, backupRuntime, backupReq, request.Progress)
+	stopBackupHeartbeat()
 	failover["toBudget"] = providerContextBudgetOutput(backupReq.ContextBudget, backupRuntime.Config.ID, backupRuntime.Config.Model)
 	if backupErr != nil {
 		failover["backupError"] = backupErr.Error()
@@ -643,7 +647,7 @@ func providerFailureStage(failureClass string, stream bool) string {
 	}
 }
 
-func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
+func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmmodels.ProviderRequest, progress runtimemodel.StepExecutionProgressFunc) ([]byte, *llmmodels.ProviderUsage, []llmmodels.ProviderStreamEvent, error) {
 	if request.ContextBudget != nil {
 		if request.ContextBudget.P0Overflow {
 			return nil, nil, nil, fmt.Errorf("%w: llm provider request too large: p0 overflow with protected goal/dod contract", common.ErrInvalidArgument)
@@ -661,17 +665,155 @@ func completeProvider(ctx context.Context, runtime ProviderRuntime, request llmm
 			return nil, nil, nil, fmt.Errorf("%w: llm provider does not implement streaming", common.ErrInvalidArgument)
 		}
 		events := []llmmodels.ProviderStreamEvent{}
+		streamProgress := newProviderStreamProgress(progress)
 		completion, err := streaming.StreamComplete(ctx, request, func(event llmmodels.ProviderStreamEvent) error {
 			if strings.TrimSpace(event.Type) == "" {
 				event.Type = "delta"
 			}
 			events = append(events, event)
-			return nil
+			return streamProgress.observe(event)
 		})
+		if err != nil {
+			_ = streamProgress.failed(err)
+		} else {
+			_ = streamProgress.done()
+		}
 		return completion.Payload, completion.Usage, events, err
 	}
 	completion, err := runtime.Provider.Complete(ctx, request)
+	if err != nil {
+		emitProviderProgress(progress, "runtime_step_failed", "llm_provider_call", "provider call failed", map[string]any{"error": err.Error()})
+	} else {
+		emitProviderProgress(progress, "runtime_step_done", "llm_provider_call", "provider call completed", map[string]any{"streaming": false})
+	}
 	return completion.Payload, completion.Usage, nil, err
+}
+
+func startProviderProgressHeartbeat(ctx context.Context, progress runtimemodel.StepExecutionProgressFunc, streaming bool) func() {
+	if progress == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	emitProviderProgress(progress, "runtime_step_started", "llm_provider_call", "provider call started", map[string]any{"streaming": streaming})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				emitProviderProgress(progress, "runtime_step_failed", "llm_provider_call", "provider call context ended", map[string]any{"streaming": streaming, "error": ctx.Err().Error()})
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				emitProviderProgress(progress, "runtime_step_progress", "llm_provider_call", "provider call waiting", map[string]any{"streaming": streaming, "waiting": true})
+			}
+		}
+	}()
+	return func() {
+		once.Do(func() {
+			close(done)
+		})
+	}
+}
+
+type providerStreamProgress struct {
+	progress           runtimemodel.StepExecutionProgressFunc
+	eventCount         int
+	deltaCount         int
+	receivedBytes      int
+	doneReceived       bool
+	lastEmittedAt      time.Time
+	firstDeltaEmitted  bool
+	lastObservedErrMsg string
+}
+
+func newProviderStreamProgress(progress runtimemodel.StepExecutionProgressFunc) *providerStreamProgress {
+	return &providerStreamProgress{progress: progress}
+}
+
+func (p *providerStreamProgress) observe(event llmmodels.ProviderStreamEvent) error {
+	if p == nil {
+		return nil
+	}
+	p.eventCount++
+	eventType := strings.TrimSpace(event.Type)
+	if eventType == "" {
+		eventType = "delta"
+	}
+	switch eventType {
+	case "done":
+		p.doneReceived = true
+	case "delta":
+		if event.Delta != "" {
+			p.deltaCount++
+			p.receivedBytes += len(event.Delta)
+		}
+	default:
+		if event.Delta != "" {
+			p.receivedBytes += len(event.Delta)
+		}
+	}
+	if eventType == "done" {
+		return p.emit("runtime_step_done", "provider stream done")
+	}
+	if !p.firstDeltaEmitted && p.deltaCount > 0 {
+		p.firstDeltaEmitted = true
+		return p.emit("runtime_step_progress", "provider stream receiving")
+	}
+	if p.lastEmittedAt.IsZero() || time.Since(p.lastEmittedAt) >= 5*time.Second {
+		return p.emit("runtime_step_progress", "provider stream receiving")
+	}
+	return nil
+}
+
+func (p *providerStreamProgress) done() error {
+	if p == nil {
+		return nil
+	}
+	return p.emit("runtime_step_done", "provider call completed")
+}
+
+func (p *providerStreamProgress) failed(err error) error {
+	if p == nil {
+		return nil
+	}
+	if err != nil {
+		p.lastObservedErrMsg = err.Error()
+	}
+	return p.emit("runtime_step_failed", "provider call failed")
+}
+
+func (p *providerStreamProgress) emit(event string, summary string) error {
+	if p == nil {
+		return nil
+	}
+	p.lastEmittedAt = time.Now()
+	data := map[string]any{
+		"streaming":          true,
+		"receivedEventCount": p.eventCount,
+		"receivedDeltaCount": p.deltaCount,
+		"receivedBytes":      p.receivedBytes,
+		"doneReceived":       p.doneReceived,
+		"streamIncomplete":   !p.doneReceived,
+	}
+	if p.lastObservedErrMsg != "" {
+		data["error"] = p.lastObservedErrMsg
+	}
+	return emitProviderProgress(p.progress, event, "llm_provider_stream", summary, data)
+}
+
+func emitProviderProgress(progress runtimemodel.StepExecutionProgressFunc, event string, stage string, summary string, data map[string]any) error {
+	if progress == nil {
+		return nil
+	}
+	return progress(runtimemodel.StepExecutionProgress{
+		Event:   event,
+		Stage:   stage,
+		Summary: summary,
+		Data:    data,
+	})
 }
 
 func validateProviderContextGate(budget *llmmodels.ProviderContextBudget) error {
