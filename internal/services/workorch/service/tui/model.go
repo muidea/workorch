@@ -278,6 +278,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.applyWorkspaceContext(msg)
+		m.lastError = nil
 		if msg.ResetMainViewport {
 			m.syncMainViewportToCurrentContent()
 		}
@@ -2107,7 +2108,7 @@ func isTransientProjectionError(err error) bool {
 		return true
 	}
 	text := strings.ToLower(err.Error())
-	return (errors.Is(err, common.ErrConflict) || strings.Contains(text, "status 409")) &&
+	return (errors.Is(err, common.ErrConflict) || strings.Contains(text, "status 409") || strings.Contains(text, "conflict")) &&
 		strings.Contains(text, "workspace projection")
 }
 

@@ -3789,21 +3789,55 @@ func TestModelIgnoresStaleWorkspaceContextResponse(t *testing.T) {
 }
 
 func TestModelTransientProjectionErrorSchedulesContextRetry(t *testing.T) {
+	for _, errorText := range []string{
+		"workorch API error (status 409): workspace projection detail not ready",
+		"conflict: workspace projection detail not ready",
+	} {
+		t.Run(errorText, func(t *testing.T) {
+			m := NewAppModel(newFake(t), "ws-a", "")
+			m.activeWorkspaceID = "ws-a"
+			m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
+
+			next, cmd := m.Update(WorkspaceContextMsg{
+				RequestSeq:  1,
+				WorkspaceID: "ws-a",
+				Error:       errors.New(errorText),
+			})
+			m = asModel(next)
+			if cmd == nil {
+				t.Fatal("transient projection error did not schedule retry")
+			}
+			if m.lastError != nil || !strings.Contains(m.progressText, "retrying") {
+				t.Fatalf("lastError/progressText = %v/%q, want retry without sticky error", m.lastError, m.progressText)
+			}
+		})
+	}
+}
+
+func TestModelWorkspaceContextSuccessClearsProjectionError(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
+	m.lastError = errors.New("conflict: workspace projection detail not ready")
 	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
 
-	next, cmd := m.Update(WorkspaceContextMsg{
+	next, _ := m.Update(WorkspaceContextMsg{
 		RequestSeq:  1,
 		WorkspaceID: "ws-a",
-		Error:       errors.New("workorch API error (status 409): workspace projection detail not ready"),
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		ActiveRun:   &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		DisplayRun:  &backend.RunInfo{ID: "run-a", WorkspaceID: "ws-a", State: common.RunStateRunning},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace:    backend.WorkspaceInfo{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-a", RunID: "run-a", State: "running", Summary: "run running"},
+		},
+		WorkspaceHasLive: true,
 	})
 	m = asModel(next)
-	if cmd == nil {
-		t.Fatal("transient projection error did not schedule retry")
+	if m.lastError != nil {
+		t.Fatalf("lastError = %v, want cleared after successful workspace context", m.lastError)
 	}
-	if m.lastError != nil || !strings.Contains(m.progressText, "retrying") {
-		t.Fatalf("lastError/progressText = %v/%q, want retry without sticky error", m.lastError, m.progressText)
+	if m.progress != progressRunning || m.progressText != "run running" {
+		t.Fatalf("progress = %s/%q, want running context applied", m.progress, m.progressText)
 	}
 }
 
