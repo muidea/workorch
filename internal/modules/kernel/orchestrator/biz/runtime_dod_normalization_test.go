@@ -362,6 +362,89 @@ func TestNormalizeCompletionGateDoDAssessmentOutputFillsDeliverableCoverageIDsBy
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputFillsDeliverableCoverageIDsWhenItemsHaveDescriptions(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-description-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-description-normalize",
+		DoDID:           "dod-deliverable-coverage-description-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"validation passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true},
+							{"id": "validation_report", "required": true},
+							{"id": "coverage_map", "required": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-description-normalize/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD and deliverable requirements are covered.",
+			"items": []map[string]any{{
+				"item":         "validation passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-description-normalize/graph-001/verify"},
+			}},
+			"deliverableCoverage": map[string]any{
+				"satisfied": true,
+				"items": []map[string]any{
+					{
+						"item":         "完整的 Go 源代码",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-description-normalize/graph-001/source"},
+					},
+					{
+						"item":         "验证报告",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-description-normalize/graph-001/report"},
+					},
+					{
+						"item":         "覆盖映射",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-description-normalize/graph-001/map"},
+					},
+				},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	wantIDs := []string{"source_change", "validation_report", "coverage_map"}
+	if len(items) != len(wantIDs) {
+		t.Fatalf("deliverableCoverage.items = %+v, want %d items", items, len(wantIDs))
+	}
+	for idx, want := range wantIDs {
+		if got := stringFromMap(items[idx], "id"); got != want {
+			t.Fatalf("deliverableCoverage.items[%d].id = %q, want %q; items=%+v", idx, got, want, items)
+		}
+		if got := stringFromMap(items[idx], "item"); got == "" || got == want {
+			t.Fatalf("deliverableCoverage.items[%d].item = %q, want original descriptive item", idx, got)
+		}
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputCompletesMissingDeliverableCoverage(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-deliverable-coverage-missing-normalize",

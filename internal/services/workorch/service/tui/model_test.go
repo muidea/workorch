@@ -4189,6 +4189,56 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 	}
 }
 
+func TestModelLiveStateEventClearsStaleDecisionPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
+	m.activeRunID = "run-1"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.progress = progressWaitingDecision
+	m.progressText = "Waiting for decision"
+	m.width = 120
+	m.height = 32
+
+	cmd := m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"state":       "running",
+			"activeRunId": "run-1",
+		},
+	})
+	if cmd != nil {
+		t.Fatalf("running workspace state event should not require immediate context refresh")
+	}
+	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+		t.Fatalf("workspace running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
+	}
+}
+
+func TestModelLiveRunStateEventClearsStaleDecisionPrompt(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-1", BlockingTicketID: "ticket-1"}}
+	m.activeRunID = "run-1"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-a", RunID: "run-1", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.progress = progressWaitingDecision
+	m.progressText = "Waiting for decision"
+	m.width = 120
+	m.height = 32
+
+	m.applyBackendEvent(backend.Event{
+		Type:        backend.EventRunStateChanged,
+		WorkspaceID: "ws-a",
+		RunID:       "run-1",
+		Payload:     map[string]any{"state": "running"},
+	})
+	if m.blockingDecision != nil || m.progress != progressRunning || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
+		t.Fatalf("run running event kept stale decision prompt: input=%q blocker=%+v progress=%s", stripANSI(m.renderInput(120)), m.blockingDecision, m.progress)
+	}
+}
+
 func TestModelWorkspaceDeletedEventClearsActiveWorkspaceView(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{

@@ -257,7 +257,6 @@ func normalizeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, 
 			stringFromMap(item, "deliverable"),
 			stringFromMap(item, "name"),
 			stringFromMap(item, "path"),
-			stringFromMap(item, "item"),
 		)) == "" {
 			item["id"] = required[idx]
 			changed = true

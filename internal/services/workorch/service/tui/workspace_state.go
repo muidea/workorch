@@ -873,6 +873,7 @@ func (m *AppModel) upsertWorkspace(ws backend.WorkspaceInfo) {
 func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 	switch state {
 	case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
+		m.clearBlockingInputState()
 		m.running = true
 		m.progress = progressRunning
 		m.progressText = string(state) + "; waiting for progress or final result"
@@ -894,6 +895,15 @@ func (m *AppModel) applyWorkspaceProgress(state common.WorkspaceState) {
 		m.progressText = "Workspace failed"
 	default:
 		m.running = false
+		m.progress = progressIdle
+		m.progressText = ""
+	}
+}
+
+func (m *AppModel) clearBlockingInputState() {
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	if m.progress == progressWaitingDecision || m.progress == progressWaitingApproval {
 		m.progress = progressIdle
 		m.progressText = ""
 	}

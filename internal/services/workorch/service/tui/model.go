@@ -2248,6 +2248,7 @@ func (m *AppModel) applyRunState(state common.RunState, payload map[string]any) 
 	default:
 		if state != "" {
 			if runStateIsLive(state) {
+				m.clearBlockingInputState()
 				m.clearResultDisplayState()
 				m.syncMainViewportToCurrentContent()
 			}
