@@ -967,6 +967,7 @@ func repairHasDirectImplementationTargetEvidence(input map[string]any, pkg map[s
 func stateChangingRepairActionPackageForConvergence(input map[string]any, failedStep *runModel.Step) map[string]any {
 	existing := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(existing) > 0 {
+		syncRepairActionPackageTargetSnapshots(input, existing)
 		required := mapFromValue(existing["requiredOutput"])
 		if boolValue(required["mustIncludeStateChangingNode"]) {
 			applyConcreteRepairEvidenceOutputContract(input, existing, required)
@@ -988,6 +989,30 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 	required := enforceStateChangingRequiredOutputForConvergence(pkg)
 	addStrategyReassessmentRequiredOutputContract(pkg, required)
 	return pkg
+}
+
+func syncRepairActionPackageTargetSnapshots(input map[string]any, pkg map[string]any) {
+	if len(input) == 0 || len(pkg) == 0 {
+		return
+	}
+	targets := repairActionTargetSnapshots(input)
+	if len(targets) == 0 {
+		return
+	}
+	merged := mergeRepairTargetSnapshots(mapSliceFromValue(pkg["targetSnapshots"]), targets)
+	if len(merged) == 0 {
+		return
+	}
+	pkg["targetSnapshots"] = merged
+	pkg["currentTargetSnapshots"] = repairActionTargetSnapshotMetadata(merged)
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	required["mustTargetFailureScope"] = true
+	required["targetRelation"] = "failure_target_repair_snapshot_or_declared_related_failure_target"
+	applyCurrentSnapshotDirectPatchContract(required)
+	pkg["requiredOutput"] = required
 }
 
 func enforceStateChangingRequiredOutputForConvergence(pkg map[string]any) map[string]any {

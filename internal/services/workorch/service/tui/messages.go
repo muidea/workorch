@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
@@ -89,8 +90,9 @@ type RunControlMsg struct {
 }
 
 type DecisionResolvedMsg struct {
-	Decision *backend.DecisionInfo
-	Error    error
+	WorkspaceID common.WorkspaceID
+	Decision    *backend.DecisionInfo
+	Error       error
 }
 
 type ApprovalResolvedMsg struct {

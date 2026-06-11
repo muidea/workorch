@@ -586,13 +586,13 @@ func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID st
 			Payload:        map[string]any{"answer": answer, "operator": "tui"},
 		})
 		if err != nil {
-			return DecisionResolvedMsg{Error: err}
+			return DecisionResolvedMsg{WorkspaceID: wsID, Error: err}
 		}
 		if decision.RunID != "" {
 			resumeCtx := common.ContextWithRuntimeWorkspaceID(ctx, decision.WorkspaceID)
 			_, err = be.Run().Resume(resumeCtx, decision.WorkspaceID, decision.RunID)
 		}
-		return DecisionResolvedMsg{Decision: decision, Error: err}
+		return DecisionResolvedMsg{WorkspaceID: wsID, Decision: decision, Error: err}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -949,6 +950,54 @@ func TestPreserveStateChangingSchemaInvalidRepairContractKeepsExecutableRepair(t
 	required := mapFromValue(pkg["requiredOutput"])
 	if required["mustReturnValidJSON"] != true || required["mustNotReuseRejectedJSON"] != true || required["mustIncludeStateChangingNode"] != true {
 		t.Fatalf("requiredOutput = %+v, want valid JSON state-changing contract", required)
+	}
+}
+
+func TestPreserveStateChangingSchemaInvalidRepairContractCopiesTargetSnapshotsIntoActionPackage(t *testing.T) {
+	failed := &runmodel.Step{
+		ID:   "run-schema-invalid-contract/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+			"failureTargetRepairContext": []map[string]any{{
+				"targetRef":        "main_test.go",
+				"content":          "package main\nfunc TestStatsManagerAppend() {}\n",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+				"contentHash":      "sha256:test",
+				"exists":           true,
+			}},
+		},
+		Output: map[string]any{
+			"stage":               "llm_schema_invalid",
+			failureOutputKeyClass: failureClassLLMDecisionInvalid,
+			"error":               "invalid argument: executionGraph patch/apply must not depend on same-graph file/read",
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeRepairFollowUp: true,
+	}
+
+	if !preserveStateChangingSchemaInvalidRepairContract(input, failed) {
+		t.Fatalf("preserveStateChangingSchemaInvalidRepairContract returned false")
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main_test.go" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want current failure target snapshot", targets)
+	}
+	if strings.TrimSpace(stringFromMap(targets[0], "content")) == "" {
+		t.Fatalf("repairActionPackage.targetSnapshots[0] missing content: %+v", targets[0])
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if required["mustTargetFailureScope"] != true || !strings.Contains(stringFromMap(required, "sameGraphReadPatchRule"), "do not put file/read before patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want direct snapshot patch contract", required)
 	}
 }
 

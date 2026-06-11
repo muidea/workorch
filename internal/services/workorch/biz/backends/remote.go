@@ -305,7 +305,7 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecision
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
+	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, ResolutionType: d.ResolutionType, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
 }
 func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))

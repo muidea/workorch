@@ -22,6 +22,7 @@ func preserveStateChangingSchemaInvalidRepairContract(input map[string]any, fail
 	delete(input, "evidenceRepairRequired")
 	delete(input, stepInputKeyAssessmentOnly)
 	delete(input, "assessmentOnlyReason")
+	inheritPriorRepairContext(input, failedStep)
 	pkg := stateChangingRepairActionPackageForConvergence(input, failedStep)
 	if len(pkg) == 0 {
 		pkg = map[string]any{}
@@ -37,6 +38,14 @@ func preserveStateChangingSchemaInvalidRepairContract(input map[string]any, fail
 		},
 	}
 	required := enforceStateChangingRequiredOutputForConvergence(pkg)
+	required["mustReturnValidJSON"] = true
+	required["mustNotReuseRejectedJSON"] = true
+	required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]),
+		"malformed_json",
+		"markdown_wrapped_json",
+		"raw_rejected_json_reuse",
+		"partial_json_array",
+	))
 	pkg["requiredOutput"] = required
 	input["repairActionPackage"] = pkg
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],

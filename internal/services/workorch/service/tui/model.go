@@ -458,9 +458,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DecisionResolvedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
+			if msg.WorkspaceID != "" {
+				return m, tea.Batch(FetchWorkspaceContext(m.be, string(msg.WorkspaceID)), FetchDecisions(m.be, string(msg.WorkspaceID)))
+			}
 			return m, nil
 		}
+		refreshWorkspaceID := msg.WorkspaceID
 		if msg.Decision != nil {
+			if refreshWorkspaceID == "" {
+				refreshWorkspaceID = msg.Decision.WorkspaceID
+			}
 			if msg.Decision.RunID != "" {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
@@ -472,7 +479,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearInput()
 		m.progress = progressRunning
 		m.progressText = "Decision resolved; resuming run"
-		return m, m.refreshActiveWorkspaceState()
+		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
+		if refreshWorkspaceID != "" {
+			cmds = append(cmds, FetchWorkspaceContext(m.be, string(refreshWorkspaceID)), FetchDecisions(m.be, string(refreshWorkspaceID)))
+		}
+		return m, tea.Batch(cmds...)
 	case ApprovalResolvedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
