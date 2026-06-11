@@ -426,7 +426,7 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 }
 
 func (m *AppModel) activeWorkspaceHasDecisionBlocker() bool {
-	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
+	if m.blockingDecision != nil && m.blockingDecision.ID != "" && m.decisionMatchesActiveScope(*m.blockingDecision) {
 		return true
 	}
 	ws := m.activeWorkspaceOverview()
@@ -434,11 +434,51 @@ func (m *AppModel) activeWorkspaceHasDecisionBlocker() bool {
 }
 
 func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
-	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
+	if m.blockingApproval != nil && m.blockingApproval.ID != "" && m.approvalMatchesActiveScope(*m.blockingApproval) {
 		return true
 	}
 	ws := m.activeWorkspaceOverview()
 	return ws != nil && ws.State == common.WorkspaceStateBlocked && ws.BlockingApprovalID != ""
+}
+
+func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
+	if m.blockingDecision != nil && m.blockingDecision.ID != "" && m.decisionMatchesActiveScope(*m.blockingDecision) {
+		return true
+	}
+	ws := m.activeWorkspaceOverview()
+	if ws == nil || ws.State != common.WorkspaceStateWaitingDecision || ws.BlockingTicketID == "" {
+		return false
+	}
+	runID := ws.ActiveRunID
+	if runID == "" {
+		runID = common.RunID(m.activeRunID)
+	}
+	m.activeRunID = string(runID)
+	m.setBlockingDecision(ws.BlockingTicketID, ws.ID, runID, "", "")
+	m.running = false
+	m.progress = progressWaitingDecision
+	m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
+	return true
+}
+
+func (m *AppModel) ensureActiveBlockingApprovalFromOverview() bool {
+	if m.blockingApproval != nil && m.blockingApproval.ID != "" && m.approvalMatchesActiveScope(*m.blockingApproval) {
+		return true
+	}
+	ws := m.activeWorkspaceOverview()
+	if ws == nil || ws.State != common.WorkspaceStateBlocked || ws.BlockingApprovalID == "" {
+		return false
+	}
+	runID := ws.ActiveRunID
+	if runID == "" {
+		runID = common.RunID(m.activeRunID)
+	}
+	m.activeRunID = string(runID)
+	m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, runID, "", "", nil)
+	m.running = false
+	m.progress = progressWaitingApproval
+	m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
+	return true
 }
 
 func (m *AppModel) syncActiveWorkspaceBlockerOverview() tea.Cmd {

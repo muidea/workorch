@@ -1619,6 +1619,79 @@ func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing
 	}
 }
 
+func TestModelDecisionReplanAfterWorkspaceSwitchUsesOverviewBlocker(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+	}})
+	m = asModel(next)
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
+
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = "ws-b"
+	next, _ = m.confirmWorkspaceSelection()
+	m = asModel(next)
+	m.blockingDecision = nil
+	m.decisions = nil
+	m.setInput("/decision replan")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected decision resolve command for switched workspace")
+	}
+	msg := cmd()
+	next, _ = next.(*AppModel).Update(msg)
+	m = asModel(next)
+
+	if len(be.decisions) != 1 {
+		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	}
+	req := be.decisions[0]
+	if req.WorkspaceID != "ws-b" || req.TicketID != "ticket-b" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision request = %+v, want ws-b ticket-b replan", req)
+	}
+	if m.lastError != nil {
+		t.Fatalf("lastError = %v, want nil", m.lastError)
+	}
+}
+
+func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateWaitingDecision, ActiveRunID: "run-b", BlockingTicketID: "ticket-b"},
+	}})
+	m = asModel(next)
+
+	m.activeWorkspaceID = "ws-b"
+	m.selectedWorkspaceID = "ws-b"
+	m.activeRunID = "run-b"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}
+	m.decisions = []backend.DecisionInfo{{ID: "ticket-a", WorkspaceID: "ws-a", RunID: "run-a", State: "open"}}
+	m.syncBlockingDecisionFromList()
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-b" {
+		t.Fatalf("blocking decision = %+v, want ticket-b from active overview", m.blockingDecision)
+	}
+
+	m.setInput("/decision replan")
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected decision resolve command for active workspace")
+	}
+	_ = next
+	_ = cmd()
+	if len(be.decisions) != 1 {
+		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	}
+	req := be.decisions[0]
+	if req.WorkspaceID != "ws-b" || req.TicketID != "ticket-b" {
+		t.Fatalf("decision request = %+v, want ws-b ticket-b", req)
+	}
+}
+
 func TestModelCtrlCOnlyInterruptsOrHintsExitCommand(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})

@@ -659,6 +659,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.addInputHistory(text)
+	m.ensureActiveBlockingDecisionFromOverview()
 	if m.blockingDecision != nil {
 		ticketID := string(m.blockingDecision.ID)
 		m.clearInput()
@@ -666,6 +667,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.appendTranscript("Decision", text)
 		return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, text)
 	}
+	m.ensureActiveBlockingApprovalFromOverview()
 	if m.blockingApproval != nil {
 		approvalID := string(m.blockingApproval.ID)
 		approve, ok := parseApprovalInputWithContext(text, m.blockingApproval.Reason)
@@ -834,7 +836,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			return m, FetchDecisions(m.be, m.activeWorkspaceID), true
 		case "answer", "resolve":
-			if m.blockingDecision == nil {
+			if !m.ensureActiveBlockingDecisionFromOverview() {
 				m.lastError = fmt.Errorf("no blocking decision")
 				return m, nil, true
 			}
@@ -848,7 +850,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.appendTranscript("Decision", rest)
 			return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, rest), true
 		case "replan":
-			if m.blockingDecision == nil {
+			if !m.ensureActiveBlockingDecisionFromOverview() {
 				m.lastError = fmt.Errorf("no blocking decision")
 				return m, nil, true
 			}
@@ -859,7 +861,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.appendTranscript("Decision", answer)
 			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, decisioncommon.ResolutionTypeReplan, answer), true
 		case "terminate", "reject":
-			if m.blockingDecision == nil {
+			if !m.ensureActiveBlockingDecisionFromOverview() {
 				m.lastError = fmt.Errorf("no blocking decision")
 				return m, nil, true
 			}
@@ -893,7 +895,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.lastError = nil
 			return m, FetchApprovals(m.be, m.activeWorkspaceID), true
 		case "approve", "yes":
-			if m.blockingApproval == nil {
+			if !m.ensureActiveBlockingApprovalFromOverview() {
 				m.lastError = fmt.Errorf("no blocking approval")
 				return m, nil, true
 			}
@@ -903,7 +905,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.appendTranscript("Approval", "approve")
 			return m, ResolveApproval(m.be, m.activeWorkspaceID, approvalID, true), true
 		case "reject", "no":
-			if m.blockingApproval == nil {
+			if !m.ensureActiveBlockingApprovalFromOverview() {
 				m.lastError = fmt.Errorf("no blocking approval")
 				return m, nil, true
 			}
@@ -1704,9 +1706,16 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 			if item.ID == m.blockingDecision.ID {
 				matched = true
 				merged := mergeDecisionInfo(*m.blockingDecision, item)
-				if merged.State != "open" || !m.decisionMatchesActiveScope(merged) {
+				if merged.State != "open" {
 					m.blockingDecision = nil
 					m.clearWaitingProgressIfUnblocked()
+					return
+				}
+				if !m.decisionMatchesActiveScope(merged) {
+					m.blockingDecision = nil
+					if !m.ensureActiveBlockingDecisionFromOverview() {
+						m.clearWaitingProgressIfUnblocked()
+					}
 					return
 				}
 				m.blockingDecision = &merged
@@ -1718,7 +1727,9 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 		}
 		if !matched {
 			m.blockingDecision = nil
-			m.clearWaitingProgressIfUnblocked()
+			if !m.ensureActiveBlockingDecisionFromOverview() {
+				m.clearWaitingProgressIfUnblocked()
+			}
 		}
 	}
 	for _, item := range filterOpenDecisions(m.decisions) {
@@ -1733,6 +1744,7 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 			return
 		}
 	}
+	m.ensureActiveBlockingDecisionFromOverview()
 }
 
 func (m *AppModel) syncBlockingApprovalFromList() {
@@ -1745,9 +1757,16 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 			if item.ID == m.blockingApproval.ID {
 				matched = true
 				merged := mergeApprovalInfo(*m.blockingApproval, item)
-				if merged.State != "pending" || !m.approvalMatchesActiveScope(merged) {
+				if merged.State != "pending" {
 					m.blockingApproval = nil
 					m.clearWaitingProgressIfUnblocked()
+					return
+				}
+				if !m.approvalMatchesActiveScope(merged) {
+					m.blockingApproval = nil
+					if !m.ensureActiveBlockingApprovalFromOverview() {
+						m.clearWaitingProgressIfUnblocked()
+					}
 					return
 				}
 				m.blockingApproval = &merged
@@ -1759,7 +1778,9 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 		}
 		if !matched {
 			m.blockingApproval = nil
-			m.clearWaitingProgressIfUnblocked()
+			if !m.ensureActiveBlockingApprovalFromOverview() {
+				m.clearWaitingProgressIfUnblocked()
+			}
 		}
 	}
 	for _, item := range filterPendingApprovals(m.approvals) {
@@ -1774,6 +1795,7 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 			return
 		}
 	}
+	m.ensureActiveBlockingApprovalFromOverview()
 }
 
 func (m *AppModel) decisionAlreadyResolved(id common.TicketID) bool {
