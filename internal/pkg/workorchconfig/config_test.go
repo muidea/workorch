@@ -436,12 +436,14 @@ func TestConfigureDirectorySetsFrameworkConfigPath(t *testing.T) {
 
 func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 	disabled := true
+	cacheMarker := true
 	cfg := Config{
 		LLM: LLMConfig{
 			DefaultProvider: "reasoning",
 			Providers: map[string]LLMProviderConfig{
 				"reasoning": {
 					Provider:               "openai",
+					APISurface:             "openai_sdk",
 					BaseURL:                "https://example.test/v1",
 					APIKey:                 "secret",
 					Model:                  "model",
@@ -453,6 +455,9 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 					MaxOutputTokens:        65536,
 					ReasoningEffort:        "high",
 					ThinkingBudgetTokens:   32768,
+					CacheMode:              "prompt_cache_key",
+					PromptCacheKey:         &cacheMarker,
+					CacheUsageFields:       []string{"cached_tokens"},
 					ContextProfileMode:     "manual",
 					ContextWindowTokens:    32768,
 					MaxInputTokens:         8192,
@@ -467,6 +472,7 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 
 	values := cfg.LLMProviderValues()
 	if values["provider"] != "openai" ||
+		values["apiSurface"] != "openai_sdk" ||
 		values["disabled"] != "true" ||
 		values["streaming"] != "true" ||
 		values["nonChatOperations"] != "embeddings" ||
@@ -474,6 +480,9 @@ func TestLLMProviderValuesUsesFrameworkConfigFields(t *testing.T) {
 		values["maxOutputTokens"] != "65536" ||
 		values["reasoningEffort"] != "high" ||
 		values["thinkingBudgetTokens"] != "32768" ||
+		values["cacheMode"] != "prompt_cache_key" ||
+		values["promptCacheKey"] != "true" ||
+		values["cacheUsageFields"] != "cached_tokens" ||
 		values["contextProfileMode"] != "manual" ||
 		values["contextWindowTokens"] != "32768" ||
 		values["maxInputTokens"] != "8192" ||

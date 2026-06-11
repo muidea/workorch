@@ -65,13 +65,14 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 	}
 
 	cfg := llmmodels.ProviderConfig{
-		ID:       normalizedProviderID(providerID),
-		Provider: strings.TrimSpace(values[llmcommon.EnvProvider]),
-		BaseURL:  strings.TrimSpace(values[llmcommon.EnvBaseURL]),
-		APIKey:   strings.TrimSpace(values[llmcommon.EnvAPIKey]),
-		Model:    strings.TrimSpace(values[llmcommon.EnvModel]),
-		Timeout:  timeout,
-		Disabled: disabled,
+		ID:         normalizedProviderID(providerID),
+		Provider:   strings.TrimSpace(values[llmcommon.EnvProvider]),
+		APISurface: strings.TrimSpace(values[llmcommon.EnvAPISurface]),
+		BaseURL:    strings.TrimSpace(values[llmcommon.EnvBaseURL]),
+		APIKey:     strings.TrimSpace(values[llmcommon.EnvAPIKey]),
+		Model:      strings.TrimSpace(values[llmcommon.EnvModel]),
+		Timeout:    timeout,
+		Disabled:   disabled,
 		Capabilities: llmmodels.ProviderCapabilities{
 			ChatCompletions:   chatCompletions,
 			Streaming:         streaming,
@@ -90,6 +91,16 @@ func LoadProviderConfig(providerID string, values map[string]string) (llmmodels.
 		return llmmodels.ProviderConfig{}, err
 	}
 	cfg.ContextProfile = profile
+	surface, err := resolveProviderAPISurface(cfg.Provider, cfg.APISurface)
+	if err != nil {
+		return llmmodels.ProviderConfig{}, err
+	}
+	cfg.APISurface = surface
+	cacheCapability, err := providerCacheCapabilityFromValues(surface, values)
+	if err != nil {
+		return llmmodels.ProviderConfig{}, err
+	}
+	cfg.CacheCapability = cacheCapability
 	return withAvailability(cfg), nil
 }
 
@@ -121,6 +132,7 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 	return llmmodels.RedactedProviderConfig{
 		ID:               cfg.ID,
 		Provider:         cfg.Provider,
+		APISurface:       cfg.APISurface,
 		BaseURL:          cfg.BaseURL,
 		Model:            cfg.Model,
 		Timeout:          cfg.Timeout.String(),
@@ -128,12 +140,104 @@ func RedactedProviderConfig(cfg llmmodels.ProviderConfig) llmmodels.RedactedProv
 		Ready:            !cfg.Unavailable,
 		Reason:           cfg.UnavailableReason,
 		Capabilities:     capabilities,
+		CacheCapability:  cfg.CacheCapability,
 		InferenceProfile: cfg.InferenceProfile,
 		ContextProfile:   cfg.ContextProfile,
 		Failover: llmmodels.ProviderFailoverConfig{
 			Enabled:   cfg.FailoverEnabled,
 			Providers: append([]string(nil), cfg.FailoverProviders...),
 		},
+	}
+}
+
+func resolveProviderAPISurface(provider string, configured string) (string, error) {
+	provider = strings.TrimSpace(provider)
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		switch provider {
+		case llmcommon.ProviderOpenAI:
+			return llmcommon.ProviderSurfaceOpenAISDK, nil
+		case llmcommon.ProviderAnthropic:
+			return llmcommon.ProviderSurfaceAnthropicSDK, nil
+		case llmcommon.ProviderCompatible:
+			return llmcommon.ProviderSurfaceOpenAICompatibleHTTP, nil
+		default:
+			return "", nil
+		}
+	}
+	switch configured {
+	case llmcommon.ProviderSurfaceOpenAISDK:
+		if provider != "" && provider != llmcommon.ProviderOpenAI {
+			return "", fmt.Errorf("%w: apiSurface %s requires provider %s", common.ErrInvalidArgument, configured, llmcommon.ProviderOpenAI)
+		}
+	case llmcommon.ProviderSurfaceAnthropicSDK:
+		if provider != "" && provider != llmcommon.ProviderAnthropic {
+			return "", fmt.Errorf("%w: apiSurface %s requires provider %s", common.ErrInvalidArgument, configured, llmcommon.ProviderAnthropic)
+		}
+	case llmcommon.ProviderSurfaceOpenAICompatibleHTTP, llmcommon.ProviderSurfaceAnthropicCompatibleHTTP:
+		if provider != "" && provider != llmcommon.ProviderCompatible {
+			return "", fmt.Errorf("%w: apiSurface %s requires provider %s", common.ErrInvalidArgument, configured, llmcommon.ProviderCompatible)
+		}
+	default:
+		return "", fmt.Errorf("%w: unsupported apiSurface %q", common.ErrInvalidArgument, configured)
+	}
+	return configured, nil
+}
+
+func providerCacheCapabilityFromValues(surface string, values map[string]string) (llmmodels.ProviderCacheCapability, error) {
+	mode := strings.TrimSpace(values[llmcommon.EnvCacheMode])
+	if mode == "" {
+		mode = defaultProviderCacheMode(surface)
+	}
+	if !isSupportedProviderCacheMode(mode) {
+		return llmmodels.ProviderCacheCapability{}, fmt.Errorf("%w: unsupported cacheMode %q", common.ErrInvalidArgument, mode)
+	}
+	promptCacheKey := mode == llmcommon.ProviderCacheModePromptCacheKey
+	if raw := strings.TrimSpace(values[llmcommon.EnvPromptCacheKey]); raw != "" {
+		parsed, err := parseBool(raw)
+		if err != nil {
+			return llmmodels.ProviderCacheCapability{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvPromptCacheKey)
+		}
+		promptCacheKey = parsed
+	}
+	messageCacheControl := mode == llmcommon.ProviderCacheModeAnthropicCacheControl
+	if raw := strings.TrimSpace(values[llmcommon.EnvMessageCacheControl]); raw != "" {
+		parsed, err := parseBool(raw)
+		if err != nil {
+			return llmmodels.ProviderCacheCapability{}, fmt.Errorf("%w: invalid %s", common.ErrInvalidArgument, llmcommon.EnvMessageCacheControl)
+		}
+		messageCacheControl = parsed
+	}
+	return llmmodels.ProviderCacheCapability{
+		Surface:             surface,
+		Mode:                mode,
+		PromptCacheKey:      promptCacheKey,
+		MessageCacheControl: messageCacheControl,
+		UsageFields:         normalizedOperations(values[llmcommon.EnvCacheUsageFields]),
+	}, nil
+}
+
+func defaultProviderCacheMode(surface string) string {
+	switch surface {
+	case llmcommon.ProviderSurfaceOpenAISDK:
+		return llmcommon.ProviderCacheModePromptCacheKey
+	case llmcommon.ProviderSurfaceAnthropicSDK:
+		return llmcommon.ProviderCacheModeAnthropicCacheControl
+	default:
+		return llmcommon.ProviderCacheModeNone
+	}
+}
+
+func isSupportedProviderCacheMode(mode string) bool {
+	switch mode {
+	case llmcommon.ProviderCacheModeNone,
+		llmcommon.ProviderCacheModeAutoPrefix,
+		llmcommon.ProviderCacheModePromptCacheKey,
+		llmcommon.ProviderCacheModeAnthropicCacheControl,
+		llmcommon.ProviderCacheModeCompatibleDeclared:
+		return true
+	default:
+		return false
 	}
 }
 

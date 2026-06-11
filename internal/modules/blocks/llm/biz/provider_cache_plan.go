@@ -94,6 +94,7 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 		},
 	}
 	plan.AdapterHint = providerAdapterCacheHint(plan)
+	plan.RenderedStablePrefixHash = renderedStablePrefixHash(buildProviderFacingPrompt(request).StablePrefix)
 	return plan
 }
 
@@ -114,6 +115,14 @@ func promptContextHasTypedEventTape(context *llmmodels.PromptContext) bool {
 		}
 	}
 	return false
+}
+
+func renderedStablePrefixHash(stablePrefix string) string {
+	stablePrefix = strings.TrimSpace(stablePrefix)
+	if stablePrefix == "" {
+		return ""
+	}
+	return promptSectionHash("renderedStablePrefix", stablePrefix)
 }
 
 func providerAdapterCacheHint(plan llmmodels.ProviderCachePlan) llmmodels.ProviderAdapterCacheHint {

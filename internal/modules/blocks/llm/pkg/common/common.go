@@ -26,7 +26,23 @@ const (
 )
 
 const (
+	ProviderSurfaceOpenAISDK               = "openai_sdk"
+	ProviderSurfaceAnthropicSDK            = "anthropic_sdk"
+	ProviderSurfaceOpenAICompatibleHTTP    = "openai_compatible_http"
+	ProviderSurfaceAnthropicCompatibleHTTP = "anthropic_compatible_http"
+)
+
+const (
+	ProviderCacheModeNone                  = "none"
+	ProviderCacheModeAutoPrefix            = "auto_prefix"
+	ProviderCacheModePromptCacheKey        = "prompt_cache_key"
+	ProviderCacheModeAnthropicCacheControl = "anthropic_cache_control"
+	ProviderCacheModeCompatibleDeclared    = "compatible_declared"
+)
+
+const (
 	EnvProvider                = "provider"
+	EnvAPISurface              = "apiSurface"
 	EnvBaseURL                 = "baseURL"
 	EnvAPIKey                  = "apiKey"
 	EnvModel                   = "model"
@@ -51,6 +67,10 @@ const (
 	EnvTokensPerByte           = "estimatedTokensPerByte"
 	EnvFailoverEnabled         = "failoverEnabled"
 	EnvFailoverProviders       = "failoverProviders"
+	EnvCacheMode               = "cacheMode"
+	EnvPromptCacheKey          = "promptCacheKey"
+	EnvMessageCacheControl     = "messageCacheControl"
+	EnvCacheUsageFields        = "cacheUsageFields"
 )
 
 const (

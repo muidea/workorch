@@ -19,11 +19,16 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	var gotPath string
 	var gotAuthorization string
 	var gotPayload chatCompletionRequest
+	var gotRawPayload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuthorization = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&gotRawPayload); err != nil {
 			t.Fatalf("decode request: %v", err)
+		}
+		raw, _ := json.Marshal(gotRawPayload)
+		if err := json.Unmarshal(raw, &gotPayload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -63,6 +68,9 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 		gotPayload.Thinking == nil ||
 		gotPayload.Thinking.BudgetTokens != 32768 {
 		t.Fatalf("payload = %+v, want configured inference profile", gotPayload)
+	}
+	if _, ok := gotRawPayload["prompt_cache_key"]; ok {
+		t.Fatalf("payload = %+v, compatible default must not send prompt_cache_key", gotRawPayload)
 	}
 	joined := ""
 	for _, message := range gotPayload.Messages {
@@ -117,6 +125,242 @@ func TestHTTPProviderCompleteUsesChatCompletionsAndExtractsDecision(t *testing.T
 	}
 	if result.Usage != nil {
 		t.Fatalf("usage = %+v, want nil when provider response has no usage", result.Usage)
+	}
+}
+
+func TestHTTPProviderCompleteUsesAnthropicMessagesShapeAndDeclaredCacheControl(t *testing.T) {
+	var gotPath string
+	var gotAPIKey string
+	var gotVersion string
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotVersion = r.Header.Get("anthropic-version")
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"anthropic http done\",\"items\":[{\"item\":\"done\",\"state\":\"satisfied\",\"evidenceRefs\":[\"evidence-1\"]}]}}"}],
+			"usage":{"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":5,"cache_creation_input_tokens":6}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider:   llmcommon.ProviderCompatible,
+		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+		BaseURL:    server.URL + "/v1",
+		APIKey:     "secret-value",
+		Model:      "claude-test",
+		Timeout:    5 * time.Second,
+		CacheCapability: llmmodels.ProviderCacheCapability{
+			Surface:             llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+			Mode:                llmcommon.ProviderCacheModeCompatibleDeclared,
+			MessageCacheControl: true,
+		},
+	})
+	result, err := provider.Complete(context.Background(), llmProviderRequest())
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if gotPath != "/v1/messages" {
+		t.Fatalf("path = %q, want /v1/messages", gotPath)
+	}
+	if gotAPIKey != "secret-value" || gotVersion != "2023-06-01" {
+		t.Fatalf("headers = %q/%q, want anthropic headers", gotAPIKey, gotVersion)
+	}
+	if gotPayload["model"] != "claude-test" || gotPayload["max_tokens"] == nil || gotPayload["system"] == nil {
+		t.Fatalf("payload = %+v, want anthropic messages request", gotPayload)
+	}
+	systemBlocks, ok := gotPayload["system"].([]any)
+	if !ok || len(systemBlocks) == 0 {
+		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
+	}
+	firstSystem, ok := systemBlocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
+	}
+	if cacheControl, ok := firstSystem["cache_control"].(map[string]any); !ok || cacheControl["type"] != "ephemeral" {
+		t.Fatalf("system block = %+v, want declared anthropic cache_control", firstSystem)
+	}
+	messages, _ := json.Marshal(gotPayload["messages"])
+	if !strings.Contains(string(messages), "C3.workspace-run") || !strings.Contains(string(messages), "C4.current-action") {
+		t.Fatalf("messages = %s, want dynamic tail after stable prefix", messages)
+	}
+	if !strings.Contains(string(result.Payload), `"summary":"anthropic http done"`) {
+		t.Fatalf("payload = %s, want anthropic decision content", result.Payload)
+	}
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 11 ||
+		result.Usage.OutputTokens != 7 ||
+		result.Usage.TotalTokens != 18 ||
+		result.Usage.CacheReadTokens != 5 ||
+		result.Usage.CacheWriteTokens != 6 ||
+		result.Usage.CacheCreationTokens != 6 {
+		t.Fatalf("usage = %+v, want parsed anthropic usage", result.Usage)
+	}
+}
+
+func TestHTTPProviderAnthropicCompatibleDefaultDoesNotSendCacheControl(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"ok\",\"items\":[]}}"}],
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider:   llmcommon.ProviderCompatible,
+		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+		BaseURL:    server.URL + "/v1",
+		APIKey:     "secret-value",
+		Model:      "claude-test",
+		Timeout:    5 * time.Second,
+	})
+	if _, err := provider.Complete(context.Background(), llmProviderRequest()); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	systemBlocks, ok := gotPayload["system"].([]any)
+	if !ok || len(systemBlocks) == 0 {
+		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
+	}
+	firstSystem, ok := systemBlocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
+	}
+	if _, ok := firstSystem["cache_control"]; ok {
+		t.Fatalf("system block = %+v, cache_control must not be sent by default", firstSystem)
+	}
+}
+
+func TestHTTPProviderStreamCompleteParsesAnthropicMessagesDeltas(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"completionState\\\":\\\"continue\\\"\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\",\\\"nextAction\\\":{\\\"kind\\\":\\\"continue_run\\\"}}\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_creation_input_tokens\":6}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider:   llmcommon.ProviderCompatible,
+		APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+		BaseURL:    server.URL + "/v1",
+		APIKey:     "secret-value",
+		Model:      "claude-test",
+		Timeout:    5 * time.Second,
+		CacheCapability: llmmodels.ProviderCacheCapability{
+			Surface:             llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+			Mode:                llmcommon.ProviderCacheModeCompatibleDeclared,
+			MessageCacheControl: true,
+		},
+	})
+	events := []llmmodels.ProviderStreamEvent{}
+	result, err := provider.StreamComplete(context.Background(), llmProviderRequest(), func(event llmmodels.ProviderStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream complete: %v", err)
+	}
+	if gotPayload["stream"] != true {
+		t.Fatalf("payload = %+v, want stream=true", gotPayload)
+	}
+	if gotPayload["system"] == nil {
+		t.Fatalf("payload = %+v, want system prompt", gotPayload)
+	}
+	if !strings.Contains(string(result.Payload), `"completionState":"continue"`) || len(events) != 3 || events[0].Delta == "" || events[2].Type != "done" {
+		t.Fatalf("payload=%s events=%+v, want streamed anthropic decision and done event", result.Payload, events)
+	}
+	if result.Usage == nil ||
+		result.Usage.InputTokens != 11 ||
+		result.Usage.OutputTokens != 7 ||
+		result.Usage.TotalTokens != 18 ||
+		result.Usage.CacheReadTokens != 5 ||
+		result.Usage.CacheWriteTokens != 6 {
+		t.Fatalf("usage = %+v, want stream usage", result.Usage)
+	}
+}
+
+func TestHTTPProviderSendsPromptCacheKeyOnlyWhenCapabilityDeclared(t *testing.T) {
+	var gotPayload chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{"message":{"content":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"done\",\"items\":[]}}"}}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderCompatible,
+		BaseURL:  server.URL + "/v1",
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		Timeout:  5 * time.Second,
+		CacheCapability: llmmodels.ProviderCacheCapability{
+			Surface:        llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+			Mode:           llmcommon.ProviderCacheModeCompatibleDeclared,
+			PromptCacheKey: true,
+		},
+	})
+	request := llmProviderRequest()
+	request.ContextBudget = &llmmodels.ProviderContextBudget{
+		CachePlan: &llmmodels.ProviderCachePlan{CacheKey: "sha256:stable-cache-key"},
+	}
+
+	if _, err := provider.Complete(context.Background(), request); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if gotPayload.PromptCacheKey != "sha256:stable-cache-key" {
+		t.Fatalf("prompt_cache_key = %q, want declared cache key", gotPayload.PromptCacheKey)
+	}
+}
+
+func TestHTTPProviderRejectsUnknownHTTPSurfaceBeforeSubmitting(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	provider := NewHTTPProvider(llmmodels.ProviderConfig{
+		Provider:   llmcommon.ProviderCompatible,
+		APISurface: "unsupported_surface",
+		BaseURL:    server.URL + "/v1",
+		APIKey:     "secret-value",
+		Model:      "test-model",
+		Timeout:    5 * time.Second,
+	})
+	_, err := provider.Complete(context.Background(), llmProviderRequest())
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("complete err = %v, want invalid argument", err)
+	}
+	if called {
+		t.Fatalf("unsupported surface should fail before submitting request")
 	}
 }
 

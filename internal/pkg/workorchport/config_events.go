@@ -26,13 +26,14 @@ type TemplateBackend interface {
 }
 
 type LLMProvider struct {
-	ID        string
-	Provider  string
-	BaseURL   string
-	Model     string
-	Timeout   string
-	Disabled  bool
-	Streaming bool
+	ID         string
+	Provider   string
+	APISurface string
+	BaseURL    string
+	Model      string
+	Timeout    string
+	Disabled   bool
+	Streaming  bool
 }
 
 type LLMOutputConfig struct {

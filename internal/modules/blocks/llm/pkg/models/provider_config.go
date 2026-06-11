@@ -5,12 +5,14 @@ import "time"
 type ProviderConfig struct {
 	ID                string
 	Provider          string
+	APISurface        string
 	BaseURL           string
 	APIKey            string
 	Model             string
 	Timeout           time.Duration
 	Disabled          bool
 	Capabilities      ProviderCapabilities
+	CacheCapability   ProviderCacheCapability
 	InferenceProfile  ProviderInferenceProfile
 	ContextProfile    ProviderContextProfile
 	FailoverEnabled   bool
@@ -30,6 +32,14 @@ type ProviderCapabilities struct {
 	ChatCompletions   bool     `json:"chatCompletions"`
 	Streaming         bool     `json:"streaming,omitempty"`
 	NonChatOperations []string `json:"nonChatOperations,omitempty"`
+}
+
+type ProviderCacheCapability struct {
+	Surface             string   `json:"surface,omitempty"`
+	Mode                string   `json:"mode,omitempty"`
+	PromptCacheKey      bool     `json:"promptCacheKey,omitempty"`
+	MessageCacheControl bool     `json:"messageCacheControl,omitempty"`
+	UsageFields         []string `json:"usageFields,omitempty"`
 }
 
 type ProviderStreamEvent struct {
@@ -53,6 +63,7 @@ type ProviderEmbeddingResult struct {
 type RedactedProviderConfig struct {
 	ID               string                   `json:"id,omitempty"`
 	Provider         string                   `json:"provider,omitempty"`
+	APISurface       string                   `json:"apiSurface,omitempty"`
 	BaseURL          string                   `json:"baseUrl,omitempty"`
 	Model            string                   `json:"model,omitempty"`
 	Timeout          string                   `json:"timeout,omitempty"`
@@ -60,6 +71,7 @@ type RedactedProviderConfig struct {
 	Ready            bool                     `json:"ready"`
 	Reason           string                   `json:"reason,omitempty"`
 	Capabilities     ProviderCapabilities     `json:"capabilities"`
+	CacheCapability  ProviderCacheCapability  `json:"cacheCapability,omitempty"`
 	InferenceProfile ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
 	ContextProfile   ProviderContextProfile   `json:"contextProfile,omitempty"`
 	Failover         ProviderFailoverConfig   `json:"failover,omitempty"`

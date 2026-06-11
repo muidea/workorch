@@ -229,3 +229,50 @@ func TestAnthropicProviderCompleteUsesOfficialSDKMessages(t *testing.T) {
 		t.Fatalf("usage = %+v, want native anthropic usage", result.Usage)
 	}
 }
+
+func TestAnthropicProviderDoesNotSendCacheControlWhenCapabilityDisabled(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"{\"completionState\":\"completed\",\"dodAssessment\":{\"satisfied\":true,\"summary\":\"done\",\"items\":[]}}"}],
+			"stop_reason":"end_turn",
+			"stop_sequence":null,
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewAnthropicProvider(llmmodels.ProviderConfig{
+		Provider: llmcommon.ProviderAnthropic,
+		BaseURL:  server.URL,
+		APIKey:   "secret-value",
+		Model:    "claude-test",
+		Timeout:  5 * time.Second,
+		CacheCapability: llmmodels.ProviderCacheCapability{
+			Surface: llmcommon.ProviderSurfaceAnthropicSDK,
+			Mode:    llmcommon.ProviderCacheModeNone,
+		},
+	})
+	if _, err := provider.Complete(context.Background(), llmProviderRequest()); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	systemBlocks, ok := gotPayload["system"].([]any)
+	if !ok || len(systemBlocks) == 0 {
+		t.Fatalf("system = %#v, want text block array", gotPayload["system"])
+	}
+	firstSystem, ok := systemBlocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first system block = %#v, want object", systemBlocks[0])
+	}
+	if _, ok := firstSystem["cache_control"]; ok {
+		t.Fatalf("system block = %+v, cache_control must not be sent when capability is disabled", firstSystem)
+	}
+}

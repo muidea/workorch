@@ -19,6 +19,7 @@ func llmProviderConfigurations(cfg workorchconfig.Config) (string, []LLMProvider
 		providers = append(providers, LLMProviderConfiguration{
 			ID:                redacted.ID,
 			Provider:          redacted.Provider,
+			APISurface:        redacted.APISurface,
 			BaseURL:           redacted.BaseURL,
 			Model:             redacted.Model,
 			Timeout:           redacted.Timeout,
@@ -32,6 +33,7 @@ func llmProviderConfigurations(cfg workorchconfig.Config) (string, []LLMProvider
 			NonChatOperations: append([]string(nil), redacted.Capabilities.NonChatOperations...),
 			FailoverEnabled:   redacted.Failover.Enabled,
 			FailoverProviders: append([]string(nil), redacted.Failover.Providers...),
+			CacheCapability:   redacted.CacheCapability,
 			InferenceProfile:  redacted.InferenceProfile,
 			ContextProfile:    redacted.ContextProfile,
 		})

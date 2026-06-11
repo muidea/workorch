@@ -134,6 +134,7 @@ func NewRuntimeAdapterWithProviders(defaultProviderID string, providers map[stri
 			continue
 		}
 		runtime.Config.ID = id
+		runtime.Config = normalizedProviderConfigForRuntime(runtime.Config)
 		runtime.Config.Capabilities = effectiveProviderCapabilities(runtime.Config.Capabilities)
 		normalized[id] = runtime
 	}
@@ -184,6 +185,7 @@ func providerRuntimesFromConfigsWithFactory(configs map[string]llmmodels.Provide
 			continue
 		}
 		config.ID = id
+		config = normalizedProviderConfigForRuntime(config)
 		var provider Provider
 		if !config.Unavailable {
 			provider = newLazyProvider(config, factory)
@@ -1179,17 +1181,18 @@ func providerCachePlanOutput(plan *llmmodels.ProviderCachePlan) map[string]any {
 		})
 	}
 	return map[string]any{
-		"schemaVersion":           plan.SchemaVersion,
-		"strategy":                plan.Strategy,
-		"cacheKey":                plan.CacheKey,
-		"stablePrefixHash":        plan.StablePrefixHash,
-		"workspaceDefinitionHash": plan.WorkspaceDefinitionHash,
-		"capabilityContractHash":  plan.CapabilityContractHash,
-		"stageBundleHash":         plan.StageBundleHash,
-		"volatileTailHash":        plan.VolatileTailHash,
-		"largeRefsHash":           plan.LargeRefsHash,
-		"sectionHashes":           sectionHashes,
-		"cacheBreakers":           breakers,
+		"schemaVersion":            plan.SchemaVersion,
+		"strategy":                 plan.Strategy,
+		"cacheKey":                 plan.CacheKey,
+		"stablePrefixHash":         plan.StablePrefixHash,
+		"renderedStablePrefixHash": plan.RenderedStablePrefixHash,
+		"workspaceDefinitionHash":  plan.WorkspaceDefinitionHash,
+		"capabilityContractHash":   plan.CapabilityContractHash,
+		"stageBundleHash":          plan.StageBundleHash,
+		"volatileTailHash":         plan.VolatileTailHash,
+		"largeRefsHash":            plan.LargeRefsHash,
+		"sectionHashes":            sectionHashes,
+		"cacheBreakers":            breakers,
 		"canonicalization": map[string]any{
 			"sectionOrderPolicy": plan.Canonicalization.SectionOrderPolicy,
 			"sectionOrder":       append([]string(nil), plan.Canonicalization.SectionOrder...),
@@ -1285,6 +1288,7 @@ func buildLLMUsageOutput(
 		"stepId":        string(request.StepID),
 		"providerId":    strings.TrimSpace(call.runtime.Config.ID),
 		"provider":      strings.TrimSpace(call.runtime.Config.Provider),
+		"apiSurface":    strings.TrimSpace(call.runtime.Config.APISurface),
 		"model":         strings.TrimSpace(call.runtime.Config.Model),
 		"operation":     strings.TrimSpace(operation),
 		"inputTokens":   inputTokens,
@@ -1304,10 +1308,58 @@ func buildLLMUsageOutput(
 	if len(cacheUsage) > 0 {
 		ret["cacheUsage"] = cacheUsage
 	}
+	if markers := providerCacheMarkersSentOutput(call); len(markers) > 0 {
+		ret["cacheMarkersSent"] = markers
+	}
 	if strings.TrimSpace(failureClass) != "" {
 		ret["failureClass"] = strings.TrimSpace(failureClass)
 	}
 	return ret
+}
+
+func providerCacheMarkersSentOutput(call providerCallResult) map[string]any {
+	config := normalizedProviderConfigForRuntime(call.runtime.Config)
+	plan := providerCachePlanFromBudget(call.request.ContextBudget)
+	prompt := buildProviderFacingPrompt(call.request)
+	renderedHash := ""
+	if plan != nil {
+		renderedHash = strings.TrimSpace(plan.RenderedStablePrefixHash)
+	}
+	if renderedHash == "" && strings.TrimSpace(prompt.StablePrefix) != "" {
+		renderedHash = renderedStablePrefixHash(prompt.StablePrefix)
+	}
+	ret := map[string]any{
+		"providerMode":              strings.TrimSpace(config.CacheCapability.Mode),
+		"apiSurface":                strings.TrimSpace(config.APISurface),
+		"promptCacheKeySent":        promptCacheKeyForRequest(config, call.request) != "",
+		"promptCacheKeyUnsupported": promptCacheKeyUnsupportedForRequest(config),
+		"cacheControlSent":          cacheControlSentForRequest(config, prompt),
+		"autoPrefixCacheExpected":   config.CacheCapability.Mode == llmcommon.ProviderCacheModeAutoPrefix,
+		"renderedStablePrefixBytes": len(prompt.StablePrefix),
+		"renderedStablePrefixHash":  renderedHash,
+		"cacheableSections":         append([]string(nil), prompt.StablePrefixSectionIDs...),
+	}
+	if plan != nil {
+		ret["planCacheKey"] = strings.TrimSpace(plan.CacheKey)
+	}
+	return ret
+}
+
+func promptCacheKeyUnsupportedForRequest(config llmmodels.ProviderConfig) bool {
+	return strings.TrimSpace(config.APISurface) == llmcommon.ProviderSurfaceOpenAISDK &&
+		config.CacheCapability.PromptCacheKey
+}
+
+func cacheControlSentForRequest(config llmmodels.ProviderConfig, prompt providerFacingPrompt) bool {
+	if !config.CacheCapability.MessageCacheControl || len(prompt.StablePrefixSectionIDs) == 0 {
+		return false
+	}
+	switch strings.TrimSpace(config.CacheCapability.Mode) {
+	case llmcommon.ProviderCacheModeAnthropicCacheControl, llmcommon.ProviderCacheModeCompatibleDeclared:
+		return true
+	default:
+		return false
+	}
 }
 
 func providerCacheUsageOutput(call providerCallResult, inputTokens int) map[string]any {

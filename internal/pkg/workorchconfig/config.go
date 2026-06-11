@@ -87,6 +87,7 @@ type LLMModelCapabilityConfig struct {
 
 type LLMProviderConfig struct {
 	Provider                string   `json:"provider" toml:"provider"`
+	APISurface              string   `json:"apiSurface" toml:"apiSurface,omitempty"`
 	BaseURL                 string   `json:"baseURL" toml:"baseURL"`
 	APIKey                  string   `json:"apiKey" toml:"apiKey"`
 	Model                   string   `json:"model" toml:"model"`
@@ -101,6 +102,10 @@ type LLMProviderConfig struct {
 	ThinkingBudgetTokens    int      `json:"thinkingBudgetTokens" toml:"thinkingBudgetTokens,omitempty"`
 	FailoverEnabled         *bool    `json:"failoverEnabled" toml:"failoverEnabled,omitempty"`
 	FailoverProviders       []string `json:"failoverProviders" toml:"failoverProviders,omitempty"`
+	CacheMode               string   `json:"cacheMode" toml:"cacheMode,omitempty"`
+	PromptCacheKey          *bool    `json:"promptCacheKey" toml:"promptCacheKey,omitempty"`
+	MessageCacheControl     *bool    `json:"messageCacheControl" toml:"messageCacheControl,omitempty"`
+	CacheUsageFields        []string `json:"cacheUsageFields" toml:"cacheUsageFields,omitempty"`
 	ContextProfileMode      string   `json:"contextProfileMode" toml:"contextProfileMode,omitempty"`
 	ContextWindowTokens     int      `json:"contextWindowTokens" toml:"contextWindowTokens,omitempty"`
 	MaxInputTokens          int      `json:"maxInputTokens" toml:"maxInputTokens,omitempty"`
@@ -451,6 +456,7 @@ func (c Config) WebSearchProviderValueSets() map[string]map[string]string {
 func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	values := map[string]string{}
 	set(values, "provider", provider.Provider)
+	set(values, "apiSurface", provider.APISurface)
 	set(values, "baseURL", provider.BaseURL)
 	set(values, "apiKey", provider.APIKey)
 	set(values, "model", provider.Model)
@@ -515,6 +521,16 @@ func llmProviderValues(provider LLMProviderConfig) map[string]string {
 	}
 	if len(provider.FailoverProviders) > 0 {
 		values["failoverProviders"] = strings.Join(provider.FailoverProviders, ",")
+	}
+	set(values, "cacheMode", provider.CacheMode)
+	if provider.PromptCacheKey != nil {
+		values["promptCacheKey"] = boolString(*provider.PromptCacheKey)
+	}
+	if provider.MessageCacheControl != nil {
+		values["messageCacheControl"] = boolString(*provider.MessageCacheControl)
+	}
+	if len(provider.CacheUsageFields) > 0 {
+		values["cacheUsageFields"] = strings.Join(provider.CacheUsageFields, ",")
 	}
 	return values
 }

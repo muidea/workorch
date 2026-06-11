@@ -641,13 +641,14 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 	providers := make([]LLMProvider, 0, len(cfg.LLM.Providers))
 	for _, item := range cfg.LLM.Providers {
 		providers = append(providers, LLMProvider{
-			ID:        item.ID,
-			Provider:  item.Provider,
-			BaseURL:   item.BaseURL,
-			Model:     item.Model,
-			Timeout:   item.Timeout,
-			Disabled:  item.Disabled,
-			Streaming: item.Streaming,
+			ID:         item.ID,
+			Provider:   item.Provider,
+			APISurface: item.APISurface,
+			BaseURL:    item.BaseURL,
+			Model:      item.Model,
+			Timeout:    item.Timeout,
+			Disabled:   item.Disabled,
+			Streaming:  item.Streaming,
 		})
 	}
 	return &ServiceConfig{

@@ -13,6 +13,9 @@ func applyLLMProviderBaseUpdate(next *workorchconfig.LLMProviderConfig, update U
 	if update.Provider != nil {
 		next.Provider = strings.TrimSpace(*update.Provider)
 	}
+	if update.APISurface != nil {
+		next.APISurface = strings.TrimSpace(*update.APISurface)
+	}
 	if update.BaseURL != nil {
 		next.BaseURL = strings.TrimSpace(*update.BaseURL)
 	}
@@ -58,5 +61,17 @@ func applyLLMProviderCapabilityUpdate(next *workorchconfig.LLMProviderConfig, up
 	}
 	if update.FailoverProviders != nil {
 		next.FailoverProviders = normalizedProviderOperations(update.FailoverProviders)
+	}
+	if update.CacheMode != nil {
+		next.CacheMode = strings.TrimSpace(*update.CacheMode)
+	}
+	if update.PromptCacheKey != nil {
+		next.PromptCacheKey = boolPtr(*update.PromptCacheKey)
+	}
+	if update.MessageCacheControl != nil {
+		next.MessageCacheControl = boolPtr(*update.MessageCacheControl)
+	}
+	if update.CacheUsageFields != nil {
+		next.CacheUsageFields = normalizedProviderOperations(update.CacheUsageFields)
 	}
 }

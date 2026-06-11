@@ -13,3 +13,7 @@ func llmUsageTraceContextBudget(payload map[string]any) map[string]any {
 func llmUsageTraceCacheUsage(payload map[string]any) map[string]any {
 	return readModelMapValue(payload[events.PayloadKeyCacheUsage])
 }
+
+func llmUsageTraceCacheMarkers(payload map[string]any) map[string]any {
+	return readModelMapValue(payload[events.PayloadKeyCacheMarkersSent])
+}

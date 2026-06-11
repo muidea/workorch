@@ -261,6 +261,7 @@ func TestDecodeLLMUsagePayloadRoundTrip(t *testing.T) {
 		StepID:        common.StepID("run-1/step-1"),
 		ProviderID:    "provider-a",
 		Provider:      "compatible",
+		APISurface:    "openai_compatible_http",
 		Model:         "model-a",
 		Operation:     "chat_completions",
 		InputTokens:   120,
@@ -273,6 +274,7 @@ func TestDecodeLLMUsagePayloadRoundTrip(t *testing.T) {
 		Streaming:     true,
 		ContextBudget: map[string]any{"maxBytes": 4096},
 		CacheUsage:    map[string]any{"cacheReadTokens": 12, "source": "provider_native"},
+		CacheMarkers:  map[string]any{"autoPrefixCacheExpected": true, "renderedStablePrefixHash": "sha256:test"},
 		StartedAt:     "2026-05-07T07:00:00Z",
 		CompletedAt:   "2026-05-07T07:00:01Z",
 		DurationMs:    1000,
@@ -287,6 +289,7 @@ func TestDecodeLLMUsagePayloadRoundTrip(t *testing.T) {
 		decoded.StepID != "run-1/step-1" ||
 		decoded.ProviderID != "provider-a" ||
 		decoded.Provider != "compatible" ||
+		decoded.APISurface != "openai_compatible_http" ||
 		decoded.Model != "model-a" ||
 		decoded.Operation != "chat_completions" ||
 		decoded.InputTokens != 120 ||
@@ -299,6 +302,8 @@ func TestDecodeLLMUsagePayloadRoundTrip(t *testing.T) {
 		!decoded.Streaming ||
 		decoded.CacheUsage["cacheReadTokens"] != 12 ||
 		decoded.CacheUsage["source"] != "provider_native" ||
+		decoded.CacheMarkers["autoPrefixCacheExpected"] != true ||
+		decoded.CacheMarkers["renderedStablePrefixHash"] != "sha256:test" ||
 		decoded.DurationMs != 1000 ||
 		decoded.Status != "completed" {
 		t.Fatalf("decoded llm usage payload = %+v", decoded)

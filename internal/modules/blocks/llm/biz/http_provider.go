@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -24,6 +25,7 @@ type HTTPProvider struct {
 }
 
 func NewHTTPProvider(config llmmodels.ProviderConfig) *HTTPProvider {
+	config = normalizedProviderConfigForRuntime(config)
 	timeout := config.Timeout
 	if timeout <= 0 {
 		timeout = defaultProviderTimeout
@@ -38,12 +40,27 @@ func NewHTTPProviderWithClient(config llmmodels.ProviderConfig, client *http.Cli
 	if client == nil {
 		return NewHTTPProvider(config)
 	}
+	config = normalizedProviderConfigForRuntime(config)
 	return &HTTPProvider{config: config, client: client}
 }
 
 func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
+	}
+	switch p.surfaceOrDefault() {
+	case llmcommon.ProviderSurfaceOpenAICompatibleHTTP:
+		return p.completeOpenAICompatible(ctx, request)
+	case llmcommon.ProviderSurfaceAnthropicCompatibleHTTP:
+		return p.completeAnthropicCompatible(ctx, request)
+	default:
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider apiSurface %s is not implemented by HTTPProvider", common.ErrInvalidArgument, p.surfaceOrDefault())
+	}
+}
+
+func (p *HTTPProvider) completeOpenAICompatible(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	if err := p.ensureOpenAICompatibleHTTPSurface(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
 	}
 	endpoint, err := chatCompletionsURL(p.config.BaseURL)
 	if err != nil {
@@ -52,6 +69,7 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 	payload, err := json.Marshal(chatCompletionRequest{
 		Model:               p.config.Model,
 		Messages:            chatMessagesForRequest(&request),
+		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
 		Temperature:         providerTemperature(p.config),
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
@@ -106,6 +124,20 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderCompletionResult{}, common.ErrInvalidArgument
 	}
+	switch p.surfaceOrDefault() {
+	case llmcommon.ProviderSurfaceOpenAICompatibleHTTP:
+		return p.streamOpenAICompatible(ctx, request, emit)
+	case llmcommon.ProviderSurfaceAnthropicCompatibleHTTP:
+		return p.streamAnthropicCompatible(ctx, request, emit)
+	default:
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider apiSurface %s is not implemented by HTTPProvider", common.ErrInvalidArgument, p.surfaceOrDefault())
+	}
+}
+
+func (p *HTTPProvider) streamOpenAICompatible(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+	if err := p.ensureOpenAICompatibleHTTPSurface(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
 	endpoint, err := chatCompletionsURL(p.config.BaseURL)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -113,6 +145,7 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 	payload, err := json.Marshal(chatCompletionRequest{
 		Model:               p.config.Model,
 		Messages:            chatMessagesForRequest(&request),
+		PromptCacheKey:      promptCacheKeyForRequest(p.config, request),
 		Temperature:         providerTemperature(p.config),
 		MaxCompletionTokens: maxOutputTokens(p.config),
 		ReasoningEffort:     p.config.InferenceProfile.ReasoningEffort,
@@ -158,6 +191,9 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbeddingRequest) (llmmodels.ProviderEmbeddingResult, error) {
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
+	}
+	if err := p.ensureOpenAICompatibleHTTPSurface(); err != nil {
+		return llmmodels.ProviderEmbeddingResult{}, err
 	}
 	input := strings.TrimSpace(request.Input)
 	if input == "" {
@@ -218,6 +254,7 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 type chatCompletionRequest struct {
 	Model               string                         `json:"model"`
 	Messages            []chatCompletionMessage        `json:"messages"`
+	PromptCacheKey      string                         `json:"prompt_cache_key,omitempty"`
 	Temperature         float64                        `json:"temperature"`
 	MaxCompletionTokens int64                          `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
@@ -225,6 +262,373 @@ type chatCompletionRequest struct {
 	ResponseFormat      map[string]string              `json:"response_format,omitempty"`
 	Stream              bool                           `json:"stream,omitempty"`
 	StreamOptions       *chatCompletionStreamOptions   `json:"stream_options,omitempty"`
+}
+
+type anthropicMessagesRequest struct {
+	Model       string                         `json:"model"`
+	Messages    []anthropicMessageParam        `json:"messages,omitempty"`
+	System      []anthropicTextBlockParam      `json:"system,omitempty"`
+	MaxTokens   int64                          `json:"max_tokens"`
+	Temperature float64                        `json:"temperature,omitempty"`
+	Stream      bool                           `json:"stream,omitempty"`
+	Thinking    *compatibleThinkingConfigParam `json:"thinking,omitempty"`
+}
+
+type anthropicMessageParam struct {
+	Role    string                       `json:"role"`
+	Content []anthropicContentBlockParam `json:"content"`
+}
+
+type anthropicContentBlockParam struct {
+	Type         string                      `json:"type"`
+	Text         string                      `json:"text,omitempty"`
+	CacheControl *anthropicCacheControlParam `json:"cache_control,omitempty"`
+}
+
+type anthropicTextBlockParam struct {
+	Text         string                      `json:"text"`
+	Type         string                      `json:"type,omitempty"`
+	CacheControl *anthropicCacheControlParam `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControlParam struct {
+	Type string `json:"type"`
+}
+
+type anthropicMessagesResponse struct {
+	Content []anthropicResponseContentBlock `json:"content"`
+	Usage   anthropicUsagePayload           `json:"usage"`
+	Error   *chatCompletionError            `json:"error,omitempty"`
+}
+
+type anthropicResponseContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type anthropicUsagePayload struct {
+	InputTokens              int `json:"input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	PromptCacheHitTokens     int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens    int `json:"prompt_cache_miss_tokens,omitempty"`
+	CacheableInputTokens     int `json:"cacheable_input_tokens,omitempty"`
+	NonCacheableInputTokens  int `json:"non_cacheable_input_tokens,omitempty"`
+}
+
+type anthropicStreamEvent struct {
+	Type  string                `json:"type"`
+	Delta anthropicStreamDelta  `json:"delta,omitempty"`
+	Usage anthropicUsagePayload `json:"usage,omitempty"`
+	Error *chatCompletionError  `json:"error,omitempty"`
+}
+
+type anthropicStreamDelta struct {
+	Type string `json:"type,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+func (p *HTTPProvider) completeAnthropicCompatible(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	if err := p.ensureAnthropicCompatibleHTTPSurface(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	endpoint, err := anthropicMessagesURL(p.config.BaseURL)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	payload, err := json.Marshal(p.anthropicMessagesRequest(request, false))
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	p.setAnthropicHeaders(httpReq)
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	var decoded anthropicMessagesResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: invalid response json: %v", common.ErrInvalidArgument, err)
+	}
+	if decoded.Error != nil {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, decoded.Error.Summary())
+	}
+	content := strings.TrimSpace(firstAnthropicHTTPText(decoded.Content))
+	if content == "" {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider response schema invalid: content text is required", common.ErrInvalidArgument)
+	}
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   decoded.Usage.ProviderUsage(),
+	}, nil
+}
+
+func (p *HTTPProvider) streamAnthropicCompatible(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+	if err := p.ensureAnthropicCompatibleHTTPSurface(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	endpoint, err := anthropicMessagesURL(p.config.BaseURL)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	payload, err := json.Marshal(p.anthropicMessagesRequest(request, true))
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	p.setAnthropicHeaders(httpReq)
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes))
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider http status %d: %s", common.ErrInvalidArgument, resp.StatusCode, sanitizeProviderBody(body, p.config.APIKey))
+	}
+	content, usage, err := readAnthropicHTTPStream(resp.Body, emit)
+	if err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return llmmodels.ProviderCompletionResult{}, fmt.Errorf("%w: llm provider streamed response content is empty", common.ErrInvalidArgument)
+	}
+	return llmmodels.ProviderCompletionResult{
+		Payload: []byte(content),
+		Usage:   usage,
+	}, nil
+}
+
+func (p *HTTPProvider) ensureOpenAICompatibleHTTPSurface() error {
+	surface := strings.TrimSpace(p.config.APISurface)
+	if surface == "" || surface == llmcommon.ProviderSurfaceOpenAICompatibleHTTP {
+		return nil
+	}
+	return fmt.Errorf("%w: llm provider apiSurface %s is not implemented by HTTPProvider", common.ErrInvalidArgument, surface)
+}
+
+func (p *HTTPProvider) ensureAnthropicCompatibleHTTPSurface() error {
+	surface := strings.TrimSpace(p.config.APISurface)
+	if surface == llmcommon.ProviderSurfaceAnthropicCompatibleHTTP {
+		return nil
+	}
+	return fmt.Errorf("%w: llm provider apiSurface %s is not implemented by HTTPProvider", common.ErrInvalidArgument, surface)
+}
+
+func (p *HTTPProvider) surface() string {
+	return strings.TrimSpace(p.config.APISurface)
+}
+
+func (p *HTTPProvider) surfaceOrDefault() string {
+	if surface := p.surface(); surface != "" {
+		return surface
+	}
+	return defaultProviderAPISurface(p.config.Provider)
+}
+
+func promptCacheKeyForRequest(config llmmodels.ProviderConfig, request llmmodels.ProviderRequest) string {
+	if strings.TrimSpace(config.APISurface) != llmcommon.ProviderSurfaceOpenAICompatibleHTTP {
+		return ""
+	}
+	if !config.CacheCapability.PromptCacheKey {
+		return ""
+	}
+	switch strings.TrimSpace(config.CacheCapability.Mode) {
+	case llmcommon.ProviderCacheModePromptCacheKey, llmcommon.ProviderCacheModeCompatibleDeclared:
+	default:
+		return ""
+	}
+	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil {
+		return ""
+	}
+	return strings.TrimSpace(request.ContextBudget.CachePlan.CacheKey)
+}
+
+func (p *HTTPProvider) setAnthropicHeaders(httpReq *http.Request) {
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	httpReq.Header.Set("x-api-key", p.config.APIKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+}
+
+func (p *HTTPProvider) anthropicMessagesRequest(request llmmodels.ProviderRequest, stream bool) anthropicMessagesRequest {
+	prompt := buildProviderFacingPrompt(request)
+	req := anthropicMessagesRequest{
+		Model:       p.config.Model,
+		MaxTokens:   anthropicMaxTokens(p.config),
+		Temperature: providerTemperature(p.config),
+		Stream:      stream,
+	}
+	if p.config.InferenceProfile.ThinkingBudgetTokens > 0 {
+		req.Thinking = compatibleThinkingConfig(p.config)
+	}
+	if stablePrefix := strings.TrimSpace(prompt.StablePrefix); stablePrefix != "" {
+		block := anthropicTextBlockParam{Type: "text", Text: stablePrefix}
+		if cacheControlSentForRequest(p.config, prompt) {
+			block.CacheControl = &anthropicCacheControlParam{Type: "ephemeral"}
+		}
+		req.System = []anthropicTextBlockParam{block}
+	}
+	for _, item := range prompt.DynamicMessages {
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		role := normalizedPromptRole(item.Role)
+		if role == "system" {
+			continue
+		}
+		req.Messages = append(req.Messages, anthropicMessageParam{
+			Role: role,
+			Content: []anthropicContentBlockParam{{
+				Type: "text",
+				Text: content,
+			}},
+		})
+	}
+	if len(req.Messages) == 0 {
+		req.Messages = append(req.Messages, anthropicMessageParam{
+			Role: "user",
+			Content: []anthropicContentBlockParam{{
+				Type: "text",
+				Text: userPrompt(request),
+			}},
+		})
+	}
+	return req
+}
+
+func anthropicMessagesURL(baseURL string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", common.ErrInvalidArgument
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("%w: invalid llm provider base url", common.ErrInvalidArgument)
+	}
+	trimmedPath := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(trimmedPath, "/messages") {
+		parsed.Path = trimmedPath
+	} else {
+		parsed.Path = trimmedJoin(trimmedPath, "messages")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func firstAnthropicHTTPText(content []anthropicResponseContentBlock) string {
+	for _, item := range content {
+		if strings.TrimSpace(item.Text) != "" {
+			return item.Text
+		}
+	}
+	return ""
+}
+
+func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
+	var builder strings.Builder
+	var usage *llmmodels.ProviderUsage
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			if emit != nil {
+				if err := emit(llmmodels.ProviderStreamEvent{Type: "done"}); err != nil {
+					return "", nil, err
+				}
+			}
+			return builder.String(), usage, nil
+		}
+		var chunk anthropicStreamEvent
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if providerStreamChunkJSONTruncated(err) {
+				return "", nil, fmt.Errorf("%w: llm provider stream incomplete: truncated stream chunk json: %v", common.ErrInvalidArgument, err)
+			}
+			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: invalid stream chunk json: %v", common.ErrInvalidArgument, err)
+		}
+		if chunk.Error != nil {
+			return "", nil, fmt.Errorf("%w: llm provider protocol invalid: %s", common.ErrInvalidArgument, chunk.Error.Summary())
+		}
+		if parsed := chunk.Usage.ProviderUsage(); parsed != nil {
+			usage = parsed
+		}
+		switch strings.TrimSpace(chunk.Type) {
+		case "content_block_delta":
+			if delta := strings.TrimSpace(chunk.Delta.Text); delta != "" {
+				builder.WriteString(delta)
+				if emit != nil {
+					if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
+						return "", nil, err
+					}
+				}
+			}
+		case "message_delta":
+			if parsed := chunk.Usage.ProviderUsage(); parsed != nil {
+				usage = parsed
+			}
+		case "message_stop", "content_block_stop":
+		default:
+			if delta := strings.TrimSpace(chunk.Delta.Text); delta != "" {
+				builder.WriteString(delta)
+				if emit != nil {
+					if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
+						return "", nil, err
+					}
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", nil, err
+	}
+	return "", nil, fmt.Errorf("%w: llm provider stream incomplete: ended before [DONE]", common.ErrInvalidArgument)
+}
+
+func (u anthropicUsagePayload) ProviderUsage() *llmmodels.ProviderUsage {
+	input := maxPositiveInt(u.InputTokens)
+	output := maxPositiveInt(u.OutputTokens)
+	cacheReadTokens := maxPositiveInt(u.CacheReadInputTokens, u.PromptCacheHitTokens)
+	cacheWriteTokens := maxPositiveInt(u.CacheCreationInputTokens, u.PromptCacheMissTokens)
+	if input == 0 && output == 0 && cacheReadTokens == 0 && cacheWriteTokens == 0 {
+		return nil
+	}
+	return &llmmodels.ProviderUsage{
+		InputTokens:             input,
+		OutputTokens:            output,
+		TotalTokens:             input + output,
+		CacheReadTokens:         cacheReadTokens,
+		CacheWriteTokens:        cacheWriteTokens,
+		CacheCreationTokens:     maxPositiveInt(u.CacheCreationInputTokens),
+		CacheableInputTokens:    maxPositiveInt(u.CacheableInputTokens),
+		NonCacheableInputTokens: maxPositiveInt(u.NonCacheableInputTokens),
+	}
 }
 
 type compatibleThinkingConfigParam struct {
@@ -447,15 +851,17 @@ func (u chatCompletionUsage) ProviderUsage() *llmmodels.ProviderUsage {
 	if total == 0 && (input > 0 || output > 0) {
 		total = input + output
 	}
-	if input == 0 && output == 0 && total == 0 {
+	cacheReadTokens := maxPositiveInt(u.PromptCacheHitTokens, u.CacheReadInputTokens, u.CachedTokens, u.InputCachedTokens, u.InputCacheReadTokens)
+	cacheWriteTokens := maxPositiveInt(u.PromptCacheMissTokens, u.CacheCreationInputTokens, u.InputCacheWriteTokens)
+	if input == 0 && output == 0 && total == 0 && cacheReadTokens == 0 && cacheWriteTokens == 0 {
 		return nil
 	}
 	return &llmmodels.ProviderUsage{
 		InputTokens:             input,
 		OutputTokens:            output,
 		TotalTokens:             total,
-		CacheReadTokens:         maxPositiveInt(u.PromptCacheHitTokens, u.CacheReadInputTokens, u.CachedTokens, u.InputCachedTokens, u.InputCacheReadTokens),
-		CacheWriteTokens:        maxPositiveInt(u.PromptCacheMissTokens, u.CacheCreationInputTokens, u.InputCacheWriteTokens),
+		CacheReadTokens:         cacheReadTokens,
+		CacheWriteTokens:        cacheWriteTokens,
 		CacheCreationTokens:     max(0, u.CacheCreationInputTokens),
 		CacheableInputTokens:    max(0, u.CacheableInputTokens),
 		NonCacheableInputTokens: max(0, u.NonCacheableInputTokens),

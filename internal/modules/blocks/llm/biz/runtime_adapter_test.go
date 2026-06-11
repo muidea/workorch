@@ -171,7 +171,11 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
 	}
-	if usage["providerId"] != "reasoning" || usage["provider"] != llmcommon.ProviderCompatible || usage["model"] != "test-model" || usage["estimated"] != true {
+	if usage["providerId"] != "reasoning" ||
+		usage["provider"] != llmcommon.ProviderCompatible ||
+		usage["apiSurface"] != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		usage["model"] != "test-model" ||
+		usage["estimated"] != true {
 		t.Fatalf("llmUsage = %+v, want observable provider/model usage metadata", usage)
 	}
 	if usage["usageSource"] != llmcommon.UsageSourceEstimated {
@@ -202,6 +206,49 @@ func TestRuntimeAdapterProjectsContextBudgetToStepOutput(t *testing.T) {
 		cacheUsage["cacheableInputTokens"] == nil ||
 		cacheUsage["nonCacheableInputTokens"] == nil {
 		t.Fatalf("cacheUsage = %+v, want cache-plan estimated usage", cacheUsage)
+	}
+	cacheMarkers, ok := usage["cacheMarkersSent"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %+v, want cache marker observability", usage)
+	}
+	if cacheMarkers["apiSurface"] != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		cacheMarkers["providerMode"] != llmcommon.ProviderCacheModeNone ||
+		cacheMarkers["promptCacheKeySent"] != false ||
+		cacheMarkers["cacheControlSent"] != false ||
+		cacheMarkers["renderedStablePrefixHash"] == "" {
+		t.Fatalf("cacheMarkersSent = %+v, want compatible default marker summary", cacheMarkers)
+	}
+}
+
+func TestRuntimeAdapterReportsOpenAIPromptCacheKeyUnsupportedUntilWireImplemented(t *testing.T) {
+	provider := &staticProvider{payload: []byte(`{"completionState":"continue"}`)}
+	adapter := NewRuntimeAdapter(llmmodels.ProviderConfig{
+		ID:       "openai",
+		Provider: llmcommon.ProviderOpenAI,
+		APIKey:   "secret-value",
+		Model:    "test-model",
+		ContextProfile: llmmodels.ProviderContextProfile{
+			EstimatedTokensPerByte: 0.25,
+		},
+	}, provider)
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), llmStepRequest())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	usage, ok := result.Output["llmUsage"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %#v, want usage metadata", result.Output["llmUsage"])
+	}
+	cacheMarkers, ok := usage["cacheMarkersSent"].(map[string]any)
+	if !ok {
+		t.Fatalf("llmUsage = %+v, want cache marker observability", usage)
+	}
+	if cacheMarkers["apiSurface"] != llmcommon.ProviderSurfaceOpenAISDK ||
+		cacheMarkers["providerMode"] != llmcommon.ProviderCacheModePromptCacheKey ||
+		cacheMarkers["promptCacheKeySent"] != false ||
+		cacheMarkers["promptCacheKeyUnsupported"] != true {
+		t.Fatalf("cacheMarkersSent = %+v, want openai sdk prompt cache key marked unsupported", cacheMarkers)
 	}
 }
 

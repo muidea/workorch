@@ -10,6 +10,10 @@ func llmUsageTraceProvider(payload map[string]any) string {
 	return readModelStringValue(payload[events.PayloadKeyProvider])
 }
 
+func llmUsageTraceAPISurface(payload map[string]any) string {
+	return readModelStringValue(payload[events.PayloadKeyAPISurface])
+}
+
 func llmUsageTraceModel(payload map[string]any) string {
 	return readModelStringValue(payload[events.PayloadKeyModel])
 }

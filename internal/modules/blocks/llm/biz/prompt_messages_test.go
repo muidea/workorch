@@ -294,10 +294,17 @@ func TestProviderCachePlanKeepsCacheablePrefixStableAcrossVolatileProgress(t *te
 		t.Fatalf("cache plan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
 	}
 	if basePlan.StablePrefixHash != changedPlan.StablePrefixHash ||
+		basePlan.RenderedStablePrefixHash != changedPlan.RenderedStablePrefixHash ||
 		basePlan.WorkspaceDefinitionHash != changedPlan.WorkspaceDefinitionHash ||
 		basePlan.CapabilityContractHash != changedPlan.CapabilityContractHash ||
 		basePlan.CacheKey != changedPlan.CacheKey {
 		t.Fatalf("cacheable prefix changed under volatile progress: base=%+v changed=%+v", basePlan, changedPlan)
+	}
+	if basePlan.RenderedStablePrefixHash == "" {
+		t.Fatalf("rendered stable prefix hash is empty: %+v", basePlan)
+	}
+	if basePlan.RenderedStablePrefixHash == basePlan.StablePrefixHash {
+		t.Fatalf("rendered stable prefix hash = C0 stable hash %q, want distinct rendered C0/C1/C2 hash", basePlan.RenderedStablePrefixHash)
 	}
 	if basePlan.VolatileTailHash == changedPlan.VolatileTailHash {
 		t.Fatalf("volatile tail hash unchanged: %q", basePlan.VolatileTailHash)

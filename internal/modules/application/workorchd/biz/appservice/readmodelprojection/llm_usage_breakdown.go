@@ -7,14 +7,20 @@ import (
 )
 
 func llmUsageProviderModelBreakdownKey(item readmodelcore.LLMUsageTrace) string {
-	return strings.TrimSpace(item.ProviderID) + "|" + strings.TrimSpace(item.Provider) + "|" + strings.TrimSpace(item.Model)
+	return strings.TrimSpace(item.ProviderID) + "|" +
+		strings.TrimSpace(item.Provider) + "|" +
+		strings.TrimSpace(item.APISurface) + "|" +
+		strings.TrimSpace(item.Model) + "|" +
+		llmUsageProviderMode(item)
 }
 
 func newLLMUsageProviderModelBreakdown(item readmodelcore.LLMUsageTrace) *readmodelcore.LLMUsageProviderModelBreakdown {
 	return &readmodelcore.LLMUsageProviderModelBreakdown{
-		ProviderID: strings.TrimSpace(item.ProviderID),
-		Provider:   strings.TrimSpace(item.Provider),
-		Model:      strings.TrimSpace(item.Model),
+		ProviderID:   strings.TrimSpace(item.ProviderID),
+		Provider:     strings.TrimSpace(item.Provider),
+		APISurface:   strings.TrimSpace(item.APISurface),
+		Model:        strings.TrimSpace(item.Model),
+		ProviderMode: llmUsageProviderMode(item),
 	}
 }
 
@@ -25,10 +31,33 @@ func addLLMUsageProviderModelBreakdown(entry *readmodelcore.LLMUsageProviderMode
 	entry.TotalTokens += item.TotalTokens
 	entry.CacheReadTokens += cacheReadTokens
 	entry.CacheWriteTokens += cacheWriteTokens
+	entry.CacheCreationTokens += readModelIntValue(item.CacheUsage["cacheCreationTokens"])
+	if readModelIntValue(item.CacheMarkers["renderedStablePrefixBytes"]) > 0 {
+		entry.CacheablePromptCount++
+	}
+	if cacheReadTokens > 0 {
+		entry.ActualCacheHitCount++
+	}
+	if cacheWriteTokens > 0 || readModelIntValue(item.CacheUsage["cacheCreationTokens"]) > 0 {
+		entry.CacheCreationCount++
+	}
+	if readModelBoolValue(item.CacheMarkers["promptCacheKeySent"]) {
+		entry.PromptCacheKeySentCount++
+	}
+	if readModelBoolValue(item.CacheMarkers["cacheControlSent"]) {
+		entry.CacheControlSentCount++
+	}
+	if readModelBoolValue(item.CacheMarkers["autoPrefixCacheExpected"]) {
+		entry.AutoPrefixExpectedCount++
+	}
 	if item.Estimated {
 		entry.EstimatedEntries++
 	}
 	if item.Status == "failed" {
 		entry.FailedEntries++
 	}
+}
+
+func llmUsageProviderMode(item readmodelcore.LLMUsageTrace) string {
+	return strings.TrimSpace(readModelStringValue(item.CacheMarkers["providerMode"]))
 }

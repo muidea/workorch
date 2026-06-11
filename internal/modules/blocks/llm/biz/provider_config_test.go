@@ -39,6 +39,13 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 	if !cfg.Capabilities.ChatCompletions || cfg.Capabilities.Streaming || len(cfg.Capabilities.NonChatOperations) != 0 {
 		t.Fatalf("capabilities = %+v, want default chat completions only", cfg.Capabilities)
 	}
+	if cfg.APISurface != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		cfg.CacheCapability.Surface != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		cfg.CacheCapability.Mode != llmcommon.ProviderCacheModeNone ||
+		cfg.CacheCapability.PromptCacheKey ||
+		cfg.CacheCapability.MessageCacheControl {
+		t.Fatalf("surface/cache capability = %q/%+v, want openai-compatible http without private markers", cfg.APISurface, cfg.CacheCapability)
+	}
 	if cfg.ContextProfile.ContextWindowTokens != defaultContextWindowTokens ||
 		cfg.ContextProfile.MaxInputTokens != defaultContextWindowTokens-defaultReservedOutputTokens ||
 		cfg.ContextProfile.ReservedOutputTokens != defaultReservedOutputTokens ||
@@ -56,6 +63,10 @@ func TestLoadProviderConfigAcceptsCompatibleProvider(t *testing.T) {
 	}
 	if redacted.ContextProfile.ContextWindowTokens != defaultContextWindowTokens {
 		t.Fatalf("redacted context profile = %+v, want exported profile", redacted.ContextProfile)
+	}
+	if redacted.APISurface != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		redacted.CacheCapability.Mode != llmcommon.ProviderCacheModeNone {
+		t.Fatalf("redacted surface/cache = %q/%+v, want exported compatible defaults", redacted.APISurface, redacted.CacheCapability)
 	}
 }
 
@@ -116,6 +127,11 @@ func TestLoadProviderConfigDefaultsOpenAIBaseURL(t *testing.T) {
 	if cfg.Unavailable || cfg.BaseURL != defaultOpenAIBaseURL {
 		t.Fatalf("config = %+v, want ready openai default base url", cfg)
 	}
+	if cfg.APISurface != llmcommon.ProviderSurfaceOpenAISDK ||
+		cfg.CacheCapability.Mode != llmcommon.ProviderCacheModePromptCacheKey ||
+		!cfg.CacheCapability.PromptCacheKey {
+		t.Fatalf("surface/cache = %q/%+v, want openai sdk prompt cache key capability", cfg.APISurface, cfg.CacheCapability)
+	}
 }
 
 func TestLoadProviderConfigDefaultsAnthropicBaseURL(t *testing.T) {
@@ -129,6 +145,66 @@ func TestLoadProviderConfigDefaultsAnthropicBaseURL(t *testing.T) {
 	}
 	if cfg.Unavailable || cfg.BaseURL != defaultAnthropicBaseURL {
 		t.Fatalf("config = %+v, want ready anthropic default base url", cfg)
+	}
+	if cfg.APISurface != llmcommon.ProviderSurfaceAnthropicSDK ||
+		cfg.CacheCapability.Mode != llmcommon.ProviderCacheModeAnthropicCacheControl ||
+		!cfg.CacheCapability.MessageCacheControl {
+		t.Fatalf("surface/cache = %q/%+v, want anthropic sdk cache control capability", cfg.APISurface, cfg.CacheCapability)
+	}
+}
+
+func TestLoadProviderConfigParsesCompatibleAnthropicSurfaceWithoutImplicitCacheControl(t *testing.T) {
+	cfg, err := LoadProviderConfig("anthropic-http", map[string]string{
+		llmcommon.EnvProvider:   llmcommon.ProviderCompatible,
+		llmcommon.EnvAPISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+		llmcommon.EnvBaseURL:    "https://api.deepseek.com/anthropic",
+		llmcommon.EnvAPIKey:     "deepseek-secret",
+		llmcommon.EnvModel:      "deepseek-chat",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.APISurface != llmcommon.ProviderSurfaceAnthropicCompatibleHTTP ||
+		cfg.CacheCapability.Surface != llmcommon.ProviderSurfaceAnthropicCompatibleHTTP ||
+		cfg.CacheCapability.Mode != llmcommon.ProviderCacheModeNone ||
+		cfg.CacheCapability.MessageCacheControl {
+		t.Fatalf("surface/cache = %q/%+v, want anthropic-compatible http with no implicit cache_control", cfg.APISurface, cfg.CacheCapability)
+	}
+}
+
+func TestLoadProviderConfigParsesDeclaredAutoPrefixCacheCapability(t *testing.T) {
+	cfg, err := LoadProviderConfig("deepseek", map[string]string{
+		llmcommon.EnvProvider:         llmcommon.ProviderCompatible,
+		llmcommon.EnvAPISurface:       llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+		llmcommon.EnvBaseURL:          "https://api.deepseek.com/v1",
+		llmcommon.EnvAPIKey:           "deepseek-secret",
+		llmcommon.EnvModel:            "deepseek-chat",
+		llmcommon.EnvCacheMode:        llmcommon.ProviderCacheModeAutoPrefix,
+		llmcommon.EnvCacheUsageFields: "prompt_cache_hit_tokens,prompt_cache_miss_tokens",
+	})
+	if err != nil {
+		t.Fatalf("load provider config: %v", err)
+	}
+	if cfg.CacheCapability.Mode != llmcommon.ProviderCacheModeAutoPrefix ||
+		cfg.CacheCapability.PromptCacheKey ||
+		cfg.CacheCapability.MessageCacheControl ||
+		len(cfg.CacheCapability.UsageFields) != 2 ||
+		cfg.CacheCapability.UsageFields[0] != "prompt_cache_hit_tokens" ||
+		cfg.CacheCapability.UsageFields[1] != "prompt_cache_miss_tokens" {
+		t.Fatalf("cache capability = %+v, want declared auto-prefix usage fields without private markers", cfg.CacheCapability)
+	}
+}
+
+func TestLoadProviderConfigRejectsMismatchedAPISurface(t *testing.T) {
+	_, err := LoadProviderConfig("bad", map[string]string{
+		llmcommon.EnvProvider:   llmcommon.ProviderCompatible,
+		llmcommon.EnvAPISurface: llmcommon.ProviderSurfaceOpenAISDK,
+		llmcommon.EnvBaseURL:    "http://127.0.0.1:11434/v1",
+		llmcommon.EnvAPIKey:     "secret",
+		llmcommon.EnvModel:      "model",
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("load mismatched api surface err = %v, want invalid argument", err)
 	}
 }
 

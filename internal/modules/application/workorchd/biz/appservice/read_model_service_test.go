@@ -2875,6 +2875,7 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 		{
 			ProviderID:   "provider-a",
 			Provider:     "compatible",
+			APISurface:   llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
 			Model:        "model-a",
 			InputTokens:  100,
 			OutputTokens: 10,
@@ -2882,16 +2883,28 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 			Status:       "completed",
 			UsageSource:  llmcommon.UsageSourceEstimated,
 			Estimated:    true,
+			CacheMarkers: map[string]any{
+				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
+				"autoPrefixCacheExpected":   true,
+				"renderedStablePrefixBytes": 1024,
+			},
 		},
 		{
 			ProviderID:   "provider-a",
 			Provider:     "compatible",
+			APISurface:   llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
 			Model:        "model-a",
 			InputTokens:  200,
 			OutputTokens: 20,
 			TotalTokens:  220,
 			Status:       "completed",
 			UsageSource:  llmcommon.UsageSourceProviderNative,
+			CacheUsage:   map[string]any{"cacheReadTokens": 20, "cacheCreationTokens": 8},
+			CacheMarkers: map[string]any{
+				"providerMode":              llmcommon.ProviderCacheModeAutoPrefix,
+				"autoPrefixCacheExpected":   true,
+				"renderedStablePrefixBytes": 1024,
+			},
 		},
 	})
 
@@ -2899,8 +2912,50 @@ func TestSummarizeLLMUsageMergesProviderModelBreakdownWithoutCost(t *testing.T) 
 		t.Fatalf("provider/model breakdown = %+v, want merged provider/model entry", summary.ProviderModelBreakdown)
 	}
 	item := summary.ProviderModelBreakdown[0]
-	if item.EntryTotal != 2 || item.InputTokens != 300 || item.OutputTokens != 30 || item.TotalTokens != 330 || item.EstimatedEntries != 1 {
+	if item.APISurface != llmcommon.ProviderSurfaceOpenAICompatibleHTTP ||
+		item.ProviderMode != llmcommon.ProviderCacheModeAutoPrefix ||
+		item.EntryTotal != 2 ||
+		item.InputTokens != 300 ||
+		item.OutputTokens != 30 ||
+		item.TotalTokens != 330 ||
+		item.EstimatedEntries != 1 ||
+		item.CacheReadTokens != 20 ||
+		item.CacheCreationTokens != 8 ||
+		item.CacheablePromptCount != 2 ||
+		item.ActualCacheHitCount != 1 ||
+		item.CacheCreationCount != 1 ||
+		item.AutoPrefixExpectedCount != 2 {
 		t.Fatalf("provider/model breakdown = %+v, want merged token counters", summary.ProviderModelBreakdown)
+	}
+}
+
+func TestSummarizeLLMUsageDoesNotMergeDifferentSurfacesOrProviderModes(t *testing.T) {
+	summary := readmodelprojection.SummarizeLLMUsage([]LLMUsageTrace{
+		{
+			ProviderID: "provider-a",
+			Provider:   "compatible",
+			APISurface: llmcommon.ProviderSurfaceOpenAICompatibleHTTP,
+			Model:      "model-a",
+			CacheMarkers: map[string]any{
+				"providerMode": llmcommon.ProviderCacheModeAutoPrefix,
+			},
+		},
+		{
+			ProviderID: "provider-a",
+			Provider:   "compatible",
+			APISurface: llmcommon.ProviderSurfaceAnthropicCompatibleHTTP,
+			Model:      "model-a",
+			CacheMarkers: map[string]any{
+				"providerMode": llmcommon.ProviderCacheModeNone,
+			},
+		},
+	})
+
+	if len(summary.ProviderModelBreakdown) != 2 {
+		t.Fatalf("provider/model breakdown = %+v, want distinct surface/mode entries", summary.ProviderModelBreakdown)
+	}
+	if summary.ProviderModelBreakdown[0].APISurface == summary.ProviderModelBreakdown[1].APISurface {
+		t.Fatalf("provider/model breakdown = %+v, want surface-specific entries", summary.ProviderModelBreakdown)
 	}
 }
 

@@ -20,6 +20,7 @@ type LLMModelCapabilityConfiguration struct {
 type LLMProviderConfiguration struct {
 	ID                string                             `json:"id"`
 	Provider          string                             `json:"provider,omitempty"`
+	APISurface        string                             `json:"apiSurface,omitempty"`
 	BaseURL           string                             `json:"baseUrl,omitempty"`
 	Model             string                             `json:"model,omitempty"`
 	Timeout           string                             `json:"timeout,omitempty"`
@@ -33,6 +34,7 @@ type LLMProviderConfiguration struct {
 	NonChatOperations []string                           `json:"nonChatOperations,omitempty"`
 	FailoverEnabled   bool                               `json:"failoverEnabled"`
 	FailoverProviders []string                           `json:"failoverProviders,omitempty"`
+	CacheCapability   llmmodels.ProviderCacheCapability  `json:"cacheCapability,omitempty"`
 	InferenceProfile  llmmodels.ProviderInferenceProfile `json:"inferenceProfile,omitempty"`
 	ContextProfile    llmmodels.ProviderContextProfile   `json:"contextProfile,omitempty"`
 }
@@ -43,6 +45,7 @@ type LLMProviderTemplate struct {
 	Description       string   `json:"description,omitempty"`
 	ID                string   `json:"id"`
 	Provider          string   `json:"provider"`
+	APISurface        string   `json:"apiSurface,omitempty"`
 	BaseURL           string   `json:"baseUrl,omitempty"`
 	Model             string   `json:"model,omitempty"`
 	Timeout           string   `json:"timeout,omitempty"`

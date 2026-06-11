@@ -16,6 +16,7 @@ func cloneLLMProviderConfigs(source map[string]workorchconfig.LLMProviderConfig)
 func cloneLLMProviderConfig(source workorchconfig.LLMProviderConfig) workorchconfig.LLMProviderConfig {
 	return workorchconfig.LLMProviderConfig{
 		Provider:                source.Provider,
+		APISurface:              source.APISurface,
 		BaseURL:                 source.BaseURL,
 		APIKey:                  source.APIKey,
 		Model:                   source.Model,
@@ -26,6 +27,10 @@ func cloneLLMProviderConfig(source workorchconfig.LLMProviderConfig) workorchcon
 		NonChatOperations:       append([]string(nil), source.NonChatOperations...),
 		FailoverEnabled:         cloneBoolPtr(source.FailoverEnabled),
 		FailoverProviders:       append([]string(nil), source.FailoverProviders...),
+		CacheMode:               source.CacheMode,
+		PromptCacheKey:          cloneBoolPtr(source.PromptCacheKey),
+		MessageCacheControl:     cloneBoolPtr(source.MessageCacheControl),
+		CacheUsageFields:        append([]string(nil), source.CacheUsageFields...),
 		Temperature:             cloneFloat64Ptr(source.Temperature),
 		MaxOutputTokens:         source.MaxOutputTokens,
 		ReasoningEffort:         source.ReasoningEffort,

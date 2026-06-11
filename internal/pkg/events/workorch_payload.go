@@ -113,6 +113,7 @@ const (
 	PayloadKeyReceivedBytes          = "receivedBytes"
 	PayloadKeyElapsedMs              = "elapsedMs"
 	PayloadKeyProvider               = "provider"
+	PayloadKeyAPISurface             = "apiSurface"
 	PayloadKeyInputTokens            = "inputTokens"
 	PayloadKeyOutputTokens           = "outputTokens"
 	PayloadKeyTotalTokens            = "totalTokens"
@@ -123,6 +124,7 @@ const (
 	PayloadKeyStreaming              = "streaming"
 	PayloadKeyContextBudget          = "contextBudget"
 	PayloadKeyCacheUsage             = "cacheUsage"
+	PayloadKeyCacheMarkersSent       = "cacheMarkersSent"
 	PayloadKeyStartedAt              = "startedAt"
 	PayloadKeyCompletedAt            = "completedAt"
 	PayloadKeyDurationMs             = "durationMs"
@@ -382,6 +384,7 @@ type LLMUsagePayloadData struct {
 	StepID        common.StepID
 	ProviderID    string
 	Provider      string
+	APISurface    string
 	Model         string
 	Operation     string
 	InputTokens   int
@@ -394,6 +397,7 @@ type LLMUsagePayloadData struct {
 	Streaming     bool
 	ContextBudget map[string]any
 	CacheUsage    map[string]any
+	CacheMarkers  map[string]any
 	StartedAt     string
 	CompletedAt   string
 	DurationMs    int
@@ -1381,6 +1385,7 @@ func LLMUsagePayload(data LLMUsagePayloadData) map[string]any {
 		PayloadKeyStepID:        string(data.StepID),
 		PayloadKeyProviderID:    data.ProviderID,
 		PayloadKeyProvider:      data.Provider,
+		PayloadKeyAPISurface:    data.APISurface,
 		PayloadKeyModel:         data.Model,
 		PayloadKeyOperation:     data.Operation,
 		PayloadKeyInputTokens:   data.InputTokens,
@@ -1405,6 +1410,9 @@ func LLMUsagePayload(data LLMUsagePayloadData) map[string]any {
 	if len(data.CacheUsage) > 0 {
 		payload[PayloadKeyCacheUsage] = clonePayloadMap(data.CacheUsage)
 	}
+	if len(data.CacheMarkers) > 0 {
+		payload[PayloadKeyCacheMarkersSent] = clonePayloadMap(data.CacheMarkers)
+	}
 	return payload
 }
 
@@ -1426,6 +1434,10 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 		return LLMUsagePayloadData{}, false
 	}
 	provider, ok := optionalStringField(payload, PayloadKeyProvider)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
+	apiSurface, ok := optionalStringField(payload, PayloadKeyAPISurface)
 	if !ok {
 		return LLMUsagePayloadData{}, false
 	}
@@ -1477,6 +1489,10 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 	if !ok {
 		return LLMUsagePayloadData{}, false
 	}
+	cacheMarkers, ok := optionalMapField(payload, PayloadKeyCacheMarkersSent)
+	if !ok {
+		return LLMUsagePayloadData{}, false
+	}
 	startedAt, ok := optionalStringField(payload, PayloadKeyStartedAt)
 	if !ok {
 		return LLMUsagePayloadData{}, false
@@ -1503,6 +1519,7 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 		StepID:        common.StepID(stepID),
 		ProviderID:    providerID,
 		Provider:      provider,
+		APISurface:    apiSurface,
 		Model:         model,
 		Operation:     operation,
 		InputTokens:   inputTokens,
@@ -1515,6 +1532,7 @@ func DecodeLLMUsagePayload(payload map[string]any) (LLMUsagePayloadData, bool) {
 		Streaming:     streaming,
 		ContextBudget: contextBudget,
 		CacheUsage:    cacheUsage,
+		CacheMarkers:  cacheMarkers,
 		StartedAt:     startedAt,
 		CompletedAt:   completedAt,
 		DurationMs:    durationMs,

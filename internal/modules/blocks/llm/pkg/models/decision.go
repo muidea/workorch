@@ -91,20 +91,21 @@ type ProviderContextBudget struct {
 }
 
 type ProviderCachePlan struct {
-	SchemaVersion           string                       `json:"schemaVersion,omitempty"`
-	Strategy                string                       `json:"strategy,omitempty"`
-	CacheKey                string                       `json:"cacheKey,omitempty"`
-	StablePrefixHash        string                       `json:"stablePrefixHash,omitempty"`
-	WorkspaceDefinitionHash string                       `json:"workspaceDefinitionHash,omitempty"`
-	CapabilityContractHash  string                       `json:"capabilityContractHash,omitempty"`
-	StageBundleHash         string                       `json:"stageBundleHash,omitempty"`
-	VolatileTailHash        string                       `json:"volatileTailHash,omitempty"`
-	LargeRefsHash           string                       `json:"largeRefsHash,omitempty"`
-	SectionHashes           []ProviderCacheSectionHash   `json:"sectionHashes,omitempty"`
-	CacheBreakers           []ProviderCacheBreaker       `json:"cacheBreakers,omitempty"`
-	Canonicalization        ProviderCanonicalizationPlan `json:"canonicalization,omitempty"`
-	ObservedRequestShape    ProviderObservedRequestShape `json:"observedRequestShape,omitempty"`
-	AdapterHint             ProviderAdapterCacheHint     `json:"adapterHint,omitempty"`
+	SchemaVersion            string                       `json:"schemaVersion,omitempty"`
+	Strategy                 string                       `json:"strategy,omitempty"`
+	CacheKey                 string                       `json:"cacheKey,omitempty"`
+	StablePrefixHash         string                       `json:"stablePrefixHash,omitempty"`
+	RenderedStablePrefixHash string                       `json:"renderedStablePrefixHash,omitempty"`
+	WorkspaceDefinitionHash  string                       `json:"workspaceDefinitionHash,omitempty"`
+	CapabilityContractHash   string                       `json:"capabilityContractHash,omitempty"`
+	StageBundleHash          string                       `json:"stageBundleHash,omitempty"`
+	VolatileTailHash         string                       `json:"volatileTailHash,omitempty"`
+	LargeRefsHash            string                       `json:"largeRefsHash,omitempty"`
+	SectionHashes            []ProviderCacheSectionHash   `json:"sectionHashes,omitempty"`
+	CacheBreakers            []ProviderCacheBreaker       `json:"cacheBreakers,omitempty"`
+	Canonicalization         ProviderCanonicalizationPlan `json:"canonicalization,omitempty"`
+	ObservedRequestShape     ProviderObservedRequestShape `json:"observedRequestShape,omitempty"`
+	AdapterHint              ProviderAdapterCacheHint     `json:"adapterHint,omitempty"`
 }
 
 type ProviderCacheSectionHash struct {

@@ -25,10 +25,12 @@ type OpenAIProvider struct {
 }
 
 func NewOpenAIProvider(config llmmodels.ProviderConfig) *OpenAIProvider {
+	config = normalizedProviderConfigForRuntime(config)
 	return NewOpenAIProviderWithClient(config, &http.Client{Timeout: effectiveProviderTimeout(config)})
 }
 
 func NewOpenAIProviderWithClient(config llmmodels.ProviderConfig, client *http.Client) *OpenAIProvider {
+	config = normalizedProviderConfigForRuntime(config)
 	if client == nil {
 		client = &http.Client{Timeout: effectiveProviderTimeout(config)}
 	}
@@ -191,10 +193,12 @@ type AnthropicProvider struct {
 }
 
 func NewAnthropicProvider(config llmmodels.ProviderConfig) *AnthropicProvider {
+	config = normalizedProviderConfigForRuntime(config)
 	return NewAnthropicProviderWithClient(config, &http.Client{Timeout: effectiveProviderTimeout(config)})
 }
 
 func NewAnthropicProviderWithClient(config llmmodels.ProviderConfig, client *http.Client) *AnthropicProvider {
+	config = normalizedProviderConfigForRuntime(config)
 	if client == nil {
 		client = &http.Client{Timeout: effectiveProviderTimeout(config)}
 	}
@@ -296,7 +300,7 @@ func (p *AnthropicProvider) messageParams(request llmmodels.ProviderRequest) ant
 	system := []anthropic.TextBlockParam{{Text: systemPromptForRequest(request)}}
 	if stablePrefix := strings.TrimSpace(prompt.StablePrefix); stablePrefix != "" {
 		block := anthropic.TextBlockParam{Text: stablePrefix}
-		if len(prompt.StablePrefixSectionIDs) > 0 {
+		if cacheControlSentForRequest(p.config, prompt) {
 			block.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		}
 		system = []anthropic.TextBlockParam{block}

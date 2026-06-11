@@ -23,8 +23,14 @@ func sortedLLMUsageProviderModelBreakdowns(items map[string]*readmodelcore.LLMUs
 		if left.Provider != right.Provider {
 			return left.Provider < right.Provider
 		}
+		if left.APISurface != right.APISurface {
+			return left.APISurface < right.APISurface
+		}
 		if left.Model != right.Model {
 			return left.Model < right.Model
+		}
+		if left.ProviderMode != right.ProviderMode {
+			return left.ProviderMode < right.ProviderMode
 		}
 		return false
 	})
