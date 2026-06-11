@@ -21,16 +21,17 @@ func ReadWorkspaceExecutionContextInputs(ctx context.Context, hub events.Hub, wo
 	if hub == nil || workspaceID == "" || goalID == "" || dodID == "" {
 		return WorkspaceExecutionContextInputs{}, common.ErrInvalidArgument
 	}
+	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	var ret WorkspaceExecutionContextInputs
 	if err := readmodelcore.RunTasks(
 		func() error {
 			var err error
-			ret.Goal, err = definitionports.ReadGoal(ctx, hub, goalID)
+			ret.Goal, err = definitionports.ReadGoal(readCtx, hub, goalID)
 			return err
 		},
 		func() error {
 			var err error
-			ret.DoD, err = definitionports.ReadDoD(ctx, hub, dodID)
+			ret.DoD, err = definitionports.ReadDoD(readCtx, hub, dodID)
 			return err
 		},
 		func() error {

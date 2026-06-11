@@ -51,7 +51,7 @@ export function DecisionQueuePage() {
 
   const resolve = async (item: Decision, resolutionType: string, payload?: Record<string, unknown>) => {
     try {
-      await workorchApi.resolveDecision(item.id, resolutionType, payload);
+      await workorchApi.resolveDecision(item.workspaceId, item.id, resolutionType, payload);
       message.success(`决策已按 ${resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
       void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));
     } catch (error) {
@@ -61,7 +61,7 @@ export function DecisionQueuePage() {
 
   const openDecisionResolution = (item: Decision, resolutionType: string) => {
     decisionForm.resetFields();
-    void workorchApi.readDecision(item.id)
+    void workorchApi.readDecision(item.workspaceId, item.id)
       .then((detail) => {
         if (resolutionType === 'provide_missing_info') {
           decisionForm.setFieldsValue(decisionInitialPayload(detail));
@@ -82,7 +82,7 @@ export function DecisionQueuePage() {
       const values = await decisionForm.validateFields();
       const payload = normalizeDecisionResolutionPayload(values);
       const target = decisionTarget;
-      await workorchApi.resolveDecision(target.item.id, target.resolutionType, payload);
+      await workorchApi.resolveDecision(target.item.workspaceId, target.item.id, target.resolutionType, payload);
       setDecisionTarget(undefined);
       decisionForm.resetFields();
       message.success(`决策已按 ${target.resolutionType} 处理，${modelLabels.run} 已由服务端转入后台继续`);
@@ -101,7 +101,17 @@ export function DecisionQueuePage() {
       return;
     }
     try {
-      await workorchApi.batchResolveDecisions(ticketIds, resolutionType, { operator: 'console', mode: 'batch' });
+      const selected = decisionRecords.filter((item) => ticketIds.includes(item.id));
+      const byWorkspace = new Map<string, string[]>();
+      for (const item of selected) {
+        const workspaceId = item.workspaceId || '';
+        const items = byWorkspace.get(workspaceId) ?? [];
+        items.push(item.id);
+        byWorkspace.set(workspaceId, items);
+      }
+      for (const [workspaceId, ids] of byWorkspace) {
+        await workorchApi.batchResolveDecisions(workspaceId, ids, resolutionType, { operator: 'console', mode: 'batch' });
+      }
       message.success(`${ticketIds.length} 个决策工单已按 ${resolutionType} 处理，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedDecisionKeys([]);
       void loadDecisionPage().catch((error: unknown) => message.error(errorMessage(error)));

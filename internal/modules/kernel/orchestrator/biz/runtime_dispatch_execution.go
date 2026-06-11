@@ -85,6 +85,9 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	if err != nil {
 		return err
 	}
+	if blocked, err := o.blockMCPToolCallForOperatorApproval(ctx, run, step, workspace); blocked || err != nil {
+		return err
+	}
 	if handled, err := o.dispatchInternalArtifactContinuationStep(ctx, run, step, toolCall, workspace); handled || err != nil {
 		return err
 	}

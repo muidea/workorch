@@ -11,10 +11,11 @@ import (
 )
 
 func IsStuckRunningRunCandidate(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
-	return runtimecore.IsRecoverableRunningRun(item) && !HasContinuationCheckpoint(ctx, hub, item.ID)
+	return runtimecore.IsRecoverableRunningRun(item) && !HasContinuationCheckpointForRun(ctx, hub, item)
 }
 
 func TerminalStepCanDriveRunningRunResume(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
+	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
 	return err == nil && terminal != nil && terminal.State != common.StepStateDispatched
 }
@@ -23,6 +24,7 @@ func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmod
 	if hub == nil || !runtimecore.IsRecoverableRunningRun(item) {
 		return nil, nil
 	}
+	ctx = contextWithRunWorkspace(ctx, item)
 	runSteps, err := ListStepsByRun(ctx, hub, item.ID)
 	if err != nil {
 		return nil, err
@@ -31,6 +33,7 @@ func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmod
 }
 
 func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run) (*runmodel.Step, error) {
+	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := TerminalStepForRunningRun(ctx, hub, item)
 	if err != nil {
 		return nil, err
@@ -42,6 +45,7 @@ func OrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *run
 }
 
 func StaleOrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item *runmodel.Run, minAge time.Duration, now time.Time) (*runmodel.Step, error) {
+	ctx = contextWithRunWorkspace(ctx, item)
 	terminal, err := OrphanDispatchedTerminalStep(ctx, hub, item)
 	if err != nil || terminal == nil {
 		return terminal, err
@@ -68,4 +72,11 @@ func StaleOrphanDispatchedTerminalStep(ctx context.Context, hub events.Hub, item
 		return nil, nil
 	}
 	return terminal, nil
+}
+
+func contextWithRunWorkspace(ctx context.Context, item *runmodel.Run) context.Context {
+	if item == nil || item.WorkspaceID == "" {
+		return ctx
+	}
+	return common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 }

@@ -13,17 +13,43 @@ import (
 )
 
 func ApproveApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalID)
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID})
 }
 
 func RejectApproval(ctx context.Context, hub events.Hub, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, approvalID)
+	return resolveApproval(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID})
 }
 
-func resolveApproval(ctx context.Context, hub events.Hub, topic string, approvalID common.ApprovalID) (*approvalmodel.Approval, error) {
-	response, err := ownercommandports.PublishWithResponse(ctx, hub, topic, "approval", string(approvalID), "", "", map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID},
+func ApproveApprovalItem(ctx context.Context, hub events.Hub, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureApproved, item)
+}
+
+func RejectApprovalItem(ctx context.Context, hub events.Hub, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+	return resolveApprovalItem(ctx, hub, approvalevents.TopicApprovalCommandEnsureRejected, item)
+}
+
+func resolveApprovalItem(ctx context.Context, hub events.Hub, topic string, item *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+	if item == nil || item.ID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	return resolveApproval(ctx, hub, topic, approvalcontracts.ResolveApprovalCommand{
+		ApprovalID:  item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RunID:       item.RunID,
 	})
+}
+
+func resolveApproval(ctx context.Context, hub events.Hub, topic string, cmd approvalcontracts.ResolveApprovalCommand) (*approvalmodel.Approval, error) {
+	payload := map[string]any{
+		events.PayloadKeyCommand: cmd,
+	}
+	if cmd.WorkspaceID != "" {
+		payload[events.PayloadKeyWorkspaceID] = string(cmd.WorkspaceID)
+	}
+	if cmd.RunID != "" {
+		payload[events.PayloadKeyRunID] = string(cmd.RunID)
+	}
+	response, err := ownercommandports.PublishWithResponse(ctx, hub, topic, "approval", string(cmd.ApprovalID), cmd.WorkspaceID, cmd.RunID, payload)
 	if err != nil {
 		return nil, err
 	}

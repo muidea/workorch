@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 )
 
 func MCPServerForWorkspace(item *mcpmodel.Server, workspace *workspacemodel.Workspace) *mcpmodel.Server {
@@ -36,6 +37,7 @@ func ExpandWorkspaceContextPlaceholders(value string, workspace *workspacemodel.
 	if workspace == nil {
 		return value
 	}
+	value = expandManagedConfigPlaceholders(value, workspace)
 	replacements := map[string]string{
 		"{workspaceId}":                   string(workspace.ID),
 		"{workspaceDeliverableDirectory}": workspace.DeliverableDirectory,
@@ -45,4 +47,8 @@ func ExpandWorkspaceContextPlaceholders(value string, workspace *workspacemodel.
 		value = strings.ReplaceAll(value, old, replacement)
 	}
 	return value
+}
+
+func expandManagedConfigPlaceholders(value string, workspace *workspacemodel.Workspace) string {
+	return workorchmanagedconfig.ExpandPlaceholders(value, workspace.InternalDirectory)
 }

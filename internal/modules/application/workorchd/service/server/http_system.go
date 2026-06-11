@@ -48,6 +48,6 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 	router.AddHandler("/metrics", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {
 		state.metrics.metricsRequests.Add(1)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = fmt.Fprint(w, state.metrics.render(state.config))
+		_, _ = fmt.Fprint(w, state.metrics.render(state.config, state.workspaceProjection))
 	})
 }

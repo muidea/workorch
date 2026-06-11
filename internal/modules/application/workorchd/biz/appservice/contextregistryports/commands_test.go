@@ -9,17 +9,21 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	mcpcontracts "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/contracts"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorycontracts "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/contracts"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	skillcontracts "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/contracts"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulcontracts "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/contracts"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func TestUpdateByIDRejectsMissingPathID(t *testing.T) {
@@ -89,9 +93,15 @@ func TestDeleteSoulPublishesCommandPayload(t *testing.T) {
 }
 
 func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
-	ctx := context.Background()
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-delete")
 	hub := events.NewMemoryHub()
 	hub.Subscribe(memoryevents.TopicMemoryCommandDelete, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-delete" {
+			t.Fatalf("delete envelope workspace = %q, want ws-memory-delete", envelope.WorkspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-delete" {
+			t.Fatalf("delete payload workspace = %v, want ws-memory-delete", envelope.Payload[events.PayloadKeyWorkspaceID])
+		}
 		return events.Response(envelope)
 	})
 
@@ -112,6 +122,116 @@ func TestDeleteMemoryItemPublishesCommandPayload(t *testing.T) {
 	}
 	if _, ok := published[0].Payload[events.PayloadKeyMemoryID]; ok {
 		t.Fatalf("payload contains legacy memoryId field")
+	}
+}
+
+func TestPublishMemoryItemPublishesScopedCommandEnvelope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(memoryevents.TopicMemoryCommandCreate, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-write" || envelope.RunID != "run-memory-write" {
+			t.Fatalf("envelope scope = workspace:%q run:%q", envelope.WorkspaceID, envelope.RunID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-write" || envelope.Payload[events.PayloadKeyRunID] != "run-memory-write" {
+			t.Fatalf("payload scope = workspace:%v run:%v", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID])
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(memorycontracts.CreateMemoryItemCommand)
+		if !ok {
+			t.Fatalf("command payload = %T, want CreateMemoryItemCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.MemoryID != "mem-write-scope" || cmd.WorkspaceID != "ws-memory-write" || cmd.RunID != "run-memory-write" {
+			t.Fatalf("command = %+v, want scoped memory command", cmd)
+		}
+		if _, ok := envelope.Payload[events.PayloadKeyMemoryID]; ok {
+			t.Fatalf("payload contains legacy memoryId field")
+		}
+		return events.Response(envelope)
+	})
+
+	if err := PublishMemoryItem(ctx, hub, memoryevents.TopicMemoryCommandCreate, &memorymodel.MemoryItem{
+		ID:          "mem-write-scope",
+		WorkspaceID: "ws-memory-write",
+		RunID:       "run-memory-write",
+		Summary:     "scoped write",
+	}); err != nil {
+		t.Fatalf("PublishMemoryItem: %v", err)
+	}
+}
+
+func TestMemoryQueriesPublishScopedOwnerReadCommands(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-memory-query-scope")
+	hub := events.NewMemoryHub()
+	hub.Subscribe(memoryevents.TopicMemoryCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-query-scope" {
+			t.Fatalf("get envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-query-scope" {
+			t.Fatalf("get payload workspace = %v, want ws-memory-query-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyMemoryItem: &memorymodel.MemoryItem{ID: "mem-query-scope", WorkspaceID: "ws-memory-query-scope"},
+			},
+		})
+	})
+	hub.Subscribe(memoryevents.TopicMemoryCommandListByWorkspace, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-query-scope" {
+			t.Fatalf("list envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-query-scope" {
+			t.Fatalf("list payload workspace = %v, want ws-memory-query-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
+			},
+		})
+	})
+	hub.Subscribe(memoryevents.TopicMemoryCommandSearch, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-query-scope" {
+			t.Fatalf("search envelope workspace = %q, want ws-memory-query-scope", envelope.WorkspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyMemoryItems: []*memorymodel.MemoryItem{},
+			},
+		})
+	})
+
+	if _, err := ReadMemoryItem(ctx, hub, "mem-query-scope"); err != nil {
+		t.Fatalf("ReadMemoryItem: %v", err)
+	}
+	if _, err := ListMemoryByWorkspace(context.Background(), hub, "ws-memory-query-scope"); err != nil {
+		t.Fatalf("ListMemoryByWorkspace: %v", err)
+	}
+	if _, err := SearchMemory(context.Background(), hub, repository.MemorySearchQuery{WorkspaceID: "ws-memory-query-scope", Query: "scope"}); err != nil {
+		t.Fatalf("SearchMemory: %v", err)
+	}
+}
+
+func TestEnsureWorkspaceExistsPublishesScopedOwnerReadCommand(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != "ws-memory-workspace-scope" {
+			t.Fatalf("workspace get envelope workspace = %q, want ws-memory-workspace-scope", envelope.WorkspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-memory-workspace-scope" {
+			t.Fatalf("workspace get payload workspace = %v, want ws-memory-workspace-scope", envelope.Payload[events.PayloadKeyWorkspaceID])
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyWorkspace: &workspacemodel.Workspace{ID: "ws-memory-workspace-scope"},
+			},
+		})
+	})
+
+	if err := EnsureWorkspaceExists(ctx, hub, "ws-memory-workspace-scope"); err != nil {
+		t.Fatalf("EnsureWorkspaceExists err = %v", err)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 func ApprovalView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, approvalID common.ApprovalID, scope common.WorkspaceID) (readmodelcore.Approval, error) {
-	item, err := ReadApproval(ctx, hub, approvalID)
+	item, err := ReadApproval(contextWithGovernanceScope(ctx, scope), hub, approvalID)
 	if err != nil {
 		return readmodelcore.Approval{}, err
 	}

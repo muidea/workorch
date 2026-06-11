@@ -44,6 +44,7 @@ Last Updated: 2026-05-29
 - [next-mvp-acceptance.md](next-mvp-acceptance.md)
 - [llm-context-budget-todo.md](llm-context-budget-todo.md)
 - [run-closure-quality-improvement-plan.md](run-closure-quality-improvement-plan.md)
+- [workorchd-state-loop-and-projection-closure-plan.md](workorchd-state-loop-and-projection-closure-plan.md)
 
 ## Layering
 

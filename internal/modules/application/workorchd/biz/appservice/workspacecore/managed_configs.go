@@ -7,11 +7,30 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 )
 
-func EnsureManagedConfigs(internalDirectory string, contextHints map[string]any) error {
+func EnsureManagedConfigs(internalDirectory string, systemContextHints map[string]any, workspaceContextHints ...map[string]any) error {
 	internalDirectory = strings.TrimSpace(internalDirectory)
-	if internalDirectory == "" || len(contextHints) == 0 {
+	if internalDirectory == "" {
+		return nil
+	}
+	if len(workspaceContextHints) == 0 {
+		return ensureManagedConfigsInRoot(internalDirectory, systemContextHints, managedConfigWritePolicy{})
+	}
+	if err := ensureManagedConfigsInRoot(SystemManagedConfigDirectory(internalDirectory), systemContextHints, managedConfigWritePolicy{overwriteExisting: true}); err != nil {
+		return err
+	}
+	return ensureManagedConfigsInRoot(internalDirectory, workspaceContextHints[0], managedConfigWritePolicy{})
+}
+
+type managedConfigWritePolicy struct {
+	overwriteExisting bool
+}
+
+func ensureManagedConfigsInRoot(root string, contextHints map[string]any, policy managedConfigWritePolicy) error {
+	root = strings.TrimSpace(root)
+	if root == "" || len(contextHints) == 0 {
 		return nil
 	}
 	configs, ok := contextHints["managedWorkspaceConfigs"].([]any)
@@ -23,33 +42,41 @@ func EnsureManagedConfigs(internalDirectory string, contextHints map[string]any)
 		if !ok {
 			continue
 		}
-		if err := ensureManagedConfig(internalDirectory, config); err != nil {
+		if err := ensureManagedConfig(root, config, policy); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ensureManagedConfig(internalDirectory string, config map[string]any) error {
-	relPath := strings.TrimSpace(stringValueFromMap(config, "path"))
-	if relPath == "" {
-		return common.ErrInvalidArgument
+func ensureManagedConfig(root string, config map[string]any, policy managedConfigWritePolicy) error {
+	cleanRelPath, err := workorchmanagedconfig.CleanPath(stringValueFromMap(config, "path"))
+	if err != nil {
+		return err
 	}
-	cleanRelPath := filepath.Clean(relPath)
-	if filepath.IsAbs(cleanRelPath) || cleanRelPath == "." || strings.HasPrefix(cleanRelPath, ".."+string(os.PathSeparator)) || cleanRelPath == ".." {
-		return common.ErrInvalidArgument
-	}
-	target := filepath.Join(internalDirectory, cleanRelPath)
+	target := filepath.Join(root, cleanRelPath)
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	format := strings.ToLower(strings.TrimSpace(stringValueFromMap(config, "format")))
 	switch format {
 	case "", "json":
-		return ensureManagedJSONConfig(target, config["content"], boolValueFromMap(config, "mergeMissing"))
+		return ensureManagedJSONConfig(target, config["content"], boolValueFromMap(config, "mergeMissing"), policy.overwriteExisting)
 	default:
 		return fmt.Errorf("%w: unsupported workspace managed config format %q", common.ErrInvalidArgument, format)
 	}
+}
+
+func CleanManagedConfigPath(relPath string) (string, error) {
+	return workorchmanagedconfig.CleanPath(relPath)
+}
+
+func SystemManagedConfigDirectory(workspaceInternalDirectory string) string {
+	return workorchmanagedconfig.SystemDirectory(workspaceInternalDirectory)
+}
+
+func ManagedConfigPathForWorkspace(workspaceInternalDirectory string, relPath string) string {
+	return workorchmanagedconfig.PathForWorkspace(workspaceInternalDirectory, relPath)
 }
 
 func stringValueFromMap(values map[string]any, key string) string {

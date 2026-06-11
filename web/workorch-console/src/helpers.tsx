@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, RepairLoop, Result, Run, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels } from './utils/constants';
 
@@ -48,6 +48,7 @@ export const stateLabels: Record<string, string> = {
   blocked_on_approval: '等待审批',
   waiting_decision: '等待决策',
   waiting_approval: '等待审批',
+  stalled: '停滞',
   open: '待处理',
   resolved: '已解决',
   pending: '待审批',
@@ -152,7 +153,7 @@ export function repairLoopStateLabel(state?: string) {
 
 export function stateTag(state?: string) {
   const value = state || 'unknown';
-  const color = value.includes('failed') || value.includes('reject') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
+  const color = value.includes('failed') || value.includes('reject') || value.includes('stalled') ? 'red' : value.includes('block') || value.includes('pending') ? 'gold' : 'green';
   return <Tag color={color}>{stateLabel(value)}</Tag>;
 }
 
@@ -211,6 +212,54 @@ export function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
 export function workspaceProjectionRunLabel(snapshot?: WorkspaceSnapshot) {
   const run = workspaceProjectionRun(snapshot);
   return run ? `${run.id} / ${stateLabel(run.state)}` : '-';
+}
+
+export function projectionStatusSummary(status?: ProjectionStatus) {
+  if (!status) {
+    return '投影状态未知';
+  }
+  const revisions = [
+    `global ${status.globalRevision ?? 0}`,
+    status.workspaceRevision ? `workspace ${status.workspaceRevision}` : '',
+    status.projectedSourceRevision ? `projected ${status.projectedSourceRevision}` : ''
+  ].filter(Boolean);
+  const suffix = revisions.length ? ` / ${revisions.join(' / ')}` : '';
+  return `${stateLabel(status.state)}${suffix}`;
+}
+
+export function projectionStatusDescriptions(status?: ProjectionStatus) {
+  if (!status) {
+    return [{ key: 'projection', label: '投影状态', children: '-' }];
+  }
+  return [
+    { key: 'state', label: '投影状态', children: stateTag(status.state) },
+    { key: 'globalRevision', label: '全局 Revision', children: status.globalRevision ?? '-' },
+    { key: 'workspaceRevision', label: 'Workspace Revision', children: status.workspaceRevision ?? '-' },
+    { key: 'sourceRevision', label: 'Source Revision', children: status.sourceEventRevision ?? '-' },
+    { key: 'projectedRevision', label: '已投影 Revision', children: status.projectedSourceRevision ?? '-' },
+    { key: 'updatedAt', label: '更新时间', children: status.updatedAt || '-' },
+    { key: 'rebuiltAt', label: '重建时间', children: status.rebuiltAt || '-' },
+    { key: 'staleReason', label: 'Stale 原因', children: status.staleReason || '-' },
+    { key: 'error', label: '投影错误', children: status.error ? boundedParagraph(status.error, { rows: 2 }) : '-' }
+  ];
+}
+
+export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
+  if (!heartbeat || (!heartbeat.runId && !heartbeat.activityState && !heartbeat.summary)) {
+    return [{ key: 'heartbeat', label: '运行活动', children: '-' }];
+  }
+  return [
+    { key: 'activity', label: '运行活动', children: <Space wrap>{heartbeat.activityState ? stateTag(heartbeat.activityState) : '-'}{heartbeat.stalled ? <Tag color="red">stalled</Tag> : null}{heartbeat.ineffectiveRetry ? <Tag color="gold">ineffective retry</Tag> : null}</Space> },
+    { key: 'summary', label: '活动摘要', children: boundedParagraph(heartbeat.summary, { rows: 2 }) },
+    { key: 'latestStep', label: '最近步骤', children: [heartbeat.latestStepId, heartbeat.latestStepKind, heartbeat.latestStepState].filter(Boolean).join(' / ') || '-' },
+    { key: 'latestEvent', label: '最近事件', children: [heartbeat.latestEventTopic, heartbeat.latestEventRevision ? `rev ${heartbeat.latestEventRevision}` : '', heartbeat.latestEventAt].filter(Boolean).join(' / ') || '-' },
+    { key: 'latestProgress', label: '最近有效进展', children: heartbeat.latestEffectiveProgressAt || '-' },
+    { key: 'latestLLM', label: '最近 LLM', children: heartbeat.latestLLMUsageAt || '-' },
+    { key: 'latestResult', label: '最近结果', children: heartbeat.latestResultAt || '-' },
+    { key: 'latestArtifact', label: '最近交付物', children: heartbeat.latestArtifactAt || '-' },
+    { key: 'latestPatch', label: '最近补丁', children: heartbeat.latestPatchAt || '-' },
+    { key: 'evidence', label: '最近证据', children: heartbeat.latestEvidenceRef || '-' }
+  ];
 }
 
 export function isBlockedRunState(state?: string) {

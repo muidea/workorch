@@ -25,8 +25,13 @@ func (c *Client) ListApprovals(ctx context.Context, workspaceID, runID string) (
 }
 
 // GetApproval returns a single approval.
-func (c *Client) GetApproval(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/approvals/%s", escapePath(approvalID)), nil)
+func (c *Client) GetApproval(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+	path := fmt.Sprintf("/api/v1/workorch/approvals/%s", escapePath(approvalID))
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "GET", joinQuery(path, values), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -34,8 +39,13 @@ func (c *Client) GetApproval(ctx context.Context, approvalID string) (*Approval,
 }
 
 // Approve approves an approval gate.
-func (c *Client) Approve(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", escapePath(approvalID)), nil)
+func (c *Client) Approve(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/approve", escapePath(approvalID))
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -43,8 +53,13 @@ func (c *Client) Approve(ctx context.Context, approvalID string) (*Approval, err
 }
 
 // Reject rejects an approval gate.
-func (c *Client) Reject(ctx context.Context, approvalID string) (*Approval, error) {
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", escapePath(approvalID)), nil)
+func (c *Client) Reject(ctx context.Context, workspaceID string, approvalID string) (*Approval, error) {
+	path := fmt.Sprintf("/api/v1/workorch/approvals/%s/reject", escapePath(approvalID))
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -52,12 +67,16 @@ func (c *Client) Reject(ctx context.Context, approvalID string) (*Approval, erro
 }
 
 // BatchResolveApprovals resolves multiple approvals at once.
-func (c *Client) BatchResolveApprovals(ctx context.Context, approvalIDs []string, action string) ([]Approval, error) {
+func (c *Client) BatchResolveApprovals(ctx context.Context, workspaceID string, approvalIDs []string, action string) ([]Approval, error) {
 	req := struct {
 		ApprovalIDs []string `json:"approvalIds"`
 		Action      string   `json:"action"`
 	}{ApprovalIDs: approvalIDs, Action: action}
-	resp, err := c.do(ctx, "POST", "/api/v1/workorch/approvals/resolve-batch", req)
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "POST", joinQuery("/api/v1/workorch/approvals/resolve-batch", values), req)
 	if err != nil {
 		return nil, err
 	}

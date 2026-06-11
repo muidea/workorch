@@ -54,8 +54,6 @@ type workspaceScopedFileStore struct {
 	indexLoaded           bool
 	indexCache            workspaceIndex
 	mu                    sync.Mutex
-	runRootMu             sync.RWMutex
-	runRootsByID          map[string]string
 	workspaces            map[string]*fileRepo.WorkspaceRepository
 	goals                 map[string]*fileRepo.GoalRepository
 	dods                  map[string]*fileRepo.DoDRepository
@@ -146,7 +144,6 @@ func NewWorkspaceScopedFileRepositorySet(dataRoot string) WorkspaceScopedFileRep
 func newWorkspaceScopedFileStore(dataRoot string) *workspaceScopedFileStore {
 	return &workspaceScopedFileStore{
 		dataRoot:              dataRoot,
-		runRootsByID:          map[string]string{},
 		workspaces:            map[string]*fileRepo.WorkspaceRepository{},
 		goals:                 map[string]*fileRepo.GoalRepository{},
 		dods:                  map[string]*fileRepo.DoDRepository{},
@@ -177,9 +174,7 @@ func (s *workspaceScopedFileStore) workspaceSoulBindingsPath(workspaceID common.
 }
 
 func (s *workspaceScopedFileStore) runRoot(workspaceID common.WorkspaceID, runID common.RunID) string {
-	root := filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", string(runID))
-	s.rememberRunRoot(runID, root)
-	return root
+	return filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", string(runID))
 }
 
 func (s *workspaceScopedFileStore) systemPath(name string) string {
@@ -204,10 +199,16 @@ func (s *workspaceScopedFileStore) allWorkspaceRoots() []string {
 	return matches
 }
 
+func (s *workspaceScopedFileStore) workspaceRootsForContext(ctx context.Context) []string {
+	if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
+		return []string{s.workspaceRoot(workspaceID)}
+	}
+	return s.allWorkspaceRoots()
+}
+
 func (s *workspaceScopedFileStore) allRunRoots() []string {
 	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", "*", "runs", "*"))
 	sort.Strings(matches)
-	s.rememberRunRoots(matches)
 	return matches
 }
 
@@ -217,35 +218,7 @@ func (s *workspaceScopedFileStore) workspaceRunRoots(workspaceID common.Workspac
 	}
 	matches, _ := filepath.Glob(filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", "*"))
 	sort.Strings(matches)
-	s.rememberRunRoots(matches)
 	return matches
-}
-
-func (s *workspaceScopedFileStore) rememberRunRoot(runID common.RunID, root string) {
-	if runID == "" || root == "" {
-		return
-	}
-	workspaceID := workspaceIDFromRunRoot(root)
-	s.runRootMu.Lock()
-	defer s.runRootMu.Unlock()
-	if workspaceID != "" {
-		s.runRootsByID[runRootCacheKey(workspaceID, runID)] = root
-	}
-	bareKey := runRootCacheKey("", runID)
-	if existing, exists := s.runRootsByID[bareKey]; !exists {
-		s.runRootsByID[bareKey] = root
-	} else if existing != root {
-		delete(s.runRootsByID, bareKey)
-	}
-}
-
-func (s *workspaceScopedFileStore) rememberRunRoots(roots []string) {
-	for _, root := range roots {
-		runID := common.RunID(filepath.Base(root))
-		if runID != "" {
-			s.rememberRunRoot(runID, root)
-		}
-	}
 }
 
 func (s *workspaceScopedFileStore) runRootByID(ctx context.Context, runID common.RunID) (string, bool) {
@@ -255,7 +228,6 @@ func (s *workspaceScopedFileStore) runRootByID(ctx context.Context, runID common
 	if workspaceID := common.RuntimeWorkspaceIDFromContext(ctx); workspaceID != "" {
 		root := filepath.Join(s.dataRoot, "internal", "workspaces", string(workspaceID), "runs", string(runID))
 		if _, err := os.Stat(filepath.Join(root, workspaceScopedRunFile)); err == nil {
-			s.rememberRunRoot(runID, root)
 			return root, true
 		}
 		return "", false
@@ -268,7 +240,6 @@ func (s *workspaceScopedFileStore) runRootByID(ctx context.Context, runID common
 	if len(matches) > 1 {
 		return "", false
 	}
-	s.rememberRunRoot(runID, matches[0])
 	return matches[0], true
 }
 
@@ -290,23 +261,31 @@ func (s *workspaceScopedFileStore) runRootsByRunID(ctx context.Context, runID co
 	if len(matches) > 1 {
 		return nil, common.ErrConflict
 	}
-	s.rememberRunRoot(runID, matches[0])
 	return matches, nil
 }
 
-func runRootCacheKey(workspaceID common.WorkspaceID, runID common.RunID) string {
-	if workspaceID == "" {
-		return "/" + string(runID)
+func findUniqueInPaths[T any](paths []string, read func(string) (T, error)) (T, error) {
+	var zero T
+	var ret T
+	found := false
+	for _, path := range paths {
+		item, err := read(path)
+		if err == nil {
+			if found {
+				return zero, common.ErrConflict
+			}
+			ret = item
+			found = true
+			continue
+		}
+		if err != common.ErrNotFound {
+			return zero, err
+		}
 	}
-	return string(workspaceID) + "/" + string(runID)
-}
-
-func workspaceIDFromRunRoot(root string) common.WorkspaceID {
-	root = filepath.Clean(root)
-	if filepath.Base(filepath.Dir(root)) != "runs" {
-		return ""
+	if !found {
+		return zero, common.ErrNotFound
 	}
-	return common.WorkspaceID(filepath.Base(filepath.Dir(filepath.Dir(root))))
+	return ret, nil
 }
 
 func runIDFromStepID(stepID common.StepID) common.RunID {
@@ -823,16 +802,9 @@ func (r *workspaceScopedGoalRepository) Get(ctx context.Context, id common.GoalI
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.allWorkspaceRoots() {
-		item, err := r.store.goalRepo(filepath.Join(root, workspaceScopedGoalFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRootsForContext(ctx), func(root string) (*workspacemodel.Goal, error) {
+		return r.store.goalRepo(filepath.Join(root, workspaceScopedGoalFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedGoalRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.Goal, error) {
@@ -890,16 +862,9 @@ func (r *workspaceScopedDoDRepository) Get(ctx context.Context, id common.DoDID)
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.allWorkspaceRoots() {
-		item, err := r.store.dodRepo(filepath.Join(root, workspaceScopedDoDFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRootsForContext(ctx), func(root string) (*workspacemodel.DoD, error) {
+		return r.store.dodRepo(filepath.Join(root, workspaceScopedDoDFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedDoDRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*workspacemodel.DoD, error) {
@@ -957,16 +922,9 @@ func (r *workspaceScopedMemoryItemRepository) Get(ctx context.Context, id common
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.allWorkspaceRoots() {
-		item, err := r.store.memoryItemRepo(filepath.Join(root, workspaceScopedMemoryItemFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRootsForContext(ctx), func(root string) (*memorymodel.MemoryItem, error) {
+		return r.store.memoryItemRepo(filepath.Join(root, workspaceScopedMemoryItemFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedMemoryItemRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
@@ -1052,16 +1010,9 @@ func (r *workspaceScopedMemoryRecallTraceRepository) Get(ctx context.Context, id
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.allWorkspaceRoots() {
-		item, err := r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRootsForContext(ctx), func(root string) (*memorymodel.MemoryRecallTrace, error) {
+		return r.store.memoryRecallTraceRepo(filepath.Join(root, workspaceScopedMemoryRecallTraceFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedMemoryRecallTraceRepository) List(ctx context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
@@ -1129,7 +1080,6 @@ func (r *workspaceScopedRunRepository) Get(ctx context.Context, id common.RunID)
 	for _, root := range roots {
 		item, err := r.store.runRepo(r.store.runPath(root, workspaceScopedRunFile)).Get(ctx, id)
 		if err == nil {
-			r.store.rememberRunRoot(id, root)
 			return item, nil
 		}
 		if err != common.ErrNotFound {
@@ -1237,16 +1187,9 @@ func (r *workspaceScopedStepRepository) Get(ctx context.Context, id common.StepI
 			return nil, common.ErrNotFound
 		}
 	}
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.Step, error) {
+		return r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
@@ -1324,16 +1267,9 @@ func (r *workspaceScopedToolCallRepository) Create(ctx context.Context, item *ru
 }
 
 func (r *workspaceScopedToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*runmodel.ToolCall, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.ToolCall, error) {
+		return r.store.toolCallRepo(r.store.runPath(root, workspaceScopedToolCallFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ToolCall, error) {
@@ -1425,16 +1361,9 @@ func (r *workspaceScopedPatchRepository) Create(ctx context.Context, item *runmo
 }
 
 func (r *workspaceScopedPatchRepository) Get(ctx context.Context, id common.PatchID) (*runmodel.Patch, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.Patch, error) {
+		return r.store.patchRepo(r.store.runPath(root, workspaceScopedPatchFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedPatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Patch, error) {
@@ -1526,16 +1455,9 @@ func (r *workspaceScopedValidationResultRepository) Create(ctx context.Context, 
 }
 
 func (r *workspaceScopedValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*runmodel.ValidationResult, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.ValidationResult, error) {
+		return r.store.validationResultRepo(r.store.runPath(root, workspaceScopedValidationResultFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.ValidationResult, error) {
@@ -1627,16 +1549,9 @@ func (r *workspaceScopedRuntimeCheckpointRepository) Create(ctx context.Context,
 }
 
 func (r *workspaceScopedRuntimeCheckpointRepository) Get(ctx context.Context, id common.CheckpointID) (*runmodel.RuntimeCheckpoint, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.runtimeCheckpointRepo(r.store.runPath(root, workspaceScopedRuntimeCheckpointFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*runmodel.RuntimeCheckpoint, error) {
+		return r.store.runtimeCheckpointRepo(r.store.runPath(root, workspaceScopedRuntimeCheckpointFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedRuntimeCheckpointRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
@@ -1708,16 +1623,9 @@ func (r *workspaceScopedArtifactContinuationRepository) Get(ctx context.Context,
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.artifactContinuationRepo(r.store.runPath(root, workspaceScopedArtifactContinuationDir)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*orchestratormodel.ArtifactContinuation, error) {
+		return r.store.artifactContinuationRepo(r.store.runPath(root, workspaceScopedArtifactContinuationDir)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedArtifactContinuationRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*orchestratormodel.ArtifactContinuation, error) {
@@ -1874,16 +1782,9 @@ func (r *workspaceScopedResultRepository) Create(ctx context.Context, item *resu
 }
 
 func (r *workspaceScopedResultRepository) Get(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.resultRepo(r.store.runPath(root, workspaceScopedResultFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*resultmodel.Result, error) {
+		return r.store.resultRepo(r.store.runPath(root, workspaceScopedResultFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedResultRepository) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
@@ -1965,16 +1866,9 @@ func (r *workspaceScopedArtifactRepository) Create(ctx context.Context, item *re
 }
 
 func (r *workspaceScopedArtifactRepository) Get(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.artifactRepo(r.store.runPath(root, workspaceScopedArtifactFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*resultmodel.Artifact, error) {
+		return r.store.artifactRepo(r.store.runPath(root, workspaceScopedArtifactFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedArtifactRepository) ListByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
@@ -2074,21 +1968,21 @@ func (r *workspaceScopedEventRecordRepository) Append(ctx context.Context, item 
 func (r *workspaceScopedEventRecordRepository) Get(ctx context.Context, id common.EventRecordID) (*eventstreammodel.EventRecord, error) {
 	item, err := r.store.eventRecordRepo(r.store.systemPath(workspaceScopedEventRecordFile)).Get(ctx, id)
 	if err == nil {
+		if _, runErr := findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*eventstreammodel.EventRecord, error) {
+			return r.store.eventRecordRepo(r.store.runPath(root, workspaceScopedEventRecordFile)).Get(ctx, id)
+		}); runErr == nil {
+			return nil, common.ErrConflict
+		} else if runErr != common.ErrNotFound {
+			return nil, runErr
+		}
 		return item, nil
 	}
 	if err != common.ErrNotFound {
 		return nil, err
 	}
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.eventRecordRepo(r.store.runPath(root, workspaceScopedEventRecordFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*eventstreammodel.EventRecord, error) {
+		return r.store.eventRecordRepo(r.store.runPath(root, workspaceScopedEventRecordFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedEventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
@@ -2165,16 +2059,9 @@ func (r *workspaceScopedDecisionTicketRepository) Get(ctx context.Context, id co
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)) {
-		item, err := r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Ticket, error) {
+		return r.store.ticketRepo(r.store.runPath(root, workspaceScopedTicketFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedDecisionTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
@@ -2289,16 +2176,9 @@ func (r *workspaceScopedDecisionResolutionRepository) GetByTicketID(ctx context.
 	} else if err != common.ErrNotFound {
 		return nil, err
 	}
-	for _, root := range r.store.allRunRoots() {
-		item, err := r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*decisionmodel.Resolution, error) {
+		return r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID)
+	})
 }
 
 func (r *workspaceScopedDecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
@@ -2313,16 +2193,16 @@ func (r *workspaceScopedDecisionResolutionRepository) DeleteByTicketID(ctx conte
 	} else if err != common.ErrNotFound {
 		return err
 	}
-	for _, root := range r.store.allRunRoots() {
-		err := r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).DeleteByTicketID(ctx, ticketID)
-		if err == nil {
-			return nil
+	root, err := findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (string, error) {
+		if _, err := r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).GetByTicketID(ctx, ticketID); err != nil {
+			return "", err
 		}
-		if err != common.ErrNotFound {
-			return err
-		}
+		return root, nil
+	})
+	if err != nil {
+		return err
 	}
-	return common.ErrNotFound
+	return r.store.resolutionRepo(r.store.runPath(root, workspaceScopedResolutionFile)).DeleteByTicketID(ctx, ticketID)
 }
 
 type workspaceScopedApprovalRepository struct {
@@ -2344,16 +2224,9 @@ func (r *workspaceScopedApprovalRepository) Get(ctx context.Context, id common.A
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	for _, root := range r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)) {
-		item, err := r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).Get(ctx, id)
-		if err == nil {
-			return item, nil
-		}
-		if err != common.ErrNotFound {
-			return nil, err
-		}
-	}
-	return nil, common.ErrNotFound
+	return findUniqueInPaths(r.store.workspaceRunRoots(common.RuntimeWorkspaceIDFromContext(ctx)), func(root string) (*approvalmodel.Approval, error) {
+		return r.store.approvalRepo(r.store.runPath(root, workspaceScopedApprovalFile)).Get(ctx, id)
+	})
 }
 
 func (r *workspaceScopedApprovalRepository) List(ctx context.Context) ([]*approvalmodel.Approval, error) {

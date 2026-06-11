@@ -56,7 +56,40 @@ func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template Workspace
 	item.TemplateID = templateID
 	item.ProfileID = templateID
 	item.SoulBindings = bindings
-	item.ContextHints = cloneContextMap(template.ContextHints)
+	item.ContextHints = cloneContextMapWithoutCommonToolDefaults(template.ContextHints)
 	item.EvidencePolicies = cloneContextMapSlice(template.EvidencePolicies)
 	return item, nil
+}
+
+func cloneContextMapWithoutCommonToolDefaults(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		if isCommonToolDefaultContextKey(key) {
+			continue
+		}
+		if mapped, ok := value.(map[string]any); ok {
+			cloned := cloneContextMapWithoutCommonToolDefaults(mapped)
+			if len(cloned) > 0 {
+				ret[key] = cloned
+			}
+			continue
+		}
+		ret[key] = cloneContextValue(value)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func isCommonToolDefaultContextKey(key string) bool {
+	switch key {
+	case "defaultMCPServerIds", "defaultCapabilityIds", "managedWorkspaceConfigs":
+		return true
+	default:
+		return false
+	}
 }

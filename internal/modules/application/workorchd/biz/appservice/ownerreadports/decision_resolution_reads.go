@@ -14,9 +14,10 @@ func ReadDecisionResolutionByTicketOwnerCommand(ctx context.Context, hub events.
 	if hub == nil || ticketID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, decisionevents.TopicDecisionCommandGetResolution, "ticket", string(ticketID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, decisionevents.TopicDecisionCommandGetResolution, "ticket", string(ticketID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyBlockingTicketID: string(ticketID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

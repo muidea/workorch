@@ -15,8 +15,9 @@ func ResolveApprovalView(ctx context.Context, hub events.Hub, traces governancec
 	if err != nil {
 		return readmodelcore.Approval{}, err
 	}
+	var existing *approvalmodel.Approval
 	if scope != "" {
-		existing, err := ReadApproval(ctx, hub, approvalID)
+		existing, err = ReadApproval(contextWithGovernanceScope(ctx, scope), hub, approvalID)
 		if err != nil {
 			return readmodelcore.Approval{}, err
 		}
@@ -26,9 +27,17 @@ func ResolveApprovalView(ctx context.Context, hub events.Hub, traces governancec
 	}
 	var item *approvalmodel.Approval
 	if action == "approve" {
-		item, err = ApproveApproval(ctx, hub, approvalID)
+		if existing != nil {
+			item, err = ApproveApprovalItem(ctx, hub, existing)
+		} else {
+			item, err = ApproveApproval(ctx, hub, approvalID)
+		}
 	} else {
-		item, err = RejectApproval(ctx, hub, approvalID)
+		if existing != nil {
+			item, err = RejectApprovalItem(ctx, hub, existing)
+		} else {
+			item, err = RejectApproval(ctx, hub, approvalID)
+		}
 	}
 	if err != nil {
 		return readmodelcore.Approval{}, err
@@ -36,9 +45,9 @@ func ResolveApprovalView(ctx context.Context, hub events.Hub, traces governancec
 	return ApprovalViewForItem(ctx, traces, item, scope)
 }
 
-func resolveApprovalByAction(ctx context.Context, hub events.Hub, approvalID common.ApprovalID, action string) (*approvalmodel.Approval, error) {
+func resolveApprovalItemByAction(ctx context.Context, hub events.Hub, item *approvalmodel.Approval, action string) (*approvalmodel.Approval, error) {
 	if action == "approve" {
-		return ApproveApproval(ctx, hub, approvalID)
+		return ApproveApprovalItem(ctx, hub, item)
 	}
-	return RejectApproval(ctx, hub, approvalID)
+	return RejectApprovalItem(ctx, hub, item)
 }

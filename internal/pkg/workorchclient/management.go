@@ -174,8 +174,8 @@ func (c *Client) SearchMemory(ctx context.Context, query MemorySearchQuery) ([]M
 	return decodeEnvelopeSlice[MemoryItem](resp, "memory")
 }
 
-func (c *Client) GetMemory(ctx context.Context, memoryID string) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), nil)
+func (c *Client) GetMemory(ctx context.Context, workspaceID string, memoryID string) (*MemoryItem, error) {
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory/%s", escapePath(workspaceID), escapePath(memoryID)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -190,16 +190,16 @@ func (c *Client) CreateMemory(ctx context.Context, workspaceID string, item *Mem
 	return decodeEnvelope[MemoryItem](resp, "memory")
 }
 
-func (c *Client) UpdateMemory(ctx context.Context, memoryID string, item *MemoryItem) (*MemoryItem, error) {
-	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), item)
+func (c *Client) UpdateMemory(ctx context.Context, workspaceID string, memoryID string, item *MemoryItem) (*MemoryItem, error) {
+	resp, err := c.do(ctx, "PUT", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory/%s", escapePath(workspaceID), escapePath(memoryID)), item)
 	if err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[MemoryItem](resp, "memory")
 }
 
-func (c *Client) DeleteMemory(ctx context.Context, memoryID string) error {
-	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/memory/%s", escapePath(memoryID)), nil)
+func (c *Client) DeleteMemory(ctx context.Context, workspaceID string, memoryID string) error {
+	resp, err := c.do(ctx, "DELETE", fmt.Sprintf("/api/v1/workorch/workspaces/%s/memory/%s", escapePath(workspaceID), escapePath(memoryID)), nil)
 	if err != nil {
 		return err
 	}

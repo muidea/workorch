@@ -11,9 +11,11 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
@@ -37,7 +39,8 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed progress checkpoint: %v", err)
 	}
-	if HasContinuationCheckpoint(ctx, exports.Infrastructure.EventHub, runID) {
+	run := &runmodel.Run{ID: runID}
+	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
 		t.Fatal("progress checkpoint should not count as continuation checkpoint")
 	}
 
@@ -50,7 +53,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed recovery checkpoint: %v", err)
 	}
-	if !HasContinuationCheckpoint(ctx, exports.Infrastructure.EventHub, runID) {
+	if !HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
 		t.Fatal("latest recovery checkpoint with resume action should count")
 	}
 
@@ -63,7 +66,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed empty recovery checkpoint: %v", err)
 	}
-	if HasContinuationCheckpoint(ctx, exports.Infrastructure.EventHub, runID) {
+	if HasContinuationCheckpointForRun(ctx, exports.Infrastructure.EventHub, run) {
 		t.Fatal("latest recovery checkpoint without continuation action should not count")
 	}
 }
@@ -113,6 +116,59 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 	}
 	if IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, candidate) {
 		t.Fatal("running run with continuation checkpoint should not be a stuck-running candidate")
+	}
+}
+
+func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-recovery-candidate-scope")
+	runID := common.RunID("run-recovery-candidate-scope")
+	hub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("checkpoint list envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.RunID != string(runID) {
+			t.Fatalf("checkpoint list envelope run = %q, want %s", envelope.RunID, runID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("checkpoint list payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyRunID] != string(runID) {
+			t.Fatalf("checkpoint list payload run = %v, want %s", envelope.Payload[events.PayloadKeyRunID], runID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{},
+			},
+		})
+	})
+	hub.Subscribe(runevents.TopicRunCommandListStepsByRun, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("step list envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("step list payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeySteps: []*runmodel.Step{{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateCompleted}},
+			},
+		})
+	})
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+
+	if !IsStuckRunningRunCandidate(ctx, hub, run) {
+		t.Fatal("running run without continuation checkpoint should be candidate")
+	}
+	terminal, err := TerminalStepForRunningRun(ctx, hub, run)
+	if err != nil {
+		t.Fatalf("TerminalStepForRunningRun: %v", err)
+	}
+	if terminal == nil || terminal.ID != "run-recovery-candidate-scope/root" {
+		t.Fatalf("terminal = %+v, want scoped root step", terminal)
 	}
 }
 

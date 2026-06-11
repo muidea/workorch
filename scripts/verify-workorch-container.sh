@@ -337,10 +337,10 @@ if [[ "$BACKEND" == "file" ]]; then
   ticket_id="$(sed -n 's/.*"blockingTicketId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-decision-block-verify.json" | head -n1)"
   [[ -n "$ticket_id" ]]
   curl -fsS "$BASE_URL/api/v1/workorch/decisions" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"open"'
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"open"'
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id" | grep "\"id\": \"$ticket_id\"" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/decisions?workspaceId=$workspace_id&runId=run-runtime-decision-block-verify" | grep "\"id\": \"$ticket_id\"" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_id/resolve" -H 'Content-Type: application/json' \
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$ticket_id/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
     -d '{"resolutionType":"provide_missing_info"}' | json_contains '"resolutionType"[[:space:]]*:[[:space:]]*"provide_missing_info"'
   wait_run_state "run-runtime-decision-block-verify" "completed" "$TMP_DIR/run-runtime-decision-block-verify-resumed-status.json"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
@@ -348,7 +348,7 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-runtime-decision-block-rejected-verify/start" >"$TMP_DIR/run-runtime-decision-block-rejected-verify.json"
   reject_ticket_id="$(sed -n 's/.*"blockingTicketId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-decision-block-rejected-verify.json" | head -n1)"
   [[ -n "$reject_ticket_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id/resolve" -H 'Content-Type: application/json' \
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
     -d '{"resolutionType":"reject_current_path","resolutionPayload":{"operator":"verify"}}' | json_contains '"resolutionType"[[:space:]]*:[[:space:]]*"reject_current_path"'
   wait_run_state "run-runtime-decision-block-rejected-verify" "failed" "$TMP_DIR/run-runtime-decision-block-rejected-verify-resumed-status.json"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
@@ -358,17 +358,17 @@ if [[ "$BACKEND" == "file" ]]; then
   approval_id="$(sed -n 's/.*"blockingApprovalId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-approval-block-verify.json" | head -n1)"
   [[ -n "$approval_id" ]]
   curl -fsS "$BASE_URL/api/v1/workorch/approvals" | grep "\"id\": \"$approval_id\"" >/dev/null
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"pending"'
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"pending"'
   curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | grep "\"id\": \"$approval_id\"" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=run-runtime-approval-block-verify" | grep "\"id\": \"$approval_id\"" >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_id/approve" | json_contains '"state"[[:space:]]*:[[:space:]]*"approved"'
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_id/approve?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"approved"'
   wait_run_state "run-runtime-approval-block-verify" "completed" "$TMP_DIR/run-runtime-approval-block-verify-resumed-status.json"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" -H 'Content-Type: application/json' \
     -d '{"runId":"run-runtime-approval-block-rejected-verify","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'"}' | json_contains '"id"[[:space:]]*:[[:space:]]*"run-runtime-approval-block-rejected-verify"'
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-runtime-approval-block-rejected-verify/start" >"$TMP_DIR/run-runtime-approval-block-rejected-verify.json"
   reject_approval_id="$(sed -n 's/.*"blockingApprovalId": "\(.*\)".*/\1/p' "$TMP_DIR/run-runtime-approval-block-rejected-verify.json" | head -n1)"
   [[ -n "$reject_approval_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id/reject" | json_contains '"state"[[:space:]]*:[[:space:]]*"rejected"'
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id/reject?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"rejected"'
   wait_run_state "run-runtime-approval-block-rejected-verify" "failed" "$TMP_DIR/run-runtime-approval-block-rejected-verify-resumed-status.json"
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | grep "\"id\": \"$workspace_id\"" >/dev/null
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_contains '"title"[[:space:]]*:[[:space:]]*"verify workspace"'
@@ -405,10 +405,10 @@ if [[ "$BACKEND" == "file" ]]; then
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-verify/status" | json_contains '"state"[[:space:]]*:[[:space:]]*"completed"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-runtime-decision-block-verify" | json_contains '"state"[[:space:]]*:[[:space:]]*"completed"'
   curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/run-runtime-decision-block-rejected-verify" | json_contains '"state"[[:space:]]*:[[:space:]]*"failed"'
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"resolved"'
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id" | json_contains '"resolutionType"[[:space:]]*:[[:space:]]*"reject_current_path"'
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"approved"'
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"rejected"'
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_id?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"resolved"'
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$reject_ticket_id?workspaceId=$workspace_id" | json_contains '"resolutionType"[[:space:]]*:[[:space:]]*"reject_current_path"'
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_id?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"approved"'
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$reject_approval_id?workspaceId=$workspace_id" | json_contains '"state"[[:space:]]*:[[:space:]]*"rejected"'
 fi
 
 echo "workorch container verification passed for backend=$BACKEND"

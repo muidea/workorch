@@ -11,6 +11,7 @@ import (
 )
 
 func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, map[string]any, error) {
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, opts.WorkspaceID)
 	type memResult struct {
 		item *memorymodel.MemoryItem
 		err  error

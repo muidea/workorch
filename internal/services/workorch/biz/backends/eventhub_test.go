@@ -344,21 +344,21 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 	if len(search) != 1 || search[0].ID != created.ID {
 		t.Fatalf("search = %+v, want created memory", search)
 	}
-	got, err := be.Memory().Get(ctx, created.ID)
+	got, err := be.Memory().Get(ctx, ws.ID, created.ID)
 	if err != nil {
 		t.Fatalf("get memory: %v", err)
 	}
 	if got == nil || got.Summary != "eventhub memory" {
 		t.Fatalf("got = %+v, want created memory", got)
 	}
-	updated, err := be.Memory().Update(ctx, created.ID, &MemoryItemInfo{Summary: "updated eventhub memory"})
+	updated, err := be.Memory().Update(ctx, ws.ID, created.ID, &MemoryItemInfo{Summary: "updated eventhub memory"})
 	if err != nil {
 		t.Fatalf("update memory: %v", err)
 	}
 	if updated == nil || updated.Summary != "updated eventhub memory" {
 		t.Fatalf("updated = %+v, want updated summary", updated)
 	}
-	if err := be.Memory().Delete(ctx, created.ID); err != nil {
+	if err := be.Memory().Delete(ctx, ws.ID, created.ID); err != nil {
 		t.Fatalf("delete memory: %v", err)
 	}
 	list, err = be.Memory().List(ctx, ws.ID)

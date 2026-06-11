@@ -182,30 +182,30 @@ func (s *serverState) cachedRunSnapshot(ctx context.Context, runID string) (apps
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	key := runSnapshotCacheKey(ctx, runID)
-	entry, ok := s.runSnapshotCache[key]
-	if !ok || time.Since(entry.cachedAt) > runSnapshotCacheTTL {
-		if ok {
-			delete(s.runSnapshotCache, key)
-		}
+	entry := s.runSnapshotEntries[key]
+	cached, ok := freshRunSnapshotCachedEntry(entry, time.Now())
+	if !ok {
+		s.clearRunSnapshotCachedEntryLocked(key, entry)
 		if common.RuntimeWorkspaceIDFromContext(ctx) != "" {
 			return appservice.RunSnapshot{}, false
 		}
 		return s.cachedRunSnapshotByBareRunIDLocked(runID)
 	}
-	return entry.snapshot, true
+	return cached.snapshot, true
 }
 
 func (s *serverState) cachedRunSnapshotByBareRunIDLocked(runID string) (appservice.RunSnapshot, bool) {
 	now := time.Now()
 	var ret appservice.RunSnapshot
 	count := 0
-	for key, entry := range s.runSnapshotCache {
-		if now.Sub(entry.cachedAt) > runSnapshotCacheTTL {
-			delete(s.runSnapshotCache, key)
+	for key, entry := range s.runSnapshotEntries {
+		cached, ok := freshRunSnapshotCachedEntry(entry, now)
+		if !ok {
+			s.clearRunSnapshotCachedEntryLocked(key, entry)
 			continue
 		}
-		if entry.snapshot.Run.ID == runID {
-			ret = entry.snapshot
+		if cached.snapshot.Run.ID == runID {
+			ret = cached.snapshot
 			count++
 		}
 	}
@@ -219,16 +219,20 @@ func (s *serverState) cachedRunSnapshotByWorkspace(workspaceID string) (appservi
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	now := time.Now()
-	for runID, entry := range s.runSnapshotCache {
-		if now.Sub(entry.cachedAt) > runSnapshotCacheTTL {
-			delete(s.runSnapshotCache, runID)
+	var ret appservice.RunSnapshot
+	count := 0
+	for key, entry := range s.runSnapshotEntries {
+		cached, ok := freshRunSnapshotCachedEntry(entry, now)
+		if !ok {
+			s.clearRunSnapshotCachedEntryLocked(key, entry)
 			continue
 		}
-		if entry.snapshot.Run.WorkspaceID == workspaceID {
-			return entry.snapshot, true
+		if cached.snapshot.Run.WorkspaceID == workspaceID {
+			ret = cached.snapshot
+			count++
 		}
 	}
-	return appservice.RunSnapshot{}, false
+	return ret, count == 1
 }
 
 func (s *serverState) ensureRunSnapshotInflight(ctx context.Context, runID string) (*runSnapshotInflight, bool) {
@@ -237,15 +241,13 @@ func (s *serverState) ensureRunSnapshotInflight(ctx context.Context, runID strin
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	if s.runSnapshotInflight == nil {
-		s.runSnapshotInflight = map[string]*runSnapshotInflight{}
-	}
 	key := runSnapshotCacheKey(ctx, runID)
-	if current, ok := s.runSnapshotInflight[key]; ok {
-		return current, true
+	entry := s.ensureRunSnapshotEntryLocked(key)
+	if entry.inflight != nil {
+		return entry.inflight, true
 	}
 	current := &runSnapshotInflight{done: make(chan struct{})}
-	s.runSnapshotInflight[key] = current
+	entry.inflight = current
 	return current, false
 }
 
@@ -255,9 +257,13 @@ func (s *serverState) waitRunSnapshotInflight(ctx context.Context, runID string)
 	}
 	s.runSnapshotCacheMu.Lock()
 	key := runSnapshotCacheKey(ctx, runID)
-	current, ok := s.runSnapshotInflight[key]
+	entry := s.runSnapshotEntries[key]
+	var current *runSnapshotInflight
+	if entry != nil {
+		current = entry.inflight
+	}
 	s.runSnapshotCacheMu.Unlock()
-	if !ok {
+	if current == nil {
 		return appservice.RunSnapshot{}, nil, false
 	}
 	select {
@@ -275,17 +281,18 @@ func (s *serverState) completeRunSnapshotInflight(ctx context.Context, runID str
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	key := runSnapshotCacheKey(ctx, runID)
-	current, ok := s.runSnapshotInflight[key]
-	if !ok {
+	entry := s.runSnapshotEntries[key]
+	if entry == nil || entry.inflight == nil {
 		return
 	}
+	current := entry.inflight
 	current.snapshot = snapshot
 	current.err = err
 	if err == nil && snapshot.Run.ID != "" && terminalRunState(snapshot.Run.State) {
-		if s.runSnapshotCache == nil {
-			s.runSnapshotCache = map[string]cachedRunSnapshot{}
-		}
-		s.runSnapshotCache[runSnapshotCacheKeyForSnapshot(snapshot)] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+		cacheKey := runSnapshotCacheKeyForSnapshot(snapshot)
+		cacheEntry := s.ensureRunSnapshotEntryLocked(cacheKey)
+		cacheEntry.cached = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+		cacheEntry.hasCache = true
 	}
 	close(current.done)
 }
@@ -296,7 +303,15 @@ func (s *serverState) finishRunSnapshotInflight(ctx context.Context, runID strin
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	delete(s.runSnapshotInflight, runSnapshotCacheKey(ctx, runID))
+	key := runSnapshotCacheKey(ctx, runID)
+	entry := s.runSnapshotEntries[key]
+	if entry == nil {
+		return
+	}
+	entry.inflight = nil
+	if !entry.hasCache {
+		delete(s.runSnapshotEntries, key)
+	}
 }
 
 func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appservice.RunSnapshot, bool) {
@@ -306,14 +321,15 @@ func (s *serverState) cachedRunSnapshotByArtifactURI(artifactURI string) (appser
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
 	now := time.Now()
-	for runID, entry := range s.runSnapshotCache {
-		if now.Sub(entry.cachedAt) > runSnapshotCacheTTL {
-			delete(s.runSnapshotCache, runID)
+	for key, entry := range s.runSnapshotEntries {
+		cached, ok := freshRunSnapshotCachedEntry(entry, now)
+		if !ok {
+			s.clearRunSnapshotCachedEntryLocked(key, entry)
 			continue
 		}
-		for _, artifact := range entry.snapshot.Artifacts {
+		for _, artifact := range cached.snapshot.Artifacts {
 			if strings.TrimSpace(artifact.URI) == artifactURI {
-				return entry.snapshot, true
+				return cached.snapshot, true
 			}
 		}
 	}
@@ -326,10 +342,9 @@ func (s *serverState) cacheRunSnapshot(snapshot appservice.RunSnapshot) {
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	if s.runSnapshotCache == nil {
-		s.runSnapshotCache = map[string]cachedRunSnapshot{}
-	}
-	s.runSnapshotCache[runSnapshotCacheKeyForSnapshot(snapshot)] = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+	entry := s.ensureRunSnapshotEntryLocked(runSnapshotCacheKeyForSnapshot(snapshot))
+	entry.cached = cachedRunSnapshot{snapshot: snapshot, cachedAt: time.Now()}
+	entry.hasCache = true
 }
 
 func runSnapshotCacheKey(ctx context.Context, runID string) string {
@@ -353,7 +368,50 @@ func (s *serverState) clearRunSnapshotCache() {
 	}
 	s.runSnapshotCacheMu.Lock()
 	defer s.runSnapshotCacheMu.Unlock()
-	clear(s.runSnapshotCache)
+	for key, entry := range s.runSnapshotEntries {
+		if entry == nil {
+			delete(s.runSnapshotEntries, key)
+			continue
+		}
+		entry.cached = cachedRunSnapshot{}
+		entry.hasCache = false
+		if entry.inflight == nil {
+			delete(s.runSnapshotEntries, key)
+		}
+	}
+}
+
+func (s *serverState) ensureRunSnapshotEntryLocked(key string) *runSnapshotCacheEntry {
+	if s.runSnapshotEntries == nil {
+		s.runSnapshotEntries = map[string]*runSnapshotCacheEntry{}
+	}
+	entry := s.runSnapshotEntries[key]
+	if entry == nil {
+		entry = &runSnapshotCacheEntry{}
+		s.runSnapshotEntries[key] = entry
+	}
+	return entry
+}
+
+func (s *serverState) clearRunSnapshotCachedEntryLocked(key string, entry *runSnapshotCacheEntry) {
+	if entry == nil {
+		return
+	}
+	entry.cached = cachedRunSnapshot{}
+	entry.hasCache = false
+	if entry.inflight == nil {
+		delete(s.runSnapshotEntries, key)
+	}
+}
+
+func freshRunSnapshotCachedEntry(entry *runSnapshotCacheEntry, now time.Time) (cachedRunSnapshot, bool) {
+	if entry == nil || !entry.hasCache {
+		return cachedRunSnapshot{}, false
+	}
+	if now.Sub(entry.cached.cachedAt) > runSnapshotCacheTTL {
+		return cachedRunSnapshot{}, false
+	}
+	return entry.cached, true
 }
 
 func (s *serverState) runStatusWaitNotify() <-chan struct{} {
@@ -424,13 +482,6 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 type governanceRunResumeRef struct {
 	WorkspaceID string
 	RunID       string
-}
-
-func (s *serverState) scheduleGovernanceRunResumes(runIDs []string, priority int) {
-	if s == nil || s.runContinuations == nil {
-		return
-	}
-	s.runContinuations.scheduleGovernanceRunResumes(runIDs, priority)
 }
 
 func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {

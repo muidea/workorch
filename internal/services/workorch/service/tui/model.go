@@ -70,31 +70,32 @@ type AppModel struct {
 	activeRunID         string
 	cursor              int
 
-	input                   string
-	inputCursor             int
-	slashCursor             int
-	inputHistory            []string
-	historyCursor           int
-	currentTask             string
-	dodItems                []string
-	transcript              []transcriptItem
-	result                  string
-	artifacts               []string
-	sources                 []string
-	patches                 []backend.PatchInfo
-	artifactContinuations   []backend.ArtifactContinuationInfo
-	taskDecomp              []backend.TaskDecompositionInfo
-	memoryRecalls           []backend.MemoryRecallTraceInfo
-	llmUsage                backend.LLMUsageSummaryInfo
-	llmContext              map[string]any
-	runtimeEvents           []string
-	progress                progressState
-	progressText            string
-	repairLoop              string
-	failureReason           string
-	failureHint             string
-	running                 bool
-	lastRevisionByWorkspace map[string]int64
+	input                  string
+	inputCursor            int
+	slashCursor            int
+	inputHistory           []string
+	historyCursor          int
+	currentTask            string
+	dodItems               []string
+	transcript             []transcriptItem
+	result                 string
+	artifacts              []string
+	sources                []string
+	patches                []backend.PatchInfo
+	artifactContinuations  []backend.ArtifactContinuationInfo
+	taskDecomp             []backend.TaskDecompositionInfo
+	memoryRecalls          []backend.MemoryRecallTraceInfo
+	llmUsage               backend.LLMUsageSummaryInfo
+	llmContext             map[string]any
+	runHeartbeat           backend.RunHeartbeatInfo
+	runtimeEvents          []string
+	progress               progressState
+	progressText           string
+	repairLoop             string
+	failureReason          string
+	failureHint            string
+	running                bool
+	workspaceRuntimeStates map[string]*workspaceRuntimeState
 
 	blockingDecision          *backend.DecisionInfo
 	blockingApproval          *backend.ApprovalInfo
@@ -105,6 +106,7 @@ type AppModel struct {
 
 	workspaceListRefreshInFlight bool
 	workspaceListRefreshPending  bool
+	workspaceListRequestSeq      int64
 
 	eventCh     chan backend.Event
 	unsubscribe func()
@@ -135,21 +137,21 @@ func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initi
 		}
 	}
 	return AppModel{
-		be:                      be,
-		mode:                    modeAgentSession,
-		defaultWorkspaceID:      defaultWorkspaceID,
-		activeWorkspaceID:       defaultWorkspaceID,
-		selectedWorkspaceID:     defaultWorkspaceID,
-		eventCh:                 eventCh,
-		unsubscribe:             unsubscribe,
-		initialGoal:             strings.TrimSpace(initialGoal),
-		currentTask:             strings.TrimSpace(initialGoal),
-		transcript:              initialTranscript(initialGoal),
-		options:                 options,
-		progress:                progressIdle,
-		lastRevisionByWorkspace: map[string]int64{},
-		historyCursor:           -1,
-		mainViewport:            newMainViewport(),
+		be:                     be,
+		mode:                   modeAgentSession,
+		defaultWorkspaceID:     defaultWorkspaceID,
+		activeWorkspaceID:      defaultWorkspaceID,
+		selectedWorkspaceID:    defaultWorkspaceID,
+		eventCh:                eventCh,
+		unsubscribe:            unsubscribe,
+		initialGoal:            strings.TrimSpace(initialGoal),
+		currentTask:            strings.TrimSpace(initialGoal),
+		transcript:             initialTranscript(initialGoal),
+		options:                options,
+		progress:               progressIdle,
+		workspaceRuntimeStates: map[string]*workspaceRuntimeState{},
+		historyCursor:          -1,
+		mainViewport:           newMainViewport(),
 	}
 }
 
@@ -238,6 +240,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case WorkspaceListMsg:
+		if msg.RequestSeq > 0 && msg.RequestSeq != m.workspaceListRequestSeq {
+			return m, nil
+		}
 		pendingRefresh := m.workspaceListRefreshPending
 		m.workspaceListRefreshInFlight = false
 		m.workspaceListRefreshPending = false
@@ -250,17 +255,25 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureActiveWorkspace()
 		cmds := []tea.Cmd{}
 		if m.activeWorkspaceID != "" && (previousActive != m.activeWorkspaceID || m.activeRunID != "" || len(msg.Workspaces) > 0) {
-			cmds = append(cmds, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+			cmds = append(cmds, m.requestWorkspaceContextRefresh(false))
 		}
 		if pendingRefresh {
 			cmds = append(cmds, m.requestWorkspaceListRefresh())
 		}
 		return m, tea.Batch(cmds...)
 	case WorkspaceContextMsg:
+		if msg.RequestSeq > 0 && msg.RequestSeq != m.workspaceContextRequestSeqFor(msg.WorkspaceID) {
+			return m, nil
+		}
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
 			return m, nil
 		}
 		if msg.Error != nil {
+			if isTransientProjectionError(msg.Error) {
+				m.lastError = nil
+				m.progressText = "Workspace projection is refreshing; retrying state load"
+				return m, RetryWorkspaceContext(msg.WorkspaceID, msg.ResetMainViewport)
+			}
 			m.setLastError(msg.Error)
 			return m, nil
 		}
@@ -269,6 +282,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncMainViewportToCurrentContent()
 		}
 		return m, m.fetchActiveBlockerDetails()
+	case WorkspaceContextRetryMsg:
+		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
+			return m, nil
+		}
+		return m, m.requestWorkspaceContextFor(msg.WorkspaceID, msg.ResetMainViewport)
 	case WorkspaceCreatedMsg:
 		if msg.Error != nil {
 			m.setLastError(msg.Error)
@@ -281,7 +299,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progressText = "Workspace created"
 			m.result = fmt.Sprintf("Workspace created: %s", workspaceLabel(*msg.Workspace))
 			m.lastError = nil
-			return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContextForSwitch(m.be, string(msg.Workspace.ID)))
+			return m, tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextFor(string(msg.Workspace.ID), true))
 		}
 		return m, nil
 	case DecisionListMsg:
@@ -376,7 +394,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progressText = "DoD saved"
 			m.lastError = nil
 			m.resetMainViewport()
-			return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+			return m, m.requestWorkspaceContextRefresh(false)
 		}
 		return m, nil
 	case RunControlMsg:
@@ -608,7 +626,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.clearInput()
 		m.lastError = nil
 		m.appendTranscript("Decision", text)
-		return m, ResolveDecision(m.be, ticketID, text)
+		return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, text)
 	}
 	if m.blockingApproval != nil {
 		approvalID := string(m.blockingApproval.ID)
@@ -790,7 +808,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", rest)
-			return m, ResolveDecision(m.be, ticketID, rest), true
+			return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, rest), true
 		case "replan":
 			if m.blockingDecision == nil {
 				m.lastError = fmt.Errorf("no blocking decision")
@@ -801,7 +819,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
-			return m, ResolveDecisionWithType(m.be, ticketID, decisioncommon.ResolutionTypeReplan, answer), true
+			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, decisioncommon.ResolutionTypeReplan, answer), true
 		case "terminate", "reject":
 			if m.blockingDecision == nil {
 				m.lastError = fmt.Errorf("no blocking decision")
@@ -812,7 +830,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			m.clearInput()
 			m.lastError = nil
 			m.appendTranscript("Decision", answer)
-			return m, ResolveDecisionWithType(m.be, ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, answer), true
+			return m, ResolveDecisionWithType(m.be, m.activeWorkspaceID, ticketID, decisioncommon.ResolutionTypeRejectCurrentPath, answer), true
 		default:
 			m.lastError = fmt.Errorf("unknown decision subcommand: %s", subcommand)
 			return m, nil, true
@@ -878,7 +896,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.clearInput()
 		m.resetMainViewport()
 		m.progressText = "Refreshing workspace result"
-		return m, FetchWorkspaceContext(m.be, m.activeWorkspaceID), true
+		return m, m.requestWorkspaceContextRefresh(false), true
 	case "memory", "mem":
 		m.addInputHistory(text)
 		m.clearInput()
@@ -1784,11 +1802,13 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 	case backend.EventWorkspaceListChanged:
 		return m.requestWorkspaceListRefresh()
 	case backend.EventWorkspaceProjectionChanged:
-		listCmd := m.requestWorkspaceListRefresh()
-		if m.activeWorkspaceID != "" && (evt.WorkspaceID == "" || string(evt.WorkspaceID) == m.activeWorkspaceID) {
-			return tea.Batch(listCmd, FetchWorkspaceContext(m.be, m.activeWorkspaceID))
+		if evt.WorkspaceID == "" {
+			return m.requestWorkspaceListRefresh()
 		}
-		return listCmd
+		if m.activeWorkspaceID != "" && string(evt.WorkspaceID) == m.activeWorkspaceID {
+			return m.requestWorkspaceContextRefresh(false)
+		}
+		return nil
 	case backend.EventWorkspaceCreated:
 		m.upsertWorkspaceFromEvent(evt)
 		return m.requestWorkspaceListRefresh()
@@ -1830,13 +1850,13 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		switch state {
 		case common.WorkspaceStateCompleted, common.WorkspaceStateFailed, common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
-			return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+			return m.requestWorkspaceContextRefresh(false)
 		default:
 			return nil
 		}
 	case backend.EventGoalDefined, backend.EventDoDDefined:
 		m.progressText = "Workspace definitions changed; refreshing context"
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventRunStateChanged:
 		state := firstPayloadString(evt.Payload, "state", "State", events.PayloadKeyState)
 		if evt.RunID != "" {
@@ -1858,7 +1878,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 			m.appendRuntimeEvent(m.progressText)
 			m.followMainViewportTailUnlessUserScrolled()
 		}
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventDecisionCreated:
 		decision := backend.DecisionInfo{
 			ID:          common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID)),
@@ -1917,7 +1937,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.artifacts = artifactPayloadStrings(evt.Payload)
 		m.sources = nil
 		m.followMainViewportTail()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventPatchPreviewed, backend.EventPatchApplied, backend.EventPatchFailed, backend.EventPatchReverted:
 		m.upsertPatch(patchInfoFromEvent(evt))
 		targetRef := firstPayloadString(evt.Payload, "targetRef", "TargetRef", events.PayloadKeyTargetRef)
@@ -1947,7 +1967,7 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		}
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventLLMStreamProgress:
 		m.progress = progressRunning
 		m.progressText = llmStreamProgressText(evt.Payload)
@@ -1960,10 +1980,10 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.llmContext = payloadMapValue(evt.Payload, "contextBudget", "ContextBudget", events.PayloadKeyContextBudget)
 		m.appendRuntimeEvent(m.progressText)
 		m.followMainViewportTailUnlessUserScrolled()
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	case backend.EventMemoryCreated, backend.EventMemoryUpdated, backend.EventMemoryDeleted:
 		m.progressText = "Workspace memory changed; refreshing context"
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+		return m.requestWorkspaceContextRefresh(false)
 	}
 	return nil
 }
@@ -1986,17 +2006,23 @@ func (m *AppModel) recordWorkspaceEventRevision(evt backend.Event) tea.Cmd {
 		return nil
 	}
 	workspaceID := string(evt.WorkspaceID)
-	if m.lastRevisionByWorkspace == nil {
-		m.lastRevisionByWorkspace = map[string]int64{}
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return nil
 	}
-	previous := m.lastRevisionByWorkspace[workspaceID]
-	if previous > 0 && evt.Revision > previous+1 && workspaceID == m.activeWorkspaceID {
-		m.lastRevisionByWorkspace[workspaceID] = evt.Revision
-		m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
-		return FetchWorkspaceContext(m.be, m.activeWorkspaceID)
+	previous := entry.LastRevision
+	if previous > 0 && evt.Revision > previous+1 {
+		entry.RevisionGapCount++
+		entry.LastRevisionGap = evt.Revision - previous - 1
+		entry.LastRevision = evt.Revision
+		if workspaceID == m.activeWorkspaceID {
+			m.progressText = fmt.Sprintf("Event stream revision gap detected (%d); refreshing context", evt.Revision)
+			return m.requestWorkspaceContextRefresh(false)
+		}
+		return nil
 	}
 	if evt.Revision > previous {
-		m.lastRevisionByWorkspace[workspaceID] = evt.Revision
+		entry.LastRevision = evt.Revision
 	}
 	return nil
 }
@@ -2007,14 +2033,58 @@ func (m *AppModel) requestWorkspaceListRefresh() tea.Cmd {
 		return nil
 	}
 	m.workspaceListRefreshInFlight = true
-	return FetchAll(m.be)
+	m.workspaceListRequestSeq++
+	return FetchAll(m.be, m.workspaceListRequestSeq)
+}
+
+func (m *AppModel) requestWorkspaceContextRefresh(resetMainViewport bool) tea.Cmd {
+	return m.requestWorkspaceContextFor(m.activeWorkspaceID, resetMainViewport)
+}
+
+func (m *AppModel) requestWorkspaceContextFor(workspaceID string, resetMainViewport bool) tea.Cmd {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil
+	}
+	entry := m.ensureWorkspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return nil
+	}
+	entry.ContextRequestSeq++
+	requestSeq := entry.ContextRequestSeq
+	if resetMainViewport {
+		return FetchWorkspaceContextForSwitch(m.be, workspaceID, requestSeq)
+	}
+	return FetchWorkspaceContext(m.be, workspaceID, requestSeq)
+}
+
+func (m *AppModel) workspaceContextRequestSeqFor(workspaceID string) int64 {
+	if strings.TrimSpace(workspaceID) == "" {
+		workspaceID = m.activeWorkspaceID
+	}
+	entry := m.workspaceRuntimeState(workspaceID)
+	if entry == nil {
+		return 0
+	}
+	return entry.ContextRequestSeq
 }
 
 func (m *AppModel) refreshActiveWorkspaceState() tea.Cmd {
 	return tea.Batch(
-		FetchWorkspaceContext(m.be, m.activeWorkspaceID),
+		m.requestWorkspaceContextRefresh(false),
 		m.requestWorkspaceListRefresh(),
 	)
+}
+
+func isTransientProjectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isTransientContextError(err) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	return (errors.Is(err, common.ErrConflict) || strings.Contains(text, "status 409")) &&
+		strings.Contains(text, "workspace projection")
 }
 
 func (m *AppModel) workspaceMessageBelongsToActiveWorkspace(workspaceID string) bool {

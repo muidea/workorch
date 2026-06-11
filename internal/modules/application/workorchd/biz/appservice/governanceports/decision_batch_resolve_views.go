@@ -37,7 +37,7 @@ func BatchResolveDecisionViews(ctx context.Context, hub events.Hub, traces gover
 	}
 	reads := make([]ticketRead, len(cmd.TicketIDs))
 	for i, ticketID := range cmd.TicketIDs {
-		reads[i].item, reads[i].err = ReadDecisionTicket(ctx, hub, common.TicketID(ticketID))
+		reads[i].item, reads[i].err = ReadDecisionTicketForResolution(ctx, hub, common.TicketID(ticketID), scope)
 	}
 	for _, r := range reads {
 		if r.err != nil {

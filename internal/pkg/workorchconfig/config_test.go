@@ -21,6 +21,7 @@ writeTimeout = "30s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = 2
+staleDispatchedStepMinAge = "120s"
 
 [repository]
 backend = "file"
@@ -116,8 +117,8 @@ maxRepeatedSamePrompt = 1
 	if cfg.Server.Addr != "127.0.0.1:18080" || cfg.Repository.Backend != "file" || cfg.LLM.Providers["local"].Provider != "compatible" {
 		t.Fatalf("config = %+v, want framework application config", cfg)
 	}
-	if cfg.Server.MaxConcurrentRuns != 2 {
-		t.Fatalf("max concurrent runs = %d, want 2", cfg.Server.MaxConcurrentRuns)
+	if cfg.Server.MaxConcurrentRuns != 2 || cfg.Server.StaleDispatchedStepMinAge != "120s" {
+		t.Fatalf("server config = %+v, want max concurrent runs and stale dispatched min age", cfg.Server)
 	}
 	if cfg.Runtime.DefaultSoulID != "soul-system" ||
 		cfg.Runtime.MaxRuntimeRepairAttempts != 11 ||

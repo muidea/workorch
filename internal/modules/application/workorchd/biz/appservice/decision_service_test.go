@@ -883,8 +883,8 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 			t.Fatalf("item = %+v, want resolved replan response", item)
 		}
 	}
-	if got := tickets.getCount.Load(); got != 4 {
-		t.Fatalf("ticket Get count = %d, want prevalidation plus one service read per ticket", got)
+	if got := tickets.getCount.Load(); got != 2 {
+		t.Fatalf("ticket Get count = %d, want one scoped prevalidation read per ticket with returned entities reused", got)
 	}
 	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
 		t.Fatalf("resolution GetByTicketID count = %d, want no response reread on first batch resolve", got)

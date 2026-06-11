@@ -14,9 +14,10 @@ func ReadGoalByOwnerCommand(ctx context.Context, hub events.Hub, goalID common.G
 	if hub == nil || goalID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(goalID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetGoal, "goal", string(goalID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyGoalID: string(goalID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

@@ -2248,10 +2248,10 @@ if errors:
     raise SystemExit(1)
 PY
 
-# Scenario-2: repair loop exhausted, replan resolution resumes the run,
-# then the server schedules a continuation run. Auto-governance may resolve
-# the ticket directly; otherwise this e2e resolves it explicitly so the
-# continuation contract is still verified under stricter configurations.
+# Scenario-2: repeated runtime failure or exhausted repair loop resolves to
+# replan, then the server schedules a continuation run. Auto-governance may
+# resolve the ticket directly; otherwise this e2e resolves it explicitly so
+# the continuation contract is still verified under stricter configurations.
 scenario2_known_run_ids="$(list_workspace_run_ids "$workspace_id")"
 scenario2_run_id="$(activate_workspace_execution \
   "$workspace_id" \
@@ -2266,7 +2266,7 @@ if [[ "$scenario2_state" == "blocked_on_decision" ]]; then
   scenario2_ticket_id="$(json_path "$TMP_DIR/scenario2-status.json" "status.blockingTicketId")"
   scenario2_ticket_path="$(url_encode "$scenario2_ticket_id")"
   scenario2_resolve_status="$(curl -sS -o "$TMP_DIR/scenario2-ticket-resolved.json" -w '%{http_code}' \
-    -X POST "$BASE_URL/api/v1/workorch/decisions/$scenario2_ticket_path/resolve" -H 'Content-Type: application/json' \
+    -X POST "$BASE_URL/api/v1/workorch/decisions/$scenario2_ticket_path/resolve?workspaceId=$workspace_id" -H 'Content-Type: application/json' \
     -d '{"resolutionType":"replan","resolutionPayload":{"operator":"software-dev-e2e","reason":"repair exhausted replan continuation verification"}}')"
   if [[ "$scenario2_resolve_status" != "200" && "$scenario2_resolve_status" != "409" ]]; then
     cat "$TMP_DIR/scenario2-ticket-resolved.json" >&2
@@ -2310,8 +2310,7 @@ if run.get("state") != "superseded":
 repair_loop = (run_snapshot.get("taskProgress") or {}).get("repairLoop") or {}
 if repair_loop.get("state") not in {"escalated_decision", "terminated"}:
     errors.append(f"repairLoop.state={repair_loop.get('state')!r}, want escalated_decision or terminated after auto replan")
-if int(repair_loop.get("attemptCount") or 0) < 3:
-    errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3")
+repair_attempt_count = int(repair_loop.get("attemptCount") or 0)
 routing = ((run.get("executionContext") or {}).get("soulRouting") or {})
 if routing.get("status") != "resolved":
     errors.append(f"soulRouting.status={routing.get('status')!r}, want resolved")
@@ -2322,14 +2321,24 @@ if execution.get("soulId") != "soul-software-dev-execution":
 decisions = run_snapshot.get("decisions") or []
 replan_decisions = [item for item in decisions if item.get("runId") == scenario2_run_id and item.get("resolutionType") == "replan"]
 if not replan_decisions:
-    errors.append(f"decisions={decisions!r}, want resolved replan decision for repair exhaustion")
+    errors.append(f"decisions={decisions!r}, want resolved replan decision for duplicate failure or repair exhaustion")
 ticket = replan_decisions[-1] if replan_decisions else {}
 reason = str(ticket.get("reason") or "")
-if "自动修复尝试已耗尽" not in reason:
-    errors.append(f"decision reason missing repair exhaustion: {reason!r}")
 question = str(ticket.get("question") or "")
-if "请补充缺失的" not in question or "重新规划" not in question:
-    errors.append(f"decision question missing Chinese repair guidance: {question!r}")
+repair_exhausted = "自动修复尝试已耗尽" in reason
+duplicate_failure = "检测到重复的运行时失败签名" in reason
+if not repair_exhausted and not duplicate_failure:
+    errors.append(f"decision reason missing duplicate failure or repair exhaustion: {reason!r}")
+if repair_exhausted:
+    if repair_attempt_count < 3:
+        errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=3 for repair exhaustion")
+    if "请补充缺失的" not in question or "重新规划" not in question:
+        errors.append(f"decision question missing Chinese repair exhaustion guidance: {question!r}")
+elif duplicate_failure:
+    if repair_attempt_count < 1:
+        errors.append(f"repairLoop.attemptCount={repair_loop.get('attemptCount')!r}, want >=1 for duplicate failure")
+    if "同一运行时失败" not in question or "重新规划" not in question:
+        errors.append(f"decision question missing Chinese duplicate failure guidance: {question!r}")
 if ticket.get("state") != "resolved":
     errors.append(f"decision state={ticket.get('state')!r}, want resolved")
 if resolution_mode == "auto" and not ticket.get("autoGovernance"):

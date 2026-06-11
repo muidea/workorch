@@ -6,10 +6,13 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/kernel/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/kernel/soul/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestSelectedWorkspaceMemoryItemsLoadsDefaultProviderOnlyForImplicitSelection(t *testing.T) {
@@ -39,6 +42,41 @@ func TestSelectedWorkspaceMemoryItemsLoadsDefaultProviderOnlyForImplicitSelectio
 	}
 	if calls != 1 {
 		t.Fatalf("loader calls for implicit memory selection = %d, want 1", calls)
+	}
+}
+
+func TestSelectedWorkspaceMemoryItemsReadsExplicitIDsWithWorkspaceScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-memory-selection-scope")
+	hub.Subscribe(memoryevents.TopicMemoryCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("memory get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("memory get payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyMemoryItem: &memorymodel.MemoryItem{ID: "memory-selection-scope", WorkspaceID: workspaceID, Summary: "scoped memory", Visibility: "llm"},
+			},
+		})
+	})
+
+	items, evidence, err := SelectedWorkspaceMemoryItems(ctx, WorkspaceMemorySelectionRequest{
+		WorkspaceID: workspaceID,
+		IDs:         []string{"memory-selection-scope"},
+		Hub:         hub,
+	})
+	if err != nil {
+		t.Fatalf("SelectedWorkspaceMemoryItems err = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "memory-selection-scope" {
+		t.Fatalf("items = %+v, want scoped explicit memory", items)
+	}
+	if evidence["policy"] != "explicit_memory_selection" {
+		t.Fatalf("evidence = %+v, want explicit policy", evidence)
 	}
 }
 

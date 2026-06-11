@@ -54,8 +54,8 @@ export function ApprovalQueuePage() {
     approvalForm.setFieldsValue({ operator: 'console' });
     try {
       const [approvalDetail, decisions] = await Promise.all([
-        workorchApi.readApproval(item.id),
-        workorchApi.listDecisionPage({ runId: item.runId, limit: governancePageLimit })
+        workorchApi.readApproval(item.workspaceId, item.id),
+        workorchApi.listDecisionPage({ workspaceId: item.workspaceId, runId: item.runId, limit: governancePageLimit })
       ]);
       const relatedDecision = decisions
         .decisions
@@ -75,9 +75,9 @@ export function ApprovalQueuePage() {
     try {
       await approvalForm.validateFields();
       if (approvalTarget.action === 'approve') {
-        await workorchApi.approveApproval(approvalTarget.item.id);
+        await workorchApi.approveApproval(approvalTarget.item.workspaceId, approvalTarget.item.id);
       } else {
-        await workorchApi.rejectApproval(approvalTarget.item.id);
+        await workorchApi.rejectApproval(approvalTarget.item.workspaceId, approvalTarget.item.id);
       }
       const target = approvalTarget;
       setApprovalTarget(undefined);
@@ -98,7 +98,17 @@ export function ApprovalQueuePage() {
       return;
     }
     try {
-      await workorchApi.batchResolveApprovals(approvalIds, action);
+      const selected = approvalRecords.filter((item) => approvalIds.includes(item.id));
+      const byWorkspace = new Map<string, string[]>();
+      for (const item of selected) {
+        const workspaceId = item.workspaceId || '';
+        const items = byWorkspace.get(workspaceId) ?? [];
+        items.push(item.id);
+        byWorkspace.set(workspaceId, items);
+      }
+      for (const [workspaceId, ids] of byWorkspace) {
+        await workorchApi.batchResolveApprovals(workspaceId, ids, action);
+      }
       message.success(`${approvalIds.length} 个审批项${actionLabel(action)}，相关${modelLabels.run}已由服务端转入后台继续`);
       setSelectedApprovalKeys([]);
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));

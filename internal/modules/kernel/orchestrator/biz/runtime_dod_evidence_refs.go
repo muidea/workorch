@@ -630,6 +630,9 @@ func canonicalCompletionEvidenceRef(ctx context.Context, steps repository.StepRe
 	if ref == "" || !traceableEvidenceRef(ref) {
 		return "", false
 	}
+	if governanceOwnerEvidenceRef(ref) {
+		return ref, true
+	}
 	if canonical := catalog.aliases[ref]; canonical != "" {
 		if catalog.patches[canonical] {
 			return canonical, true

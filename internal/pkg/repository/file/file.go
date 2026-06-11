@@ -3,6 +3,7 @@ package file
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -1286,11 +1287,36 @@ func safeEventRecordFileName(value string) string {
 }
 
 func safeRepositoryItemFileName(value string) string {
-	return runtimepath.SafePath(value)
+	return safeRepositoryItemPath(value)
 }
 
 func readableRepositoryItemName(value string) string {
 	return runtimepath.SafePath(value)
+}
+
+func safeRepositoryItemPath(value string) string {
+	segments := runtimepath.SafeSegments(value)
+	if len(segments) == 0 {
+		return "empty"
+	}
+	for idx, segment := range segments {
+		segments[idx] = truncateRepositoryItemSegment(segment)
+	}
+	return filepath.Join(segments...)
+}
+
+func truncateRepositoryItemSegment(segment string) string {
+	const maxSegmentLen = 160
+	if len(segment) <= maxSegmentLen {
+		return segment
+	}
+	sum := sha256.Sum256([]byte(segment))
+	hash := fmt.Sprintf("%x", sum[:])[:16]
+	prefixLen := maxSegmentLen - len(hash) - 1
+	if prefixLen < 16 {
+		prefixLen = 16
+	}
+	return strings.TrimRight(segment[:prefixLen], ".-") + "-" + hash
 }
 
 func repositoryItemRoot(path string, legacyFileName string, directoryName string) string {

@@ -14,15 +14,16 @@ import (
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
-func FetchAll(be backend.Backend) tea.Cmd {
+func FetchAll(be backend.Backend, requestSeq ...int64) tea.Cmd {
+	seq := optionalRequestSeq(requestSeq)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		workspaces, err := be.Workspace().List(ctx)
 		if err != nil {
-			return WorkspaceListMsg{Error: err}
+			return WorkspaceListMsg{RequestSeq: seq, Error: err}
 		}
-		return WorkspaceListMsg{Workspaces: workspaces}
+		return WorkspaceListMsg{RequestSeq: seq, Workspaces: workspaces}
 	}
 }
 
@@ -38,15 +39,25 @@ func FetchConfiguration(be backend.Backend) tea.Cmd {
 	}
 }
 
-func FetchWorkspaceContext(be backend.Backend, workspaceID string) tea.Cmd {
-	return fetchWorkspaceContext(be, workspaceID, false)
+func FetchWorkspaceContext(be backend.Backend, workspaceID string, requestSeq ...int64) tea.Cmd {
+	return fetchWorkspaceContext(be, workspaceID, false, optionalRequestSeq(requestSeq))
 }
 
-func FetchWorkspaceContextForSwitch(be backend.Backend, workspaceID string) tea.Cmd {
-	return fetchWorkspaceContext(be, workspaceID, true)
+func FetchWorkspaceContextForSwitch(be backend.Backend, workspaceID string, requestSeq ...int64) tea.Cmd {
+	return fetchWorkspaceContext(be, workspaceID, true, optionalRequestSeq(requestSeq))
 }
 
-func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainViewport bool) tea.Cmd {
+func RetryWorkspaceContext(workspaceID string, resetMainViewport bool) tea.Cmd {
+	if workspaceID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		time.Sleep(300 * time.Millisecond)
+		return WorkspaceContextRetryMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport}
+	}
+}
+
+func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainViewport bool, requestSeq int64) tea.Cmd {
 	if workspaceID == "" {
 		return nil
 	}
@@ -57,7 +68,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
 		snapshot, err := be.Workspace().Snapshot(ctx, wsID)
 		if err != nil {
-			return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
+			return WorkspaceContextMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: err}
 		}
 		if snapshot != nil {
 			liveRunID := snapshot.Workspace.ActiveRunID
@@ -70,6 +81,7 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 			goal := resolveWorkspaceContextGoal(snapshot, displayRun, nil)
 			dod := resolveWorkspaceContextDoD(snapshot, displayRun, nil)
 			return WorkspaceContextMsg{
+				RequestSeq:        requestSeq,
 				WorkspaceID:       workspaceID,
 				ResetMainViewport: resetMainViewport,
 				Workspace:         &snapshot.Workspace,
@@ -86,8 +98,15 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 			}
 		}
 
-		return WorkspaceContextMsg{WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: common.ErrInvalidArgument}
+		return WorkspaceContextMsg{RequestSeq: requestSeq, WorkspaceID: workspaceID, ResetMainViewport: resetMainViewport, Error: common.ErrInvalidArgument}
 	}
+}
+
+func optionalRequestSeq(values []int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	return values[0]
 }
 
 func CreateWorkspace(be backend.Backend, req backend.CreateWorkspaceRequest) tea.Cmd {
@@ -534,18 +553,23 @@ func stringValueFromMap(input map[string]any, key string) string {
 	return value
 }
 
-func ResolveDecision(be backend.Backend, ticketID string, answer string) tea.Cmd {
-	return ResolveDecisionWithType(be, ticketID, inferDecisionResolutionType(answer), answer)
+func ResolveDecision(be backend.Backend, workspaceID string, ticketID string, answer string) tea.Cmd {
+	return ResolveDecisionWithType(be, workspaceID, ticketID, inferDecisionResolutionType(answer), answer)
 }
 
-func ResolveDecisionWithType(be backend.Backend, ticketID string, resolutionType string, answer string) tea.Cmd {
+func ResolveDecisionWithType(be backend.Backend, workspaceID string, ticketID string, resolutionType string, answer string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		wsID := common.WorkspaceID(workspaceID)
+		if wsID != "" {
+			ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+		}
 		if !decisioncommon.IsSupportedResolutionType(resolutionType) {
 			resolutionType = inferDecisionResolutionType(answer)
 		}
 		decision, err := be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
+			WorkspaceID:    wsID,
 			TicketID:       common.TicketID(ticketID),
 			ResolutionType: resolutionType,
 			Payload:        map[string]any{"answer": answer, "operator": "tui"},
@@ -581,9 +605,9 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 		var err error
 		resumeHandled := false
 		if approve {
-			approval, err = be.Approval().Approve(ctx, common.ApprovalID(approvalID))
+			approval, err = be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
 		} else {
-			approval, err = be.Approval().Reject(ctx, common.ApprovalID(approvalID))
+			approval, err = be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID))
 		}
 		if err != nil && errors.Is(err, common.ErrConflict) {
 			var snapshot *backend.WorkspaceSnapshotInfo

@@ -493,8 +493,9 @@ export const workorchApi = {
     const body = await workorchApi.listDecisionPage();
     return body.decisions ?? [];
   },
-  readDecision: async (ticketId: string) => {
-    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}`);
+  readDecision: async (workspaceId: string | undefined, ticketId: string) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}${suffix}`);
     return body.decision;
   },
   listApprovals: async () => {
@@ -515,37 +516,43 @@ export const workorchApi = {
       approvals: body.approvals ?? body.page.approvals ?? []
     };
   },
-  readApproval: async (approvalId: string) => {
-    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}`);
+  readApproval: async (workspaceId: string | undefined, approvalId: string) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}${suffix}`);
     return body.approval;
   },
-  resolveDecision: async (ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
-    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve`, {
+  resolveDecision: async (workspaceId: string | undefined, ticketId: string, resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ decision: Decision }>(`${apiBase}/decisions/${encodeURIComponent(ticketId)}/resolve${suffix}`, {
       method: 'POST',
       body: JSON.stringify({ resolutionType, resolutionPayload })
     });
     return body.decision;
   },
-  batchResolveDecisions: async (ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
-    const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions/resolve-batch`, {
+  batchResolveDecisions: async (workspaceId: string | undefined, ticketIds: string[], resolutionType = 'provide_missing_info', resolutionPayload?: Record<string, unknown>) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ decisions: Decision[] }>(`${apiBase}/decisions/resolve-batch${suffix}`, {
       method: 'POST',
       body: JSON.stringify({ ticketIds, resolutionType, resolutionPayload })
     });
     return body.decisions ?? [];
   },
-  rejectDecision: async (ticketId: string) => {
-    return workorchApi.resolveDecision(ticketId, 'reject_current_path', { operator: 'console' });
+  rejectDecision: async (workspaceId: string | undefined, ticketId: string) => {
+    return workorchApi.resolveDecision(workspaceId, ticketId, 'reject_current_path', { operator: 'console' });
   },
-  approveApproval: async (approvalId: string) => {
-    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/approve`, { method: 'POST' });
+  approveApproval: async (workspaceId: string | undefined, approvalId: string) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/approve${suffix}`, { method: 'POST' });
     return body.approval;
   },
-  rejectApproval: async (approvalId: string) => {
-    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject`, { method: 'POST' });
+  rejectApproval: async (workspaceId: string | undefined, approvalId: string) => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ approval: Approval }>(`${apiBase}/approvals/${encodeURIComponent(approvalId)}/reject${suffix}`, { method: 'POST' });
     return body.approval;
   },
-  batchResolveApprovals: async (approvalIds: string[], action: 'approve' | 'reject') => {
-    const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals/resolve-batch`, {
+  batchResolveApprovals: async (workspaceId: string | undefined, approvalIds: string[], action: 'approve' | 'reject') => {
+    const suffix = querySuffix({ workspaceId });
+    const body = await request<{ approvals: Approval[] }>(`${apiBase}/approvals/resolve-batch${suffix}`, {
       method: 'POST',
       body: JSON.stringify({ approvalIds, action })
     });

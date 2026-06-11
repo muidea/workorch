@@ -10,6 +10,68 @@ import (
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 )
 
+type workspaceDisplayState struct {
+	ActiveRunID           string
+	CurrentTask           string
+	DoDItems              []string
+	Transcript            []transcriptItem
+	Result                string
+	Artifacts             []string
+	Sources               []string
+	Patches               []backend.PatchInfo
+	ArtifactContinuations []backend.ArtifactContinuationInfo
+	TaskDecompositions    []backend.TaskDecompositionInfo
+	MemoryRecalls         []backend.MemoryRecallTraceInfo
+	LLMUsage              backend.LLMUsageSummaryInfo
+	LLMContext            map[string]any
+	RunHeartbeat          backend.RunHeartbeatInfo
+	RuntimeEvents         []string
+	Progress              progressState
+	ProgressText          string
+	RepairLoop            string
+	FailureReason         string
+	FailureHint           string
+	Running               bool
+	BlockingDecision      *backend.DecisionInfo
+	BlockingApproval      *backend.ApprovalInfo
+	Decisions             []backend.DecisionInfo
+	Approvals             []backend.ApprovalInfo
+	LastError             error
+}
+
+type workspaceRuntimeState struct {
+	Display           workspaceDisplayState
+	HasDisplay        bool
+	LastRevision      int64
+	RevisionGapCount  int64
+	LastRevisionGap   int64
+	ContextRequestSeq int64
+}
+
+func (m *AppModel) ensureWorkspaceRuntimeState(workspaceID string) *workspaceRuntimeState {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil
+	}
+	if m.workspaceRuntimeStates == nil {
+		m.workspaceRuntimeStates = map[string]*workspaceRuntimeState{}
+	}
+	entry := m.workspaceRuntimeStates[workspaceID]
+	if entry == nil {
+		entry = &workspaceRuntimeState{}
+		m.workspaceRuntimeStates[workspaceID] = entry
+	}
+	return entry
+}
+
+func (m *AppModel) workspaceRuntimeState(workspaceID string) *workspaceRuntimeState {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" || m.workspaceRuntimeStates == nil {
+		return nil
+	}
+	return m.workspaceRuntimeStates[workspaceID]
+}
+
 func findWorkspace(workspaces []backend.WorkspaceInfo, id string) *backend.WorkspaceInfo {
 	for i := range workspaces {
 		if string(workspaces[i].ID) == id {
@@ -67,6 +129,9 @@ func (m *AppModel) upsertWorkspaceFromEvent(evt backend.Event) {
 func (m *AppModel) removeWorkspace(id common.WorkspaceID) {
 	if id == "" {
 		return
+	}
+	if m.workspaceRuntimeStates != nil {
+		delete(m.workspaceRuntimeStates, string(id))
 	}
 	next := m.workspaces[:0]
 	for _, ws := range m.workspaces {
@@ -142,9 +207,12 @@ func (m *AppModel) setActiveWorkspace(id string) {
 	if id == "" || id == m.activeWorkspaceID {
 		return
 	}
+	m.saveActiveWorkspaceDisplayState()
 	m.activeWorkspaceID = id
 	m.selectedWorkspaceID = id
-	m.resetWorkspaceView()
+	if !m.restoreWorkspaceDisplayState(id) {
+		m.resetWorkspaceView()
+	}
 	if idx := workspaceIndex(m.workspaces, id); idx >= 0 {
 		m.cursor = idx
 	}
@@ -261,9 +329,10 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 	}
 	m.setActiveWorkspace(m.selectedWorkspaceID)
 	m.workspaceSelectMode = false
-	m.resetWorkspaceView()
-	m.progressText = "Workspace switched; refreshing state"
-	return m, tea.Batch(FetchAll(m.be), FetchWorkspaceContextForSwitch(m.be, m.activeWorkspaceID))
+	if _, ok := m.cachedWorkspaceDisplayState(m.activeWorkspaceID); !ok {
+		m.progressText = "Workspace switched; refreshing state"
+	}
+	return m, tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(true))
 }
 
 func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
@@ -311,6 +380,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		}
 		m.restoreDefinitionsWhenPartialContext(msg, previousTask, previousTranscript, previousDoDItems)
 		m.applyWorkspaceProgress(msg.Workspace.State)
+		if msg.Snapshot != nil {
+			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
+		}
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()
 		return
@@ -353,6 +425,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
+		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -399,6 +472,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -516,12 +590,14 @@ func (m *AppModel) resetWorkspaceView() {
 	m.transcript = nil
 	m.result = ""
 	m.artifacts = nil
+	m.sources = nil
 	m.patches = nil
 	m.artifactContinuations = nil
 	m.taskDecomp = nil
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -536,6 +612,116 @@ func (m *AppModel) resetWorkspaceView() {
 	m.lastError = nil
 	m.resetMainViewport()
 	m.clearInput()
+}
+
+func (m *AppModel) saveActiveWorkspaceDisplayState() {
+	if strings.TrimSpace(m.activeWorkspaceID) == "" {
+		return
+	}
+	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+	if entry == nil {
+		return
+	}
+	entry.Display = workspaceDisplayState{
+		ActiveRunID:           m.activeRunID,
+		CurrentTask:           m.currentTask,
+		DoDItems:              append([]string(nil), m.dodItems...),
+		Transcript:            append([]transcriptItem(nil), m.transcript...),
+		Result:                m.result,
+		Artifacts:             append([]string(nil), m.artifacts...),
+		Sources:               append([]string(nil), m.sources...),
+		Patches:               append([]backend.PatchInfo(nil), m.patches...),
+		ArtifactContinuations: append([]backend.ArtifactContinuationInfo(nil), m.artifactContinuations...),
+		TaskDecompositions:    append([]backend.TaskDecompositionInfo(nil), m.taskDecomp...),
+		MemoryRecalls:         append([]backend.MemoryRecallTraceInfo(nil), m.memoryRecalls...),
+		LLMUsage:              m.llmUsage,
+		LLMContext:            clonePayloadMap(m.llmContext),
+		RunHeartbeat:          m.runHeartbeat,
+		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
+		Progress:              m.progress,
+		ProgressText:          m.progressText,
+		RepairLoop:            m.repairLoop,
+		FailureReason:         m.failureReason,
+		FailureHint:           m.failureHint,
+		Running:               m.running,
+		BlockingDecision:      cloneDecisionPtr(m.blockingDecision),
+		BlockingApproval:      cloneApprovalPtr(m.blockingApproval),
+		Decisions:             append([]backend.DecisionInfo(nil), m.decisions...),
+		Approvals:             append([]backend.ApprovalInfo(nil), m.approvals...),
+		LastError:             m.lastError,
+	}
+	entry.HasDisplay = true
+}
+
+func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
+	cached, ok := m.cachedWorkspaceDisplayState(workspaceID)
+	if !ok {
+		return false
+	}
+	m.activeRunID = cached.ActiveRunID
+	m.currentTask = cached.CurrentTask
+	m.dodItems = append([]string(nil), cached.DoDItems...)
+	m.transcript = append([]transcriptItem(nil), cached.Transcript...)
+	m.result = cached.Result
+	m.artifacts = append([]string(nil), cached.Artifacts...)
+	m.sources = append([]string(nil), cached.Sources...)
+	m.patches = append([]backend.PatchInfo(nil), cached.Patches...)
+	m.artifactContinuations = append([]backend.ArtifactContinuationInfo(nil), cached.ArtifactContinuations...)
+	m.taskDecomp = append([]backend.TaskDecompositionInfo(nil), cached.TaskDecompositions...)
+	m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), cached.MemoryRecalls...)
+	m.llmUsage = cached.LLMUsage
+	m.llmContext = clonePayloadMap(cached.LLMContext)
+	m.runHeartbeat = cached.RunHeartbeat
+	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
+	m.progress = cached.Progress
+	m.progressText = cached.ProgressText
+	m.repairLoop = cached.RepairLoop
+	m.failureReason = cached.FailureReason
+	m.failureHint = cached.FailureHint
+	m.running = cached.Running
+	m.blockingDecision = cloneDecisionPtr(cached.BlockingDecision)
+	m.blockingApproval = cloneApprovalPtr(cached.BlockingApproval)
+	m.decisions = append([]backend.DecisionInfo(nil), cached.Decisions...)
+	m.approvals = append([]backend.ApprovalInfo(nil), cached.Approvals...)
+	m.lastError = cached.LastError
+	m.resetMainViewport()
+	m.clearInput()
+	return true
+}
+
+func (m *AppModel) cachedWorkspaceDisplayState(workspaceID string) (workspaceDisplayState, bool) {
+	entry := m.workspaceRuntimeState(workspaceID)
+	if entry == nil || !entry.HasDisplay {
+		return workspaceDisplayState{}, false
+	}
+	return entry.Display, true
+}
+
+func cloneDecisionPtr(input *backend.DecisionInfo) *backend.DecisionInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	return &ret
+}
+
+func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	ret.Context = clonePayloadMap(input.Context)
+	return &ret
+}
+
+func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
+	m.runHeartbeat = item
+	switch item.ActivityState {
+	case "ineffective_retry", "no_activity", "stalled":
+		if m.progress == progressRunning || m.progress == progressIdle {
+			m.progressText = nonEmpty(item.Summary, string(item.ActivityState))
+		}
+	}
 }
 
 func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {

@@ -133,14 +133,18 @@ func (s *runContinuationScheduler) recoverStaleDispatchedRuns(ctx context.Contex
 	defer release()
 
 	var recovered []appservice.Run
+	minAge := state.config.StaleDispatchedStepMinAge
+	if minAge <= 0 {
+		minAge = appservice.DefaultStaleDispatchedStepMinAge
+	}
 	if state.hasSharedSession() {
 		err = state.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var recoverErr error
-			recovered, recoverErr = appservice.RecoverStaleDispatchedRunsWithSession(ctx, session, appservice.DefaultStaleDispatchedStepMinAge, time.Now().UTC())
+			recovered, recoverErr = appservice.RecoverStaleDispatchedRunsWithSession(ctx, session, minAge, time.Now().UTC())
 			return recoverErr
 		})
 	} else {
-		recovered, err = appservice.RecoverStaleDispatchedRunsWithBackend(ctx, state.config.Backend, state.config.DataRoot, appservice.DefaultStaleDispatchedStepMinAge, time.Now().UTC())
+		recovered, err = appservice.RecoverStaleDispatchedRunsWithBackend(ctx, state.config.Backend, state.config.DataRoot, minAge, time.Now().UTC())
 	}
 	if err != nil {
 		return err
@@ -256,14 +260,6 @@ func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Contex
 	}
 }
 
-func (s *runContinuationScheduler) scheduleGovernanceRunResumes(runIDs []string, priority int) {
-	refs := make([]governanceRunResumeRef, 0, len(runIDs))
-	for _, runID := range runIDs {
-		refs = append(refs, governanceRunResumeRef{RunID: runID})
-	}
-	s.scheduleGovernanceRunResumeRefs(refs, priority)
-}
-
 func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {
 	if s == nil || s.state == nil {
 		return
@@ -315,12 +311,12 @@ func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []govern
 	}
 }
 
-func (s *runContinuationScheduler) markGovernanceResumeStarted(runID string) bool {
+func (s *runContinuationScheduler) markGovernanceResumeStarted(key string) bool {
 	if s == nil {
 		return false
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return false
 	}
 	s.governanceMu.Lock()
@@ -328,24 +324,24 @@ func (s *runContinuationScheduler) markGovernanceResumeStarted(runID string) boo
 	if s.governanceStarted == nil {
 		s.governanceStarted = map[string]struct{}{}
 	}
-	if _, ok := s.governanceStarted[runID]; ok {
+	if _, ok := s.governanceStarted[key]; ok {
 		return false
 	}
-	s.governanceStarted[runID] = struct{}{}
+	s.governanceStarted[key] = struct{}{}
 	return true
 }
 
-func (s *runContinuationScheduler) clearGovernanceResumeStarted(runID string) {
+func (s *runContinuationScheduler) clearGovernanceResumeStarted(key string) {
 	if s == nil {
 		return
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return
 	}
 	s.governanceMu.Lock()
 	defer s.governanceMu.Unlock()
-	delete(s.governanceStarted, runID)
+	delete(s.governanceStarted, key)
 }
 
 func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {

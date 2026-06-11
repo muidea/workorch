@@ -516,6 +516,45 @@ func assertItemFileExists(t *testing.T, root string, id string) {
 	}
 }
 
+func TestDecisionResolutionRepositoryStoresLongReadableIDsWithSafeFileName(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	repo := NewDecisionResolutionRepository(filepath.Join(root, "resolution.json"))
+	ticketID := common.TicketID("run-001-" + strings.Repeat("context-gate-retry-", 12) + "context-integrity-decision")
+	resolutionID := common.ResolutionID("resolution-ws-real-run-" + string(ticketID) + "-provide_missing_info")
+
+	if err := repo.Create(ctx, &decisionmodel.Resolution{
+		ID:       resolutionID,
+		TicketID: ticketID,
+		Type:     "provide_missing_info",
+		Payload:  map[string]any{"answer": "continue"},
+	}); err != nil {
+		t.Fatalf("create long resolution: %v", err)
+	}
+	resolution, err := repo.GetByTicketID(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get long resolution by ticket: %v", err)
+	}
+	if resolution.ID != resolutionID || resolution.Payload["answer"] != "continue" {
+		t.Fatalf("resolution = %+v, want stored long ID and payload", resolution)
+	}
+
+	paths, err := repositoryItemPaths(filepath.Join(root, "decisions", "resolutions"))
+	if err != nil {
+		t.Fatalf("list resolution files: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("resolution file count = %d, want 1: %v", len(paths), paths)
+	}
+	name := filepath.Base(paths[0])
+	if len(strings.TrimSuffix(name, filepath.Ext(name))) > 160 {
+		t.Fatalf("resolution filename segment too long: len=%d name=%s", len(strings.TrimSuffix(name, filepath.Ext(name))), name)
+	}
+	if !strings.Contains(name, "-") {
+		t.Fatalf("resolution filename = %s, want readable prefix plus hash suffix", name)
+	}
+}
+
 func TestWorkspaceRepositorySharedInstanceConcurrentCreate(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.json")

@@ -15,9 +15,10 @@ func ListArtifactsByResultOwnerCommand(ctx context.Context, hub events.Hub, resu
 	if hub == nil || resultID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByResult, "result", string(resultID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByResult, "result", string(resultID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyCommand: resultcontracts.ListArtifactsByResultCommand{ResultID: resultID},
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

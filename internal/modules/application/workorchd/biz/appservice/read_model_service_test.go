@@ -494,8 +494,9 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 	if projected.RuntimeCheckpoints[0].Data != nil {
 		t.Fatalf("checkpoint projection = %+v, want raw data omitted", projected.RuntimeCheckpoints[0])
 	}
-	if projected.Results[0].DoDAssessment != nil || projected.Results[0].SummaryDetail != nil {
-		t.Fatalf("result projection = %+v, want raw assessment/detail omitted", projected.Results[0])
+	if projected.Results[0].DoDAssessment == nil || projected.Results[0].DoDAssessment.Summary == "" ||
+		projected.Results[0].SummaryDetail == nil || projected.Results[0].SummaryDetail.ImplementationSummary == "" {
+		t.Fatalf("result projection = %+v, want structured assessment/detail retained", projected.Results[0])
 	}
 	if projected.Artifacts[0].Metadata != nil {
 		t.Fatalf("artifact projection = %+v, want metadata omitted", projected.Artifacts[0])

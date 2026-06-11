@@ -26,7 +26,9 @@ type UpdateApprovalCommand struct {
 }
 
 type ResolveApprovalCommand struct {
-	ApprovalID common.ApprovalID
+	ApprovalID  common.ApprovalID
+	WorkspaceID common.WorkspaceID
+	RunID       common.RunID
 }
 
 type DeleteApprovalCommand struct {

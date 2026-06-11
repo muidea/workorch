@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -2322,6 +2324,79 @@ func TestModelWorkspaceSwitchClearsStaleViewBeforeRefresh(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+	m.currentTask = "task-a"
+	m.result = "result-a"
+	m.artifacts = []string{"artifact-a"}
+	m.runtimeEvents = []string{"event-a"}
+	m.progress = progressRunning
+	m.progressText = "progress-a"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-a", WorkspaceID: "ws-a", State: "open"}
+	m.decisions = []backend.DecisionInfo{{ID: "ticket-a", WorkspaceID: "ws-a", State: "open"}}
+
+	m.setActiveWorkspace("ws-b")
+	if m.activeWorkspaceID != "ws-b" || m.currentTask != "" || m.result != "" || m.blockingDecision != nil {
+		t.Fatalf("switch to uncached workspace did not clear active display: active=%q task=%q result=%q blocker=%+v", m.activeWorkspaceID, m.currentTask, m.result, m.blockingDecision)
+	}
+	m.currentTask = "task-b"
+	m.result = "result-b"
+	m.progressText = "progress-b"
+	m.runtimeEvents = []string{"event-b"}
+
+	m.setActiveWorkspace("ws-a")
+	if m.activeWorkspaceID != "ws-a" || m.currentTask != "task-a" || m.result != "result-a" || m.progressText != "progress-a" {
+		t.Fatalf("switch back did not restore cached display: active=%q task=%q result=%q progress=%q", m.activeWorkspaceID, m.currentTask, m.result, m.progressText)
+	}
+	if len(m.artifacts) != 1 || m.artifacts[0] != "artifact-a" || len(m.runtimeEvents) != 1 || m.runtimeEvents[0] != "event-a" {
+		t.Fatalf("cached artifacts/events = %+v/%+v, want workspace A state", m.artifacts, m.runtimeEvents)
+	}
+	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" || len(m.decisions) != 1 || m.decisions[0].ID != "ticket-a" {
+		t.Fatalf("cached blocker/decisions = %+v/%+v, want workspace A decision", m.blockingDecision, m.decisions)
+	}
+
+	m.setActiveWorkspace("ws-b")
+	if m.currentTask != "task-b" || m.result != "result-b" || m.progressText != "progress-b" {
+		t.Fatalf("workspace B cache = task:%q result:%q progress:%q, want restored B display", m.currentTask, m.result, m.progressText)
+	}
+}
+
+func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+	m.progress = progressRunning
+	state := m.ensureWorkspaceRuntimeState("ws-a")
+	state.LastRevision = 42
+	state.RevisionGapCount = 2
+	state.LastRevisionGap = 3
+	m.runHeartbeat = backend.RunHeartbeatInfo{
+		WorkspaceID:               "ws-a",
+		RunID:                     "run-a",
+		ActivityState:             "no_activity",
+		Summary:                   "no effective progress evidence yet",
+		LatestEffectiveProgressAt: "2026-06-10T00:00:00Z",
+		Stalled:                   true,
+	}
+
+	got := m.renderInspectStatus()
+	for _, want := range []string{
+		"stream revision: last 42, gaps 2, latest gap 3",
+		"activity: no_activity - no effective progress evidence yet",
+		"latest progress: 2026-06-10T00:00:00Z",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status = %q, missing %q", got, want)
+		}
+	}
+}
+
 func TestModelIgnoresRunControlForInactiveWorkspace(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-b", "")
 	m.progressText = "Workspace switched; refreshing state"
@@ -3355,7 +3430,7 @@ func TestModelWorkspaceListChangedEventRefreshesWorkspaceList(t *testing.T) {
 	}
 }
 
-func TestModelWorkspaceProjectionChangedEventRefreshesListAndActiveDetail(t *testing.T) {
+func TestModelWorkspaceProjectionBaselineEventRefreshesWorkspaceList(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
 		{ID: "ws-a", Title: "A", State: "active"},
@@ -3363,13 +3438,298 @@ func TestModelWorkspaceProjectionChangedEventRefreshesListAndActiveDetail(t *tes
 	m = asModel(next)
 	m.activeWorkspaceID = "ws-a"
 
-	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
+	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged})
 	if cmd == nil || !m.workspaceListRefreshInFlight {
-		t.Fatalf("projection changed event should refresh list and detail: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+		t.Fatalf("projection baseline event should refresh list: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
 	}
-	msg := cmd()
-	if _, ok := msg.(tea.BatchMsg); !ok {
-		t.Fatalf("projection changed command = %T, want tea.BatchMsg", msg)
+}
+
+func TestModelWorkspaceProjectionDetailEventRefreshesOnlyActiveDetail(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-a"
+	previousActiveSeq := m.workspaceContextRequestSeqFor("ws-a")
+
+	cmd := m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a"})
+	if cmd == nil || m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-a") != previousActiveSeq+1 {
+		t.Fatalf("active detail projection event cmd/list/seq = %v/%v/%d, want detail refresh only with seq %d", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-a"), previousActiveSeq+1)
+	}
+
+	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b"})
+	if cmd != nil || m.workspaceListRefreshInFlight || m.workspaceContextRequestSeqFor("ws-b") != 0 {
+		t.Fatalf("inactive detail projection event cmd/list/seq = %v/%v/%d, want no main refresh", cmd != nil, m.workspaceListRefreshInFlight, m.workspaceContextRequestSeqFor("ws-b"))
+	}
+}
+
+func TestModelWorkspaceSwitchThenProjectionRefreshUpdatesMainViewAndStatusBar(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
+	}})
+	m = asModel(next)
+	m.width = 120
+	m.height = 32
+	m.activeWorkspaceID = "ws-a"
+	m.currentTask = "task-a"
+	m.progress = progressRunning
+	m.progressText = "progress-a"
+
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = "ws-b"
+	next, cmd := m.confirmWorkspaceSelection()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("workspace selection should request list/context refresh")
+	}
+	if m.activeWorkspaceID != "ws-b" || m.currentTask != "" || m.progressText != "Workspace switched; refreshing state" {
+		t.Fatalf("switch state = active:%q task:%q progress:%q, want cleared ws-b view", m.activeWorkspaceID, m.currentTask, m.progressText)
+	}
+
+	previousSeq := m.workspaceContextRequestSeqFor("ws-b")
+	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-b", Revision: 11})
+	if cmd == nil || m.workspaceContextRequestSeqFor("ws-b") != previousSeq+1 {
+		t.Fatalf("projection event did not request active workspace refresh: cmd=%v seq=%d want %d", cmd != nil, m.workspaceContextRequestSeqFor("ws-b"), previousSeq+1)
+	}
+
+	seq := m.workspaceContextRequestSeqFor("ws-b")
+	next, _ = m.Update(WorkspaceContextMsg{
+		RequestSeq:  99,
+		WorkspaceID: "ws-a",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "A stale", State: common.WorkspaceStateFailed, ActiveRunID: "run-a"},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-a",
+			WorkspaceID: "ws-a",
+			State:       common.RunStateFailed,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{"text": "stale task-a"},
+			},
+		},
+	})
+	m = asModel(next)
+	if m.activeWorkspaceID != "ws-b" || m.currentTask != "" || m.progressText != "Workspace switched; refreshing state" {
+		t.Fatalf("inactive stale context polluted switched view: active=%q task=%q progress=%q", m.activeWorkspaceID, m.currentTask, m.progressText)
+	}
+
+	next, _ = m.Update(WorkspaceContextMsg{
+		RequestSeq:  seq,
+		WorkspaceID: "ws-b",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateRunning},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-b",
+			WorkspaceID: "ws-b",
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{"text": "build workspace B"},
+				"dod":  map[string]any{"items": []any{"B result accepted"}},
+			},
+		},
+		Status: &backend.RunStatusInfo{
+			ID:              "run-b",
+			WorkspaceID:     "ws-b",
+			State:           common.RunStateRunning,
+			CurrentStepKind: "llm/workspace_execution",
+		},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
+			RunHeartbeat: backend.RunHeartbeatInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	if m.activeWorkspaceID != "ws-b" || m.activeRunID != "run-b" || m.currentTask != "build workspace B" {
+		t.Fatalf("active context not applied: active=%q run=%q task=%q", m.activeWorkspaceID, m.activeRunID, m.currentTask)
+	}
+	status := stripANSI(m.renderRuntimeStatusBar(120))
+	for _, want := range []string{"Running - B is making progress", "ws ws-b", "run run-b"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("status bar = %q, missing %q", status, want)
+		}
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "build workspace B") || strings.Contains(view, "task-a") {
+		t.Fatalf("main view not rebound to workspace B:\n%s", view)
+	}
+
+	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 12})
+	if cmd != nil || m.currentTask != "build workspace B" || !strings.Contains(m.renderRuntimeStatusBar(120), "B is making progress") {
+		t.Fatalf("inactive projection event polluted active B view: cmd=%v task=%q status=%q", cmd != nil, m.currentTask, stripANSI(m.renderRuntimeStatusBar(120)))
+	}
+}
+
+func TestTUIE2EWorkspaceSwitchProjectionRefreshVisualSnapshot(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateActive},
+	}})
+	m = asModel(next)
+	m.width = 120
+	m.height = 32
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+	m.currentTask = "task-a"
+	m.progress = progressRunning
+	m.progressText = "progress-a"
+	writeOptionalTUIViewSnapshot(t, "01-before-switch.txt", m)
+
+	m.workspaceSelectMode = true
+	m.selectedWorkspaceID = "ws-b"
+	next, cmd := m.confirmWorkspaceSelection()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("workspace selection should request refresh")
+	}
+	writeOptionalTUIViewSnapshot(t, "02-after-switch-before-refresh.txt", m)
+	if m.activeWorkspaceID != "ws-b" || strings.Contains(stripANSI(m.View()), "task-a") {
+		t.Fatalf("workspace switch did not clear stale workspace A view:\n%s", stripANSI(m.View()))
+	}
+	if !strings.Contains(stripANSI(m.renderRuntimeStatusBar(120)), "refreshing state") {
+		t.Fatalf("status bar missing refresh state after switch: %q", stripANSI(m.renderRuntimeStatusBar(120)))
+	}
+
+	seq := m.workspaceContextRequestSeqFor("ws-b")
+	next, _ = m.Update(WorkspaceContextMsg{
+		RequestSeq:  seq,
+		WorkspaceID: "ws-b",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+		ActiveRun:   &backend.RunInfo{ID: "run-b", WorkspaceID: "ws-b", State: common.RunStateRunning},
+		DisplayRun: &backend.RunInfo{
+			ID:          "run-b",
+			WorkspaceID: "ws-b",
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"goal": map[string]any{"text": "build workspace B"},
+				"dod":  map[string]any{"items": []any{"B result accepted"}},
+			},
+		},
+		Status: &backend.RunStatusInfo{
+			ID:              "run-b",
+			WorkspaceID:     "ws-b",
+			State:           common.RunStateRunning,
+			CurrentStepKind: "llm/workspace_execution",
+		},
+		Snapshot: &backend.WorkspaceSnapshotInfo{
+			Workspace:    backend.WorkspaceInfo{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+			TaskProgress: backend.TaskProgressInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", Summary: "B is making progress"},
+			RunHeartbeat: backend.RunHeartbeatInfo{WorkspaceID: "ws-b", RunID: "run-b", State: "running", ActivityState: "running", Summary: "B heartbeat"},
+		},
+		WorkspaceHasLive: true,
+	})
+	m = asModel(next)
+	writeOptionalTUIViewSnapshot(t, "03-after-projection-refresh.txt", m)
+	view := stripANSI(m.View())
+	status := stripANSI(m.renderRuntimeStatusBar(120))
+	for _, want := range []string{"build workspace B", "B result accepted"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("refreshed main view missing %q:\n%s", want, view)
+		}
+	}
+	for _, want := range []string{"Running - B is making progress", "ws ws-b", "run run-b"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("refreshed status bar = %q, missing %q", status, want)
+		}
+	}
+	if strings.Contains(view, "task-a") || strings.Contains(status, "run-a") {
+		t.Fatalf("refreshed workspace B view/status contains stale workspace A state:\nview:\n%s\nstatus:\n%s", view, status)
+	}
+
+	cmd = m.applyBackendEvent(backend.Event{Type: backend.EventWorkspaceProjectionChanged, WorkspaceID: "ws-a", Revision: 12})
+	if cmd != nil {
+		t.Fatal("inactive workspace projection event should not request active main view refresh")
+	}
+	writeOptionalTUIViewSnapshot(t, "04-after-inactive-projection-event.txt", m)
+	if view := stripANSI(m.View()); !strings.Contains(view, "build workspace B") || strings.Contains(view, "task-a") {
+		t.Fatalf("inactive projection event polluted active workspace view:\n%s", view)
+	}
+}
+
+func TestModelIgnoresStaleWorkspaceListResponse(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", Title: "A", State: "active"}}
+	m.workspaceListRefreshInFlight = true
+	m.workspaceListRequestSeq = 2
+
+	next, cmd := m.Update(WorkspaceListMsg{
+		RequestSeq: 1,
+		Workspaces: []backend.WorkspaceInfo{
+			{ID: "ws-old", Title: "Old", State: "active"},
+		},
+	})
+	m = asModel(next)
+	if cmd != nil || !m.workspaceListRefreshInFlight {
+		t.Fatalf("stale list response changed refresh state: cmd=%v inFlight=%v", cmd != nil, m.workspaceListRefreshInFlight)
+	}
+	if len(m.workspaces) != 1 || m.workspaces[0].ID != "ws-a" {
+		t.Fatalf("workspaces = %+v, want unchanged active list", m.workspaces)
+	}
+}
+
+func TestModelIgnoresStaleWorkspaceContextResponse(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.workspaces = []backend.WorkspaceInfo{{ID: "ws-a", Title: "A", State: "active"}}
+	m.activeWorkspaceID = "ws-a"
+	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 2
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		RequestSeq:  1,
+		WorkspaceID: "ws-a",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-a", Title: "Old", State: "running"},
+	})
+	m = asModel(next)
+	if cmd != nil {
+		t.Fatalf("stale context response returned cmd: %T", cmd())
+	}
+	if len(m.workspaces) != 1 || m.workspaces[0].Title != "A" {
+		t.Fatalf("workspaces = %+v, want unchanged context", m.workspaces)
+	}
+}
+
+func TestModelTransientProjectionErrorSchedulesContextRetry(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 1
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		RequestSeq:  1,
+		WorkspaceID: "ws-a",
+		Error:       errors.New("workorch API error (status 409): workspace projection detail not ready"),
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("transient projection error did not schedule retry")
+	}
+	if m.lastError != nil || !strings.Contains(m.progressText, "retrying") {
+		t.Fatalf("lastError/progressText = %v/%q, want retry without sticky error", m.lastError, m.progressText)
+	}
+}
+
+func TestModelWorkspaceContextRequestSeqIsScopedByWorkspace(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-b", "")
+	m.workspaces = []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: "active"},
+		{ID: "ws-b", Title: "B", State: "active"},
+	}
+	m.activeWorkspaceID = "ws-b"
+	m.ensureWorkspaceRuntimeState("ws-a").ContextRequestSeq = 9
+	m.ensureWorkspaceRuntimeState("ws-b").ContextRequestSeq = 1
+
+	next, cmd := m.Update(WorkspaceContextMsg{
+		RequestSeq:  1,
+		WorkspaceID: "ws-b",
+		Workspace:   &backend.WorkspaceInfo{ID: "ws-b", Title: "B updated", State: "running"},
+	})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("workspace context response did not return follow-up blocker command")
+	}
+	if got := findWorkspace(m.workspaces, "ws-b"); got == nil || got.Title != "B updated" {
+		t.Fatalf("ws-b context was not applied: %+v", m.workspaces)
 	}
 }
 
@@ -3449,8 +3809,10 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("active workspace first revision should not be compared against inactive workspace revision")
 	}
-	if m.lastRevisionByWorkspace["ws-b"] != 50 || m.lastRevisionByWorkspace["ws-a"] != 2 {
-		t.Fatalf("workspace revisions = %+v, want ws-a=2 ws-b=50", m.lastRevisionByWorkspace)
+	wsBState := m.workspaceRuntimeState("ws-b")
+	wsAState := m.workspaceRuntimeState("ws-a")
+	if wsBState == nil || wsBState.LastRevision != 50 || wsAState == nil || wsAState.LastRevision != 2 {
+		t.Fatalf("workspace runtime states = %+v, want ws-a revision=2 ws-b revision=50", m.workspaceRuntimeStates)
 	}
 
 	cmd = m.applyBackendEvent(backend.Event{
@@ -3462,6 +3824,24 @@ func TestModelTracksEventRevisionPerWorkspace(t *testing.T) {
 	})
 	if cmd == nil || !strings.Contains(m.progressText, "revision gap") {
 		t.Fatalf("active workspace revision gap should refresh context: cmd=%v progress=%q", cmd != nil, m.progressText)
+	}
+	wsAState = m.workspaceRuntimeState("ws-a")
+	if wsAState == nil || wsAState.RevisionGapCount != 1 || wsAState.LastRevisionGap != 1 {
+		t.Fatalf("ws-a revision gap state = %+v, want count=1 latest=1", wsAState)
+	}
+
+	cmd = m.applyBackendEvent(backend.Event{
+		Type:        backend.EventWorkspaceStateChanged,
+		WorkspaceID: "ws-b",
+		Revision:    53,
+		Payload:     map[string]any{"state": "running"},
+	})
+	if cmd != nil {
+		t.Fatal("inactive workspace revision gap should not refresh active context")
+	}
+	wsBState = m.workspaceRuntimeState("ws-b")
+	if wsBState == nil || wsBState.RevisionGapCount != 1 || wsBState.LastRevisionGap != 2 {
+		t.Fatalf("ws-b revision gap state = %+v, want count=1 latest=2", wsBState)
 	}
 }
 
@@ -3749,6 +4129,21 @@ func stripANSI(value string) string {
 	return ansiPattern.ReplaceAllString(value, "")
 }
 
+func writeOptionalTUIViewSnapshot(t *testing.T, name string, model AppModel) {
+	t.Helper()
+	dir := strings.TrimSpace(os.Getenv("WORKORCH_TUI_WORKSPACE_SWITCH_ARTIFACT_DIR"))
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create TUI snapshot dir: %v", err)
+	}
+	content := "status:\n" + stripANSI(model.renderRuntimeStatusBar(model.width)) + "\n\nview:\n" + stripANSI(model.View())
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write TUI snapshot %s: %v", name, err)
+	}
+}
+
 // ── fake backend ──
 
 type fakeBE struct{}
@@ -3870,14 +4265,14 @@ func (f *decisionRecordingBackend) Resolve(ctx context.Context, req backend.Reso
 	f.parent.decisions = append(f.parent.decisions, req)
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *decisionRecordingBackend) BatchResolve(ctx context.Context, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *decisionRecordingBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *decisionRecordingBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
-func (f *decisionRecordingBackend) Get(ctx context.Context, id common.TicketID) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{ID: id, State: "open"}, nil
+func (f *decisionRecordingBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*backend.DecisionInfo, error) {
+	return &backend.DecisionInfo{ID: id, WorkspaceID: wsID, State: "open"}, nil
 }
 
 func (b *recordingBE) Goal() backend.GoalBackend { return &recordingGoal{parent: b} }
@@ -4017,20 +4412,20 @@ func (f *conflictWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 
 type conflictApprovalBackend struct{}
 
-func (f *conflictApprovalBackend) Approve(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrConflict
 }
-func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *conflictApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *conflictApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
-func (f *conflictApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, WorkspaceID: "ws-1", RunID: "run-1", State: "approved"}, nil
+func (f *conflictApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, RunID: "run-1", State: "approved"}, nil
 }
 
 type conflictRunBackend struct{ parent *conflictApprovalBE }
@@ -4150,32 +4545,32 @@ type fakeDC struct{}
 func (f *fakeDC) Resolve(ctx context.Context, req backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *fakeDC) BatchResolve(ctx context.Context, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *fakeDC) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *fakeDC) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
-func (f *fakeDC) Get(ctx context.Context, id common.TicketID) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{ID: id, Question: "?", State: "open"}, nil
+func (f *fakeDC) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*backend.DecisionInfo, error) {
+	return &backend.DecisionInfo{ID: id, WorkspaceID: wsID, Question: "?", State: "open"}, nil
 }
 
 type fakeA struct{}
 
-func (f *fakeA) Approve(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, State: "approved"}, nil
+func (f *fakeA) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeA) Reject(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, State: "rejected"}, nil
+func (f *fakeA) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeA) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *fakeA) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *fakeA) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
-func (f *fakeA) Get(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, Reason: "reason", State: "pending"}, nil
+func (f *fakeA) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "reason", State: "pending"}, nil
 }
 
 type fakeS struct{}
@@ -4223,13 +4618,15 @@ type fakeMM struct{}
 func (f *fakeMM) Create(ctx context.Context, wsID common.WorkspaceID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return m, nil
 }
-func (f *fakeMM) Get(ctx context.Context, id common.MemoryID) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{ID: id}, nil
+func (f *fakeMM) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*backend.MemoryItemInfo, error) {
+	return &backend.MemoryItemInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeMM) Update(ctx context.Context, id common.MemoryID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (f *fakeMM) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+	m.ID = id
+	m.WorkspaceID = wsID
 	return m, nil
 }
-func (f *fakeMM) Delete(ctx context.Context, id common.MemoryID) error {
+func (f *fakeMM) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
 	return nil
 }
 func (f *fakeMM) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.MemoryItemInfo, error) {

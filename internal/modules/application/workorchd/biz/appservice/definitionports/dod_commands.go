@@ -40,11 +40,15 @@ func DefineDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 }
 
 func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID, items []string) (*workspacemodel.DoD, error) {
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
 	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateDoD, "dod", string(dodID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.UpdateDoDCommand{
 			DoDID: dodID,
 			Items: append([]string(nil), items...),
 		},
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
 		return nil, err
@@ -57,7 +61,11 @@ func UpdateDoD(ctx context.Context, hub events.Hub, workspaceID common.Workspace
 }
 
 func DeleteDoD(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, dodID common.DoDID) error {
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
 	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteDoD, "dod", string(dodID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.DeleteDoDCommand{DoDID: dodID},
+		events.PayloadKeyCommand:     workspacecontracts.DeleteDoDCommand{DoDID: dodID},
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 }

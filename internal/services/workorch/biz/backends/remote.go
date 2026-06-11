@@ -295,18 +295,18 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 type remoteDecisionBackend struct{ cl *client.Client }
 
 func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
-	d, err := b.cl.ResolveDecision(ctx, string(req.TicketID), req.ResolutionType, req.Payload)
+	d, err := b.cl.ResolveDecision(ctx, string(req.WorkspaceID), string(req.TicketID), req.ResolutionType, req.Payload)
 	if err != nil {
 		return nil, err
 	}
 	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
 }
-func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
+func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
 	for i, id := range ticketIDs {
 		ids[i] = string(id)
 	}
-	list, err := b.cl.BatchResolveDecisions(ctx, ids, resolutionType, payload)
+	list, err := b.cl.BatchResolveDecisions(ctx, string(workspaceID), ids, resolutionType, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -327,8 +327,8 @@ func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	return result, nil
 }
-func (b *remoteDecisionBackend) Get(ctx context.Context, id common.TicketID) (*DecisionInfo, error) {
-	d, err := b.cl.GetDecision(ctx, string(id))
+func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error) {
+	d, err := b.cl.GetDecision(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -339,26 +339,26 @@ func (b *remoteDecisionBackend) Get(ctx context.Context, id common.TicketID) (*D
 
 type remoteApprovalBackend struct{ cl *client.Client }
 
-func (b *remoteApprovalBackend) Approve(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	a, err := b.cl.Approve(ctx, string(id))
+func (b *remoteApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	a, err := b.cl.Approve(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	a, err := b.cl.Reject(ctx, string(id))
+func (b *remoteApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	a, err := b.cl.Reject(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
 	return &ApprovalInfo{ID: common.ApprovalID(a.ID), WorkspaceID: common.WorkspaceID(a.WorkspaceID), RunID: common.RunID(a.RunID), Reason: a.Reason, Action: a.Action, Context: a.Context, State: a.State, AutoGovernance: mapRemoteAutoGovernanceSummary(a.AutoGovernance)}, nil
 }
-func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
+func (b *remoteApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
 	_idStrings := make([]string, len(ids))
 	for i, id := range ids {
 		_idStrings[i] = string(id)
 	}
-	list, err := b.cl.BatchResolveApprovals(ctx, _idStrings, action)
+	list, err := b.cl.BatchResolveApprovals(ctx, string(wsID), _idStrings, action)
 	if err != nil {
 		return nil, err
 	}
@@ -379,8 +379,8 @@ func (b *remoteApprovalBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	return result, nil
 }
-func (b *remoteApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	a, err := b.cl.GetApproval(ctx, string(id))
+func (b *remoteApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	a, err := b.cl.GetApproval(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -460,22 +460,22 @@ func (b *remoteMemoryBackend) Create(ctx context.Context, wsID common.WorkspaceI
 	}
 	return memoryInfoFromClient(item), nil
 }
-func (b *remoteMemoryBackend) Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error) {
-	item, err := b.cl.GetMemory(ctx, string(id))
+func (b *remoteMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*MemoryItemInfo, error) {
+	item, err := b.cl.GetMemory(ctx, string(wsID), string(id))
 	if err != nil {
 		return nil, err
 	}
 	return memoryInfoFromClient(item), nil
 }
-func (b *remoteMemoryBackend) Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
-	item, err := b.cl.UpdateMemory(ctx, string(id), clientMemoryFromInfo(m))
+func (b *remoteMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+	item, err := b.cl.UpdateMemory(ctx, string(wsID), string(id), clientMemoryFromInfo(m))
 	if err != nil {
 		return nil, err
 	}
 	return memoryInfoFromClient(item), nil
 }
-func (b *remoteMemoryBackend) Delete(ctx context.Context, id common.MemoryID) error {
-	return b.cl.DeleteMemory(ctx, string(id))
+func (b *remoteMemoryBackend) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
+	return b.cl.DeleteMemory(ctx, string(wsID), string(id))
 }
 func (b *remoteMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {
 	return b.Search(ctx, wsID, MemorySearchRequest{})

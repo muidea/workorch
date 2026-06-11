@@ -15,9 +15,10 @@ func ReadMemoryItemByOwnerCommand(ctx context.Context, hub events.Hub, id common
 	if hub == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, memoryevents.TopicMemoryCommandGet, "memory", string(id), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, memoryevents.TopicMemoryCommandGet, "memory", string(id), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyMemoryID: string(id),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

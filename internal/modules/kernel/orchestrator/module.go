@@ -298,6 +298,14 @@ func stringPayload(payload map[string]any, key string) string {
 	return value
 }
 
+func orchestratorScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if workspaceID == "" {
+		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	return workspaceID
+}
+
 func (m *Module) handlePurgeRunCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
@@ -340,6 +348,9 @@ func purgeRunIDFromPayload(payload map[string]any) common.RunID {
 func (m *Module) handleEvidenceReadCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.bizPtr == nil {
 		return common.ErrInvalidArgument
+	}
+	if workspaceID := orchestratorScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
 	if runID == "" {

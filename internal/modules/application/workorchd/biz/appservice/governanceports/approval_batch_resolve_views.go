@@ -23,9 +23,10 @@ func BatchResolveApprovalViews(ctx context.Context, hub events.Hub, traces gover
 		item *approvalmodel.Approval
 		err  error
 	}
+	readCtx := contextWithGovernanceScope(ctx, scope)
 	reads := make([]approvalRead, len(cmd.ApprovalIDs))
 	for i, approvalID := range cmd.ApprovalIDs {
-		reads[i].item, reads[i].err = ReadApproval(ctx, hub, common.ApprovalID(approvalID))
+		reads[i].item, reads[i].err = ReadApproval(readCtx, hub, common.ApprovalID(approvalID))
 	}
 	for _, r := range reads {
 		if r.err != nil {
@@ -40,8 +41,8 @@ func BatchResolveApprovalViews(ctx context.Context, hub events.Hub, traces gover
 	}
 
 	ret := make([]readmodelcore.Approval, 0, len(cmd.ApprovalIDs))
-	for _, approvalID := range cmd.ApprovalIDs {
-		item, err := resolveApprovalByAction(ctx, hub, common.ApprovalID(approvalID), action)
+	for _, r := range reads {
+		item, err := resolveApprovalItemByAction(ctx, hub, r.item, action)
 		if err != nil {
 			return nil, err
 		}

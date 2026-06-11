@@ -193,40 +193,40 @@ func (f *fakeDec) Resolve(ctx context.Context, req backend.ResolveDecisionReques
 	f.b.mu.Unlock()
 	return &backend.DecisionInfo{ID: req.TicketID, State: "resolved"}, nil
 }
-func (f *fakeDec) BatchResolve(ctx context.Context, ticketIDs []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
+func (f *fakeDec) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, rt string, p map[string]any) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (f *fakeDec) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.DecisionInfo, error) {
 	return f.b.decisions, nil
 }
-func (f *fakeDec) Get(ctx context.Context, id common.TicketID) (*backend.DecisionInfo, error) {
-	return &backend.DecisionInfo{ID: id, Question: "test?", State: "open"}, nil
+func (f *fakeDec) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*backend.DecisionInfo, error) {
+	return &backend.DecisionInfo{ID: id, WorkspaceID: wsID, Question: "test?", State: "open"}, nil
 }
 
 // ── Approval ──
 
 type fakeAppr struct{ b *fakeBackend }
 
-func (f *fakeAppr) Approve(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.ApproveCalls = append(f.b.ApproveCalls, string(id))
 	f.b.mu.Unlock()
-	return &backend.ApprovalInfo{ID: id, State: "approved"}, nil
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "approved"}, nil
 }
-func (f *fakeAppr) Reject(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (f *fakeAppr) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
 	f.b.mu.Lock()
 	f.b.RejectCalls = append(f.b.RejectCalls, string(id))
 	f.b.mu.Unlock()
-	return &backend.ApprovalInfo{ID: id, State: "rejected"}, nil
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, State: "rejected"}, nil
 }
-func (f *fakeAppr) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
+func (f *fakeAppr) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (f *fakeAppr) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.ApprovalInfo, error) {
 	return f.b.approvals, nil
 }
-func (f *fakeAppr) Get(ctx context.Context, id common.ApprovalID) (*backend.ApprovalInfo, error) {
-	return &backend.ApprovalInfo{ID: id, Reason: "test reason", State: "pending"}, nil
+func (f *fakeAppr) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*backend.ApprovalInfo, error) {
+	return &backend.ApprovalInfo{ID: id, WorkspaceID: wsID, Reason: "test reason", State: "pending"}, nil
 }
 
 // ── Stubs ──
@@ -276,13 +276,17 @@ type fakeMem struct{}
 func (f *fakeMem) Create(ctx context.Context, wsID common.WorkspaceID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return m, nil
 }
-func (f *fakeMem) Get(ctx context.Context, id common.MemoryID) (*backend.MemoryItemInfo, error) {
-	return &backend.MemoryItemInfo{ID: id}, nil
+func (f *fakeMem) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*backend.MemoryItemInfo, error) {
+	return &backend.MemoryItemInfo{ID: id, WorkspaceID: wsID}, nil
 }
-func (f *fakeMem) Update(ctx context.Context, id common.MemoryID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (f *fakeMem) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+	m.ID = id
+	m.WorkspaceID = wsID
 	return m, nil
 }
-func (f *fakeMem) Delete(ctx context.Context, id common.MemoryID) error { return nil }
+func (f *fakeMem) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
+	return nil
+}
 func (f *fakeMem) List(ctx context.Context, wsID common.WorkspaceID) ([]backend.MemoryItemInfo, error) {
 	return nil, nil
 }

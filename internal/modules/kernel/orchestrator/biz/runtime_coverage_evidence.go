@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -10,7 +12,7 @@ import (
 )
 
 func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWorkItemSource) []string {
-	kinds := []string{"validation"}
+	kinds := coverageDefaultRequiredEvidenceKinds(source)
 	target := map[string]any{
 		"kind":                     source.SourceScope,
 		"source":                   source.Source,
@@ -31,6 +33,126 @@ func coverageRequiredEvidenceKindsForSource(run *runModel.Run, source coverageWo
 		kinds = append(kinds, "state_change")
 	}
 	return compactUniqueStrings(kinds)
+}
+
+func coverageDefaultRequiredEvidenceKinds(source coverageWorkItemSource) []string {
+	target := strings.ToLower(strings.TrimSpace(source.TargetText))
+	switch {
+	case coverageTextRequiresDecisionEvidence(target):
+		return []string{"decision"}
+	case coverageTextRequiresApprovalEvidence(target):
+		return []string{"approval"}
+	default:
+		return []string{"validation"}
+	}
+}
+
+func coverageRequiredEvidenceCountsForSource(source coverageWorkItemSource, requiredKinds []string) map[string]int {
+	ret := map[string]int{}
+	target := strings.ToLower(strings.TrimSpace(source.TargetText))
+	for _, kind := range requiredKinds {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		switch kind {
+		case "decision":
+			ret[kind] = coverageGovernanceEvidenceMinCount(target, "decision")
+		case "approval":
+			ret[kind] = coverageGovernanceEvidenceMinCount(target, "approval")
+		default:
+			ret[kind] = 1
+		}
+	}
+	return ret
+}
+
+func coverageGovernanceEvidenceMinCount(text string, kind string) int {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return 1
+	}
+	kindTerms := []string{kind}
+	switch kind {
+	case "decision":
+		kindTerms = []string{"decision", "decisions", "ticket", "tickets", "决策", "工单"}
+	case "approval":
+		kindTerms = []string{"approval", "approvals", "approved", "审批", "批准"}
+	}
+	for _, term := range kindTerms {
+		if count := coverageCountBeforeTerm(text, term); count > 0 {
+			return count
+		}
+	}
+	return 1
+}
+
+func coverageCountBeforeTerm(text string, term string) int {
+	term = strings.ToLower(strings.TrimSpace(term))
+	if text == "" || term == "" || !strings.Contains(text, term) {
+		return 0
+	}
+	pattern := regexp.MustCompile(`(?i)(\d+|one|two|three|four|five|six|seven|eight|nine|ten|一|一个|一条|一项|两|两个|两条|两项|二|二个|二条|二项|三|三个|三条|三项)\s*(?:[a-z_-]+\s+){0,3}` + regexp.QuoteMeta(term))
+	match := pattern.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return 0
+	}
+	return coverageCountWordValue(match[1])
+}
+
+func coverageCountWordValue(raw string) int {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return 0
+	}
+	if count, err := strconv.Atoi(raw); err == nil {
+		return count
+	}
+	switch raw {
+	case "one", "一", "一个", "一条", "一项":
+		return 1
+	case "two", "两", "两个", "两条", "两项", "二", "二个", "二条", "二项":
+		return 2
+	case "three", "三", "三个", "三条", "三项":
+		return 3
+	case "four":
+		return 4
+	case "five":
+		return 5
+	case "six":
+		return 6
+	case "seven":
+		return 7
+	case "eight":
+		return 8
+	case "nine":
+		return 9
+	case "ten":
+		return 10
+	default:
+		return 0
+	}
+}
+
+func coverageTextRequiresDecisionEvidence(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "decision") ||
+		strings.Contains(text, "决策") ||
+		strings.Contains(text, "工单")
+}
+
+func coverageTextRequiresApprovalEvidence(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "approval") ||
+		strings.Contains(text, "approved") ||
+		strings.Contains(text, "审批") ||
+		strings.Contains(text, "批准")
 }
 
 func coverageSourceCanCarryStateChange(source coverageWorkItemSource) bool {
@@ -59,10 +181,10 @@ func coverageMissingEvidenceKinds(item map[string]any) []string {
 	if len(required) == 0 {
 		required = []string{"validation"}
 	}
-	return coverageMissingEvidenceKindsFromDetails(required, mapStringSliceValue(item["acceptedEvidenceByKind"]))
+	return coverageMissingEvidenceKindsFromDetails(required, mapStringSliceValue(item["acceptedEvidenceByKind"]), mapIntValue(item["requiredEvidenceCounts"]))
 }
 
-func coverageMissingEvidenceKindsFromDetails(requiredKinds []string, acceptedByKind map[string][]string) []string {
+func coverageMissingEvidenceKindsFromDetails(requiredKinds []string, acceptedByKind map[string][]string, requiredCounts map[string]int) []string {
 	if len(requiredKinds) == 0 {
 		requiredKinds = []string{"validation"}
 	}
@@ -72,11 +194,37 @@ func coverageMissingEvidenceKindsFromDetails(requiredKinds []string, acceptedByK
 		if kind == "" {
 			continue
 		}
-		if len(acceptedByKind[kind]) == 0 {
+		requiredCount := requiredCounts[kind]
+		if requiredCount <= 0 {
+			requiredCount = 1
+		}
+		if coverageEvidenceCountForKind(kind, acceptedByKind[kind]) < requiredCount {
 			missing = append(missing, kind)
 		}
 	}
 	return compactUniqueStrings(missing)
+}
+
+func coverageEvidenceCountForKind(kind string, refs []string) int {
+	refs = compactUniqueStrings(refs)
+	switch strings.TrimSpace(kind) {
+	case "decision":
+		countable := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			normalized := strings.ToLower(strings.TrimSpace(ref))
+			if normalized == "" || strings.HasPrefix(normalized, "resolution-") || strings.Contains(normalized, "/resolution/") {
+				continue
+			}
+			if coverageEvidenceRefLooksDecision(normalized) {
+				countable = append(countable, normalized)
+			}
+		}
+		return len(compactUniqueStrings(countable))
+	case "approval":
+		return len(filterCoverageEvidenceRefs(refs, coverageEvidenceRefLooksApproval))
+	default:
+		return len(refs)
+	}
 }
 
 func coverageCurrentGap(missingKinds []string) string {
@@ -138,6 +286,9 @@ func coverageWorkItemStepUpdate(step *runModel.Step) coverageWorkItemUpdate {
 
 func coverageStepCanProduceValidationEvidence(step *runModel.Step) bool {
 	if step == nil {
+		return false
+	}
+	if !validationEvidenceCanSatisfyDoD(evidenceQualityFromRuntimeStep(step)) {
 		return false
 	}
 	switch strings.TrimSpace(step.Kind) {
@@ -221,7 +372,7 @@ func coverageWorkItemAssessmentUpdates(step *runModel.Step, assessment map[strin
 			accepted := state == "satisfied"
 			update := coverageWorkItemUpdate{
 				TargetTokens:   tokens,
-				EvidenceKinds:  []string{"validation"},
+				EvidenceKinds:  coverageAssessmentEvidenceKinds(item),
 				EvidenceRefs:   refs,
 				Accepted:       accepted,
 				CloseSatisfied: accepted,
@@ -240,6 +391,28 @@ func coverageWorkItemAssessmentUpdates(step *runModel.Step, assessment map[strin
 		}
 	}
 	return updates
+}
+
+func coverageAssessmentEvidenceKinds(item map[string]any) []string {
+	if len(item) == 0 {
+		return []string{"validation"}
+	}
+	text := strings.Join([]string{
+		stringFromMap(item, "item"),
+		stringFromMap(item, "goal"),
+		stringFromMap(item, "goalItem"),
+		stringFromMap(item, "requirement"),
+		stringFromMap(item, "targetText"),
+		stringFromMap(item, "summary"),
+	}, " ")
+	switch {
+	case coverageTextRequiresDecisionEvidence(text):
+		return []string{"decision"}
+	case coverageTextRequiresApprovalEvidence(text):
+		return []string{"approval"}
+	default:
+		return []string{"validation"}
+	}
 }
 
 func coverageTokensFromAssessmentItem(item map[string]any) []string {
@@ -309,16 +482,25 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		flatKey = "acceptedEvidenceRefs"
 	}
 	byKind := mapStringSliceValue(item[key])
+	hasApplicableEvidence := false
 	for _, kind := range kinds {
 		kind = strings.TrimSpace(kind)
 		if kind == "" || !required[kind] {
 			continue
 		}
+		filteredRefs := coverageEvidenceRefsForKind(kind, refs)
+		if len(filteredRefs) == 0 {
+			continue
+		}
+		hasApplicableEvidence = true
 		before := stableCoverageJSON(byKind[kind])
-		byKind[kind] = compactUniqueStrings(append(byKind[kind], refs...))
+		byKind[kind] = compactUniqueStrings(append(byKind[kind], filteredRefs...))
 		if before != stableCoverageJSON(byKind[kind]) {
 			changed = true
 		}
+	}
+	if !hasApplicableEvidence {
+		return false
 	}
 	item[key] = byKind
 	item[flatKey] = coverageFlattenEvidenceRefs(byKind, stringSliceFromValue(item[flatKey]))
@@ -330,6 +512,7 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		item["reason"] = reason
 	}
 	missing := coverageMissingEvidenceKinds(item)
+	item["missingEvidenceKinds"] = missing
 	item["currentGap"] = coverageCurrentGap(missing)
 	if accepted {
 		if len(missing) == 0 {
@@ -341,6 +524,7 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 					changed = true
 				}
 				item["status"] = "satisfied"
+				item["missingEvidenceKinds"] = []string{}
 				item["currentGap"] = ""
 			} else if strings.TrimSpace(stringFromMap(item, "status")) != "satisfied" {
 				if strings.TrimSpace(stringFromMap(item, "status")) != "evidence_ready" {
@@ -368,4 +552,46 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		return false
 	}
 	return true
+}
+
+func coverageEvidenceRefsForKind(kind string, refs []string) []string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" || len(refs) == 0 {
+		return nil
+	}
+	switch kind {
+	case "decision":
+		return filterCoverageEvidenceRefs(refs, coverageEvidenceRefLooksDecision)
+	case "approval":
+		return filterCoverageEvidenceRefs(refs, coverageEvidenceRefLooksApproval)
+	default:
+		return compactUniqueStrings(refs)
+	}
+}
+
+func filterCoverageEvidenceRefs(refs []string, keep func(string) bool) []string {
+	if keep == nil {
+		return compactUniqueStrings(refs)
+	}
+	ret := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || !keep(ref) {
+			continue
+		}
+		ret = append(ret, ref)
+	}
+	return compactUniqueStrings(ret)
+}
+
+func coverageEvidenceRefLooksDecision(ref string) bool {
+	ref = strings.ToLower(strings.TrimSpace(ref))
+	return strings.Contains(ref, "decision") ||
+		strings.Contains(ref, "ticket") ||
+		strings.Contains(ref, "resolution")
+}
+
+func coverageEvidenceRefLooksApproval(ref string) bool {
+	ref = strings.ToLower(strings.TrimSpace(ref))
+	return strings.Contains(ref, "approval")
 }

@@ -65,12 +65,17 @@ func (o eventOrchestrator) publish(ctx context.Context, topic string, runID comm
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID != "" {
+		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+	}
 	payload[events.PayloadKeyRunID] = string(runID)
 	err := o.hub.Publish(ctx, events.Envelope{
 		Topic:        topic,
 		SourceModule: ModuleID,
 		SubjectType:  "run",
 		SubjectID:    string(runID),
+		WorkspaceID:  string(workspaceID),
 		RunID:        string(runID),
 		Payload:      payload,
 	})

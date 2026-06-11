@@ -40,11 +40,15 @@ func DefineGoal(ctx context.Context, hub events.Hub, workspaceID common.Workspac
 }
 
 func UpdateGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID, text string) (*workspacemodel.Goal, error) {
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
 	response, err := ownercommandports.PublishWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandUpdateGoal, "goal", string(goalID), workspaceID, "", map[string]any{
 		events.PayloadKeyCommand: workspacecontracts.UpdateGoalCommand{
 			GoalID: goalID,
 			Text:   text,
 		},
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 	if err != nil {
 		return nil, err
@@ -57,7 +61,11 @@ func UpdateGoal(ctx context.Context, hub events.Hub, workspaceID common.Workspac
 }
 
 func DeleteGoal(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID, goalID common.GoalID) error {
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
 	return ownercommandports.Publish(ctx, hub, workspaceevents.TopicWorkspaceCommandDeleteGoal, "goal", string(goalID), workspaceID, "", map[string]any{
-		events.PayloadKeyCommand: workspacecontracts.DeleteGoalCommand{GoalID: goalID},
+		events.PayloadKeyCommand:     workspacecontracts.DeleteGoalCommand{GoalID: goalID},
+		events.PayloadKeyWorkspaceID: string(workspaceID),
 	})
 }

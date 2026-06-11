@@ -280,6 +280,20 @@ func publishStateEventCommand(ctx context.Context, hub events.Hub, topic string,
 	if hub == nil || topic == "" {
 		return events.Envelope{}, common.ErrInvalidArgument
 	}
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
+	if workspaceID != "" || runID != "" {
+		if payload == nil {
+			payload = map[string]any{}
+		}
+		if workspaceID != "" {
+			payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+		}
+		if runID != "" {
+			payload[events.PayloadKeyRunID] = string(runID)
+		}
+	}
 	err := hub.Publish(ctx, events.Envelope{
 		Topic:        topic,
 		SourceModule: ModuleID,

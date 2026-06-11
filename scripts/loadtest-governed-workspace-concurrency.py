@@ -37,11 +37,15 @@ KEEP_ARTIFACTS = os.environ.get("WORKORCH_LOAD_KEEP_ARTIFACTS", "1") == "1"
 CURL_MAX_TIME = os.environ.get("WORKORCH_LOAD_CURL_MAX_TIME", "300")
 POLL_INTERVAL_SECONDS = float(os.environ.get("WORKORCH_LOAD_POLL_INTERVAL_SECONDS", "1"))
 STATUS_WAIT_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS", "0"))
+REAL_RUN_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS", "900"))
+REAL_PROVIDER_TIMEOUT = os.environ.get("WORKORCH_LOAD_REAL_PROVIDER_TIMEOUT", "180s").strip()
+METRICS_SAMPLE_INTERVAL_SECONDS = float(os.environ.get("WORKORCH_LOAD_METRICS_SAMPLE_INTERVAL_SECONDS", "0.2"))
 COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
 PROVINCE = os.environ.get("WORKORCH_LOAD_PROVINCE", "浙江")
 CITY = os.environ.get("WORKORCH_LOAD_CITY", "杭州")
 LOOKUP_NAME = os.environ.get("WORKORCH_LOAD_LOOKUP_NAME", "Hangzhou")
 EXPECTED_MAX_CONCURRENT_RUNS = int(os.environ.get("WORKORCH_LOAD_EXPECT_MAX_CONCURRENT_RUNS", "0"))
+EXPECT_ACTIVE_OVERLAP = os.environ.get("WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP", "0") == "1"
 MCP_SESSION_POLICY = os.environ.get("WORKORCH_LOAD_MCP_SESSION_POLICY", "transient").strip().lower()
 MIN_SUCCESS_RATE = float(os.environ.get("WORKORCH_LOAD_MIN_SUCCESS_RATE", "1.0"))
 
@@ -57,6 +61,10 @@ if POLL_INTERVAL_SECONDS <= 0:
     raise SystemExit(f"WORKORCH_LOAD_POLL_INTERVAL_SECONDS must be positive, got {POLL_INTERVAL_SECONDS!r}")
 if STATUS_WAIT_TIMEOUT_SECONDS < 0:
     raise SystemExit(f"WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS must not be negative, got {STATUS_WAIT_TIMEOUT_SECONDS!r}")
+if REAL_RUN_TIMEOUT_SECONDS <= 0:
+    raise SystemExit(f"WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS must be positive, got {REAL_RUN_TIMEOUT_SECONDS!r}")
+if METRICS_SAMPLE_INTERVAL_SECONDS <= 0:
+    raise SystemExit(f"WORKORCH_LOAD_METRICS_SAMPLE_INTERVAL_SECONDS must be positive, got {METRICS_SAMPLE_INTERVAL_SECONDS!r}")
 
 
 class HTTPError(RuntimeError):
@@ -95,6 +103,12 @@ class StageTiming:
     @property
     def duration_ms(self) -> float:
         return (self.ended_at - self.started_at) * 1000
+
+
+@dataclass
+class MetricsSample:
+    sampled_at: float
+    values: dict[str, float]
 
 
 @dataclass
@@ -194,29 +208,37 @@ class MockLLMServer:
 
     @staticmethod
     def parse_provider_request(payload: dict[str, Any]) -> dict[str, Any]:
-        content = ((payload.get("messages") or [{}])[-1] or {}).get("content", "")
+        messages = payload.get("messages") or [{}]
+        content = (messages[-1] or {}).get("content", "")
+        all_content = "\n".join(str((message or {}).get("content") or "") for message in messages)
         try:
             request = json.loads(content)
         except Exception:
             request = {}
-        request["raw"] = content
+        request["raw"] = all_content or content
         if not request.get("runId"):
-            match = re.search(r'"runId"\s*:\s*"([^"]+)"', content)
+            match = re.search(r'"runId"\s*:\s*"([^"]+)"', all_content)
             if match:
                 request["runId"] = match.group(1)
+        if not request.get("workspaceId"):
+            match = re.search(r'"workspaceId"\s*:\s*"([^"]+)"', all_content)
+            if match:
+                request["workspaceId"] = match.group(1)
         if not request.get("stepId"):
-            match = re.search(r'"stepId"\s*:\s*"([^"]+)"', content)
+            match = re.search(r'"stepId"\s*:\s*"([^"]+)"', all_content)
             if match:
                 request["stepId"] = match.group(1)
         return request
 
-    def next_call(self, run_id: str) -> int:
+    def next_call(self, workspace_id: str, run_id: str) -> int:
+        key = f"{workspace_id or 'unknown'}:{run_id}"
         with self.lock:
-            next_value = self.call_counts.get(run_id, 0) + 1
-            self.call_counts[run_id] = next_value
+            next_value = self.call_counts.get(key, 0) + 1
+            self.call_counts[key] = next_value
             return next_value
 
     def decision_payload(self, request: dict[str, Any]) -> dict[str, Any]:
+        workspace_id = request.get("workspaceId") or "unknown"
         run_id = request.get("runId") or "unknown"
         step_id = request.get("stepId") or ""
         step_input = request.get("input") or {}
@@ -224,8 +246,19 @@ class MockLLMServer:
         if run_id == "probe":
             return {"completionState": "failed", "thoughtSummary": "probe"}
 
-        if step_input.get("graphFollowUp") or step_input.get("previousStepOutput") or '"graphFollowUp": true' in raw or '"previousStepOutput"' in raw:
+        if (
+            step_input.get("graphFollowUp")
+            or step_input.get("previousStepOutput")
+            or "follow-up-graph" in step_id
+            or "assessment" in step_id
+            or "correction" in step_id
+            or '"graphFollowUp": true' in raw
+            or '"previousStepOutput"' in raw
+            or '"assessmentOnly"' in raw
+        ):
             previous_step_id = step_input.get("previousStepId") or extract_json_string(raw, "previousStepId") or f"{run_id}/block/loadtest-tool"
+            decision_refs = [f"{run_id}-step-1-decision", f"{run_id}-llm-after-decision-decision"]
+            approval_refs = [f"{run_id}-llm-after-decision-2-approval"]
             return {
                 "thoughtSummary": "Governed load test evidence was collected and can be assessed.",
                 "completionState": "completed",
@@ -236,9 +269,9 @@ class MockLLMServer:
                     "implementationSummary": "The run completed the required governance sequence and executed the configured MCP tool.",
                     "verificationSummary": "The final DoD assessment references the MCP evidence step after two Decision Tickets and one Approval.",
                     "items": [
-                        {"item": "两轮 Decision Ticket 已处理", "state": "satisfied", "evidenceRefs": [previous_step_id]},
-                        {"item": "Approval 已审批", "state": "satisfied", "evidenceRefs": [previous_step_id]},
-                        {"item": "MCP ToolCall 已完成", "state": "satisfied", "evidenceRefs": [previous_step_id]},
+                        {"item": "two Decision tickets are resolved", "state": "satisfied", "evidenceRefs": decision_refs},
+                        {"item": "one Approval is approved", "state": "satisfied", "evidenceRefs": approval_refs},
+                        {"item": "MCP loadtest.governed_result evidence is collected", "state": "satisfied", "evidenceRefs": [previous_step_id]},
                     ],
                     "knownLimitations": [],
                     "residualRisks": [],
@@ -246,7 +279,7 @@ class MockLLMServer:
                 },
             }
 
-        call = self.next_call(run_id)
+        call = self.next_call(workspace_id, run_id)
         if "llm-after-approval" in step_id or call >= 4:
             return {
                 "thoughtSummary": "Approval has been granted; execute the governed MCP tool.",
@@ -265,6 +298,10 @@ class MockLLMServer:
                                     "city": CITY,
                                     "lookupName": LOOKUP_NAME,
                                     "runId": run_id,
+                                },
+                                "validationEvidence": {
+                                    "mode": "runtime_behavior",
+                                    "observationType": "runtime_observation",
                                 },
                             },
                         }
@@ -441,7 +478,7 @@ def wait_run_status(
 
 
 def clean_provider(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    ret = {
         "id": item.get("id", ""),
         "provider": item.get("provider", ""),
         "baseUrl": item.get("baseUrl", ""),
@@ -451,6 +488,41 @@ def clean_provider(item: dict[str, Any]) -> dict[str, Any]:
         "chatCompletions": bool(item.get("chatCompletions", True)),
         "streaming": bool(item.get("streaming", False)),
         "nonChatOperations": item.get("nonChatOperations") or [],
+    }
+    if item.get("failoverEnabled") is not None:
+        ret["failoverEnabled"] = bool(item.get("failoverEnabled"))
+    if item.get("failoverProviders") is not None:
+        ret["failoverProviders"] = item.get("failoverProviders") or []
+    if isinstance(item.get("inferenceProfile"), dict):
+        ret["inferenceProfile"] = clean_inference_profile(item["inferenceProfile"])
+    if isinstance(item.get("contextProfile"), dict):
+        ret["contextProfile"] = clean_context_profile(item["contextProfile"])
+    return ret
+
+
+def clean_inference_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: profile[key]
+        for key in ("temperature", "maxOutputTokens", "reasoningEffort", "thinkingBudgetTokens")
+        if key in profile and profile[key] is not None
+    }
+
+
+def clean_context_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: profile[key]
+        for key in (
+            "profileMode",
+            "contextWindowTokens",
+            "maxInputTokens",
+            "reservedOutputTokens",
+            "safetyRatio",
+            "contextUtilizationRatio",
+            "bytesHardLimit",
+            "maxRequestBytes",
+            "estimatedTokensPerByte",
+        )
+        if key in profile and profile[key] is not None
     }
 
 
@@ -515,6 +587,32 @@ def select_real_provider() -> str:
     if provider.get("chatCompletions") is False:
         raise RuntimeError(f"provider {provider_id!r} does not support chatCompletions")
     return provider_id
+
+
+def configure_real_provider_timeout(provider_id: str) -> dict[str, Any] | None:
+    if not REAL_PROVIDER_TIMEOUT:
+        return None
+    config = run_curl("GET", "/api/v1/workorch/configuration")
+    llm = nested(config, "configuration.llm", {})
+    providers = [clean_provider(item) for item in llm.get("providers") or [] if item.get("id")]
+    original = {
+        "defaultProviderId": llm.get("defaultProviderId") or provider_id,
+        "defaultEmbeddingProviderId": llm.get("defaultEmbeddingProviderId") or "",
+        "providers": providers,
+    }
+    updated = json.loads(json.dumps(original, ensure_ascii=False))
+    matched = False
+    for provider in updated["providers"]:
+        if provider.get("id") == provider_id:
+            provider["timeout"] = REAL_PROVIDER_TIMEOUT
+            matched = True
+            break
+    if not matched:
+        raise RuntimeError(f"provider {provider_id!r} is not present while applying real provider timeout")
+    write_json(ARTIFACT_DIR / "configuration-original-llm.json", original)
+    write_json(ARTIFACT_DIR / "configuration-real-timeout-llm.json", updated)
+    run_curl("PUT", "/api/v1/workorch/configuration/llm", updated)
+    return original
 
 
 def create_mcp_helper(path: Path) -> None:
@@ -603,47 +701,111 @@ def create_mcp_helper(path: Path) -> None:
 
 
 def create_payloads(seq: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    decision_item = "two Decision tickets are resolved" if LLM_MODE == "mock" else "Decision governance is resolved"
     workspace = {
         "title": f"workspace concurrency loadtest {BATCH_ID}-{seq:04d}",
-        "description": "Governed workspace concurrency load test with two Decision Tickets, one Approval, MCP evidence, and final Result.",
+        "description": "Governed workspace concurrency load test with Decision governance, Approval, MCP evidence, and final Result.",
     }
     goal = {
-        "text": (
-            f"这是 workorch workspace 并发压测任务，批次 {BATCH_ID} 序号 {seq}。必须严格按阶段执行："
-            "所有 LLM 输出都必须是严格 JSON 对象，不允许 markdown，不允许代码块，不允许解释文本。"
-            "顶层字段只允许 completionState, thoughtSummary, requiredDecision, requiredApproval, executionGraph, dodAssessment。"
-            "requiredDecision 只允许 reason, decisionKind, question, context 字段，其中 decisionKind 必须是 provide_missing_info。"
-            "requiredApproval 只允许 reason, action, context 字段，禁止输出 question, details, title, approvalQuestion 等额外字段。"
-            "executionGraph.nodes[].kind 必须是 mcp/tool_call，禁止 shell/command。"
-            "dodAssessment 允许 satisfied, summary, items, goalOutcome, implementationSummary, verificationSummary, knownLimitations, residualRisks, nextActions 字段，items[].evidenceRefs 必须使用 previousStepId。"
-            "第一轮不要调用工具，必须返回 completionState=blocked_on_decision 和 requiredDecision，询问目标城市；"
-            "收到第一轮 Decision resolution 后，第二轮仍不要调用工具，必须再次返回 completionState=blocked_on_decision 和 requiredDecision，询问输出格式和风险确认；"
-            "收到第二轮 Decision resolution 后，第三轮不要调用工具，必须返回 completionState=blocked_on_approval 和 requiredApproval，"
-            "第二轮 resolutionPayload 已经包含 outputFormat=structured_summary 和 riskAccepted=true，第三轮禁止再次返回 requiredDecision，禁止再次询问输出格式或风险确认；"
-            "requiredApproval 必须形如 {\"reason\":\"...\",\"action\":\"execute governed load test MCP tool\",\"context\":{\"outputFormat\":\"structured_summary\",\"riskAccepted\":true}}；"
-            "Approval 通过后，必须使用指定 MCP Server 调用 loadtest.governed_result；"
-            "工具返回后，最后一轮必须基于 previousStepOutput 返回 completionState=completed 和 dodAssessment，evidenceRefs 使用 previousStepId，summary 必须包含最终治理压测结果。"
-            "禁止使用 shell/command，禁止跳过 Decision Ticket 或 Approval。"
-        )
+        "text": "- MCP loadtest.governed_result evidence is collected"
     }
     dod = {
         "items": [
-            "第一轮生成并解决 Decision Ticket",
-            "第二轮生成并解决 Decision Ticket",
-            "补充信息后生成并批准 Approval",
-            "批准后通过 MCP loadtest.governed_result 获取证据",
-            "Run snapshot 暴露 Decision、Approval、ToolCall、ValidationResult、RuntimeCheckpoint、Result 和 Artifact",
+            decision_item,
+            "one Approval is approved",
+            "MCP loadtest.governed_result evidence is collected",
         ]
     }
     return workspace, goal, dod
 
 
-def resolve_decision(ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def resolve_decision(workspace_id: str, ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return run_curl(
         "POST",
-        f"/api/v1/workorch/decisions/{url_quote(ticket_id)}/resolve",
+        f"/api/v1/workorch/decisions/{url_quote(ticket_id)}/resolve?workspaceId={url_quote(workspace_id)}",
         {"resolutionType": "provide_missing_info", "resolutionPayload": payload},
     )
+
+
+def is_repair_exhaustion_ticket(ticket_id: str) -> bool:
+    normalized = ticket_id.strip().lower()
+    return "repair-exhausted" in normalized or "repair_exhausted" in normalized
+
+
+def approve_blocking_approval(workspace_id: str, approval_id: str) -> dict[str, Any]:
+    return run_curl("POST", f"/api/v1/workorch/approvals/{url_quote(approval_id)}/approve?workspaceId={url_quote(workspace_id)}")
+
+
+def real_decision_payload(decision_round: int) -> dict[str, Any]:
+    return {
+        "operator": "loadtest",
+        "country": COUNTRY,
+        "province": PROVINCE,
+        "city": CITY,
+        "lookupName": LOOKUP_NAME,
+        "outputFormat": "structured_summary",
+        "riskAccepted": True,
+        "decisionRound": decision_round,
+        "allRequiredInformationProvided": True,
+        "allowMCPToolExecution": True,
+        "allowRepositoryReadOnlyTools": True,
+        "nextExpectedState": "continue",
+    }
+
+
+def drive_real_run_until_completed(result: WorkspaceResult, case_dir: Path) -> dict[str, Any]:
+    if not result.workspace_id or not result.run_id:
+        raise RuntimeError("workspace id and run id are required before real run drive")
+    deadline = time.monotonic() + REAL_RUN_TIMEOUT_SECONDS
+    seen_tickets: set[str] = set()
+    seen_approvals: set[str] = set()
+    gate_index = 0
+    last_status: dict[str, Any] = {}
+    while time.monotonic() <= deadline:
+        status = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/status")
+        last_status = extract_run_status(status)
+        state = last_status.get("state")
+        if state == "completed":
+            write_json(case_dir / f"real-gate-{gate_index:03d}-completed-status.json", status)
+            return status
+        if state in {"failed", "canceled", "cancelled", "superseded"}:
+            raise RuntimeError(f"real run reached terminal non-success state: {last_status}")
+        if state == "blocked_on_decision":
+            ticket_id = last_status.get("blockingTicketId", "")
+            if not ticket_id:
+                raise RuntimeError(f"real decision gate missing blockingTicketId: {last_status}")
+            if is_repair_exhaustion_ticket(ticket_id):
+                write_json(case_dir / f"real-repair-exhausted-{gate_index + 1:03d}-status.json", status)
+                raise RuntimeError(f"real run exhausted runtime repair budget: {last_status}")
+            if ticket_id not in seen_tickets:
+                gate_index += 1
+                seen_tickets.add(ticket_id)
+                result.ticket_ids.append(ticket_id)
+                write_json(case_dir / f"real-decision-{gate_index:03d}-status.json", status)
+                with timed(result, "real_decision_resolve"):
+                    decision = resolve_decision(result.workspace_id, ticket_id, real_decision_payload(len(result.ticket_ids)))
+                write_json(case_dir / f"real-decision-{gate_index:03d}-resolved.json", decision)
+            time.sleep(POLL_INTERVAL_SECONDS)
+            continue
+        if state == "blocked_on_approval":
+            approval_id = last_status.get("blockingApprovalId", "")
+            if not approval_id:
+                raise RuntimeError(f"real approval gate missing blockingApprovalId: {last_status}")
+            if approval_id not in seen_approvals:
+                gate_index += 1
+                seen_approvals.add(approval_id)
+                if not result.approval_id:
+                    result.approval_id = approval_id
+                write_json(case_dir / f"real-approval-{gate_index:03d}-status.json", status)
+                with timed(result, "real_approval_approve"):
+                    approval = approve_blocking_approval(result.workspace_id, approval_id)
+                write_json(case_dir / f"real-approval-{gate_index:03d}-approved.json", approval)
+                if nested(approval, "approval.state", "") != "approved":
+                    raise RuntimeError(f"real approval state={nested(approval, 'approval.state', None)!r}, want approved")
+            time.sleep(POLL_INTERVAL_SECONDS)
+            continue
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise RuntimeError(f"real run did not complete within {REAL_RUN_TIMEOUT_SECONDS}s, last status={last_status}")
 
 
 def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], workspace_snapshot: dict[str, Any], status: dict[str, Any], observability: dict[str, Any]) -> None:
@@ -680,17 +842,27 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
         errors.append(f"observability progress invalid: {progress}")
 
     resolved_decisions = [item for item in decisions if item.get("state") == "resolved"]
-    if len(resolved_decisions) < 2:
-        errors.append(f"resolved Decision Ticket count={len(resolved_decisions)}, want >=2: {decisions}")
     approved_approvals = [item for item in approvals if item.get("state") == "approved"]
-    if not approved_approvals:
-        errors.append(f"approved Approval missing: {approvals}")
-    if not any((item.get("output") or {}).get("tool") == "loadtest.governed_result" for item in steps if item.get("kind") == "mcp/tool_call"):
-        errors.append("mcp/tool_call step for loadtest.governed_result missing")
-    if not tool_calls:
-        errors.append("ToolCall evidence missing")
-    if not validations:
-        errors.append("ValidationResult evidence missing")
+    if LLM_MODE == "mock":
+        if len(resolved_decisions) < 2:
+            errors.append(f"resolved Decision Ticket count={len(resolved_decisions)}, want >=2: {decisions}")
+        if not approved_approvals:
+            errors.append(f"approved Approval missing: {approvals}")
+        if not any((item.get("output") or {}).get("tool") == "loadtest.governed_result" for item in steps if item.get("kind") == "mcp/tool_call"):
+            errors.append("mcp/tool_call step for loadtest.governed_result missing")
+        if not tool_calls:
+            errors.append("ToolCall evidence missing")
+        if not validations:
+            errors.append("ValidationResult evidence missing")
+    else:
+        unresolved_decisions = [item for item in decisions if item.get("state") not in ("resolved", "closed")]
+        if unresolved_decisions:
+            errors.append(f"real run has unresolved Decision Tickets: {unresolved_decisions}")
+        unapproved_approvals = [item for item in approvals if item.get("state") not in ("approved", "rejected")]
+        if unapproved_approvals:
+            errors.append(f"real run has unresolved Approvals: {unapproved_approvals}")
+        if not steps:
+            errors.append("real run snapshot has no steps")
     if not checkpoints:
         errors.append("RuntimeCheckpoint evidence missing")
     accepted_results = [item for item in results if item.get("state") == "accepted"]
@@ -773,11 +945,11 @@ def collect_failure_evidence(result: WorkspaceResult, case_dir: Path) -> None:
     failure_reason = str(run.get("failureReason") or "")
     if failure_reason and failure_reason not in result.error:
         result.error = f"{result.error}; failureReason={failure_reason}"
-    if run.get("state") == "blocked_on_decision" and "want blocked_on_approval" in result.error and len(result.ticket_ids) >= 2:
+    if LLM_MODE == "mock" and run.get("state") == "blocked_on_decision" and "want blocked_on_approval" in result.error and len(result.ticket_ids) >= 2:
         message = "llm workflow protocol violation: returned extra Decision after second resolution; expected Approval"
         if message not in result.llm_protocol_errors:
             result.llm_protocol_errors.append(message)
-    if run.get("state") == "blocked_on_approval" and "want blocked_on_decision" in result.error and len(result.ticket_ids) == 1:
+    if LLM_MODE == "mock" and run.get("state") == "blocked_on_approval" and "want blocked_on_decision" in result.error and len(result.ticket_ids) == 1:
         message = "llm workflow protocol violation: skipped second Decision; expected another Decision before Approval"
         if message not in result.llm_protocol_errors:
             result.llm_protocol_errors.append(message)
@@ -827,62 +999,104 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
         write_json(case_dir / "activation.json", activation)
         run = nested(activation, "activation.run", {})
         result.run_id = run.get("id", "")
-        if run.get("state") != "blocked_on_decision":
-            raise RuntimeError(f"initial run state={run.get('state')!r}, want blocked_on_decision")
-        ticket1 = run.get("blockingTicketId", "")
+        if not result.run_id:
+            raise RuntimeError("run id missing")
+        if LLM_MODE == "real":
+            with timed(result, "real_activation_to_completed"):
+                completed = drive_real_run_until_completed(result, case_dir)
+            write_json(case_dir / "run-completed-status.json", completed)
+
+            with timed(result, "snapshot_read"):
+                snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/snapshot")
+            with timed(result, "workspace_snapshot_read"):
+                workspace_snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/snapshot")
+            with timed(result, "status_read"):
+                status = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/status")
+            with timed(result, "observability_read"):
+                observability = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/runs/{url_quote(result.run_id)}/observability")
+            write_json(case_dir / "snapshot.json", snapshot)
+            write_json(case_dir / "workspace-snapshot.json", workspace_snapshot)
+            write_json(case_dir / "status.json", status)
+            write_json(case_dir / "observability.json", observability)
+
+            validate_final_state(result, snapshot, workspace_snapshot, status, observability)
+            result.success = True
+            return result
+
+        if run.get("state") == "blocked_on_decision" and run.get("blockingTicketId"):
+            decision1_status = activation
+            run1 = run
+        else:
+            decision1_status = wait_run_status(
+                result.workspace_id,
+                result.run_id,
+                lambda status: status.get("state") == "blocked_on_decision" and bool(status.get("blockingTicketId")),
+                "state blocked_on_decision with blockingTicketId after activation",
+                wait_state="blocked_on_decision",
+            )
+            write_json(case_dir / "decision1-status.json", decision1_status)
+            run1 = extract_run_status(decision1_status)
+        if run1.get("state") != "blocked_on_decision":
+            raise RuntimeError(f"first run state={run1.get('state')!r}, want blocked_on_decision")
+        ticket1 = run1.get("blockingTicketId", "")
         if not ticket1:
             raise RuntimeError("first blockingTicketId missing")
         result.ticket_ids.append(ticket1)
 
         with timed(result, "decision1_resolve"):
             decision1 = resolve_decision(
+                result.workspace_id,
                 ticket1,
                 {"operator": "loadtest", "country": COUNTRY, "province": PROVINCE, "city": CITY, "lookupName": LOOKUP_NAME},
             )
         write_json(case_dir / "decision1-resolved.json", decision1)
 
         with timed(result, "decision1_to_decision2"):
-            decision2_status = wait_run_status(
+            next_gate_status = wait_run_status(
                 result.workspace_id,
                 result.run_id,
-                lambda status: status.get("state") == "blocked_on_decision"
-                and bool(status.get("blockingTicketId"))
-                and status.get("blockingTicketId") != ticket1,
-                f"state blocked_on_decision with a new blockingTicketId after {ticket1}",
-                wait_state="blocked_on_decision",
+                lambda status: (
+                    status.get("state") == "blocked_on_decision"
+                    and bool(status.get("blockingTicketId"))
+                    and status.get("blockingTicketId") != ticket1
+                )
+                or (status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId"))),
+                f"state blocked_on_decision with a new blockingTicketId after {ticket1}, or blocked_on_approval",
             )
-        write_json(case_dir / "decision2-status.json", decision2_status)
-        run2 = extract_run_status(decision2_status)
-        if run2.get("state") != "blocked_on_decision":
-            raise RuntimeError(f"second run state={run2.get('state')!r}, want blocked_on_decision")
-        ticket2 = run2.get("blockingTicketId", "")
-        if not ticket2:
-            raise RuntimeError("second blockingTicketId missing")
-        result.ticket_ids.append(ticket2)
+        run2 = extract_run_status(next_gate_status)
+        if run2.get("state") == "blocked_on_decision":
+            write_json(case_dir / "decision2-status.json", next_gate_status)
+            ticket2 = run2.get("blockingTicketId", "")
+            if not ticket2:
+                raise RuntimeError("second blockingTicketId missing")
+            result.ticket_ids.append(ticket2)
 
-        with timed(result, "decision2_resolve"):
-            decision2 = resolve_decision(
-                ticket2,
-                {
-                    "operator": "loadtest",
-                    "outputFormat": "structured_summary",
-                    "riskAccepted": True,
-                    "decisionRound": 2,
-                    "allRequiredInformationProvided": True,
-                    "nextExpectedState": "blocked_on_approval",
-                    "noMoreDecisionTickets": True,
-                },
-            )
-        write_json(case_dir / "decision2-resolved.json", decision2)
+            with timed(result, "decision2_resolve"):
+                decision2 = resolve_decision(
+                    result.workspace_id,
+                    ticket2,
+                    {
+                        "operator": "loadtest",
+                        "outputFormat": "structured_summary",
+                        "riskAccepted": True,
+                        "decisionRound": 2,
+                        "allRequiredInformationProvided": True,
+                        "nextExpectedState": "blocked_on_approval",
+                        "noMoreDecisionTickets": True,
+                    },
+                )
+            write_json(case_dir / "decision2-resolved.json", decision2)
 
-        with timed(result, "decision2_to_approval"):
-            approval_status = wait_run_status(
-                result.workspace_id,
-                result.run_id,
-                lambda status: status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId")),
-                "state blocked_on_approval with blockingApprovalId",
-                wait_state="blocked_on_approval",
-            )
+            with timed(result, "decision2_to_approval"):
+                approval_status = wait_run_status(
+                    result.workspace_id,
+                    result.run_id,
+                    lambda status: status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId")),
+                    "state blocked_on_approval with blockingApprovalId",
+                    wait_state="blocked_on_approval",
+                )
+        else:
+            approval_status = next_gate_status
         write_json(case_dir / "approval-status.json", approval_status)
         run3 = extract_run_status(approval_status)
         if run3.get("state") != "blocked_on_approval":
@@ -892,13 +1106,37 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
             raise RuntimeError("blockingApprovalId missing")
 
         with timed(result, "approval_approve"):
-            approval = run_curl("POST", f"/api/v1/workorch/approvals/{url_quote(result.approval_id)}/approve")
+            approval = approve_blocking_approval(result.workspace_id, result.approval_id)
         write_json(case_dir / "approval-approved.json", approval)
         if nested(approval, "approval.state", "") != "approved":
             raise RuntimeError(f"approval state={nested(approval, 'approval.state', None)!r}, want approved")
 
         with timed(result, "approval_to_completed"):
-            completed = wait_run_state(result.workspace_id, result.run_id, "completed")
+            completed: dict[str, Any] | None = None
+            for gate_index in range(1, 5):
+                gate_status = wait_run_status(
+                    result.workspace_id,
+                    result.run_id,
+                    lambda status: status.get("state") == "completed"
+                    or (status.get("state") == "blocked_on_approval" and bool(status.get("blockingApprovalId"))),
+                    "state completed or blocked_on_approval with blockingApprovalId",
+                )
+                gate_run = extract_run_status(gate_status)
+                if gate_run.get("state") == "completed":
+                    completed = gate_status
+                    break
+                operator_approval_id = gate_run.get("blockingApprovalId", "")
+                if not operator_approval_id:
+                    raise RuntimeError(f"approval gate {gate_index} blockingApprovalId missing: {gate_run}")
+                if operator_approval_id == result.approval_id:
+                    raise RuntimeError(f"approval gate {gate_index} repeated already approved approval {operator_approval_id}")
+                write_json(case_dir / f"approval-followup-{gate_index}-status.json", gate_status)
+                operator_approval = approve_blocking_approval(result.workspace_id, operator_approval_id)
+                write_json(case_dir / f"approval-followup-{gate_index}-approved.json", operator_approval)
+                if nested(operator_approval, "approval.state", "") != "approved":
+                    raise RuntimeError(f"follow-up approval state={nested(operator_approval, 'approval.state', None)!r}, want approved")
+            if completed is None:
+                raise RuntimeError("run did not complete after resolving follow-up approval gates")
         write_json(case_dir / "run-completed-status.json", completed)
         run4 = extract_run_status(completed)
         if run4.get("state") != "completed":
@@ -984,7 +1222,15 @@ def result_to_dict(result: WorkspaceResult) -> dict[str, Any]:
         "curlCode": result.curl_code,
         "failureClass": result.failure_class,
         "timingByStage": timing_by_stage,
-        "timings": [{"name": item.name, "durationMs": item.duration_ms} for item in result.timings],
+        "timings": [
+            {
+                "name": item.name,
+                "startedAtMonotonicMs": item.started_at * 1000,
+                "endedAtMonotonicMs": item.ended_at * 1000,
+                "durationMs": item.duration_ms,
+            }
+            for item in result.timings
+        ],
     }
 
 
@@ -1033,12 +1279,84 @@ def collect_metrics() -> dict[str, float]:
     return metrics
 
 
+class MetricsSampler:
+    def __init__(self, interval_seconds: float):
+        self.interval_seconds = interval_seconds
+        self.samples: list[MetricsSample] = []
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> list[MetricsSample]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(self.interval_seconds * 2, 1))
+        with self._lock:
+            return list(self.samples)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            sampled_at = time.monotonic()
+            values = collect_metrics()
+            if values:
+                with self._lock:
+                    self.samples.append(MetricsSample(sampled_at=sampled_at, values=values))
+            self._stop.wait(self.interval_seconds)
+
+
+ACTIVE_RUN_STAGE_NAMES = {
+    "activation_to_decision1",
+    "decision1_to_decision2",
+    "decision2_to_approval",
+    "approval_to_completed",
+}
+
+
+def max_overlap(windows: list[tuple[float, float]]) -> int:
+    events: list[tuple[float, int]] = []
+    for started, ended in windows:
+        if started <= 0 or ended <= started:
+            continue
+        events.append((started, 1))
+        events.append((ended, -1))
+    active = 0
+    ret = 0
+    for _, delta in sorted(events, key=lambda item: (item[0], item[1])):
+        active += delta
+        if active > ret:
+            ret = active
+    return ret
+
+
+def active_run_windows(results: list[WorkspaceResult]) -> list[tuple[float, float]]:
+    windows: list[tuple[float, float]] = []
+    for result in results:
+        if not result.success:
+            continue
+        for timing in result.timings:
+            if timing.name in ACTIVE_RUN_STAGE_NAMES:
+                windows.append((timing.started_at, timing.ended_at))
+    return windows
+
+
+def max_metric_value(samples: list[MetricsSample], key: str) -> float:
+    values = [sample.values.get(key, 0) for sample in samples]
+    return max(values) if values else 0
+
+
 def build_summary(
     results: list[WorkspaceResult],
     started_at: float,
     ended_at: float,
     metrics_before: dict[str, float],
     server_max_concurrent_runs: int,
+    metrics_samples: list[MetricsSample],
 ) -> dict[str, Any]:
     success = [item for item in results if item.success]
     failed = [item for item in results if not item.success]
@@ -1056,6 +1374,14 @@ def build_summary(
         "observabilityRead": stage_stats.get("observability_read", latency_stats([])),
     }
     result_items = [result_to_dict(item) for item in results]
+    expected_overlap = min(CONCURRENCY, server_max_concurrent_runs or CONCURRENCY, len(success))
+    if expected_overlap < 2:
+        expected_overlap = 0
+    observed_stage_overlap = max_overlap(active_run_windows(results))
+    observed_metric_inflight = int(max_metric_value(metrics_samples, "workorch_run_requests_in_flight"))
+    active_overlap_pass = True
+    if EXPECT_ACTIVE_OVERLAP and expected_overlap >= 2:
+        active_overlap_pass = max(observed_stage_overlap, observed_metric_inflight) >= expected_overlap
     diagnostic_stage_names = [
         "activation_to_decision1",
         "decision1_to_decision2",
@@ -1076,11 +1402,18 @@ def build_summary(
         "total": TOTAL,
         "concurrency": CONCURRENCY,
         "serverMaxConcurrentRuns": server_max_concurrent_runs,
+        "expectActiveOverlap": EXPECT_ACTIVE_OVERLAP,
+        "expectedActiveRunOverlap": expected_overlap,
+        "maxObservedActiveStageOverlap": observed_stage_overlap,
+        "maxObservedRunRequestsInFlight": observed_metric_inflight,
+        "activeRunOverlapPass": active_overlap_pass,
+        "metricsSampleIntervalSeconds": METRICS_SAMPLE_INTERVAL_SECONDS,
+        "metricsSampleTotal": len(metrics_samples),
         "workspaceSuccessTotal": len(success),
         "workspaceFailedTotal": len(failed),
         "successRate": success_rate,
         "minSuccessRate": MIN_SUCCESS_RATE,
-        "pass": success_rate >= MIN_SUCCESS_RATE,
+        "pass": success_rate >= MIN_SUCCESS_RATE and active_overlap_pass,
         "durationSeconds": duration_s,
         "throughputWorkspacesPerMin": len(success) / duration_s * 60,
         "e2eLatency": latency_stats([item.e2e_ms for item in results]),
@@ -1159,6 +1492,12 @@ def write_markdown_report(summary: dict[str, Any]) -> None:
         f"- total: `{summary['total']}`",
         f"- concurrency: `{summary['concurrency']}`",
         f"- serverMaxConcurrentRuns: `{summary['serverMaxConcurrentRuns']}`",
+        f"- expectActiveOverlap: `{summary['expectActiveOverlap']}`",
+        f"- expectedActiveRunOverlap: `{summary['expectedActiveRunOverlap']}`",
+        f"- maxObservedActiveStageOverlap: `{summary['maxObservedActiveStageOverlap']}`",
+        f"- maxObservedRunRequestsInFlight: `{summary['maxObservedRunRequestsInFlight']}`",
+        f"- activeRunOverlapPass: `{summary['activeRunOverlapPass']}`",
+        f"- metricsSampleTotal: `{summary['metricsSampleTotal']}`",
         f"- success: `{summary['workspaceSuccessTotal']}`",
         f"- failed: `{summary['workspaceFailedTotal']}`",
         f"- successRate: `{summary['successRate']:.4f}`",
@@ -1263,6 +1602,7 @@ def main() -> int:
             original_llm = configure_mock_provider(provider_id)
         else:
             provider_id = select_real_provider()
+            original_llm = configure_real_provider_timeout(provider_id)
 
         mcp_server_payload = {
             "id": mcp_server_id,
@@ -1284,19 +1624,24 @@ def main() -> int:
         write_json(ARTIFACT_DIR / "mcp-server.json", mcp_server)
 
         results: list[WorkspaceResult] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
-            future_map = {executor.submit(execute_workspace, seq, provider_id, mcp_server_id): seq for seq in range(1, TOTAL + 1)}
-            for future in concurrent.futures.as_completed(future_map):
-                result = future.result()
-                results.append(result)
-                status = "ok" if result.success else "failed"
-                print(f"[{status}] index={result.index} workspace={result.workspace_id} run={result.run_id} e2eMs={result.e2e_ms:.1f}", flush=True)
+        metrics_sampler = MetricsSampler(METRICS_SAMPLE_INTERVAL_SECONDS)
+        metrics_sampler.start()
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
+                future_map = {executor.submit(execute_workspace, seq, provider_id, mcp_server_id): seq for seq in range(1, TOTAL + 1)}
+                for future in concurrent.futures.as_completed(future_map):
+                    result = future.result()
+                    results.append(result)
+                    status = "ok" if result.success else "failed"
+                    print(f"[{status}] index={result.index} workspace={result.workspace_id} run={result.run_id} e2eMs={result.e2e_ms:.1f}", flush=True)
+        finally:
+            metrics_samples = metrics_sampler.stop()
         results.sort(key=lambda item: item.index)
         ended_at = time.monotonic()
-        summary = build_summary(results, started_at, ended_at, metrics_before, server_max_concurrent_runs)
+        summary = build_summary(results, started_at, ended_at, metrics_before, server_max_concurrent_runs, metrics_samples)
         write_json(ARTIFACT_DIR / "summary.json", summary)
         write_markdown_report(summary)
-        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "minSuccessRate", "pass", "throughputWorkspacesPerMin", "http4xxTotal", "http5xxTotal", "curlErrorTotal", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({k: summary[k] for k in ["batchId", "llmMode", "mcpSessionPolicy", "total", "concurrency", "serverMaxConcurrentRuns", "expectActiveOverlap", "expectedActiveRunOverlap", "maxObservedActiveStageOverlap", "maxObservedRunRequestsInFlight", "activeRunOverlapPass", "workspaceSuccessTotal", "workspaceFailedTotal", "successRate", "minSuccessRate", "pass", "throughputWorkspacesPerMin", "http4xxTotal", "http5xxTotal", "curlErrorTotal", "llmProtocolErrorTotal", "timelineMissingRunStateTotal"]}, ensure_ascii=False, indent=2))
         print(f"artifacts={ARTIFACT_DIR}")
         return 0 if summary["pass"] else 1
     except KeyboardInterrupt:

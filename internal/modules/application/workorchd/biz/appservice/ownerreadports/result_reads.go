@@ -32,9 +32,11 @@ func ListResultsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID com
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandListByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandListByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyCommand: resultcontracts.ListResultsByRunCommand{RunID: runID},
-	})
+		events.PayloadKeyRunID:   string(runID),
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

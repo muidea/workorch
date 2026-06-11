@@ -56,7 +56,7 @@ func CreateAndStartWorkspaceExecutionRun(ctx context.Context, hub events.Hub, re
 		startCtx := common.ContextWithRuntimeWorkspaceID(common.ContextWithRuntimeLLMProviderID(ctx, request.LLMProviderID), request.WorkspaceID)
 		if err := StartRun(startCtx, hub, request.WorkspaceID, runID); err != nil {
 			if errors.Is(err, common.ErrConflict) {
-				observable, getErr := RunObservableAfterStartConflict(ctx, hub, runID)
+				observable, getErr := RunObservableAfterStartConflict(startCtx, hub, runID)
 				if getErr != nil {
 					return "", getErr
 				}

@@ -585,7 +585,7 @@ func validateEvidenceRefsStepKinds(ctx context.Context, steps repository.StepRep
 					continue
 				}
 			}
-			if !validationEvidenceCanSatisfyDoD(evidenceQualityFromRuntimeOutput(step.Output)) {
+			if !validationEvidenceCanSatisfyDoD(evidenceQualityFromRuntimeStep(step)) {
 				acceptedWeakRefs = append(acceptedWeakRefs, ref)
 				continue
 			}
@@ -1074,6 +1074,19 @@ func evidenceQualityFromRuntimeOutput(output map[string]any) runtimeEvidenceQual
 	}
 }
 
+func evidenceQualityFromRuntimeStep(step *runModel.Step) runtimeEvidenceQuality {
+	if step == nil {
+		return runtimeEvidenceQuality{Quality: common.EvidenceQualityInvalid, Reason: "runtime step is missing"}
+	}
+	quality := evidenceQualityFromRuntimeOutput(step.Output)
+	if validationEvidenceCanSatisfyDoD(quality) && runtimeStepHasNegativeScalarValidationOutput(step) {
+		quality.Quality = common.EvidenceQualityInconclusive
+		quality.Reason = "validation step produced a negative scalar output"
+		quality.Tags = compactUniqueStrings(append(quality.Tags, "negative_scalar_validation_output"))
+	}
+	return quality
+}
+
 func qualityFromValidationResult(item *runModel.ValidationResult) runtimeEvidenceQuality {
 	if item == nil {
 		return runtimeEvidenceQuality{Quality: common.EvidenceQualityInvalid, Reason: "validation result is missing"}
@@ -1091,6 +1104,19 @@ func qualityFromValidationResult(item *runModel.ValidationResult) runtimeEvidenc
 		Reason:   item.EvidenceReason,
 		ZeroWork: item.ZeroWork,
 		Tags:     append([]string(nil), item.EvidenceTags...),
+	}
+}
+
+func runtimeStepHasNegativeScalarValidationOutput(step *runModel.Step) bool {
+	if step == nil || strings.TrimSpace(step.Kind) != "shell/command" {
+		return false
+	}
+	stdout := strings.ToLower(strings.TrimSpace(stringFromMap(step.Output, "stdout")))
+	switch stdout {
+	case "0", "false", "null", "[]", "{}":
+		return true
+	default:
+		return false
 	}
 }
 

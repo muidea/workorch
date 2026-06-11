@@ -36,16 +36,26 @@ func (p *EventHubActionPort) EnsureApprovalApproved(ctx context.Context, approva
 	if p == nil || p.hub == nil || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), "", "", "", map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID},
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	payload := map[string]any{
+		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID, WorkspaceID: workspaceID},
+	}
+	if workspaceID != "" {
+		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+	}
+	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureApproved, "approval", string(approvalID), workspaceID, "", "", payload)
 }
 
 func (p *EventHubActionPort) EnsureApprovalRejected(ctx context.Context, approvalID common.ApprovalID) error {
 	if p == nil || p.hub == nil || approvalID == "" {
 		return common.ErrInvalidArgument
 	}
-	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureRejected, "approval", string(approvalID), "", "", "", map[string]any{
-		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID},
-	})
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	payload := map[string]any{
+		events.PayloadKeyCommand: approvalcontracts.ResolveApprovalCommand{ApprovalID: approvalID, WorkspaceID: workspaceID},
+	}
+	if workspaceID != "" {
+		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+	}
+	return p.publish(ctx, approvalevents.TopicApprovalCommandEnsureRejected, "approval", string(approvalID), workspaceID, "", "", payload)
 }

@@ -200,6 +200,38 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 	return true
 }
 
+func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, decisionRefs []string, approvalRefs []string, updatedBy string) bool {
+	if run == nil {
+		return false
+	}
+	c.ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		return false
+	}
+	changed := false
+	for _, item := range items {
+		required := stringSet(stringSliceFromValue(item["requiredEvidenceKinds"]))
+		if required["decision"] && len(decisionRefs) > 0 {
+			if coverageApplyWorkItemEvidence(item, []string{"decision"}, decisionRefs, true, false, updatedBy, "synchronized from resolved Decision owner evidence") {
+				changed = true
+			}
+		}
+		if required["approval"] && len(approvalRefs) > 0 {
+			if coverageApplyWorkItemEvidence(item, []string{"approval"}, approvalRefs, true, false, updatedBy, "synchronized from approved Approval owner evidence") {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return false
+	}
+	revision := coverageDefinitionRevision(run.ExecutionContext)
+	run.ExecutionContext[coverageWorkItemsKey] = items
+	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+	return true
+}
+
 func coverageApplyUnlinkedAssessmentRejectedEvidence(items []map[string]any, updates []coverageWorkItemUpdate, step *runModel.Step) bool {
 	if len(items) == 0 || len(updates) == 0 || step == nil {
 		return false
@@ -387,11 +419,12 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 		status = existingStatus
 	}
 	requiredKinds := coverageRequiredEvidenceKindsForSource(run, source)
+	requiredCounts := coverageRequiredEvidenceCountsForSource(source, requiredKinds)
 	acceptedByKind := coverageEvidenceRefsByKind(existing, "acceptedEvidenceByKind", requiredKinds)
 	rejectedByKind := coverageEvidenceRefsByKind(existing, "rejectedEvidenceByKind", requiredKinds)
 	acceptedRefs := coverageFlattenEvidenceRefs(acceptedByKind, stringSliceFromValue(existing["acceptedEvidenceRefs"]))
 	rejectedRefs := coverageFlattenEvidenceRefs(rejectedByKind, stringSliceFromValue(existing["rejectedEvidenceRefs"]))
-	missingKinds := coverageMissingEvidenceKindsFromDetails(requiredKinds, acceptedByKind)
+	missingKinds := coverageMissingEvidenceKindsFromDetails(requiredKinds, acceptedByKind, requiredCounts)
 	if len(missingKinds) > 0 && (status == "satisfied" || status == "evidence_ready") {
 		status = "open"
 	}
@@ -409,11 +442,13 @@ func coverageWorkItemFromSource(order int, revision, key string, source coverage
 		"targetText":             source.TargetText,
 		"normalizedSourceKey":    key,
 		"requiredEvidenceKinds":  requiredKinds,
+		"requiredEvidenceCounts": requiredCounts,
 		"status":                 status,
 		"acceptedEvidenceRefs":   acceptedRefs,
 		"rejectedEvidenceRefs":   rejectedRefs,
 		"acceptedEvidenceByKind": acceptedByKind,
 		"rejectedEvidenceByKind": rejectedByKind,
+		"missingEvidenceKinds":   missingKinds,
 		"coverageBoundary":       "must stay within source targetText and profile-declared evidence requirements",
 		"currentGap":             coverageCurrentGap(missingKinds),
 		"reason":                 firstNonEmptyString(stringFromMap(existing, "reason"), "derived from current effective coverage baseline"),
@@ -484,6 +519,33 @@ func mapStringSliceValue(value any) map[string][]string {
 				continue
 			}
 			ret[key] = compactUniqueStrings(stringSliceFromValue(values))
+		}
+	}
+	return ret
+}
+
+func mapIntValue(value any) map[string]int {
+	ret := map[string]int{}
+	switch typed := value.(type) {
+	case map[string]int:
+		for key, count := range typed {
+			key = strings.TrimSpace(key)
+			if key == "" || count <= 0 {
+				continue
+			}
+			ret[key] = count
+		}
+	case map[string]any:
+		for key, value := range typed {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			count := int(int64FromValue(value))
+			if count <= 0 {
+				continue
+			}
+			ret[key] = count
 		}
 	}
 	return ret

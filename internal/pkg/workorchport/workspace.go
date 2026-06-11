@@ -43,6 +43,7 @@ type WorkspaceSnapshotInfo struct {
 	Workspace             WorkspaceInfo
 	Outcome               WorkspaceOutcomeInfo
 	TaskProgress          TaskProgressInfo
+	RunHeartbeat          RunHeartbeatInfo
 	ContextBundle         map[string]any
 	CoverageSummary       map[string]any
 	TaskDecompositions    []TaskDecompositionInfo
@@ -60,6 +61,28 @@ type WorkspaceSnapshotInfo struct {
 	EventRecords          []EventRecordInfo
 	Decisions             []DecisionInfo
 	Approvals             []ApprovalInfo
+}
+
+type RunHeartbeatInfo struct {
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	State                     string
+	ActivityState             string
+	LatestStepID              common.StepID
+	LatestStepKind            string
+	LatestStepState           string
+	LatestEvidenceRef         string
+	LatestEventTopic          string
+	LatestEventRevision       int64
+	LatestEventAt             string
+	LatestLLMUsageAt          string
+	LatestResultAt            string
+	LatestArtifactAt          string
+	LatestPatchAt             string
+	LatestEffectiveProgressAt string
+	IneffectiveRetry          bool
+	Stalled                   bool
+	Summary                   string
 }
 
 type WorkspaceBackend interface {

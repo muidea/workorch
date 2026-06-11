@@ -32,9 +32,11 @@ func ListArtifactsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicArtifactCommandListByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyCommand: resultcontracts.ListArtifactsByRunCommand{RunID: runID},
-	})
+		events.PayloadKeyRunID:   string(runID),
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

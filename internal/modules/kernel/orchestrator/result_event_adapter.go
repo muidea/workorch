@@ -175,6 +175,15 @@ func publishResultEventCommand(ctx context.Context, hub events.Hub, topic string
 	if hub == nil || topic == "" {
 		return events.Envelope{}, common.ErrInvalidArgument
 	}
+	if workspaceID == "" {
+		workspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
+	if workspaceID != "" {
+		if payload == nil {
+			payload = map[string]any{}
+		}
+		payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+	}
 	err := hub.Publish(ctx, events.Envelope{
 		Topic:        topic,
 		SourceModule: ModuleID,

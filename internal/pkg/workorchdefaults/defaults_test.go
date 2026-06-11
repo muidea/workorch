@@ -331,8 +331,8 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if server.Transport != "stdio" || server.Command != "lsp-bridge" || server.SessionPolicy != "long_lived" {
 		t.Fatalf("mcp-lsp-bridge server = %+v, want stdio command long_lived", server)
 	}
-	if server.Env["LSP_BRIDGE_CONFIG"] != "{workspaceInternalDirectory}/lsp-bridge/mcp-config.json" {
-		t.Fatalf("mcp-lsp-bridge env = %+v, want workspace placeholder", server.Env)
+	if server.Env["LSP_BRIDGE_CONFIG"] != "{workspaceManagedConfig:lsp-bridge/mcp-config.json}" {
+		t.Fatalf("mcp-lsp-bridge env = %+v, want managed config placeholder", server.Env)
 	}
 	capability, err := mcpCapabilityRepo.Get(ctx, common.MCPCapabilityID("mcp-lsp-bridge:tool:lsp_diagnostics"))
 	if err != nil {

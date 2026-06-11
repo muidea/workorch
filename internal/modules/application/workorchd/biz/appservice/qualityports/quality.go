@@ -21,9 +21,10 @@ func CheckGoalDoDQuality(ctx context.Context, hub events.Hub, cmd qualitycore.Co
 	if workspaceID == "" {
 		return qualitycore.Check{}, common.ErrInvalidArgument
 	}
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 
 	goalText, resolvedGoalID, err := qualitycore.ResolveGoal(
-		ctx,
+		scopedCtx,
 		func(ctx context.Context, id common.GoalID) (string, common.GoalID, error) {
 			item, err := definitionports.ReadGoal(ctx, hub, id)
 			if err != nil {
@@ -51,7 +52,7 @@ func CheckGoalDoDQuality(ctx context.Context, hub events.Hub, cmd qualitycore.Co
 		return qualitycore.Check{}, err
 	}
 	dodItems, resolvedDoDID, err := qualitycore.ResolveDoD(
-		ctx,
+		scopedCtx,
 		func(ctx context.Context, id common.DoDID) ([]string, common.DoDID, error) {
 			item, err := definitionports.ReadDoD(ctx, hub, id)
 			if err != nil {

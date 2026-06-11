@@ -92,9 +92,9 @@ type MemorySearchRequest struct {
 
 type MemoryBackend interface {
 	Create(ctx context.Context, wsID common.WorkspaceID, m *MemoryItemInfo) (*MemoryItemInfo, error)
-	Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error)
-	Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error)
-	Delete(ctx context.Context, id common.MemoryID) error
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*MemoryItemInfo, error)
+	Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error)
+	Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error
 	List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error)
 	Search(ctx context.Context, wsID common.WorkspaceID, req MemorySearchRequest) ([]MemoryItemInfo, error)
 }

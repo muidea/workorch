@@ -35,9 +35,6 @@ func ApplyWorkspaceTemplateOnCreate(ctx context.Context, hub events.Hub, item *w
 			return nil, err
 		}
 	}
-	if err := workspacecore.EnsureManagedConfigs(updated.InternalDirectory, updated.ContextHints); err != nil {
-		return nil, err
-	}
 	if err := UpdateWorkspaceRecord(ctx, hub, updated); err != nil {
 		return nil, err
 	}

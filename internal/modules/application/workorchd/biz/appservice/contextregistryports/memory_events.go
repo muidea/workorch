@@ -6,6 +6,7 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/events"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -16,7 +17,8 @@ func DeleteMemoryItemWithLifecycleEvent(ctx context.Context, hub events.Hub, mem
 	if err != nil {
 		return err
 	}
-	if err := DeleteMemoryItem(ctx, hub, memoryID); err != nil {
+	deleteCtx := common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
+	if err := DeleteMemoryItem(deleteCtx, hub, memoryID); err != nil {
 		return err
 	}
 	return PublishMemoryEvent(ctx, hub, memoryevents.TopicMemoryDeleted, item)

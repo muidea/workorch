@@ -1006,11 +1006,11 @@ PY
 if [[ "$activation_state" == "blocked_on_decision" ]]; then
   ticket_id="$(json_path "$activation_state_file" "$activation_state_prefix.blockingTicketId")"
   ticket_path="$(url_encode "$ticket_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path" >"$TMP_DIR/decision-ticket.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/decisions/$ticket_path?workspaceId=$workspace_id" >"$TMP_DIR/decision-ticket.json"
   grep '"decisionKind": "provide_missing_info"' "$TMP_DIR/decision-ticket.json" >/dev/null
   grep "$CITY" "$TMP_DIR/decision-ticket.json" >/dev/null
   curl -fsS -H "Content-Type: application/json" -X POST \
-    "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve" \
+    "$BASE_URL/api/v1/workorch/decisions/$ticket_path/resolve?workspaceId=$workspace_id" \
     -d @"$TMP_DIR/decision-resolution.json" >"$TMP_DIR/decision-resolved.json"
   grep '"resolutionType": "provide_missing_info"' "$TMP_DIR/decision-resolved.json" >/dev/null
   wait_run_state "$run_id" "blocked_on_approval" "$TMP_DIR/approval-status.json"
@@ -1029,11 +1029,11 @@ if [[ "$activation_state" != "completed" ]]; then
   wait_workspace_list_projection "$workspace_id" "$run_id" "blocked" "$TMP_DIR/workspaces-blocked.json"
   approval_id="$(json_path "$TMP_DIR/approval-status.json" "status.blockingApprovalId")"
   approval_path="$(url_encode "$approval_id")"
-  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path" >"$TMP_DIR/approval-pending.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path?workspaceId=$workspace_id" >"$TMP_DIR/approval-pending.json"
   grep '"state": "pending"' "$TMP_DIR/approval-pending.json" >/dev/null
   grep "$CITY" "$TMP_DIR/approval-pending.json" >/dev/null
 
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/approve" >"$TMP_DIR/approval-approved.json"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/approvals/$approval_path/approve?workspaceId=$workspace_id" >"$TMP_DIR/approval-approved.json"
   grep '"state": "approved"' "$TMP_DIR/approval-approved.json" >/dev/null
   wait_run_state "$run_id" "completed" "$TMP_DIR/run-completed-status.json"
 else

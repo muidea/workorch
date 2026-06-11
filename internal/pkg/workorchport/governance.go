@@ -18,6 +18,7 @@ type DecisionInfo struct {
 }
 
 type ResolveDecisionRequest struct {
+	WorkspaceID    common.WorkspaceID
 	TicketID       common.TicketID
 	ResolutionType string
 	Payload        map[string]any
@@ -25,9 +26,9 @@ type ResolveDecisionRequest struct {
 
 type DecisionBackend interface {
 	Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error)
-	BatchResolve(ctx context.Context, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error)
+	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error)
-	Get(ctx context.Context, id common.TicketID) (*DecisionInfo, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error)
 }
 
 type ApprovalInfo struct {
@@ -56,9 +57,9 @@ type AutoGovernanceSummaryInfo struct {
 }
 
 type ApprovalBackend interface {
-	Approve(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error)
-	Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error)
-	BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error)
+	Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error)
+	Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error)
+	BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]ApprovalInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error)
-	Get(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error)
+	Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error)
 }

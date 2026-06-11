@@ -49,7 +49,11 @@ var approvalShowCmd = &cobra.Command{
 	Short: "Show approval gate details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		a, err := mustBackend().Approval().Get(ctx(), common.ApprovalID(args[0]))
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		a, err := mustBackend().Approval().Get(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get approval: %w", err)
 		}
@@ -71,7 +75,11 @@ var approvalApproveCmd = &cobra.Command{
 	Short: "Approve an approval gate",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		a, err := mustBackend().Approval().Approve(ctx(), common.ApprovalID(args[0]))
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		a, err := mustBackend().Approval().Approve(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("approve: %w", err)
 		}
@@ -86,7 +94,11 @@ var approvalRejectCmd = &cobra.Command{
 	Short: "Reject an approval gate",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		a, err := mustBackend().Approval().Reject(ctx(), common.ApprovalID(args[0]))
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		a, err := mustBackend().Approval().Reject(ctx(), common.WorkspaceID(wsID), common.ApprovalID(args[0]))
 		if err != nil {
 			return fmt.Errorf("reject: %w", err)
 		}
@@ -105,4 +117,10 @@ func init() {
 
 	approvalListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 	approvalListCmd.Flags().String("run", "", "Filter by run ID")
+	approvalShowCmd.Flags().String("workspace", "", "Workspace ID (required)")
+	approvalApproveCmd.Flags().String("workspace", "", "Workspace ID (required)")
+	approvalRejectCmd.Flags().String("workspace", "", "Workspace ID (required)")
+	approvalShowCmd.MarkFlagRequired("workspace")
+	approvalApproveCmd.MarkFlagRequired("workspace")
+	approvalRejectCmd.MarkFlagRequired("workspace")
 }

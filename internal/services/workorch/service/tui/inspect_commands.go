@@ -25,6 +25,28 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString(m.activeRunID)
 		b.WriteString("\n")
 	}
+	if runtimeState := m.workspaceRuntimeState(m.activeWorkspaceID); runtimeState != nil && (runtimeState.LastRevision > 0 || runtimeState.RevisionGapCount > 0) {
+		b.WriteString("- stream revision: ")
+		b.WriteString(fmt.Sprintf("last %d, gaps %d", runtimeState.LastRevision, runtimeState.RevisionGapCount))
+		if runtimeState.LastRevisionGap > 0 {
+			b.WriteString(fmt.Sprintf(", latest gap %d", runtimeState.LastRevisionGap))
+		}
+		b.WriteString("\n")
+	}
+	if m.runHeartbeat.ActivityState != "" {
+		b.WriteString("- activity: ")
+		b.WriteString(m.runHeartbeat.ActivityState)
+		if m.runHeartbeat.Summary != "" {
+			b.WriteString(" - ")
+			b.WriteString(m.runHeartbeat.Summary)
+		}
+		b.WriteString("\n")
+		if m.runHeartbeat.LatestEffectiveProgressAt != "" {
+			b.WriteString("- latest progress: ")
+			b.WriteString(m.runHeartbeat.LatestEffectiveProgressAt)
+			b.WriteString("\n")
+		}
+	}
 	if m.currentTask != "" {
 		b.WriteString("- goal: ")
 		b.WriteString(m.currentTask)

@@ -515,7 +515,21 @@ func traceableEvidenceRef(ref string) bool {
 	if ref == "" || strings.ContainsAny(ref, " \t\n\r") {
 		return false
 	}
-	return strings.Contains(ref, "/")
+	if strings.Contains(ref, "/") {
+		return true
+	}
+	return governanceOwnerEvidenceRef(ref)
+}
+
+func governanceOwnerEvidenceRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.Contains(ref, "/") || strings.ContainsAny(ref, " \t\n\r") {
+		return false
+	}
+	if !strings.ContainsAny(ref, "-_:") {
+		return false
+	}
+	return coverageEvidenceRefLooksDecision(ref) || coverageEvidenceRefLooksApproval(ref)
 }
 
 func evidenceCandidateStepRefs(missing map[string]any) []string {

@@ -150,6 +150,39 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 	}
 }
 
+func TestDecisionViewReadsTicketWithExplicitScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
+	hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("get ticket envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("get ticket payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyTicket: &decisionmodel.Ticket{
+					ID:          "ticket-detail-scope",
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.DecisionTicketStateOpen,
+				},
+			},
+		})
+	})
+
+	item, err := DecisionView(ctx, hub, nil, "ticket-detail-scope", workspaceID)
+	if err != nil {
+		t.Fatalf("DecisionView err = %v", err)
+	}
+	if item.ID != "ticket-detail-scope" || item.WorkspaceID != string(workspaceID) {
+		t.Fatalf("item = %+v, want scoped decision view", item)
+	}
+}
+
 func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -202,6 +235,70 @@ func TestResolveDecisionViewWithoutScopePrefersOpenDuplicateTicket(t *testing.T)
 	}
 }
 
+func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-governance-scope")
+	ticketIDs := []string{"ticket-scope-001", "ticket-scope-002"}
+	hub.Subscribe(decisionevents.TopicDecisionCommandGetTicket, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("get ticket envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("get ticket payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		ticketID := common.TicketID(envelope.Payload[events.PayloadKeyBlockingTicketID].(string))
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyTicket: &decisionmodel.Ticket{
+					ID:          ticketID,
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.DecisionTicketStateOpen,
+				},
+			},
+		})
+	})
+	resolvedCount := 0
+	hub.Subscribe(decisionevents.TopicDecisionCommandEnsureResolved, func(_ context.Context, envelope events.Envelope) error {
+		resolvedCount++
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(decisioncontracts.ResolveTicketCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveTicketCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
+			t.Fatalf("decision command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		}
+		ticket := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.WorkspaceID, RunID: cmd.RunID, State: common.DecisionTicketStateResolved}
+		resolution := &decisionmodel.Resolution{ID: cmd.ResolutionID, TicketID: cmd.TicketID, Type: cmd.Type, Payload: cmd.Payload}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
+			events.PayloadKeyTicket:     ticket,
+			events.PayloadKeyResolution: resolution,
+		}})
+	})
+
+	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
+		TicketIDs:         ticketIDs,
+		ResolutionType:    "provide_missing_info",
+		ResolutionPayload: map[string]any{"answer": "continue"},
+	}, workspaceID)
+	if err != nil {
+		t.Fatalf("BatchResolveDecisionViews err = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v, want two decisions", items)
+	}
+	if resolvedCount != 2 {
+		t.Fatalf("resolved count = %d, want 2", resolvedCount)
+	}
+	for idx, item := range items {
+		if item.ID != ticketIDs[idx] || item.WorkspaceID != string(workspaceID) || item.State != string(common.DecisionTicketStateResolved) {
+			t.Fatalf("item[%d] = %+v, want resolved %s", idx, item, ticketIDs[idx])
+		}
+	}
+}
+
 func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -249,12 +346,105 @@ func TestApprovalViewsForQueryProjectsAutoGovernance(t *testing.T) {
 	}
 }
 
+func TestApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-governance-detail-scope")
+	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          "approval-detail-scope",
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.ApprovalStatePending,
+				},
+			},
+		})
+	})
+
+	item, err := ApprovalView(ctx, hub, nil, "approval-detail-scope", workspaceID)
+	if err != nil {
+		t.Fatalf("ApprovalView err = %v", err)
+	}
+	if item.ID != "approval-detail-scope" || item.WorkspaceID != string(workspaceID) {
+		t.Fatalf("item = %+v, want scoped approval view", item)
+	}
+}
+
+func TestResolveApprovalViewReadsApprovalWithExplicitScope(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-governance-scope")
+	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          approvalID,
+					WorkspaceID: workspaceID,
+					RunID:       "run-001",
+					State:       common.ApprovalStatePending,
+				},
+			},
+		})
+	})
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
+			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyApproval: &approvalmodel.Approval{
+					ID:          cmd.ApprovalID,
+					WorkspaceID: cmd.WorkspaceID,
+					RunID:       cmd.RunID,
+					State:       common.ApprovalStateApproved,
+				},
+			},
+		})
+	})
+
+	item, err := ResolveApprovalView(ctx, hub, nil, "approval-scope-001", "approve", workspaceID)
+	if err != nil {
+		t.Fatalf("ResolveApprovalView err = %v", err)
+	}
+	if item.ID != "approval-scope-001" || item.WorkspaceID != string(workspaceID) || item.State != string(common.ApprovalStateApproved) {
+		t.Fatalf("item = %+v, want scoped approved approval", item)
+	}
+}
+
 func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
 	workspaceID := common.WorkspaceID("ws-governance-read")
 	approvalIDs := []string{"approval-001", "approval-002"}
 	hub.Subscribe(approvalevents.TopicApprovalCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("get approval envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("get approval payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
 		approvalID := common.ApprovalID(envelope.Payload[events.PayloadKeyApprovalID].(string))
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
@@ -276,6 +466,15 @@ func TestBatchResolveApprovalViewsApprovesPendingItems(t *testing.T) {
 			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
 		}
 		approvalID := cmd.ApprovalID
+		if cmd.WorkspaceID != workspaceID || cmd.RunID != "run-001" {
+			t.Fatalf("approval command scope = workspace:%q run:%q, want %s/run-001", cmd.WorkspaceID, cmd.RunID, workspaceID)
+		}
+		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != "run-001" {
+			t.Fatalf("approval envelope scope = workspace:%q run:%q, want %s/run-001", envelope.WorkspaceID, envelope.RunID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) || envelope.Payload[events.PayloadKeyRunID] != "run-001" {
+			t.Fatalf("approval payload scope = workspace:%v run:%v, want %s/run-001", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID], workspaceID)
+		}
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{

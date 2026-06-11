@@ -21,6 +21,7 @@ import (
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -893,6 +894,7 @@ func expandWorkspaceStringSlice(input []string, request runtimemodel.StepExecuti
 }
 
 func expandWorkspaceString(value string, request runtimemodel.StepExecutionRequest) string {
+	value = workorchmanagedconfig.ExpandPlaceholders(value, request.WorkspaceInternalDirectory)
 	replacements := map[string]string{
 		"{workspaceId}":                   string(request.WorkspaceID),
 		"{runId}":                         string(request.RunID),

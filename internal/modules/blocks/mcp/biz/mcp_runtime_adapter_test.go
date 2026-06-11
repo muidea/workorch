@@ -371,6 +371,102 @@ func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing
 	}
 }
 
+func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithWorkspaceOverride(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	internalDir := filepath.Join(dataRoot, "internal", "workspaces", "ws-mcp-managed-config")
+	workspaceConfigPath := filepath.Join(internalDir, "lsp-bridge", "mcp-config.json")
+	if err := os.MkdirAll(filepath.Dir(workspaceConfigPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace config: %v", err)
+	}
+	if err := os.WriteFile(workspaceConfigPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-managed-config"),
+		Name:          "managed config",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "{workspaceManagedConfig:lsp-bridge/mcp-config.json}"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                common.WorkspaceID("ws-mcp-managed-config"),
+		WorkspaceInternalDirectory: internalDir,
+		RunID:                      common.RunID("run-mcp-managed-config"),
+		StepID:                     common.StepID("run-mcp-managed-config/mcp-stdio-1"),
+		Kind:                       "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-managed-config",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	resultPayload, ok := result.Output["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %#v, want decoded response", result.Output["result"])
+	}
+	structured, ok := resultPayload["structuredContent"].(map[string]any)
+	if !ok || structured["envEcho"] != workspaceConfigPath {
+		t.Fatalf("structured content = %#v, want workspace managed config env", resultPayload["structuredContent"])
+	}
+}
+
+func TestRuntimeAdapterExpandsManagedConfigPlaceholderWithSystemDefault(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	internalDir := filepath.Join(dataRoot, "internal", "workspaces", "ws-mcp-system-config")
+	systemConfigPath := filepath.Join(dataRoot, "system", "managed-configs", "lsp-bridge", "mcp-config.json")
+	if err := os.MkdirAll(filepath.Dir(systemConfigPath), 0o755); err != nil {
+		t.Fatalf("mkdir system config: %v", err)
+	}
+	if err := os.WriteFile(systemConfigPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write system config: %v", err)
+	}
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-system-config"),
+		Name:          "system config",
+		Transport:     "stdio",
+		Command:       os.Args[0],
+		Args:          []string{"-test.run=TestMCPStdioHelperProcess"},
+		Env:           map[string]string{"WORKORCH_MCP_STDIO_HELPER": "1", "WORKORCH_MCP_STDIO_ENV_ECHO": "{workspaceManagedConfig:lsp-bridge/mcp-config.json}"},
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID:                common.WorkspaceID("ws-mcp-system-config"),
+		WorkspaceInternalDirectory: internalDir,
+		RunID:                      common.RunID("run-mcp-system-config"),
+		StepID:                     common.StepID("run-mcp-system-config/mcp-stdio-1"),
+		Kind:                       "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-system-config",
+			"tool":     "repo.summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteRuntimeStep: %v output=%+v", err, result.Output)
+	}
+	resultPayload, ok := result.Output["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %#v, want decoded response", result.Output["result"])
+	}
+	structured, ok := resultPayload["structuredContent"].(map[string]any)
+	if !ok || structured["envEcho"] != systemConfigPath {
+		t.Fatalf("structured content = %#v, want system managed config env", resultPayload["structuredContent"])
+	}
+}
+
 func TestRuntimeAdapterStartsStdioInWorkspaceDeliverableDirectory(t *testing.T) {
 	ctx := context.Background()
 	deliverableDir := t.TempDir()

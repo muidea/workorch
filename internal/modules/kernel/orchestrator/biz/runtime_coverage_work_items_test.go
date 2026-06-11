@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -1022,6 +1024,197 @@ func TestCoverageWorkItemsAcceptanceGateAllowsSatisfiedEvidence(t *testing.T) {
 
 	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
 		t.Fatalf("coverage.validateReadyForAcceptance: %v", err)
+	}
+}
+
+func TestCoverageWorkItemsGovernanceItemsRequireOwnerEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-governance-kinds",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{
+				"two Decision tickets are resolved",
+				"one Approval is approved",
+				"MCP loadtest.governed_result evidence is collected",
+			}},
+		},
+	}
+	newCoverageSubsystem().ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) != 3 {
+		t.Fatalf("coverageWorkItems len = %d, want 3", len(items))
+	}
+	assertRequired := func(index int, want string) {
+		t.Helper()
+		got := stringSliceFromValue(items[index]["requiredEvidenceKinds"])
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("item[%d] requiredEvidenceKinds = %+v, want [%s]", index, got, want)
+		}
+	}
+	assertRequired(0, "decision")
+	assertRequired(1, "approval")
+	assertRequired(2, "validation")
+}
+
+func TestCoverageWorkItemsGovernanceItemsRejectMCPValidationEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-governance-reject-mcp",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{
+				"two Decision tickets are resolved",
+				"one Approval is approved",
+				"MCP loadtest.governed_result evidence is collected",
+			}},
+		},
+	}
+	newCoverageSubsystem().ensure(run)
+	assess := &runmodel.Step{ID: "run-cwi-governance-reject-mcp/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{
+			{
+				"item":         "two Decision tickets are resolved",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
+			},
+			{
+				"item":         "one Approval is approved",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
+			},
+			{
+				"item":         "MCP loadtest.governed_result evidence is collected",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-reject-mcp/graph-001/001-mcp-call"},
+			},
+		},
+	}
+	if !newCoverageSubsystem().updateFromAssessment(run, assess, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want MCP validation item closure")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if got := stringFromMap(items[0], "status"); got != "open" {
+		t.Fatalf("decision item status = %q, want open", got)
+	}
+	if got := stringFromMap(items[1], "status"); got != "open" {
+		t.Fatalf("approval item status = %q, want open", got)
+	}
+	if got := stringFromMap(items[2], "status"); got != "satisfied" {
+		t.Fatalf("validation item status = %q, want satisfied", got)
+	}
+	err := newCoverageSubsystem().validateReadyForAcceptance(run)
+	if err == nil || !strings.Contains(err.Error(), "cwi-001:decision") || !strings.Contains(err.Error(), "cwi-002:approval") {
+		t.Fatalf("coverage.validateReadyForAcceptance err = %v, want decision/approval unresolved", err)
+	}
+}
+
+func TestCoverageWorkItemsGovernanceItemsAcceptOwnerEvidenceRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-governance-owner-evidence",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{
+				"two Decision tickets are resolved",
+				"one Approval is approved",
+				"MCP loadtest.governed_result evidence is collected",
+			}},
+		},
+	}
+	newCoverageSubsystem().ensure(run)
+	assess := &runmodel.Step{ID: "run-cwi-governance-owner-evidence/001-assess", RunID: run.ID, State: common.StepStateCompleted}
+	assessment := map[string]any{
+		"items": []map[string]any{
+			{
+				"item":         "two Decision tickets are resolved",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-owner-evidence-step-1-decision", "run-cwi-governance-owner-evidence-step-2-decision", "resolution-run-cwi-governance-owner-evidence-step-1-decision"},
+			},
+			{
+				"item":         "one Approval is approved",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-owner-evidence-step-2-approval"},
+			},
+			{
+				"item":         "MCP loadtest.governed_result evidence is collected",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-cwi-governance-owner-evidence/graph-001/001-mcp-call"},
+			},
+		},
+	}
+	if !newCoverageSubsystem().updateFromAssessment(run, assess, assessment) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want governance owner evidence closure")
+	}
+	if err := newCoverageSubsystem().validateReadyForAcceptance(run); err != nil {
+		t.Fatalf("coverage.validateReadyForAcceptance: %v", err)
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if refs := mapStringSliceValue(items[0]["acceptedEvidenceByKind"])["decision"]; len(refs) != 3 {
+		t.Fatalf("decision accepted refs = %+v, want decision owner refs", refs)
+	}
+	if refs := mapStringSliceValue(items[1]["acceptedEvidenceByKind"])["approval"]; len(refs) != 1 {
+		t.Fatalf("approval accepted refs = %+v, want approval owner ref", refs)
+	}
+}
+
+func TestCoverageWorkItemsGovernanceOwnerSyncRespectsRequiredCounts(t *testing.T) {
+	ctx := context.Background()
+	run := &runmodel.Run{
+		ID:          "run-cwi-governance-owner-sync",
+		WorkspaceID: "ws-cwi-governance-owner-sync",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{
+				"two Decision tickets are resolved",
+				"one Approval is approved",
+			}},
+		},
+	}
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          "run-cwi-governance-owner-sync-step-1-decision",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      "run-cwi-governance-owner-sync/step-1",
+		State:       common.DecisionTicketStateResolved,
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-run-cwi-governance-owner-sync-step-1-decision",
+		TicketID: "run-cwi-governance-owner-sync-step-1-decision",
+		Type:     "provide_missing_info",
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          "run-cwi-governance-owner-sync-step-2-approval",
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		StepID:      "run-cwi-governance-owner-sync/step-2",
+		State:       common.ApprovalStateApproved,
+	}); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutions(nil, memory.NewRunRepository(), memory.NewStepRepository(), memory.NewWorkspaceRepository(), ticketRepo, resolutionRepo, approvalRepo, nil)
+
+	if !orch.ensureCoverageLedger(ctx, run) {
+		t.Fatalf("ensureCoverageLedger changed=false, want owner evidence sync")
+	}
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	decisionItem := items[0]
+	if got := stringFromMap(decisionItem, "status"); got != "in_progress" {
+		t.Fatalf("decision status = %q, want in_progress with one of two refs", got)
+	}
+	if missing := stringSliceFromValue(decisionItem["missingEvidenceKinds"]); len(missing) != 1 || missing[0] != "decision" {
+		t.Fatalf("decision missingEvidenceKinds = %+v, want decision still missing", missing)
+	}
+	if refs := mapStringSliceValue(decisionItem["acceptedEvidenceByKind"])["decision"]; len(refs) != 2 {
+		t.Fatalf("decision refs = %+v, want ticket and resolution refs recorded as partial evidence", refs)
+	}
+	approvalItem := items[1]
+	if got := stringFromMap(approvalItem, "status"); got != "evidence_ready" {
+		t.Fatalf("approval status = %q, want evidence_ready", got)
+	}
+	if refs := mapStringSliceValue(approvalItem["acceptedEvidenceByKind"])["approval"]; len(refs) != 1 {
+		t.Fatalf("approval refs = %+v, want approved owner ref", refs)
 	}
 }
 

@@ -665,8 +665,7 @@ type serverState struct {
 	runContinuations             *runContinuationScheduler
 	workspaceProjection          *workspaceProjectionManager
 	runSnapshotCacheMu           sync.Mutex
-	runSnapshotCache             map[string]cachedRunSnapshot
-	runSnapshotInflight          map[string]*runSnapshotInflight
+	runSnapshotEntries           map[string]*runSnapshotCacheEntry
 	sharedSessionMu              sync.RWMutex
 	sharedSession                *appservice.RuntimeSession
 	workspaceSetupDraftMu        sync.Mutex
@@ -676,6 +675,12 @@ type serverState struct {
 type cachedRunSnapshot struct {
 	snapshot appservice.RunSnapshot
 	cachedAt time.Time
+}
+
+type runSnapshotCacheEntry struct {
+	cached   cachedRunSnapshot
+	hasCache bool
+	inflight *runSnapshotInflight
 }
 
 type runSnapshotInflight struct {
@@ -809,6 +814,10 @@ func ConfigFromWorkorch(cfg workorchconfig.Config) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	staleDispatchedStepMinAge, err := durationFromValue(configServerStaleDispatchedStepMinAge, cfg.Server.StaleDispatchedStepMinAge, defaultStaleDispatchedStepMinAge)
+	if err != nil {
+		return Config{}, err
+	}
 	maxConcurrentRuns := cfg.Server.MaxConcurrentRuns
 	if maxConcurrentRuns == 0 {
 		maxConcurrentRuns = defaultMaxConcurrentRuns
@@ -817,15 +826,16 @@ func ConfigFromWorkorch(cfg workorchconfig.Config) (Config, error) {
 		return Config{}, fmt.Errorf("invalid integer for %s: must be positive", configServerMaxConcurrentRuns)
 	}
 	return Config{
-		Addr:              firstNonEmpty(cfg.Server.Addr, defaultServerAddr),
-		Backend:           cfg.Repository.Backend,
-		DataRoot:          cfg.Repository.DataDir,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		ShutdownTimeout:   shutdownTimeout,
-		MaxConcurrentRuns: maxConcurrentRuns,
+		Addr:                      firstNonEmpty(cfg.Server.Addr, defaultServerAddr),
+		Backend:                   cfg.Repository.Backend,
+		DataRoot:                  cfg.Repository.DataDir,
+		ReadHeaderTimeout:         readHeaderTimeout,
+		ReadTimeout:               readTimeout,
+		WriteTimeout:              writeTimeout,
+		IdleTimeout:               idleTimeout,
+		ShutdownTimeout:           shutdownTimeout,
+		MaxConcurrentRuns:         maxConcurrentRuns,
+		StaleDispatchedStepMinAge: staleDispatchedStepMinAge,
 	}, nil
 }
 
@@ -858,16 +868,21 @@ func ConfigFromValues(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	staleDispatchedStepMinAge, err := durationFromValues(values, configServerStaleDispatchedStepMinAge, defaultStaleDispatchedStepMinAge)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		Addr:              addr,
-		Backend:           values["repository.backend"],
-		DataRoot:          values["repository.dataDir"],
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		ShutdownTimeout:   shutdownTimeout,
-		MaxConcurrentRuns: maxConcurrentRuns,
+		Addr:                      addr,
+		Backend:                   values["repository.backend"],
+		DataRoot:                  values["repository.dataDir"],
+		ReadHeaderTimeout:         readHeaderTimeout,
+		ReadTimeout:               readTimeout,
+		WriteTimeout:              writeTimeout,
+		IdleTimeout:               idleTimeout,
+		ShutdownTimeout:           shutdownTimeout,
+		MaxConcurrentRuns:         maxConcurrentRuns,
+		StaleDispatchedStepMinAge: staleDispatchedStepMinAge,
 	}, nil
 }
 
@@ -892,6 +907,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.MaxConcurrentRuns <= 0 {
 		config.MaxConcurrentRuns = defaultMaxConcurrentRuns
+	}
+	if config.StaleDispatchedStepMinAge <= 0 {
+		config.StaleDispatchedStepMinAge = defaultStaleDispatchedStepMinAge
 	}
 	return config
 }

@@ -51,7 +51,8 @@ func (s *remoteService) Startup(context.Context) error {
 
 func (s *remoteService) Run(context.Context) error {
 	return withArgs(s.programName, s.args.CobraArgs, func() error {
-		return cli.ExecuteWithBackend(s.be, backend.WorkspaceInfo{})
+		defaultWS := resolveDefaultWorkspace(context.Background(), s.be, s.args.CobraArgs)
+		return cli.ExecuteWithBackend(s.be, defaultWS)
 	})
 }
 
@@ -106,8 +107,7 @@ func (s *interactiveService) Run(ctx context.Context) error {
 	}
 	s.be = be
 	s.closeBackend = closeBackend
-	workingDir, _ := os.Getwd()
-	defaultWS := session.ResolveDefaultWorkspace(context.Background(), be, workingDir, session.ExtractCLIConfigPath(s.args.CobraArgs))
+	defaultWS := resolveDefaultWorkspace(context.Background(), be, s.args.CobraArgs)
 	return withArgs(s.programName, s.args.CobraArgs, func() error {
 		return cli.ExecuteWithBackend(be, defaultWS)
 	})
@@ -131,4 +131,9 @@ func (s *interactiveService) closeLogging() {
 	}
 	s.restoreLogging()
 	s.restoreLogging = nil
+}
+
+func resolveDefaultWorkspace(ctx context.Context, be backend.Backend, args []string) backend.WorkspaceInfo {
+	workingDir, _ := os.Getwd()
+	return session.ResolveDefaultWorkspace(ctx, be, workingDir, session.ExtractCLIConfigPath(args))
 }

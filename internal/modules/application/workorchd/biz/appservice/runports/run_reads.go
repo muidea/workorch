@@ -18,21 +18,10 @@ func ListRuns(ctx context.Context, hub events.Hub) ([]*runmodel.Run, error) {
 }
 
 func ListRunsByWorkspace(ctx context.Context, hub events.Hub, workspaceID common.WorkspaceID) ([]*runmodel.Run, error) {
-	items, err := ListRuns(ctx, hub)
-	if err != nil {
-		return nil, err
-	}
 	if workspaceID == "" {
-		return items, nil
+		return ListRuns(ctx, hub)
 	}
-	ret := make([]*runmodel.Run, 0, len(items))
-	for _, item := range items {
-		if item == nil || item.WorkspaceID != workspaceID {
-			continue
-		}
-		ret = append(ret, item)
-	}
-	return ret, nil
+	return ownerreadports.ListRunsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
 }
 
 func ListStepsByRun(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {

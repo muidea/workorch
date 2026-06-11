@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/clicore"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
@@ -13,12 +14,15 @@ func (d *CLICommandDispatcher) handleMemoryCommand(ctx context.Context, cmd even
 		item, err := CreateMemoryItemWithSession(ctx, d.borrow(), string(cmd.WorkspaceID), clicore.MemoryCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandMemoryGet:
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := ReadMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandMemoryUpdate:
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		item, err := UpdateMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID, clicore.MemoryCommandFromPayload(cmd.Payload))
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandMemoryDelete:
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, cmd.WorkspaceID)
 		err := DeleteMemoryItemWithSession(ctx, d.borrow(), cmd.SubjectID)
 		return nil, nil, err
 	case events.CommandMemoryList:

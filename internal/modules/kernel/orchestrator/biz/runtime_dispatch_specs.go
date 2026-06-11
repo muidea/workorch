@@ -31,7 +31,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}
 		return nil, common.ErrConflict
 	}
-	if o.coverageLedger().ensure(run) && o.runs != nil {
+	if o.ensureCoverageLedger(ctx, run) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return nil, err
 		}
@@ -167,7 +167,7 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if o.coverageLedger().ensure(run) && o.runs != nil {
+	if o.ensureCoverageLedger(ctx, run) && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return nil, err
 		}

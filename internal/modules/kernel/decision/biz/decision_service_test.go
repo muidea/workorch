@@ -139,7 +139,7 @@ func TestService_CreateTicket_RejectsDuplicateTicketID(t *testing.T) {
 
 	second := decisionservice.CreateTicketCommand{
 		TicketID:    first.TicketID,
-		WorkspaceID: common.WorkspaceID("ws-2"),
+		WorkspaceID: first.WorkspaceID,
 		RunID:       common.RunID("run-2"),
 		StepID:      common.StepID("run-2/step-1"),
 		Reason:      "other decision",
@@ -154,6 +154,48 @@ func TestService_CreateTicket_RejectsDuplicateTicketID(t *testing.T) {
 	}
 	if got.RunID != first.RunID || got.Reason != first.Reason {
 		t.Fatalf("ticket mutated after duplicate create: %+v", got)
+	}
+}
+
+func TestService_CreateTicket_AllowsDuplicateTicketIDAcrossWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	first := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-workspace-local"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	second := decisionservice.CreateTicketCommand{
+		TicketID:    first.TicketID,
+		WorkspaceID: common.WorkspaceID("ws-2"),
+		RunID:       common.RunID("run-2"),
+		StepID:      common.StepID("run-2/step-1"),
+		Reason:      "other decision",
+	}
+	if err := service.CreateTicket(ctx, first); err != nil {
+		t.Fatalf("first create ticket: %v", err)
+	}
+	if err := service.CreateTicket(ctx, second); err != nil {
+		t.Fatalf("second workspace-local create ticket: %v", err)
+	}
+	if _, err := ticketRepo.Get(ctx, first.TicketID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped get err = %v, want conflict for duplicate workspace-local ticket id", err)
+	}
+	gotFirst, err := ticketRepo.Get(common.ContextWithRuntimeWorkspaceID(ctx, first.WorkspaceID), first.TicketID)
+	if err != nil {
+		t.Fatalf("get first scoped ticket: %v", err)
+	}
+	gotSecond, err := ticketRepo.Get(common.ContextWithRuntimeWorkspaceID(ctx, second.WorkspaceID), second.TicketID)
+	if err != nil {
+		t.Fatalf("get second scoped ticket: %v", err)
+	}
+	if gotFirst.RunID != first.RunID || gotSecond.RunID != second.RunID {
+		t.Fatalf("scoped tickets = %+v/%+v, want distinct workspace-local records", gotFirst, gotSecond)
 	}
 }
 

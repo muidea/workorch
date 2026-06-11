@@ -21,7 +21,8 @@ func (r *Reader) ReadArtifact(ctx context.Context, artifactURI string, cachedArt
 	}
 	artifact := contentcore.FindArtifactViewByURI(cachedArtifacts, ref)
 	if artifact == nil {
-		artifacts, err := ownerreadports.ListArtifactsByRunOwnerCommand(ctx, r.eventHub, ref.RunID)
+		readCtx := common.ContextWithRuntimeWorkspaceID(ctx, ref.WorkspaceID)
+		artifacts, err := ownerreadports.ListArtifactsByRunOwnerCommand(readCtx, r.eventHub, ref.RunID)
 		if err != nil {
 			return contentcore.ArtifactContent{}, err
 		}

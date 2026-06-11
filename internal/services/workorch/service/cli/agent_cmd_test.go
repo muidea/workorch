@@ -149,31 +149,31 @@ type agentCommandDecisionBackend struct{}
 func (agentCommandDecisionBackend) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandDecisionBackend) BatchResolve(context.Context, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 func (agentCommandDecisionBackend) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
-func (agentCommandDecisionBackend) Get(context.Context, common.TicketID) (*backend.DecisionInfo, error) {
+func (agentCommandDecisionBackend) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
 	return nil, common.ErrNotFound
 }
 
 type agentCommandApprovalBackend struct{}
 
-func (agentCommandApprovalBackend) Approve(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Approve(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) Reject(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Reject(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandApprovalBackend) BatchResolve(context.Context, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
 func (agentCommandApprovalBackend) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
-func (agentCommandApprovalBackend) Get(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (agentCommandApprovalBackend) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return nil, common.ErrNotFound
 }
 
@@ -224,13 +224,15 @@ type agentCommandMemoryBackend struct{}
 func (agentCommandMemoryBackend) Create(context.Context, common.WorkspaceID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
-func (agentCommandMemoryBackend) Get(context.Context, common.MemoryID) (*backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Get(context.Context, common.WorkspaceID, common.MemoryID) (*backend.MemoryItemInfo, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandMemoryBackend) Update(context.Context, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (agentCommandMemoryBackend) Update(context.Context, common.WorkspaceID, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return nil, common.ErrNotFound
 }
-func (agentCommandMemoryBackend) Delete(context.Context, common.MemoryID) error { return nil }
+func (agentCommandMemoryBackend) Delete(context.Context, common.WorkspaceID, common.MemoryID) error {
+	return nil
+}
 func (agentCommandMemoryBackend) List(context.Context, common.WorkspaceID) ([]backend.MemoryItemInfo, error) {
 	return nil, nil
 }

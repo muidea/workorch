@@ -267,10 +267,12 @@ export type ProjectionStatus = {
   globalRevision: number;
   workspaceRevision?: number;
   sourceEventRevision?: number;
+  projectedSourceRevision?: number;
   workspaceTotal?: number;
   updatedAt?: string;
   rebuiltAt?: string;
   degraded?: boolean;
+  staleReason?: string;
   error?: string;
 };
 
@@ -304,6 +306,28 @@ export type Run = {
   blockingTicketId?: string;
   blockingApprovalId?: string;
   failureReason?: string;
+};
+
+export type RunHeartbeat = {
+  workspaceId?: string;
+  runId?: string;
+  state?: string;
+  activityState?: string;
+  latestStepId?: string;
+  latestStepKind?: string;
+  latestStepState?: string;
+  latestEvidenceRef?: string;
+  latestEventTopic?: string;
+  latestEventRevision?: number;
+  latestEventAt?: string;
+  latestLLMUsageAt?: string;
+  latestResultAt?: string;
+  latestArtifactAt?: string;
+  latestPatchAt?: string;
+  latestEffectiveProgressAt?: string;
+  ineffectiveRetry?: boolean;
+  stalled?: boolean;
+  summary?: string;
 };
 
 export type RunOutcome = {
@@ -1187,6 +1211,7 @@ export type RunSnapshot = {
   run: Run;
   outcome?: RunOutcome;
   taskProgress: TaskProgress;
+  runHeartbeat?: RunHeartbeat;
   repairLoop: RepairLoop;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
@@ -1214,6 +1239,7 @@ export type WorkspaceSnapshot = {
   workspace: Workspace;
   outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
+  runHeartbeat?: RunHeartbeat;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
   taskDecompositions?: TaskDecomposition[];

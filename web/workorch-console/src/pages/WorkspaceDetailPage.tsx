@@ -3,7 +3,7 @@ import { App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, FloatBu
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
-import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
+import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPCapability, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraftSession, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from '../types';
 import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -30,6 +30,7 @@ const {
   runtimeEventPageLimit, runtimePatchPageLimit, runtimeRawRefActions, runtimeResultPageLimit,
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
   setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
+  projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions,
   stateLabel, stateTag, taskDecompositionCard, taskProgressCard, timelineLabel,
   timelineOccurredAtContent, timelineStreamContent, webSourceCard, webSourceRows,
   workspaceProcessItems, workspaceProjectionRun, workspaceProjectionRunLabel,
@@ -39,71 +40,11 @@ const {
   workspaceSetupSmartDraftStep, defaultSoulBindingStages
 } = helpers;
 
-function terminalRunState(state?: string) {
-  return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'superseded';
-}
-
-function runScopedItems<T>(items: T[] | undefined, runId: string): T[] {
-  return (items ?? []).filter((item) => {
-    const itemRunId = (item as { runId?: unknown }).runId;
-    return typeof itemRunId !== 'string' || itemRunId === '' || itemRunId === runId;
-  });
-}
-
-function projectedRunSnapshot(snapshot: WorkspaceSnapshot, run: Run): RunSnapshot {
-  const taskProgress: RunSnapshot['taskProgress'] = snapshot.taskProgress ?? {
-    workspaceId: snapshot.workspace.id,
-    runId: run.id,
-    state: run.state,
-    recovery: { mode: 'unknown' },
-    repairLoop: { state: 'idle', attemptCount: 0, escalated: false }
-  };
-  const outcome: RunSnapshot['outcome'] = snapshot.outcome && (!snapshot.outcome.runId || snapshot.outcome.runId === run.id)
-    ? {
-      runId: snapshot.outcome.runId || run.id,
-      state: snapshot.outcome.state || run.state,
-      rawState: snapshot.outcome.rawWorkspaceState || run.state,
-      accepted: snapshot.outcome.accepted,
-      terminal: snapshot.outcome.terminal,
-      resultId: snapshot.outcome.resultId,
-      summary: snapshot.outcome.summary,
-      reason: snapshot.outcome.reason,
-      evidenceRefs: snapshot.outcome.evidenceRefs,
-      artifactRefs: snapshot.outcome.artifactRefs
-    }
-    : {
-      runId: run.id,
-      state: run.state,
-      rawState: run.state,
-      accepted: false,
-      terminal: terminalRunState(run.state)
-    };
-  return {
-    workspace: snapshot.workspace,
-    run,
-    outcome,
-    taskProgress,
-    repairLoop: taskProgress.repairLoop,
-    taskDecompositions: runScopedItems(snapshot.taskDecompositions, run.id),
-    executionSections: runScopedItems(snapshot.executionSections, run.id),
-    webSources: runScopedItems(snapshot.webSources, run.id),
-    llmContextBudgets: runScopedItems(snapshot.llmContextBudgets, run.id),
-    llmUsageTraces: runScopedItems(snapshot.llmUsageTraces, run.id),
-    llmUsageSummary: snapshot.llmUsageSummary,
-    patches: runScopedItems(snapshot.patches, run.id),
-    results: runScopedItems(snapshot.results, run.id),
-    artifacts: runScopedItems(snapshot.artifacts, run.id),
-    artifactContinuations: runScopedItems(snapshot.artifactContinuations, run.id),
-    eventRecords: runScopedItems(snapshot.eventRecords, run.id),
-    decisions: runScopedItems(snapshot.decisions, run.id),
-    approvals: runScopedItems(snapshot.approvals, run.id)
-  };
-}
-
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
   const { message } = AntApp.useApp();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
+  const [workspaceProjection, setWorkspaceProjection] = useState<ProjectionStatus | undefined>(undefined);
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | undefined>(undefined);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dods, setDoDs] = useState<DoD[]>([]);
@@ -281,6 +222,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const canUseWorkspaceSetupDraft = Boolean(String(workspaceSetupTitle ?? '').trim());
 
   function clearWorkspaceContext() {
+    setWorkspaceProjection(undefined);
     setSnapshot(undefined);
     setGoals([]);
     setDoDs([]);
@@ -362,45 +304,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setRunArtifactCursorAfterId(undefined);
     setRunArtifactHasMore(false);
     setRunArtifactLoading(false);
-  }
-
-  function applyProjectedRunView(nextSnapshot: WorkspaceSnapshot, projectedRun: Run) {
-    const nextRunSnapshot = projectedRunSnapshot(nextSnapshot, projectedRun);
-    setRunSnapshot(nextRunSnapshot);
-    setRunObservability(undefined);
-    setContextBundle(nextSnapshot.contextBundle);
-    setRunStepRecords(nextRunSnapshot.steps ?? []);
-    setRunStepCursorAfterId(undefined);
-    setRunStepHasMore(false);
-    setRunStepLoading(false);
-    setRunToolCallRecords(nextRunSnapshot.toolCalls ?? []);
-    setRunToolCallCursorAfterId(undefined);
-    setRunToolCallHasMore(false);
-    setRunToolCallLoading(false);
-    setRunCheckpointRecords(nextRunSnapshot.runtimeCheckpoints ?? []);
-    setRunCheckpointCursorAfterId(undefined);
-    setRunCheckpointHasMore(false);
-    setRunCheckpointLoading(false);
-    setRunResultRecords(nextRunSnapshot.results ?? []);
-    setRunResultCursorAfterId(undefined);
-    setRunResultHasMore(false);
-    setRunResultLoading(false);
-    setRunPatchRecords(nextRunSnapshot.patches ?? []);
-    setRunPatchCursorAfterId(undefined);
-    setRunPatchHasMore(false);
-    setRunPatchLoading(false);
-    setRunValidationRecords(nextRunSnapshot.validationResults ?? []);
-    setRunValidationCursorAfterId(undefined);
-    setRunValidationHasMore(false);
-    setRunValidationLoading(false);
-    setRunArtifactRecords(nextRunSnapshot.artifacts ?? []);
-    setRunArtifactCursorAfterId(undefined);
-    setRunArtifactHasMore(false);
-    setRunArtifactLoading(false);
-    setRunEventRecords(nextRunSnapshot.eventRecords ?? []);
-    setRunEventCursorAfterId(undefined);
-    setRunEventHasMore(false);
-    setRunEventLoading(false);
   }
 
   function applyRunStepPage(page: StepPage, append: boolean) {
@@ -720,8 +623,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   }
 
-  async function loadRunProcess(runId: string, includeContext = false) {
-    const targetWorkspaceId = workspaceId;
+  async function loadRunProcess(runId: string, includeContext = false, requestedWorkspaceId?: string, expectedWorkspaceContextSeq?: number) {
+    const targetWorkspaceId = requestedWorkspaceId || workspaceId;
     if (!targetWorkspaceId) {
       return;
     }
@@ -747,6 +650,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         workorchApi.listRunArtifacts(runId, { workspaceId: targetWorkspaceId, limit: runtimeArtifactPageLimit }),
         workorchApi.listEventRecords({ workspaceId: targetWorkspaceId, runId, limit: runtimeEventPageLimit })
       ]);
+      if (expectedWorkspaceContextSeq !== undefined && expectedWorkspaceContextSeq !== workspaceContextRequestSeq.current) {
+        return;
+      }
+      if (targetWorkspaceId !== currentWorkspaceIdRef.current) {
+        return;
+      }
       setRunSnapshot(nextRunSnapshot);
       setRunObservability(nextRunObservability);
       if (nextRunContextBundle) {
@@ -788,6 +697,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         ? workspaceId
         : selectableItems[0]?.id;
     setWorkspaceListReady(true);
+    currentWorkspaceIdRef.current = nextWorkspaceId;
     setWorkspaceId(nextWorkspaceId);
     if (!nextWorkspaceId) {
       clearWorkspaceContext();
@@ -811,6 +721,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       return;
     }
     const nextSnapshot = nextSnapshotProjection.snapshot;
+    setWorkspaceProjection(nextSnapshotProjection.projection);
     setSnapshot(nextSnapshot);
     setContextBundle(nextSnapshot.contextBundle);
     setGoals(nextSnapshot.goals ?? []);
@@ -827,10 +738,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setMemoryItems(nextMemoryItems);
     setConfiguration(nextConfiguration);
     const projectedRun = workspaceProjectionRun(nextSnapshot);
+    clearRunProcessView(nextSnapshot.contextBundle);
     if (projectedRun) {
-      applyProjectedRunView(nextSnapshot, projectedRun);
-    } else {
-      clearRunProcessView(nextSnapshot.contextBundle);
+      void loadRunProcess(projectedRun.id, false, targetWorkspaceId, requestSeq).catch((error: unknown) => {
+        if (requestSeq === workspaceContextRequestSeq.current && targetWorkspaceId === currentWorkspaceIdRef.current) {
+          message.error(errorMessage(error));
+        }
+      });
     }
   }
 
@@ -1160,6 +1074,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     void workorchApi.activateWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
       .then(async (activation) => {
         setSnapshot(activation.snapshot);
+        setWorkspaceProjection(undefined);
         setRunSnapshot(undefined);
         setRunObservability(undefined);
         setRunEventRecords([]);
@@ -1283,6 +1198,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const runLLMUsageTraces = runObservability?.llmUsageTraces ?? runSnapshot?.llmUsageTraces ?? snapshot?.llmUsageTraces;
   const summaryLLMUsage = workspaceLLMUsageSummary ?? runLLMUsageSummary;
   const currentArtifactContinuations = runSnapshot?.artifactContinuations ?? snapshot?.artifactContinuations ?? [];
+  const currentRunHeartbeat = runSnapshot?.runHeartbeat ?? snapshot?.runHeartbeat;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -1358,12 +1274,16 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'id', label: '工作空间 ID', children: snapshot.workspace.id },
                 { key: 'activeRun', label: '活跃运行', children: snapshot.workspace.activeRunId || '-' },
                 { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' },
+                { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },
                 { key: 'description', label: '描述', children: boundedParagraph(snapshot.workspace.description, { rows: 2 }) },
                 { key: 'deliverableDirectory', label: '工作目录', children: boundedParagraph(snapshot.workspace.deliverableDirectory, { rows: 1, copyText: snapshot.workspace.deliverableDirectory }) },
                 { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },
                 { key: 'stageSouls', label: '阶段执行人格', children: compactTags(stageBindingTags, 4) }
               ]}
             />
+          </ProCard>
+          <ProCard title="投影状态" className="workorch-section" extra={workspaceProjection ? stateTag(workspaceProjection.state) : null}>
+            <Descriptions column={{ xs: 1, md: 2 }} size="small" items={projectionStatusDescriptions(workspaceProjection)} />
           </ProCard>
           <ProCard title="执行过程" className="workorch-section">
             <Steps items={workspaceProcessItems(snapshot, goals, dods)} />
@@ -1420,6 +1340,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   { key: 'latestRun', label: '当前运行', children: workspaceProjectionRunLabel(snapshot) },
                   { key: 'outcome', label: '业务结果', children: snapshot.outcome?.runId ? `${snapshot.outcome.runId} / ${stateLabel(snapshot.outcome.state)}` : '-' }
                 ]}
+              />
+              <Descriptions
+                column={{ xs: 1, md: 2 }}
+                size="small"
+                items={runHeartbeatDescriptions(currentRunHeartbeat)}
               />
             </Space>
           </ProCard>

@@ -9,6 +9,21 @@ import (
 
 const sourceModule = "application/workorchd/appservice"
 
+func workspaceScopeFromContext(ctx context.Context) common.WorkspaceID {
+	return common.RuntimeWorkspaceIDFromContext(ctx)
+}
+
+func payloadWithWorkspaceScope(payload map[string]any, workspaceID common.WorkspaceID) map[string]any {
+	if workspaceID == "" {
+		return payload
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload[events.PayloadKeyWorkspaceID] = string(workspaceID)
+	return payload
+}
+
 func PublishCommandWithResponse(ctx context.Context, hub events.Hub, topic string, subjectType string, subjectID string, workspaceID common.WorkspaceID, runID common.RunID, payload map[string]any) (events.Envelope, error) {
 	return PublishCommandWithResponseFrom(ctx, sourceModule, hub, topic, subjectType, subjectID, workspaceID, runID, payload)
 }

@@ -9,11 +9,16 @@ import (
 
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
-	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-artifact-content")
+	runID := common.RunID("run-artifact-content")
+	artifactURI := "workorch://workspaces/ws-artifact-content/artifacts/run-artifact-content/result-summary.txt"
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
 	dataRoot := t.TempDir()
 	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
 	if err != nil {
@@ -23,14 +28,21 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "artifact content", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("Create run: %v", err)
+	}
 	artifact := &resultmodel.Artifact{
 		ID:           common.ArtifactID("run-artifact-content/artifact/result-summary"),
-		WorkspaceID:  common.WorkspaceID("ws-artifact-content"),
-		RunID:        common.RunID("run-artifact-content"),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
 		ResultID:     common.ResultID("run-artifact-content/result/dod-assessment"),
 		ArtifactType: resultcommon.ArtifactTypeText,
 		Name:         "Accepted Result Summary",
 		Summary:      "Artifact content from repository data dir",
+		URI:          artifactURI,
 		State:        common.ArtifactStateAvailable,
 	}
 	if err := exports.Repositories.Artifacts.Create(ctx, artifact); err != nil {
@@ -40,7 +52,7 @@ func TestReadArtifactContentWithBackendReturnsStoredArtifactFile(t *testing.T) {
 		t.Fatalf("Close session: %v", err)
 	}
 
-	item, err := ReadArtifactContentWithBackend(ctx, "file", dataRoot, "workorch://workspaces/ws-artifact-content/artifacts/run-artifact-content/result-summary.txt")
+	item, err := ReadArtifactContentWithBackend(context.Background(), "file", dataRoot, artifactURI)
 	if err != nil {
 		t.Fatalf("ReadArtifactContentWithBackend: %v", err)
 	}

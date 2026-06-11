@@ -185,31 +185,31 @@ type fakeDecision struct{}
 func (fakeDecision) Resolve(context.Context, backend.ResolveDecisionRequest) (*backend.DecisionInfo, error) {
 	return &backend.DecisionInfo{}, nil
 }
-func (fakeDecision) BatchResolve(context.Context, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
+func (fakeDecision) BatchResolve(context.Context, common.WorkspaceID, []common.TicketID, string, map[string]any) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
 func (fakeDecision) List(context.Context, common.WorkspaceID) ([]backend.DecisionInfo, error) {
 	return nil, nil
 }
-func (fakeDecision) Get(context.Context, common.TicketID) (*backend.DecisionInfo, error) {
+func (fakeDecision) Get(context.Context, common.WorkspaceID, common.TicketID) (*backend.DecisionInfo, error) {
 	return &backend.DecisionInfo{}, nil
 }
 
 type fakeApproval struct{}
 
-func (fakeApproval) Approve(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Approve(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) Reject(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Reject(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
-func (fakeApproval) BatchResolve(context.Context, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
+func (fakeApproval) BatchResolve(context.Context, common.WorkspaceID, []common.ApprovalID, string) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
 func (fakeApproval) List(context.Context, common.WorkspaceID) ([]backend.ApprovalInfo, error) {
 	return nil, nil
 }
-func (fakeApproval) Get(context.Context, common.ApprovalID) (*backend.ApprovalInfo, error) {
+func (fakeApproval) Get(context.Context, common.WorkspaceID, common.ApprovalID) (*backend.ApprovalInfo, error) {
 	return &backend.ApprovalInfo{}, nil
 }
 
@@ -257,13 +257,13 @@ func (fakeMCP) ListCapabilities(context.Context) ([]backend.MCPCapabilityInfo, e
 func (fakeMemory) Create(context.Context, common.WorkspaceID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return &backend.MemoryItemInfo{}, nil
 }
-func (fakeMemory) Get(context.Context, common.MemoryID) (*backend.MemoryItemInfo, error) {
+func (fakeMemory) Get(context.Context, common.WorkspaceID, common.MemoryID) (*backend.MemoryItemInfo, error) {
 	return &backend.MemoryItemInfo{}, nil
 }
-func (fakeMemory) Update(context.Context, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
+func (fakeMemory) Update(context.Context, common.WorkspaceID, common.MemoryID, *backend.MemoryItemInfo) (*backend.MemoryItemInfo, error) {
 	return &backend.MemoryItemInfo{}, nil
 }
-func (fakeMemory) Delete(context.Context, common.MemoryID) error {
+func (fakeMemory) Delete(context.Context, common.WorkspaceID, common.MemoryID) error {
 	return nil
 }
 func (fakeMemory) List(context.Context, common.WorkspaceID) ([]backend.MemoryItemInfo, error) {

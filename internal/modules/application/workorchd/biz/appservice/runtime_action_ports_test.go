@@ -177,11 +177,17 @@ func TestEventHubActionPortPublishesOwnerCommands(t *testing.T) {
 		t.Fatalf("approval ensure command = %#v", published[8].Payload[events.PayloadKeyCommand])
 	}
 	approvedCmd, ok := published[9].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
-	if !ok || approvedCmd.ApprovalID != "approval-action-port" {
+	if !ok || approvedCmd.ApprovalID != "approval-action-port" || approvedCmd.WorkspaceID != "ws-action-port" {
 		t.Fatalf("approval approved command = %#v", published[9].Payload[events.PayloadKeyCommand])
 	}
+	if published[9].WorkspaceID != "ws-action-port" || published[9].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" {
+		t.Fatalf("approval approved scope = envelope:%q payload:%#v, want workspace scope", published[9].WorkspaceID, published[9].Payload)
+	}
 	rejectedCmd, ok := published[10].Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
-	if !ok || rejectedCmd.ApprovalID != "approval-action-port" {
+	if !ok || rejectedCmd.ApprovalID != "approval-action-port" || rejectedCmd.WorkspaceID != "ws-action-port" {
 		t.Fatalf("approval rejected command = %#v", published[10].Payload[events.PayloadKeyCommand])
+	}
+	if published[10].WorkspaceID != "ws-action-port" || published[10].Payload[events.PayloadKeyWorkspaceID] != "ws-action-port" {
+		t.Fatalf("approval rejected scope = envelope:%q payload:%#v, want workspace scope", published[10].WorkspaceID, published[10].Payload)
 	}
 }

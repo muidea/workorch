@@ -5,7 +5,7 @@ import { workorchApi } from '../api';
 import { modelLabels } from '../utils/constants';
 import { useSSE } from '../hooks';
 import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGrid } from '../utils';
-import { workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
+import { projectionStatusSummary, workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
 import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionActivationRequest } from '../types';
 
 type WorkspaceBoardCardItem = {
@@ -80,7 +80,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   return (
     <PageContainer
       title="业务总览"
-      subTitle={projection ? `投影：${projection.state} / revision ${projection.globalRevision}` : '从工作空间视角查看目标、运行、治理阻塞和交付状态'}
+      subTitle={projection ? projectionStatusSummary(projection) : '从工作空间视角查看目标、运行、治理阻塞和交付状态'}
       extra={<Button onClick={() => void loadBoard()} loading={loading}>刷新</Button>}
     >
       {boardItems.length === 0 && !loading ? (

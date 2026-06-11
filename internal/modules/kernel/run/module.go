@@ -138,6 +138,9 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 	if m == nil || m.runs == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := runScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	switch envelope.Topic {
 	case runevents.TopicRunCommandEnsure:
 		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand)
@@ -177,10 +180,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if runID == "" {
 			runID = common.RunID(envelope.RunID)
 		}
-		workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-		if workspaceID == "" {
-			workspaceID = common.WorkspaceID(envelope.WorkspaceID)
-		}
+		workspaceID := runScopedWorkspaceID(envelope)
 		item, err := m.runs.Get(ctx, runID)
 		if err != nil {
 			return err
@@ -273,10 +273,7 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		return runCommandResponse(envelope, nil)
 	case runevents.TopicRunCommandDelete:
 		runID := deleteRunIDFromPayload(envelope.Payload, envelope.RunID)
-		workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
-		if workspaceID == "" {
-			workspaceID = common.WorkspaceID(envelope.WorkspaceID)
-		}
+		workspaceID := runScopedWorkspaceID(envelope)
 		if workspaceID != "" {
 			item, err := m.runs.Get(ctx, runID)
 			if err != nil {
@@ -365,6 +362,14 @@ func createRunCommandFromPayload(payload map[string]any) (runcontracts.CreateRun
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func runScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if workspaceID == "" {
+		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	return workspaceID
 }
 
 func mapPayload(payload map[string]any, key string) map[string]any {

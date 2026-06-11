@@ -14,6 +14,8 @@ GO_TEST_PACKAGES="${WORKORCH_MANAGED_GO_TEST_PACKAGES:-./...}"
 GO_TEST_FLAGS="${WORKORCH_MANAGED_GO_TEST_FLAGS:--count=1}"
 VERIFY_TARGET="${WORKORCH_MANAGED_VERIFY_TARGET:-verify-e2e-full}"
 MAX_CONCURRENT_RUNS="${WORKORCH_MANAGED_MAX_CONCURRENT_RUNS:-1}"
+STALE_DISPATCHED_STEP_MIN_AGE="${WORKORCH_MANAGED_STALE_DISPATCHED_STEP_MIN_AGE:-10m}"
+LLM_CONFIG_JSON="${WORKORCH_MANAGED_LLM_CONFIG_JSON:-}"
 
 select_addr() {
   if [[ -n "${WORKORCH_MANAGED_ADDR:-}" ]]; then
@@ -96,6 +98,7 @@ writeTimeout = "180s"
 idleTimeout = "60s"
 shutdownTimeout = "5s"
 maxConcurrentRuns = $MAX_CONCURRENT_RUNS
+staleDispatchedStepMinAge = "$STALE_DISPATCHED_STEP_MIN_AGE"
 
 [repository]
 backend = "file"
@@ -133,6 +136,37 @@ start_server() {
   return 1
 }
 
+apply_managed_llm_config() {
+  if [[ -z "$LLM_CONFIG_JSON" ]]; then
+    return
+  fi
+  if [[ ! -f "$LLM_CONFIG_JSON" ]]; then
+    echo "WORKORCH_MANAGED_LLM_CONFIG_JSON file not found: $LLM_CONFIG_JSON" >&2
+    return 1
+  fi
+  echo "==> apply managed LLM configuration from $LLM_CONFIG_JSON"
+  local response_file="$TMP_DIR/configuration-llm-managed.json"
+  local status_file="$TMP_DIR/configuration-llm-managed.status"
+  local http_status
+  http_status="$(
+    curl -sS --max-time 30 \
+      -X PUT \
+      -H "Content-Type: application/json" \
+      -d @"$LLM_CONFIG_JSON" \
+      -o "$response_file" \
+      -w "%{http_code}" \
+      "$BASE_URL/api/v1/workorch/configuration/llm"
+  )"
+  printf '%s\n' "$http_status" >"$status_file"
+  if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+    echo "managed LLM configuration update failed with HTTP $http_status" >&2
+    if [[ -f "$response_file" ]]; then
+      cat "$response_file" >&2 || true
+    fi
+    return 1
+  fi
+}
+
 trap report_failure ERR
 trap cleanup EXIT
 
@@ -147,10 +181,16 @@ run_step go test $GO_TEST_FLAGS $GO_TEST_PACKAGES
 run_step go build -o "$BINARY" ./application/workorch
 
 start_server
+apply_managed_llm_config
 
 export WORKORCH_BASE_URL="$BASE_URL"
 export WORKORCH_VERIFY_BASE_URL="${WORKORCH_VERIFY_BASE_URL:-$BASE_URL}"
-export WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS="${WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS:-0}"
+export WORKORCH_OBSERVE_ARTIFACT_DIR="${WORKORCH_OBSERVE_ARTIFACT_DIR:-$TMP_DIR/observe-runtime-closure}"
+export WORKORCH_OBSERVE_KEEP_ARTIFACTS="${WORKORCH_OBSERVE_KEEP_ARTIFACTS:-$KEEP_ARTIFACTS}"
+export WORKORCH_REAL_RUNTIME_ARTIFACT_DIR="${WORKORCH_REAL_RUNTIME_ARTIFACT_DIR:-$TMP_DIR/verify-real-runtime-closure}"
+export WORKORCH_REAL_RUNTIME_KEEP_ARTIFACTS="${WORKORCH_REAL_RUNTIME_KEEP_ARTIFACTS:-$KEEP_ARTIFACTS}"
+export WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR="${WORKORCH_TUI_LONG_OUTPUT_ARTIFACT_DIR:-$TMP_DIR/verify-tui-long-output}"
+export WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS="${WORKORCH_TUI_LONG_OUTPUT_KEEP_ARTIFACTS:-$KEEP_ARTIFACTS}"
 
 run_step make "$VERIFY_TARGET"
 

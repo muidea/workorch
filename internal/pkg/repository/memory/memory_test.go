@@ -5,9 +5,15 @@ import (
 	"errors"
 	"testing"
 
+	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
+	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 )
 
 func TestWorkspaceRepository_CRUDAndCloneIsolation(t *testing.T) {
@@ -144,5 +150,199 @@ func TestStepRepository_CloneIsolation(t *testing.T) {
 	}
 	if updated.Output["result"] != "done" {
 		t.Fatalf("step output result = %v, want done", updated.Output["result"])
+	}
+}
+
+func TestMemoryRunAndStepRepositoriesRequireScopedLookupForDuplicateWorkspaceLocalIDs(t *testing.T) {
+	ctx := context.Background()
+	runs := NewRunRepository()
+	steps := NewStepRepository()
+	for _, workspaceID := range []common.WorkspaceID{"ws-memory-a", "ws-memory-b"} {
+		scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := runs.Create(scoped, &runmodel.Run{
+			ID:          "run-shared",
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", workspaceID, err)
+		}
+		if err := steps.Create(scoped, &runmodel.Step{
+			ID:    "run-shared/step-001",
+			RunID: "run-shared",
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateCompleted,
+		}); err != nil {
+			t.Fatalf("create step %s: %v", workspaceID, err)
+		}
+	}
+
+	if _, err := runs.Get(ctx, "run-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate run get err = %v, want conflict", err)
+	}
+	if _, err := steps.Get(ctx, "run-shared/step-001"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate step get err = %v, want conflict", err)
+	}
+	if _, err := steps.ListByRun(ctx, "run-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate step list err = %v, want conflict", err)
+	}
+
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, "ws-memory-b")
+	runItem, err := runs.Get(scoped, "run-shared")
+	if err != nil {
+		t.Fatalf("scoped run get: %v", err)
+	}
+	if runItem.WorkspaceID != "ws-memory-b" {
+		t.Fatalf("scoped run workspace = %q, want ws-memory-b", runItem.WorkspaceID)
+	}
+	stepItems, err := steps.ListByRun(scoped, "run-shared")
+	if err != nil {
+		t.Fatalf("scoped step list: %v", err)
+	}
+	if len(stepItems) != 1 || stepItems[0].ID != "run-shared/step-001" {
+		t.Fatalf("scoped steps = %#v, want one scoped step", stepItems)
+	}
+}
+
+func TestMemoryGovernanceRepositoriesRequireScopedLookupForDuplicateWorkspaceLocalIDs(t *testing.T) {
+	ctx := context.Background()
+	tickets := NewDecisionTicketRepository()
+	resolutions := NewDecisionResolutionRepository()
+	approvals := NewApprovalRepository()
+	for _, workspaceID := range []common.WorkspaceID{"ws-gov-a", "ws-gov-b"} {
+		scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := tickets.Create(scoped, &decisionmodel.Ticket{
+			ID:          "ticket-shared",
+			WorkspaceID: workspaceID,
+			RunID:       "run-001",
+			State:       common.DecisionTicketStateOpen,
+			Reason:      "scope regression",
+		}); err != nil {
+			t.Fatalf("create ticket %s: %v", workspaceID, err)
+		}
+		if err := resolutions.Create(scoped, &decisionmodel.Resolution{
+			ID:       common.ResolutionID("resolution-" + workspaceID),
+			TicketID: "ticket-shared",
+			Type:     "accepted",
+		}); err != nil {
+			t.Fatalf("create resolution %s: %v", workspaceID, err)
+		}
+		if err := approvals.Create(scoped, &approvalmodel.Approval{
+			ID:          "approval-shared",
+			WorkspaceID: workspaceID,
+			RunID:       "run-001",
+			State:       common.ApprovalStatePending,
+			Reason:      "scope regression",
+			Action:      "approve",
+		}); err != nil {
+			t.Fatalf("create approval %s: %v", workspaceID, err)
+		}
+	}
+
+	if _, err := tickets.Get(ctx, "ticket-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate ticket get err = %v, want conflict", err)
+	}
+	if _, err := resolutions.GetByTicketID(ctx, "ticket-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate resolution get err = %v, want conflict", err)
+	}
+	if _, err := approvals.Get(ctx, "approval-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate approval get err = %v, want conflict", err)
+	}
+
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, "ws-gov-a")
+	ticket, err := tickets.Get(scoped, "ticket-shared")
+	if err != nil {
+		t.Fatalf("scoped ticket get: %v", err)
+	}
+	if ticket.WorkspaceID != "ws-gov-a" {
+		t.Fatalf("scoped ticket workspace = %q, want ws-gov-a", ticket.WorkspaceID)
+	}
+	resolution, err := resolutions.GetByTicketID(scoped, "ticket-shared")
+	if err != nil {
+		t.Fatalf("scoped resolution get: %v", err)
+	}
+	if resolution.ID != "resolution-ws-gov-a" {
+		t.Fatalf("scoped resolution id = %q, want resolution-ws-gov-a", resolution.ID)
+	}
+	approval, err := approvals.Get(scoped, "approval-shared")
+	if err != nil {
+		t.Fatalf("scoped approval get: %v", err)
+	}
+	if approval.WorkspaceID != "ws-gov-a" {
+		t.Fatalf("scoped approval workspace = %q, want ws-gov-a", approval.WorkspaceID)
+	}
+}
+
+func TestMemoryWorkspaceLocalRepositoriesRequireScopedLookup(t *testing.T) {
+	ctx := context.Background()
+	goals := NewGoalRepository()
+	dods := NewDoDRepository()
+	memories := NewMemoryItemRepository()
+	results := NewResultRepository()
+	artifacts := NewArtifactRepository()
+	events := NewEventRecordRepository()
+	for _, workspaceID := range []common.WorkspaceID{"ws-local-a", "ws-local-b"} {
+		scoped := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := goals.Create(scoped, &workspacemodel.Goal{ID: "goal-shared", WorkspaceID: workspaceID, Text: "goal"}); err != nil {
+			t.Fatalf("create goal %s: %v", workspaceID, err)
+		}
+		if err := dods.Create(scoped, &workspacemodel.DoD{ID: "dod-shared", WorkspaceID: workspaceID, Items: []string{"dod"}, State: "ready"}); err != nil {
+			t.Fatalf("create dod %s: %v", workspaceID, err)
+		}
+		if err := memories.Create(scoped, &memorymodel.MemoryItem{ID: "memory-shared", WorkspaceID: workspaceID, RunID: "run-shared", Content: "memory"}); err != nil {
+			t.Fatalf("create memory %s: %v", workspaceID, err)
+		}
+		if err := results.Create(scoped, &resultmodel.Result{ID: "result-shared", WorkspaceID: workspaceID, RunID: "run-shared", State: common.ResultStateAccepted}); err != nil {
+			t.Fatalf("create result %s: %v", workspaceID, err)
+		}
+		if err := artifacts.Create(scoped, &resultmodel.Artifact{ID: "artifact-shared", WorkspaceID: workspaceID, RunID: "run-shared", ResultID: "result-shared", State: common.ArtifactStateAvailable}); err != nil {
+			t.Fatalf("create artifact %s: %v", workspaceID, err)
+		}
+		if err := events.Append(scoped, &eventstreammodel.EventRecord{ID: "event-shared", WorkspaceID: workspaceID, RunID: "run-shared", Topic: "/test", Revision: 1}); err != nil {
+			t.Fatalf("append event %s: %v", workspaceID, err)
+		}
+	}
+
+	if _, err := goals.Get(ctx, "goal-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate goal get err = %v, want conflict", err)
+	}
+	if _, err := dods.Get(ctx, "dod-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate dod get err = %v, want conflict", err)
+	}
+	if _, err := memories.Get(ctx, "memory-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate memory get err = %v, want conflict", err)
+	}
+	if _, err := results.Get(ctx, "result-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate result get err = %v, want conflict", err)
+	}
+	if _, err := artifacts.Get(ctx, "artifact-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate artifact get err = %v, want conflict", err)
+	}
+	if _, err := artifacts.ListByRun(ctx, "run-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate artifact run list err = %v, want conflict", err)
+	}
+	if _, err := artifacts.ListByResult(ctx, "result-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate artifact result list err = %v, want conflict", err)
+	}
+	if _, err := events.Get(ctx, "event-shared"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate event get err = %v, want conflict", err)
+	}
+	if _, err := events.List(ctx, repository.EventRecordQuery{RunID: "run-shared"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped duplicate event run list err = %v, want conflict", err)
+	}
+
+	scoped := common.ContextWithRuntimeWorkspaceID(ctx, "ws-local-b")
+	goal, err := goals.Get(scoped, "goal-shared")
+	if err != nil {
+		t.Fatalf("scoped goal get: %v", err)
+	}
+	if goal.WorkspaceID != "ws-local-b" {
+		t.Fatalf("scoped goal workspace = %q, want ws-local-b", goal.WorkspaceID)
+	}
+	eventItems, err := events.List(scoped, repository.EventRecordQuery{RunID: "run-shared"})
+	if err != nil {
+		t.Fatalf("scoped event list: %v", err)
+	}
+	if len(eventItems) != 1 || eventItems[0].WorkspaceID != "ws-local-b" {
+		t.Fatalf("scoped event list = %#v, want one ws-local-b event", eventItems)
 	}
 }

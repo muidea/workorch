@@ -15,9 +15,10 @@ func ReadResultByOwnerCommand(ctx context.Context, hub events.Hub, resultID comm
 	if hub == nil || resultID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandGet, "result", string(resultID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, resultevents.TopicResultCommandGet, "result", string(resultID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyCommand: resultcontracts.GetResultCommand{ResultID: resultID},
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

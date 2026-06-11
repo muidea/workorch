@@ -18,7 +18,7 @@ CONSOLE_DEPS_STAMP := $(CONSOLE_NODE_MODULES)/.workorch-deps-stamp
 NPM_CI_FLAGS ?=
 NPM_INSTALL_FLAGS ?=
 
-.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-long-output release release-check install-latest ci
+.PHONY: help deps go-deps console-deps fmt fmt-check test test-race vet console-build build clean run run-file verify-boundary-contract verify-service verify-service-file verify-workspace-template-soul verify-workspace-template-soul-file verify-llm verify-llm-file verify-incremental-artifact-e2e verify-runtime-profile-software-dev verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration verify-software-requirement-orchestration-deployed verify-skillhub verify-skillhub-file verify-mcp-stdio verify-mcp-stdio-file verify-auto-governance-ticket-approval verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch observe-runtime-closure verify-web-console-projection-visual verify-e2e-template-contract verify-ci-mvp verify-ci-mvp-file verify-mvp verify-mvp-file verify-real-llm verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory verify-real-weather verify-weather-ticket-approval verify-weather-ticket-approval-mock verify-real-mvp verify-deployed-full verify-deployed-full-file verify-e2e-full verify-managed-full loadtest-governed loadtest-governed-real docker-build docker-run docker-run-file docker-verify docker-verify-file cli-build cli-test cli-clean verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output release release-check install-latest ci
 
 help:
 	@echo "Targets:"
@@ -55,6 +55,9 @@ help:
 	@echo "  verify-workspace-file-diff-patch - verify file/diff/patch capability closure"
 	@echo "  verify-workspace-web-search - verify Web Search contract tests"
 	@echo "  verify-workspace-web-search-e2e - verify deployed Web Search source traceability"
+	@echo "  verify-workspace-projection-switch - verify deployed workspace projection scope and switch refresh contract"
+	@echo "  observe-runtime-closure - collect deployed runtime projection, SSE, heartbeat, and optional LLM cache observations"
+	@echo "  verify-web-console-projection-visual - verify Web Console projection and heartbeat display contract"
 	@echo "  verify-incremental-artifact-e2e - verify deployed neutral incremental artifact plan/chunk/apply lifecycle"
 	@echo "  verify-e2e-template-contract - verify all e2e workspace creation requests declare templateId"
 	@echo "  verify-ci-mvp      - verify deployed service with CI-safe mock LLM/MCP checks"
@@ -62,6 +65,7 @@ help:
 	@echo "  verify-mvp      - verify deployed service with local real LLM MVP checks"
 	@echo "  verify-mvp-file - alias of verify-mvp; e2e uses the deployed instance only"
 	@echo "  verify-real-llm - verify a running workorch --server against its configured real LLM provider"
+	@echo "  verify-real-runtime-closure - verify real provider concurrency, projection observation, and optional cache baseline"
 	@echo "  verify-real-mcp-stdio - verify a running workorch --server can execute MCP stdio through LLM graph"
 	@echo "  verify-real-vector-memory - verify vector Memory recall on a running workorch --server"
 	@echo "  verify-real-weather - verify real LLM + MCP stdio current weather query for Zhejiang Hangzhou"
@@ -82,6 +86,8 @@ help:
 	@echo "  cli-test   - run CLI tests"
 	@echo "  cli-clean  - remove CLI build artifact"
 	@echo "  verify-tui-agent - run TUI agent acceptance checks"
+	@echo "  verify-tui-workspace-switch-visual - record and verify TUI workspace switch view snapshots"
+	@echo "  verify-tui-terminal-render - verify real PTY TUI render against deployed service"
 	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
 	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
 	@echo "  install-latest - install latest release binary from GitHub via install script"
@@ -208,6 +214,15 @@ verify-workspace-web-search:
 verify-workspace-web-search-e2e:
 	./scripts/verify-workspace-web-search-e2e.sh
 
+verify-workspace-projection-switch:
+	./scripts/verify-workorch-projection-workspace-switch.sh
+
+observe-runtime-closure:
+	./scripts/observe-workorch-runtime-closure.sh
+
+verify-web-console-projection-visual: console-build
+	./scripts/verify-web-console-projection-visual.sh
+
 verify-e2e-template-contract:
 	./scripts/verify-e2e-template-contract.sh
 
@@ -221,6 +236,9 @@ verify-mvp-file: verify-mvp
 
 verify-real-llm:
 	./scripts/verify-real-llm-workspace-execution.sh
+
+verify-real-runtime-closure:
+	./scripts/verify-real-runtime-closure.sh
 
 verify-real-mcp-stdio:
 	./scripts/verify-real-mcp-stdio-workspace-execution.sh
@@ -241,7 +259,7 @@ verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 
 verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-mcp-stdio verify-real-vector-memory
 
-verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-weather-ticket-approval-mock verify-tui-agent verify-tui-long-output
+verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-web-console-projection-visual verify-weather-ticket-approval-mock verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 
 verify-managed-full:
 	./scripts/verify-workorch-managed-full.sh
@@ -319,7 +337,13 @@ verify-cli:
 verify-tui-agent:
 	./scripts/verify-tui-agent.sh
 
-verify-tui-long-output:
+verify-tui-workspace-switch-visual:
+	./scripts/verify-tui-workspace-switch-visual.sh
+
+verify-tui-terminal-render: cli-build
+	python3 ./scripts/verify-tui-terminal-render-smoke.py
+
+verify-tui-long-output: cli-build
 	./scripts/verify-tui-long-output-e2e.sh
 
 ci: fmt-check vet test verify-boundary-contract build cli-test

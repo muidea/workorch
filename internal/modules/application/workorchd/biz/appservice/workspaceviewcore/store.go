@@ -13,30 +13,38 @@ import (
 )
 
 type Store struct {
-	mu                 sync.RWMutex
-	state              string
-	errText            string
-	globalRevision     int64
-	updatedAt          time.Time
-	rebuiltAt          time.Time
-	workspaces         map[string]appmodelcore.Workspace
-	workspaceOrder     []string
-	snapshots          map[string]readmodelcore.WorkspaceSnapshot
-	workspaceRevisions map[string]int64
-	sourceRevision     int64
-	workspaceSources   map[string]int64
-	staleWorkspaces    map[string]struct{}
-	globalStale        bool
+	mu                      sync.RWMutex
+	state                   string
+	errText                 string
+	globalRevision          int64
+	sourceRevision          int64
+	projectedSourceRevision int64
+	updatedAt               time.Time
+	rebuiltAt               time.Time
+	workspaceOrder          []string
+	workspaces              map[string]*workspaceProjectionEntry
+	globalStale             bool
+	globalStaleReason       string
+}
+
+type workspaceProjectionEntry struct {
+	Workspace               appmodelcore.Workspace
+	HasWorkspace            bool
+	Snapshot                readmodelcore.WorkspaceSnapshot
+	HasSnapshot             bool
+	Revision                int64
+	SourceRevision          int64
+	ProjectedSourceRevision int64
+	Stale                   bool
+	StaleReason             string
+	Error                   string
+	RebuiltAt               time.Time
 }
 
 func NewStore() *Store {
 	return &Store{
-		state:              StateBuilding,
-		workspaces:         map[string]appmodelcore.Workspace{},
-		snapshots:          map[string]readmodelcore.WorkspaceSnapshot{},
-		workspaceRevisions: map[string]int64{},
-		workspaceSources:   map[string]int64{},
-		staleWorkspaces:    map[string]struct{}{},
+		state:      StateBuilding,
+		workspaces: map[string]*workspaceProjectionEntry{},
 	}
 }
 
@@ -60,33 +68,79 @@ func (s *Store) StatusForWorkspace(workspaceID string) Status {
 
 func (s *Store) statusLocked() Status {
 	state := s.state
-	if state == StateReady && (s.globalStale || len(s.staleWorkspaces) > 0) {
+	degraded := s.state == StateDegraded || s.hasWorkspaceErrorLocked()
+	if state == StateReady && degraded {
+		state = StateDegraded
+	} else if state == StateReady && (s.globalStale || s.hasStaleWorkspaceLocked()) {
 		state = StateStale
 	}
 	return Status{
-		State:               state,
-		GlobalRevision:      s.globalRevision,
-		SourceEventRevision: s.sourceRevision,
-		WorkspaceTotal:      len(s.workspaces),
-		UpdatedAt:           formatProjectionTime(s.updatedAt),
-		RebuiltAt:           formatProjectionTime(s.rebuiltAt),
-		Degraded:            s.state == StateDegraded,
-		Error:               s.errText,
+		State:                   state,
+		GlobalRevision:          s.globalRevision,
+		SourceEventRevision:     s.sourceRevision,
+		ProjectedSourceRevision: s.projectedSourceRevision,
+		WorkspaceTotal:          s.workspaceTotalLocked(),
+		UpdatedAt:               formatProjectionTime(s.updatedAt),
+		RebuiltAt:               formatProjectionTime(s.rebuiltAt),
+		Degraded:                degraded,
+		StaleReason:             s.globalStaleReason,
+		Error:                   s.errText,
 	}
 }
 
 func (s *Store) statusForWorkspaceLocked(workspaceID string) Status {
-	ret := s.statusLocked()
-	if workspaceID != "" {
-		ret.WorkspaceRevision = s.workspaceRevisions[workspaceID]
-		ret.SourceEventRevision = s.workspaceSources[workspaceID]
-		if s.state == StateReady {
-			if _, ok := s.staleWorkspaces[workspaceID]; ok {
-				ret.State = StateStale
-			}
+	if workspaceID == "" {
+		return s.statusLocked()
+	}
+	state := s.state
+	if state == StateDegraded || state == StateFailed {
+		state = StateReady
+	}
+	entry := s.workspaces[workspaceID]
+	if (entry == nil || !entry.HasWorkspace) && s.state != StateBuilding && s.state != StateStopped {
+		state = StateFailed
+	}
+	var errText, staleReason string
+	var workspaceRevision, sourceRevision, projectedSourceRevision int64
+	var rebuiltAt time.Time
+	var stale bool
+	if entry != nil {
+		errText = entry.Error
+		staleReason = entry.StaleReason
+		workspaceRevision = entry.Revision
+		sourceRevision = entry.SourceRevision
+		projectedSourceRevision = entry.ProjectedSourceRevision
+		rebuiltAt = entry.RebuiltAt
+		stale = entry.Stale
+	}
+	if sourceRevision == 0 {
+		sourceRevision = s.sourceRevision
+	}
+	if projectedSourceRevision == 0 {
+		projectedSourceRevision = s.projectedSourceRevision
+		if projectedSourceRevision == 0 || (!stale && strings.TrimSpace(errText) == "" && projectedSourceRevision < sourceRevision) {
+			projectedSourceRevision = sourceRevision
 		}
 	}
-	return ret
+	degraded := strings.TrimSpace(errText) != ""
+	if degraded {
+		state = StateDegraded
+	} else if stale && state == StateReady {
+		state = StateStale
+	}
+	return Status{
+		State:                   state,
+		GlobalRevision:          s.globalRevision,
+		WorkspaceRevision:       workspaceRevision,
+		SourceEventRevision:     sourceRevision,
+		ProjectedSourceRevision: projectedSourceRevision,
+		WorkspaceTotal:          s.workspaceTotalLocked(),
+		UpdatedAt:               formatProjectionTime(s.updatedAt),
+		RebuiltAt:               formatProjectionTime(rebuiltAt),
+		Degraded:                degraded,
+		StaleReason:             staleReason,
+		Error:                   errText,
+	}
 }
 
 func (s *Store) setBuilding() {
@@ -95,7 +149,11 @@ func (s *Store) setBuilding() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state = StateBuilding
+	if s.workspaceTotalLocked() > 0 {
+		s.state = StateStale
+	} else {
+		s.state = StateBuilding
+	}
 	s.errText = ""
 	s.updatedAt = time.Now().UTC()
 }
@@ -121,10 +179,13 @@ func (s *Store) MarkStale(workspaceID string, sourceRevision int64) {
 	}
 	if strings.TrimSpace(workspaceID) == "" {
 		s.globalStale = true
+		s.globalStaleReason = "source_event"
 	} else {
-		s.staleWorkspaces[workspaceID] = struct{}{}
-		if sourceRevision > s.workspaceSources[workspaceID] {
-			s.workspaceSources[workspaceID] = sourceRevision
+		entry := s.entryForUpdateLocked(workspaceID)
+		entry.Stale = true
+		entry.StaleReason = "source_event"
+		if sourceRevision > entry.SourceRevision {
+			entry.SourceRevision = sourceRevision
 		}
 	}
 	s.updatedAt = time.Now().UTC()
@@ -135,18 +196,31 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 		return
 	}
 	now := time.Now().UTC()
-	nextWorkspaces := make(map[string]appmodelcore.Workspace, len(workspaces))
+	nextWorkspaces := make(map[string]*workspaceProjectionEntry, len(workspaces))
 	nextOrder := make([]string, 0, len(workspaces))
-	nextSnapshots := make(map[string]readmodelcore.WorkspaceSnapshot, len(snapshots))
 	for _, item := range workspaces {
 		if strings.TrimSpace(item.ID) == "" {
 			continue
 		}
+		entry := s.cloneEntryForReplace(item.ID)
 		if snapshot, ok := snapshots[item.ID]; ok && strings.TrimSpace(snapshot.Workspace.ID) != "" {
 			item = snapshot.Workspace
-			nextSnapshots[item.ID] = cloneWorkspaceSnapshot(snapshot)
+			entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
+			entry.HasSnapshot = true
+			entry.ProjectedSourceRevision = entry.SourceRevision
+			entry.RebuiltAt = now
+			entry.Stale = false
+			entry.StaleReason = ""
+			entry.Error = ""
+		} else if degraded != nil {
+			entry.Stale = true
+			entry.StaleReason = "rebuild_failed"
+			entry.Error = degraded.Error()
 		}
-		nextWorkspaces[item.ID] = cloneWorkspace(item)
+		entry.Workspace = cloneWorkspace(item)
+		entry.HasWorkspace = true
+		entry.Revision++
+		nextWorkspaces[item.ID] = entry
 		nextOrder = append(nextOrder, item.ID)
 	}
 	sort.Strings(nextOrder)
@@ -155,13 +229,48 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 	defer s.mu.Unlock()
 	s.workspaces = nextWorkspaces
 	s.workspaceOrder = nextOrder
-	s.snapshots = nextSnapshots
 	s.globalRevision++
-	for _, id := range nextOrder {
-		s.workspaceRevisions[id]++
-	}
+	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
-	s.staleWorkspaces = map[string]struct{}{}
+	s.globalStaleReason = ""
+	if degraded != nil {
+		s.state = StateDegraded
+		s.errText = degraded.Error()
+	} else {
+		s.state = StateReady
+		s.errText = ""
+	}
+	s.updatedAt = now
+	s.rebuiltAt = now
+}
+
+func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degraded error) {
+	if s == nil {
+		return
+	}
+	now := time.Now().UTC()
+	nextWorkspaces := make(map[string]*workspaceProjectionEntry, len(workspaces))
+	nextOrder := make([]string, 0, len(workspaces))
+	for _, item := range workspaces {
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		entry := s.cloneEntryForReplace(item.ID)
+		entry.Workspace = cloneWorkspace(item)
+		entry.HasWorkspace = true
+		entry.Revision++
+		nextWorkspaces[item.ID] = entry
+		nextOrder = append(nextOrder, item.ID)
+	}
+	sort.Strings(nextOrder)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaces = nextWorkspaces
+	s.workspaceOrder = nextOrder
+	s.globalRevision++
+	s.globalStale = false
+	s.globalStaleReason = ""
 	if degraded != nil {
 		s.state = StateDegraded
 		s.errText = degraded.Error()
@@ -193,19 +302,29 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	workspaceID := snapshot.Workspace.ID
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.workspaces[workspaceID] = cloneWorkspace(snapshot.Workspace)
+	now := time.Now().UTC()
+	entry := s.entryForUpdateLocked(workspaceID)
+	entry.Workspace = cloneWorkspace(snapshot.Workspace)
+	entry.HasWorkspace = true
 	if !stringSliceContains(s.workspaceOrder, workspaceID) {
 		s.workspaceOrder = append(s.workspaceOrder, workspaceID)
 		sort.Strings(s.workspaceOrder)
 	}
-	s.snapshots[workspaceID] = cloneWorkspaceSnapshot(snapshot)
-	s.workspaceRevisions[workspaceID]++
+	entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
+	entry.HasSnapshot = true
+	entry.Revision++
 	s.globalRevision++
-	delete(s.staleWorkspaces, workspaceID)
+	entry.ProjectedSourceRevision = entry.SourceRevision
+	entry.RebuiltAt = now
+	entry.Stale = false
+	entry.StaleReason = ""
+	entry.Error = ""
+	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
+	s.globalStaleReason = ""
 	s.state = StateReady
 	s.errText = ""
-	s.updatedAt = time.Now().UTC()
+	s.updatedAt = now
 }
 
 func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
@@ -214,17 +333,43 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.workspaces[workspace.ID] = cloneWorkspace(workspace)
+	now := time.Now().UTC()
+	entry := s.entryForUpdateLocked(workspace.ID)
+	entry.Workspace = cloneWorkspace(workspace)
+	entry.HasWorkspace = true
 	if !stringSliceContains(s.workspaceOrder, workspace.ID) {
 		s.workspaceOrder = append(s.workspaceOrder, workspace.ID)
 		sort.Strings(s.workspaceOrder)
 	}
-	s.workspaceRevisions[workspace.ID]++
+	entry.Revision++
 	s.globalRevision++
-	delete(s.staleWorkspaces, workspace.ID)
+	entry.ProjectedSourceRevision = entry.SourceRevision
+	entry.RebuiltAt = now
+	entry.Stale = false
+	entry.StaleReason = ""
+	entry.Error = ""
+	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
+	s.globalStaleReason = ""
 	s.state = StateReady
 	s.errText = ""
+	s.updatedAt = now
+}
+
+func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {
+	if s == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entryForUpdateLocked(workspaceID)
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	entry.Stale = true
+	entry.StaleReason = "rebuild_failed"
+	s.globalRevision++
+	s.state = StateReady
 	s.updatedAt = time.Now().UTC()
 }
 
@@ -235,10 +380,6 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.workspaces, workspaceID)
-	delete(s.snapshots, workspaceID)
-	delete(s.workspaceRevisions, workspaceID)
-	delete(s.workspaceSources, workspaceID)
-	delete(s.staleWorkspaces, workspaceID)
 	nextOrder := s.workspaceOrder[:0]
 	for _, id := range s.workspaceOrder {
 		if id != workspaceID {
@@ -247,7 +388,9 @@ func (s *Store) DeleteWorkspace(workspaceID string) {
 	}
 	s.workspaceOrder = nextOrder
 	s.globalRevision++
+	s.refreshProjectedSourceRevisionLocked()
 	s.globalStale = false
+	s.globalStaleReason = ""
 	s.state = StateReady
 	s.errText = ""
 	s.updatedAt = time.Now().UTC()
@@ -268,8 +411,8 @@ func (s *Store) List() ([]appmodelcore.Workspace, Status, error) {
 	}
 	ret := make([]appmodelcore.Workspace, 0, len(s.workspaceOrder))
 	for _, id := range s.workspaceOrder {
-		if item, ok := s.workspaces[id]; ok {
-			ret = append(ret, cloneWorkspace(item))
+		if entry := s.workspaces[id]; entry != nil && entry.HasWorkspace {
+			ret = append(ret, cloneWorkspace(entry.Workspace))
 		}
 	}
 	return ret, status, nil
@@ -288,14 +431,105 @@ func (s *Store) GetSnapshot(workspaceID string) (readmodelcore.WorkspaceSnapshot
 	if s.state == StateFailed {
 		return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection failed: %s", common.ErrConflict, s.errText)
 	}
-	item, ok := s.snapshots[workspaceID]
-	if !ok {
-		if _, exists := s.workspaces[workspaceID]; exists {
+	entry := s.workspaces[workspaceID]
+	if entry == nil || !entry.HasSnapshot {
+		if entry != nil && entry.HasWorkspace {
 			return readmodelcore.WorkspaceSnapshot{}, status, fmt.Errorf("%w: workspace projection detail not ready", common.ErrConflict)
 		}
 		return readmodelcore.WorkspaceSnapshot{}, status, common.ErrNotFound
 	}
-	return cloneWorkspaceSnapshot(item), status, nil
+	return cloneWorkspaceSnapshot(entry.Snapshot), status, nil
+}
+
+func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {
+	if s == nil {
+		return Metrics{}
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var ret Metrics
+	for _, entry := range s.workspaces {
+		if entry == nil || !entry.HasSnapshot {
+			continue
+		}
+		heartbeat := entry.Snapshot.RunHeartbeat
+		if strings.TrimSpace(heartbeat.RunID) == "" || !activeRunHeartbeatState(heartbeat.State) {
+			continue
+		}
+		ret.ActiveRunHeartbeatTotal++
+		if heartbeat.Stalled || strings.TrimSpace(heartbeat.ActivityState) == "stalled" {
+			ret.StalledRunTotal++
+		}
+		if heartbeat.IneffectiveRetry || strings.TrimSpace(heartbeat.ActivityState) == "ineffective_retry" {
+			ret.IneffectiveRetryRunTotal++
+		}
+		if age := runHeartbeatAgeSeconds(heartbeat, now); age > ret.ActiveRunHeartbeatAgeSecondsMax {
+			ret.ActiveRunHeartbeatAgeSecondsMax = age
+		}
+	}
+	return ret
+}
+
+func (s *Store) cloneEntryForReplace(workspaceID string) *workspaceProjectionEntry {
+	if s == nil {
+		return &workspaceProjectionEntry{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if entry := s.workspaces[workspaceID]; entry != nil {
+		return cloneWorkspaceProjectionEntry(entry)
+	}
+	return &workspaceProjectionEntry{}
+}
+
+func (s *Store) entryForUpdateLocked(workspaceID string) *workspaceProjectionEntry {
+	entry := s.workspaces[workspaceID]
+	if entry == nil {
+		entry = &workspaceProjectionEntry{}
+		s.workspaces[workspaceID] = entry
+	}
+	return entry
+}
+
+func (s *Store) workspaceTotalLocked() int {
+	total := 0
+	for _, entry := range s.workspaces {
+		if entry != nil && entry.HasWorkspace {
+			total++
+		}
+	}
+	return total
+}
+
+func (s *Store) hasWorkspaceErrorLocked() bool {
+	for _, entry := range s.workspaces {
+		if entry != nil && strings.TrimSpace(entry.Error) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) hasStaleWorkspaceLocked() bool {
+	for _, entry := range s.workspaces {
+		if entry != nil && entry.Stale {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) refreshProjectedSourceRevisionLocked() {
+	var projected int64
+	for _, entry := range s.workspaces {
+		if entry != nil && entry.ProjectedSourceRevision > projected {
+			projected = entry.ProjectedSourceRevision
+		}
+	}
+	s.projectedSourceRevision = projected
 }
 
 func formatProjectionTime(value time.Time) string {
@@ -303,6 +537,41 @@ func formatProjectionTime(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func activeRunHeartbeatState(state string) bool {
+	switch common.RunState(strings.TrimSpace(state)) {
+	case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
+		return false
+	default:
+		return true
+	}
+}
+
+func runHeartbeatAgeSeconds(heartbeat readmodelcore.RunHeartbeat, now time.Time) int64 {
+	for _, candidate := range []string{
+		heartbeat.LatestEffectiveProgressAt,
+		heartbeat.LatestEventAt,
+		heartbeat.LatestLLMUsageAt,
+		heartbeat.LatestResultAt,
+		heartbeat.LatestArtifactAt,
+		heartbeat.LatestPatchAt,
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, candidate)
+		if err != nil {
+			continue
+		}
+		age := now.Sub(parsed.UTC()).Seconds()
+		if age < 0 {
+			return 0
+		}
+		return int64(age)
+	}
+	return 0
 }
 
 func stringSliceContains(items []string, want string) bool {
@@ -344,6 +613,20 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 		item.ContextBundle = &bundle
 	}
 	return item
+}
+
+func cloneWorkspaceProjectionEntry(item *workspaceProjectionEntry) *workspaceProjectionEntry {
+	if item == nil {
+		return &workspaceProjectionEntry{}
+	}
+	ret := *item
+	if item.HasWorkspace {
+		ret.Workspace = cloneWorkspace(item.Workspace)
+	}
+	if item.HasSnapshot {
+		ret.Snapshot = cloneWorkspaceSnapshot(item.Snapshot)
+	}
+	return &ret
 }
 
 func cloneContextBundle(item readmodelcore.ContextBundle) readmodelcore.ContextBundle {

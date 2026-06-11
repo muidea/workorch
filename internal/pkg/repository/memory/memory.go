@@ -39,12 +39,12 @@ type SoulRepository struct {
 
 type MemoryItemRepository struct {
 	mu    sync.RWMutex
-	items map[common.MemoryID]*memorymodel.MemoryItem
+	items map[string]*memorymodel.MemoryItem
 }
 
 type MemoryRecallTraceRepository struct {
 	mu    sync.RWMutex
-	items map[common.MemoryRecallTraceID]*memorymodel.MemoryRecallTrace
+	items map[string]*memorymodel.MemoryRecallTrace
 }
 
 type SkillRepository struct {
@@ -64,17 +64,106 @@ type MCPCapabilityRepository struct {
 
 type ResultRepository struct {
 	mu    sync.RWMutex
-	items map[common.ResultID]*resultmodel.Result
+	items map[string]*resultmodel.Result
 }
 
 type ArtifactRepository struct {
 	mu    sync.RWMutex
-	items map[common.ArtifactID]*resultmodel.Artifact
+	items map[string]*resultmodel.Artifact
 }
 
 type EventRecordRepository struct {
 	mu    sync.RWMutex
-	items map[common.EventRecordID]*eventstream.EventRecord
+	items map[string]*eventstream.EventRecord
+}
+
+func workspaceScopedKey(workspaceID common.WorkspaceID, id string) string {
+	id = strings.TrimSpace(id)
+	if workspaceID == "" {
+		return "/" + id
+	}
+	return string(workspaceID) + "/" + id
+}
+
+func runtimeWorkspaceScopedKey(ctx context.Context, id string) (string, bool) {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	if workspaceID == "" {
+		return "", false
+	}
+	return workspaceScopedKey(workspaceID, id), true
+}
+
+func workspaceFromScopedKey(key string) common.WorkspaceID {
+	workspaceID, _, ok := strings.Cut(key, "/")
+	if !ok {
+		return ""
+	}
+	return common.WorkspaceID(workspaceID)
+}
+
+func findScopedMemoryKey[T any](ctx context.Context, items map[string]T, id string, itemID func(T) string) (string, error) {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, id); scoped {
+		item, ok := items[key]
+		if ok && itemID(item) == id {
+			return key, nil
+		}
+		bareKey := workspaceScopedKey("", id)
+		item, ok = items[bareKey]
+		if ok && itemID(item) == id {
+			return bareKey, nil
+		}
+		return "", common.ErrNotFound
+	}
+	var found string
+	for key, item := range items {
+		if itemID(item) != id {
+			continue
+		}
+		if found != "" {
+			return "", common.ErrConflict
+		}
+		found = key
+	}
+	if found == "" {
+		return "", common.ErrNotFound
+	}
+	return found, nil
+}
+
+func runScopedListHasConflict[T any](ctx context.Context, items map[string]T, runID common.RunID, itemRunID func(T) common.RunID, itemWorkspaceID func(T) common.WorkspaceID) ([]T, bool) {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	ret := make([]T, 0)
+	for _, item := range items {
+		if itemRunID(item) != runID {
+			continue
+		}
+		currentWorkspaceID := itemWorkspaceID(item)
+		if workspaceID != "" && currentWorkspaceID != "" && currentWorkspaceID != workspaceID {
+			continue
+		}
+		matchedWorkspaces[currentWorkspaceID] = struct{}{}
+		ret = append(ret, item)
+	}
+	return ret, workspaceID == "" && len(matchedWorkspaces) > 1
+}
+
+func stepScopedListHasConflict[T any](ctx context.Context, items map[string]T, stepID common.StepID, itemStepID func(T) common.StepID, itemWorkspaceID func(T) common.WorkspaceID) ([]T, bool) {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	ret := make([]T, 0)
+	for _, item := range items {
+		if itemStepID(item) != stepID {
+			continue
+		}
+		currentWorkspaceID := itemWorkspaceID(item)
+		if workspaceID != "" && currentWorkspaceID != "" && currentWorkspaceID != workspaceID {
+			continue
+		}
+		matchedWorkspaces[currentWorkspaceID] = struct{}{}
+		ret = append(ret, item)
+	}
+	return ret, workspaceID == "" && len(matchedWorkspaces) > 1
 }
 
 func NewSoulRepository() *SoulRepository {
@@ -200,27 +289,30 @@ func (r *WorkspaceTemplateRepository) Delete(_ context.Context, id string) error
 }
 
 func NewMemoryItemRepository() *MemoryItemRepository {
-	return &MemoryItemRepository{items: map[common.MemoryID]*memorymodel.MemoryItem{}}
+	return &MemoryItemRepository{items: map[string]*memorymodel.MemoryItem{}}
 }
 
 func (r *MemoryItemRepository) Create(_ context.Context, item *memorymodel.MemoryItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneMemoryItem(item)
+	r.items[key] = cloneMemoryItem(item)
 	return nil
 }
 
-func (r *MemoryItemRepository) Get(_ context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
+func (r *MemoryItemRepository) Get(ctx context.Context, id common.MemoryID) (*memorymodel.MemoryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *memorymodel.MemoryItem) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneMemoryItem(item), nil
+	return cloneMemoryItem(r.items[key]), nil
 }
 
 func (r *MemoryItemRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*memorymodel.MemoryItem, error) {
@@ -276,28 +368,42 @@ func (r *MemoryItemRepository) Search(_ context.Context, query repository.Memory
 	return ret, nil
 }
 
-func (r *MemoryItemRepository) Update(_ context.Context, item *memorymodel.MemoryItem) error {
+func (r *MemoryItemRepository) Update(ctx context.Context, item *memorymodel.MemoryItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *memorymodel.MemoryItem) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneMemoryItem(item)
+	r.items[key] = cloneMemoryItem(item)
 	return nil
 }
 
-func (r *MemoryItemRepository) Delete(_ context.Context, id common.MemoryID) error {
+func (r *MemoryItemRepository) Delete(ctx context.Context, id common.MemoryID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *memorymodel.MemoryItem) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 func NewMemoryRecallTraceRepository() *MemoryRecallTraceRepository {
-	return &MemoryRecallTraceRepository{items: map[common.MemoryRecallTraceID]*memorymodel.MemoryRecallTrace{}}
+	return &MemoryRecallTraceRepository{items: map[string]*memorymodel.MemoryRecallTrace{}}
 }
 
 func (r *MemoryRecallTraceRepository) Create(_ context.Context, item *memorymodel.MemoryRecallTrace) error {
@@ -306,10 +412,11 @@ func (r *MemoryRecallTraceRepository) Create(_ context.Context, item *memorymode
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneMemoryRecallTrace(item)
+	r.items[key] = cloneMemoryRecallTrace(item)
 	return nil
 }
 
@@ -319,21 +426,23 @@ func (r *MemoryRecallTraceRepository) Upsert(_ context.Context, item *memorymode
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.items[item.ID] = cloneMemoryRecallTrace(item)
+	r.items[workspaceScopedKey(item.WorkspaceID, string(item.ID))] = cloneMemoryRecallTrace(item)
 	return nil
 }
 
-func (r *MemoryRecallTraceRepository) Get(_ context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
+func (r *MemoryRecallTraceRepository) Get(ctx context.Context, id common.MemoryRecallTraceID) (*memorymodel.MemoryRecallTrace, error) {
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *memorymodel.MemoryRecallTrace) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneMemoryRecallTrace(item), nil
+	return cloneMemoryRecallTrace(r.items[key]), nil
 }
 
 func (r *MemoryRecallTraceRepository) List(_ context.Context, query repository.MemoryRecallTraceQuery) ([]*memorymodel.MemoryRecallTrace, error) {
@@ -356,16 +465,19 @@ func (r *MemoryRecallTraceRepository) List(_ context.Context, query repository.M
 	return ret, nil
 }
 
-func (r *MemoryRecallTraceRepository) Delete(_ context.Context, id common.MemoryRecallTraceID) error {
+func (r *MemoryRecallTraceRepository) Delete(ctx context.Context, id common.MemoryRecallTraceID) error {
 	if id == "" {
 		return common.ErrInvalidArgument
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *memorymodel.MemoryRecallTrace) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
@@ -523,27 +635,30 @@ func (r *MCPCapabilityRepository) Update(_ context.Context, item *mcpmodel.Capab
 }
 
 func NewResultRepository() *ResultRepository {
-	return &ResultRepository{items: map[common.ResultID]*resultmodel.Result{}}
+	return &ResultRepository{items: map[string]*resultmodel.Result{}}
 }
 
 func (r *ResultRepository) Create(_ context.Context, item *resultmodel.Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneResult(item)
+	r.items[key] = cloneResult(item)
 	return nil
 }
 
-func (r *ResultRepository) Get(_ context.Context, id common.ResultID) (*resultmodel.Result, error) {
+func (r *ResultRepository) Get(ctx context.Context, id common.ResultID) (*resultmodel.Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *resultmodel.Result) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneResult(item), nil
+	return cloneResult(r.items[key]), nil
 }
 
 func (r *ResultRepository) ListByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
@@ -566,15 +681,20 @@ func (r *ResultRepository) ListByWorkspace(_ context.Context, workspaceID common
 	return items, nil
 }
 
-func (r *ResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
+func (r *ResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*resultmodel.Result, 0)
-	for _, item := range r.items {
-		if item.RunID != runID {
-			continue
-		}
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *resultmodel.Result) common.RunID {
+		return item.RunID
+	}, func(item *resultmodel.Result) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*resultmodel.Result, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneResult(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -586,48 +706,65 @@ func (r *ResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*
 	return items, nil
 }
 
-func (r *ResultRepository) Update(_ context.Context, item *resultmodel.Result) error {
+func (r *ResultRepository) Update(ctx context.Context, item *resultmodel.Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *resultmodel.Result) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneResult(item)
+	r.items[key] = cloneResult(item)
 	return nil
 }
 
-func (r *ResultRepository) Delete(_ context.Context, id common.ResultID) error {
+func (r *ResultRepository) Delete(ctx context.Context, id common.ResultID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *resultmodel.Result) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 func NewArtifactRepository() *ArtifactRepository {
-	return &ArtifactRepository{items: map[common.ArtifactID]*resultmodel.Artifact{}}
+	return &ArtifactRepository{items: map[string]*resultmodel.Artifact{}}
 }
 
 func (r *ArtifactRepository) Create(_ context.Context, item *resultmodel.Artifact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneArtifact(item)
+	r.items[key] = cloneArtifact(item)
 	return nil
 }
 
-func (r *ArtifactRepository) Get(_ context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) Get(ctx context.Context, id common.ArtifactID) (*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *resultmodel.Artifact) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneArtifact(item), nil
+	return cloneArtifact(r.items[key]), nil
 }
 
 func (r *ArtifactRepository) ListByWorkspace(_ context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Artifact, error) {
@@ -638,79 +775,133 @@ func (r *ArtifactRepository) ListByWorkspace(_ context.Context, workspaceID comm
 	}), nil
 }
 
-func (r *ArtifactRepository) ListByRun(_ context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return listArtifacts(r.items, func(item *resultmodel.Artifact) bool {
-		return item.RunID == runID
-	}), nil
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *resultmodel.Artifact) common.RunID {
+		return item.RunID
+	}, func(item *resultmodel.Artifact) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	return listArtifactSlice(matches), nil
 }
 
-func (r *ArtifactRepository) ListByResult(_ context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
+func (r *ArtifactRepository) ListByResult(ctx context.Context, resultID common.ResultID) ([]*resultmodel.Artifact, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return listArtifacts(r.items, func(item *resultmodel.Artifact) bool {
-		return item.ResultID == resultID
-	}), nil
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	ret := make([]*resultmodel.Artifact, 0)
+	for _, item := range r.items {
+		if item.ResultID != resultID {
+			continue
+		}
+		if workspaceID != "" && item.WorkspaceID != workspaceID {
+			continue
+		}
+		matchedWorkspaces[item.WorkspaceID] = struct{}{}
+		ret = append(ret, item)
+	}
+	if workspaceID == "" && len(matchedWorkspaces) > 1 {
+		return nil, common.ErrConflict
+	}
+	return listArtifactSlice(ret), nil
 }
 
-func (r *ArtifactRepository) Update(_ context.Context, item *resultmodel.Artifact) error {
+func (r *ArtifactRepository) Update(ctx context.Context, item *resultmodel.Artifact) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *resultmodel.Artifact) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneArtifact(item)
+	r.items[key] = cloneArtifact(item)
 	return nil
 }
 
-func (r *ArtifactRepository) Delete(_ context.Context, id common.ArtifactID) error {
+func (r *ArtifactRepository) Delete(ctx context.Context, id common.ArtifactID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *resultmodel.Artifact) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 func NewEventRecordRepository() *EventRecordRepository {
-	return &EventRecordRepository{items: map[common.EventRecordID]*eventstream.EventRecord{}}
+	return &EventRecordRepository{items: map[string]*eventstream.EventRecord{}}
 }
 
 func (r *EventRecordRepository) Append(_ context.Context, item *eventstream.EventRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneEventRecord(item)
+	r.items[key] = cloneEventRecord(item)
 	return nil
 }
 
-func (r *EventRecordRepository) Get(_ context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
+func (r *EventRecordRepository) Get(ctx context.Context, id common.EventRecordID) (*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *eventstream.EventRecord) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneEventRecord(item), nil
+	return cloneEventRecord(r.items[key]), nil
 }
 
-func (r *EventRecordRepository) List(_ context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
+func (r *EventRecordRepository) List(ctx context.Context, query repository.EventRecordQuery) ([]*eventstream.EventRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if query.WorkspaceID == "" {
+		query.WorkspaceID = common.RuntimeWorkspaceIDFromContext(ctx)
+	}
+	if query.WorkspaceID == "" && query.RunID != "" {
+		matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+		for _, item := range r.items {
+			if item.RunID == query.RunID {
+				matchedWorkspaces[item.WorkspaceID] = struct{}{}
+			}
+		}
+		if len(matchedWorkspaces) > 1 {
+			return nil, common.ErrConflict
+		}
+	}
 	return listEventRecords(r.items, query), nil
 }
 
-func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordID) error {
+func (r *EventRecordRepository) Delete(ctx context.Context, id common.EventRecordID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *eventstream.EventRecord) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
@@ -790,31 +981,34 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 
 type GoalRepository struct {
 	mu    sync.RWMutex
-	items map[common.GoalID]*workspace.Goal
+	items map[string]*workspace.Goal
 }
 
 func NewGoalRepository() *GoalRepository {
-	return &GoalRepository{items: map[common.GoalID]*workspace.Goal{}}
+	return &GoalRepository{items: map[string]*workspace.Goal{}}
 }
 
 func (r *GoalRepository) Create(_ context.Context, item *workspace.Goal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneGoal(item)
+	r.items[key] = cloneGoal(item)
 	return nil
 }
 
-func (r *GoalRepository) Get(_ context.Context, id common.GoalID) (*workspace.Goal, error) {
+func (r *GoalRepository) Get(ctx context.Context, id common.GoalID) (*workspace.Goal, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *workspace.Goal) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	cloned := *item
+	cloned := *r.items[key]
 	return &cloned, nil
 }
 
@@ -839,53 +1033,70 @@ func (r *GoalRepository) ListByWorkspaceID(_ context.Context, workspaceID common
 	return items, nil
 }
 
-func (r *GoalRepository) Update(_ context.Context, item *workspace.Goal) error {
+func (r *GoalRepository) Update(ctx context.Context, item *workspace.Goal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *workspace.Goal) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneGoal(item)
+	r.items[key] = cloneGoal(item)
 	return nil
 }
 
-func (r *GoalRepository) Delete(_ context.Context, id common.GoalID) error {
+func (r *GoalRepository) Delete(ctx context.Context, id common.GoalID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *workspace.Goal) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type DoDRepository struct {
 	mu    sync.RWMutex
-	items map[common.DoDID]*workspace.DoD
+	items map[string]*workspace.DoD
 }
 
 func NewDoDRepository() *DoDRepository {
-	return &DoDRepository{items: map[common.DoDID]*workspace.DoD{}}
+	return &DoDRepository{items: map[string]*workspace.DoD{}}
 }
 
 func (r *DoDRepository) Create(_ context.Context, item *workspace.DoD) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneDoD(item)
+	r.items[key] = cloneDoD(item)
 	return nil
 }
 
-func (r *DoDRepository) Get(_ context.Context, id common.DoDID) (*workspace.DoD, error) {
+func (r *DoDRepository) Get(ctx context.Context, id common.DoDID) (*workspace.DoD, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *workspace.DoD) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneDoD(item), nil
+	return cloneDoD(r.items[key]), nil
 }
 
 func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*workspace.DoD, error) {
@@ -908,53 +1119,84 @@ func (r *DoDRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 	return items, nil
 }
 
-func (r *DoDRepository) Update(_ context.Context, item *workspace.DoD) error {
+func (r *DoDRepository) Update(ctx context.Context, item *workspace.DoD) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *workspace.DoD) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneDoD(item)
+	r.items[key] = cloneDoD(item)
 	return nil
 }
 
-func (r *DoDRepository) Delete(_ context.Context, id common.DoDID) error {
+func (r *DoDRepository) Delete(ctx context.Context, id common.DoDID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *workspace.DoD) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type RunRepository struct {
 	mu    sync.RWMutex
-	items map[common.RunID]*run.Run
+	items map[string]*run.Run
 }
 
 func NewRunRepository() *RunRepository {
-	return &RunRepository{items: map[common.RunID]*run.Run{}}
+	return &RunRepository{items: map[string]*run.Run{}}
 }
 
 func (r *RunRepository) Create(_ context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneRun(item)
+	r.items[key] = cloneRun(item)
 	return nil
 }
 
-func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error) {
+func (r *RunRepository) Get(ctx context.Context, id common.RunID) (*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		item, ok := r.items[key]
+		if !ok {
+			return nil, common.ErrNotFound
+		}
+		return cloneRun(item), nil
+	}
+	var ret *run.Run
+	for _, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if ret != nil {
+			return nil, common.ErrConflict
+		}
+		ret = item
+	}
+	if ret == nil {
 		return nil, common.ErrNotFound
 	}
-	return cloneRun(item), nil
+	return cloneRun(ret), nil
 }
 
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
@@ -962,14 +1204,14 @@ func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id := range r.items {
-		ids = append(ids, string(id))
+	for key := range r.items {
+		ids = append(ids, key)
 	}
 	sort.Strings(ids)
 
 	ret := make([]*run.Run, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, cloneRun(r.items[common.RunID(id)]))
+	for _, key := range ids {
+		ret = append(ret, cloneRun(r.items[key]))
 	}
 	return ret, nil
 }
@@ -979,80 +1221,133 @@ func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id, item := range r.items {
+	for key, item := range r.items {
 		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
+			ids = append(ids, key)
 		}
 	}
 	sort.Strings(ids)
 
 	ret := make([]*run.Run, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, cloneRun(r.items[common.RunID(id)]))
+	for _, key := range ids {
+		ret = append(ret, cloneRun(r.items[key]))
 	}
 	return ret, nil
 }
 
-func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
+func (r *RunRepository) Update(ctx context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
+			key = scopedKey
+		} else {
+			var found string
+			for currentKey, current := range r.items {
+				if current.ID != item.ID {
+					continue
+				}
+				if found != "" {
+					return common.ErrConflict
+				}
+				found = currentKey
+			}
+			if found == "" {
+				return common.ErrNotFound
+			}
+			key = found
+			item.WorkspaceID = r.items[key].WorkspaceID
+		}
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneRun(item)
+	r.items[key] = cloneRun(item)
 	return nil
 }
 
-func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
+func (r *RunRepository) Delete(ctx context.Context, id common.RunID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		if _, ok := r.items[key]; !ok {
+			return common.ErrNotFound
+		}
+		delete(r.items, key)
+		return nil
+	}
+	var found string
+	for key, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if found != "" {
+			return common.ErrConflict
+		}
+		found = key
+	}
+	if found == "" {
 		return common.ErrNotFound
 	}
-	delete(r.items, id)
+	delete(r.items, found)
 	return nil
 }
 
 type StepRepository struct {
 	mu    sync.RWMutex
-	items map[common.StepID]*run.Step
+	items map[string]*run.Step
 }
 
 func NewStepRepository() *StepRepository {
-	return &StepRepository{items: map[common.StepID]*run.Step{}}
+	return &StepRepository{items: map[string]*run.Step{}}
 }
 
-func (r *StepRepository) Create(_ context.Context, item *run.Step) error {
+func (r *StepRepository) Create(ctx context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	key := workspaceScopedKey(workspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
 	cloned := cloneStep(item)
-	r.items[item.ID] = cloned
+	r.items[key] = cloned
 	return nil
 }
 
-func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, error) {
+func (r *StepRepository) Get(ctx context.Context, id common.StepID) (*run.Step, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Step) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneStep(item), nil
+	return cloneStep(r.items[key]), nil
 }
 
-func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Step, error) {
+func (r *StepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.Step, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var items []*run.Step
-	for _, item := range r.items {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	for key, item := range r.items {
 		if item.RunID != runID {
 			continue
 		}
+		itemWorkspaceID := workspaceFromScopedKey(key)
+		if workspaceID != "" && itemWorkspaceID != "" && itemWorkspaceID != workspaceID {
+			continue
+		}
+		matchedWorkspaces[itemWorkspaceID] = struct{}{}
 		items = append(items, cloneStep(item))
+	}
+	if workspaceID == "" && len(matchedWorkspaces) > 1 {
+		return nil, common.ErrConflict
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return string(items[i].ID) < string(items[j].ID)
@@ -1063,64 +1358,81 @@ func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*ru
 	return items, nil
 }
 
-func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
+func (r *StepRepository) Update(ctx context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.Step) string {
+		return string(current.ID)
+	})
+	if err != nil {
+		return err
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneStep(item)
+	r.items[key] = cloneStep(item)
 	return nil
 }
 
-func (r *StepRepository) Delete(_ context.Context, id common.StepID) error {
+func (r *StepRepository) Delete(ctx context.Context, id common.StepID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Step) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type ToolCallRepository struct {
 	mu    sync.RWMutex
-	items map[common.ToolCallID]*run.ToolCall
+	items map[string]*run.ToolCall
 }
 
 func NewToolCallRepository() *ToolCallRepository {
-	return &ToolCallRepository{items: map[common.ToolCallID]*run.ToolCall{}}
+	return &ToolCallRepository{items: map[string]*run.ToolCall{}}
 }
 
 func (r *ToolCallRepository) Create(_ context.Context, item *run.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneToolCall(item)
+	r.items[key] = cloneToolCall(item)
 	return nil
 }
 
-func (r *ToolCallRepository) Get(_ context.Context, id common.ToolCallID) (*run.ToolCall, error) {
+func (r *ToolCallRepository) Get(ctx context.Context, id common.ToolCallID) (*run.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ToolCall) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneToolCall(item), nil
+	return cloneToolCall(r.items[key]), nil
 }
 
-func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.ToolCall, 0)
-	for _, item := range r.items {
-		if item.RunID != runID {
-			continue
-		}
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.ToolCall) common.RunID {
+		return item.RunID
+	}, func(item *run.ToolCall) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.ToolCall, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneToolCall(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1132,15 +1444,20 @@ func (r *ToolCallRepository) ListByRun(_ context.Context, runID common.RunID) ([
 	return items, nil
 }
 
-func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ToolCall, error) {
+func (r *ToolCallRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.ToolCall, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.ToolCall, 0)
-	for _, item := range r.items {
-		if item.StepID != stepID {
-			continue
-		}
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.ToolCall) common.StepID {
+		return item.StepID
+	}, func(item *run.ToolCall) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.ToolCall, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneToolCall(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1152,66 +1469,88 @@ func (r *ToolCallRepository) ListByStep(_ context.Context, stepID common.StepID)
 	return items, nil
 }
 
-func (r *ToolCallRepository) Update(_ context.Context, item *run.ToolCall) error {
+func (r *ToolCallRepository) Update(ctx context.Context, item *run.ToolCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.ToolCall) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneToolCall(item)
+	r.items[key] = cloneToolCall(item)
 	return nil
 }
 
-func (r *ToolCallRepository) Delete(_ context.Context, id common.ToolCallID) error {
+func (r *ToolCallRepository) Delete(ctx context.Context, id common.ToolCallID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ToolCall) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type PatchRepository struct {
 	mu    sync.RWMutex
-	items map[common.PatchID]*run.Patch
+	items map[string]*run.Patch
 }
 
 func NewPatchRepository() *PatchRepository {
-	return &PatchRepository{items: map[common.PatchID]*run.Patch{}}
+	return &PatchRepository{items: map[string]*run.Patch{}}
 }
 
 func (r *PatchRepository) Create(_ context.Context, item *run.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
 	cloned := clonePatch(item)
-	r.items[item.ID] = &cloned
+	r.items[key] = &cloned
 	return nil
 }
 
-func (r *PatchRepository) Get(_ context.Context, id common.PatchID) (*run.Patch, error) {
+func (r *PatchRepository) Get(ctx context.Context, id common.PatchID) (*run.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Patch) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	cloned := clonePatch(item)
+	cloned := clonePatch(r.items[key])
 	return &cloned, nil
 }
 
-func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.Patch, 0)
-	for _, item := range r.items {
-		if item.RunID != runID {
-			continue
-		}
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.Patch) common.RunID {
+		return item.RunID
+	}, func(item *run.Patch) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.Patch, 0, len(matches))
+	for _, item := range matches {
 		cloned := clonePatch(item)
 		items = append(items, &cloned)
 	}
@@ -1224,15 +1563,20 @@ func (r *PatchRepository) ListByRun(_ context.Context, runID common.RunID) ([]*r
 	return items, nil
 }
 
-func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.Patch, error) {
+func (r *PatchRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.Patch, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.Patch, 0)
-	for _, item := range r.items {
-		if item.StepID != stepID {
-			continue
-		}
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.Patch) common.StepID {
+		return item.StepID
+	}, func(item *run.Patch) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.Patch, 0, len(matches))
+	for _, item := range matches {
 		cloned := clonePatch(item)
 		items = append(items, &cloned)
 	}
@@ -1245,65 +1589,87 @@ func (r *PatchRepository) ListByStep(_ context.Context, stepID common.StepID) ([
 	return items, nil
 }
 
-func (r *PatchRepository) Update(_ context.Context, item *run.Patch) error {
+func (r *PatchRepository) Update(ctx context.Context, item *run.Patch) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.Patch) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
 	cloned := clonePatch(item)
-	r.items[item.ID] = &cloned
+	r.items[key] = &cloned
 	return nil
 }
 
-func (r *PatchRepository) Delete(_ context.Context, id common.PatchID) error {
+func (r *PatchRepository) Delete(ctx context.Context, id common.PatchID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.Patch) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type ValidationResultRepository struct {
 	mu    sync.RWMutex
-	items map[common.ValidationResultID]*run.ValidationResult
+	items map[string]*run.ValidationResult
 }
 
 func NewValidationResultRepository() *ValidationResultRepository {
-	return &ValidationResultRepository{items: map[common.ValidationResultID]*run.ValidationResult{}}
+	return &ValidationResultRepository{items: map[string]*run.ValidationResult{}}
 }
 
 func (r *ValidationResultRepository) Create(_ context.Context, item *run.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneValidationResult(item)
+	r.items[key] = cloneValidationResult(item)
 	return nil
 }
 
-func (r *ValidationResultRepository) Get(_ context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
+func (r *ValidationResultRepository) Get(ctx context.Context, id common.ValidationResultID) (*run.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ValidationResult) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneValidationResult(item), nil
+	return cloneValidationResult(r.items[key]), nil
 }
 
-func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.ValidationResult, 0)
-	for _, item := range r.items {
-		if item.RunID != runID {
-			continue
-		}
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.ValidationResult) common.RunID {
+		return item.RunID
+	}, func(item *run.ValidationResult) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.ValidationResult, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneValidationResult(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1315,15 +1681,20 @@ func (r *ValidationResultRepository) ListByRun(_ context.Context, runID common.R
 	return items, nil
 }
 
-func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
+func (r *ValidationResultRepository) ListByStep(ctx context.Context, stepID common.StepID) ([]*run.ValidationResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.ValidationResult, 0)
-	for _, item := range r.items {
-		if item.StepID != stepID {
-			continue
-		}
+	matches, conflict := stepScopedListHasConflict(ctx, r.items, stepID, func(item *run.ValidationResult) common.StepID {
+		return item.StepID
+	}, func(item *run.ValidationResult) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.ValidationResult, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneValidationResult(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1335,64 +1706,86 @@ func (r *ValidationResultRepository) ListByStep(_ context.Context, stepID common
 	return items, nil
 }
 
-func (r *ValidationResultRepository) Update(_ context.Context, item *run.ValidationResult) error {
+func (r *ValidationResultRepository) Update(ctx context.Context, item *run.ValidationResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.ValidationResult) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneValidationResult(item)
+	r.items[key] = cloneValidationResult(item)
 	return nil
 }
 
-func (r *ValidationResultRepository) Delete(_ context.Context, id common.ValidationResultID) error {
+func (r *ValidationResultRepository) Delete(ctx context.Context, id common.ValidationResultID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.ValidationResult) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type RuntimeCheckpointRepository struct {
 	mu    sync.RWMutex
-	items map[common.CheckpointID]*run.RuntimeCheckpoint
+	items map[string]*run.RuntimeCheckpoint
 }
 
 func NewRuntimeCheckpointRepository() *RuntimeCheckpointRepository {
-	return &RuntimeCheckpointRepository{items: map[common.CheckpointID]*run.RuntimeCheckpoint{}}
+	return &RuntimeCheckpointRepository{items: map[string]*run.RuntimeCheckpoint{}}
 }
 
 func (r *RuntimeCheckpointRepository) Create(_ context.Context, item *run.RuntimeCheckpoint) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
-	r.items[item.ID] = cloneRuntimeCheckpoint(item)
+	r.items[key] = cloneRuntimeCheckpoint(item)
 	return nil
 }
 
-func (r *RuntimeCheckpointRepository) Get(_ context.Context, id common.CheckpointID) (*run.RuntimeCheckpoint, error) {
+func (r *RuntimeCheckpointRepository) Get(ctx context.Context, id common.CheckpointID) (*run.RuntimeCheckpoint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.RuntimeCheckpoint) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cloneRuntimeCheckpoint(item), nil
+	return cloneRuntimeCheckpoint(r.items[key]), nil
 }
 
-func (r *RuntimeCheckpointRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.RuntimeCheckpoint, error) {
+func (r *RuntimeCheckpointRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*run.RuntimeCheckpoint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]*run.RuntimeCheckpoint, 0)
-	for _, item := range r.items {
-		if item.RunID != runID {
-			continue
-		}
+	matches, conflict := runScopedListHasConflict(ctx, r.items, runID, func(item *run.RuntimeCheckpoint) common.RunID {
+		return item.RunID
+	}, func(item *run.RuntimeCheckpoint) common.WorkspaceID {
+		return item.WorkspaceID
+	})
+	if conflict {
+		return nil, common.ErrConflict
+	}
+	items := make([]*run.RuntimeCheckpoint, 0, len(matches))
+	for _, item := range matches {
 		items = append(items, cloneRuntimeCheckpoint(item))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1404,39 +1797,54 @@ func (r *RuntimeCheckpointRepository) ListByRun(_ context.Context, runID common.
 	return items, nil
 }
 
-func (r *RuntimeCheckpointRepository) Update(_ context.Context, item *run.RuntimeCheckpoint) error {
+func (r *RuntimeCheckpointRepository) Update(ctx context.Context, item *run.RuntimeCheckpoint) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		found, err := findScopedMemoryKey(ctx, r.items, string(item.ID), func(current *run.RuntimeCheckpoint) string {
+			return string(current.ID)
+		})
+		if err != nil {
+			return err
+		}
+		key = found
+		item.WorkspaceID = r.items[key].WorkspaceID
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
-	r.items[item.ID] = cloneRuntimeCheckpoint(item)
+	r.items[key] = cloneRuntimeCheckpoint(item)
 	return nil
 }
 
-func (r *RuntimeCheckpointRepository) Delete(_ context.Context, id common.CheckpointID) error {
+func (r *RuntimeCheckpointRepository) Delete(ctx context.Context, id common.CheckpointID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.items, string(id), func(item *run.RuntimeCheckpoint) string {
+		return string(item.ID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.items, id)
+	delete(r.items, key)
 	return nil
 }
 
 type DecisionTicketRepository struct {
 	mu    sync.RWMutex
-	items map[common.TicketID]*decision.Ticket
+	items map[string]*decision.Ticket
 }
 
 func NewDecisionTicketRepository() *DecisionTicketRepository {
-	return &DecisionTicketRepository{items: map[common.TicketID]*decision.Ticket{}}
+	return &DecisionTicketRepository{items: map[string]*decision.Ticket{}}
 }
 
 func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -1446,18 +1854,34 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	if strings.TrimSpace(item.UpdatedAt) == "" {
 		item.UpdatedAt = item.CreatedAt
 	}
-	r.items[item.ID] = cloneDecisionTicket(item)
+	r.items[key] = cloneDecisionTicket(item)
 	return nil
 }
 
-func (r *DecisionTicketRepository) Get(_ context.Context, id common.TicketID) (*decision.Ticket, error) {
+func (r *DecisionTicketRepository) Get(ctx context.Context, id common.TicketID) (*decision.Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		item, ok := r.items[key]
+		if !ok {
+			return nil, common.ErrNotFound
+		}
+		return cloneDecisionTicket(item), nil
+	}
+	var ret *decision.Ticket
+	for _, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if ret != nil {
+			return nil, common.ErrConflict
+		}
+		ret = item
+	}
+	if ret == nil {
 		return nil, common.ErrNotFound
 	}
-	return cloneDecisionTicket(item), nil
+	return cloneDecisionTicket(ret), nil
 }
 
 func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, error) {
@@ -1465,33 +1889,42 @@ func (r *DecisionTicketRepository) List(_ context.Context) ([]*decision.Ticket, 
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id := range r.items {
-		ids = append(ids, string(id))
+	for key := range r.items {
+		ids = append(ids, key)
 	}
 	sort.Strings(ids)
 
 	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
+	for _, key := range ids {
+		ret = append(ret, cloneDecisionTicket(r.items[key]))
 	}
 	return ret, nil
 }
 
-func (r *DecisionTicketRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*decision.Ticket, error) {
+func (r *DecisionTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decision.Ticket, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id, item := range r.items {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	for key, item := range r.items {
 		if item.RunID == runID {
-			ids = append(ids, string(id))
+			if workspaceID != "" && item.WorkspaceID != workspaceID {
+				continue
+			}
+			matchedWorkspaces[item.WorkspaceID] = struct{}{}
+			ids = append(ids, key)
 		}
+	}
+	if workspaceID == "" && len(matchedWorkspaces) > 1 {
+		return nil, common.ErrConflict
 	}
 	sort.Strings(ids)
 
 	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
+	for _, key := range ids {
+		ret = append(ret, cloneDecisionTicket(r.items[key]))
 	}
 	return ret, nil
 }
@@ -1501,98 +1934,145 @@ func (r *DecisionTicketRepository) ListByWorkspaceID(_ context.Context, workspac
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id, item := range r.items {
+	for key, item := range r.items {
 		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
+			ids = append(ids, key)
 		}
 	}
 	sort.Strings(ids)
 
 	ret := make([]*decision.Ticket, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, cloneDecisionTicket(r.items[common.TicketID(id)]))
+	for _, key := range ids {
+		ret = append(ret, cloneDecisionTicket(r.items[key]))
 	}
 	return ret, nil
 }
 
-func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Ticket) error {
+func (r *DecisionTicketRepository) Update(ctx context.Context, item *decision.Ticket) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
+			key = scopedKey
+		} else {
+			var found string
+			for currentKey, current := range r.items {
+				if current.ID != item.ID {
+					continue
+				}
+				if found != "" {
+					return common.ErrConflict
+				}
+				found = currentKey
+			}
+			if found == "" {
+				return common.ErrNotFound
+			}
+			key = found
+			item.WorkspaceID = r.items[key].WorkspaceID
+		}
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = r.items[item.ID].CreatedAt
+		item.CreatedAt = r.items[key].CreatedAt
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	r.items[item.ID] = cloneDecisionTicket(item)
+	r.items[key] = cloneDecisionTicket(item)
 	return nil
 }
 
-func (r *DecisionTicketRepository) Delete(_ context.Context, id common.TicketID) error {
+func (r *DecisionTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		if _, ok := r.items[key]; !ok {
+			return common.ErrNotFound
+		}
+		delete(r.items, key)
+		return nil
+	}
+	var found string
+	for key, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if found != "" {
+			return common.ErrConflict
+		}
+		found = key
+	}
+	if found == "" {
 		return common.ErrNotFound
 	}
-	delete(r.items, id)
+	delete(r.items, found)
 	return nil
 }
 
 type DecisionResolutionRepository struct {
 	mu       sync.RWMutex
-	byTicket map[common.TicketID]*decision.Resolution
+	byTicket map[string]*decision.Resolution
 }
 
 func NewDecisionResolutionRepository() *DecisionResolutionRepository {
-	return &DecisionResolutionRepository{byTicket: map[common.TicketID]*decision.Resolution{}}
+	return &DecisionResolutionRepository{byTicket: map[string]*decision.Resolution{}}
 }
 
-func (r *DecisionResolutionRepository) Create(_ context.Context, item *decision.Resolution) error {
+func (r *DecisionResolutionRepository) Create(ctx context.Context, item *decision.Resolution) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.byTicket[item.TicketID]; ok {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	key := workspaceScopedKey(workspaceID, string(item.TicketID))
+	if _, ok := r.byTicket[key]; ok {
 		return common.ErrConflict
 	}
 	cloned := *item
-	r.byTicket[item.TicketID] = &cloned
+	r.byTicket[key] = &cloned
 	return nil
 }
 
-func (r *DecisionResolutionRepository) GetByTicketID(_ context.Context, ticketID common.TicketID) (*decision.Resolution, error) {
+func (r *DecisionResolutionRepository) GetByTicketID(ctx context.Context, ticketID common.TicketID) (*decision.Resolution, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.byTicket[ticketID]
-	if !ok {
-		return nil, common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.byTicket, string(ticketID), func(item *decision.Resolution) string {
+		return string(item.TicketID)
+	})
+	if err != nil {
+		return nil, err
 	}
-	cloned := *item
+	cloned := *r.byTicket[key]
 	return &cloned, nil
 }
 
-func (r *DecisionResolutionRepository) DeleteByTicketID(_ context.Context, ticketID common.TicketID) error {
+func (r *DecisionResolutionRepository) DeleteByTicketID(ctx context.Context, ticketID common.TicketID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.byTicket[ticketID]; !ok {
-		return common.ErrNotFound
+	key, err := findScopedMemoryKey(ctx, r.byTicket, string(ticketID), func(item *decision.Resolution) string {
+		return string(item.TicketID)
+	})
+	if err != nil {
+		return err
 	}
-	delete(r.byTicket, ticketID)
+	delete(r.byTicket, key)
 	return nil
 }
 
 type ApprovalRepository struct {
 	mu    sync.RWMutex
-	items map[common.ApprovalID]*approval.Approval
+	items map[string]*approval.Approval
 }
 
 func NewApprovalRepository() *ApprovalRepository {
-	return &ApprovalRepository{items: map[common.ApprovalID]*approval.Approval{}}
+	return &ApprovalRepository{items: map[string]*approval.Approval{}}
 }
 
 func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if _, ok := r.items[key]; ok {
 		return common.ErrConflict
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -1603,18 +2083,35 @@ func (r *ApprovalRepository) Create(_ context.Context, item *approval.Approval) 
 		item.UpdatedAt = item.CreatedAt
 	}
 	cloned := cloneApproval(item)
-	r.items[item.ID] = &cloned
+	r.items[key] = &cloned
 	return nil
 }
 
-func (r *ApprovalRepository) Get(_ context.Context, id common.ApprovalID) (*approval.Approval, error) {
+func (r *ApprovalRepository) Get(ctx context.Context, id common.ApprovalID) (*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.items[id]
-	if !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		item, ok := r.items[key]
+		if !ok {
+			return nil, common.ErrNotFound
+		}
+		cloned := cloneApproval(item)
+		return &cloned, nil
+	}
+	var ret *approval.Approval
+	for _, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if ret != nil {
+			return nil, common.ErrConflict
+		}
+		ret = item
+	}
+	if ret == nil {
 		return nil, common.ErrNotFound
 	}
-	cloned := cloneApproval(item)
+	cloned := cloneApproval(ret)
 	return &cloned, nil
 }
 
@@ -1623,34 +2120,43 @@ func (r *ApprovalRepository) List(_ context.Context) ([]*approval.Approval, erro
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id := range r.items {
-		ids = append(ids, string(id))
+	for key := range r.items {
+		ids = append(ids, key)
 	}
 	sort.Strings(ids)
 
 	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		cloned := cloneApproval(r.items[common.ApprovalID(id)])
+	for _, key := range ids {
+		cloned := cloneApproval(r.items[key])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
 }
 
-func (r *ApprovalRepository) ListByRunID(_ context.Context, runID common.RunID) ([]*approval.Approval, error) {
+func (r *ApprovalRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*approval.Approval, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id, item := range r.items {
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	for key, item := range r.items {
 		if item.RunID == runID {
-			ids = append(ids, string(id))
+			if workspaceID != "" && item.WorkspaceID != workspaceID {
+				continue
+			}
+			matchedWorkspaces[item.WorkspaceID] = struct{}{}
+			ids = append(ids, key)
 		}
+	}
+	if workspaceID == "" && len(matchedWorkspaces) > 1 {
+		return nil, common.ErrConflict
 	}
 	sort.Strings(ids)
 
 	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		cloned := cloneApproval(r.items[common.ApprovalID(id)])
+	for _, key := range ids {
+		cloned := cloneApproval(r.items[key])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
@@ -1661,43 +2167,82 @@ func (r *ApprovalRepository) ListByWorkspaceID(_ context.Context, workspaceID co
 	defer r.mu.RUnlock()
 
 	ids := make([]string, 0, len(r.items))
-	for id, item := range r.items {
+	for key, item := range r.items {
 		if item.WorkspaceID == workspaceID {
-			ids = append(ids, string(id))
+			ids = append(ids, key)
 		}
 	}
 	sort.Strings(ids)
 
 	ret := make([]*approval.Approval, 0, len(ids))
-	for _, id := range ids {
-		cloned := cloneApproval(r.items[common.ApprovalID(id)])
+	for _, key := range ids {
+		cloned := cloneApproval(r.items[key])
 		ret = append(ret, &cloned)
 	}
 	return ret, nil
 }
 
-func (r *ApprovalRepository) Update(_ context.Context, item *approval.Approval) error {
+func (r *ApprovalRepository) Update(ctx context.Context, item *approval.Approval) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[item.ID]; !ok {
+	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
+	if item.WorkspaceID == "" {
+		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
+			key = scopedKey
+		} else {
+			var found string
+			for currentKey, current := range r.items {
+				if current.ID != item.ID {
+					continue
+				}
+				if found != "" {
+					return common.ErrConflict
+				}
+				found = currentKey
+			}
+			if found == "" {
+				return common.ErrNotFound
+			}
+			key = found
+			item.WorkspaceID = r.items[key].WorkspaceID
+		}
+	}
+	if _, ok := r.items[key]; !ok {
 		return common.ErrNotFound
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
-		item.CreatedAt = r.items[item.ID].CreatedAt
+		item.CreatedAt = r.items[key].CreatedAt
 	}
 	item.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	cloned := cloneApproval(item)
-	r.items[item.ID] = &cloned
+	r.items[key] = &cloned
 	return nil
 }
 
-func (r *ApprovalRepository) Delete(_ context.Context, id common.ApprovalID) error {
+func (r *ApprovalRepository) Delete(ctx context.Context, id common.ApprovalID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
+	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
+		if _, ok := r.items[key]; !ok {
+			return common.ErrNotFound
+		}
+		delete(r.items, key)
+		return nil
+	}
+	var found string
+	for key, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		if found != "" {
+			return common.ErrConflict
+		}
+		found = key
+	}
+	if found == "" {
 		return common.ErrNotFound
 	}
-	delete(r.items, id)
+	delete(r.items, found)
 	return nil
 }
 
@@ -1936,7 +2481,7 @@ func cloneAnyMap(input map[string]any) map[string]any {
 	return ret
 }
 
-func listArtifacts(items map[common.ArtifactID]*resultmodel.Artifact, matches func(*resultmodel.Artifact) bool) []*resultmodel.Artifact {
+func listArtifacts(items map[string]*resultmodel.Artifact, matches func(*resultmodel.Artifact) bool) []*resultmodel.Artifact {
 	ret := make([]*resultmodel.Artifact, 0)
 	for _, item := range items {
 		if !matches(item) {
@@ -1944,6 +2489,18 @@ func listArtifacts(items map[common.ArtifactID]*resultmodel.Artifact, matches fu
 		}
 		ret = append(ret, cloneArtifact(item))
 	}
+	return sortedArtifactList(ret)
+}
+
+func listArtifactSlice(items []*resultmodel.Artifact) []*resultmodel.Artifact {
+	ret := make([]*resultmodel.Artifact, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, cloneArtifact(item))
+	}
+	return sortedArtifactList(ret)
+}
+
+func sortedArtifactList(ret []*resultmodel.Artifact) []*resultmodel.Artifact {
 	sort.Slice(ret, func(i, j int) bool {
 		return string(ret[i].ID) < string(ret[j].ID)
 	})
@@ -1953,7 +2510,7 @@ func listArtifacts(items map[common.ArtifactID]*resultmodel.Artifact, matches fu
 	return ret
 }
 
-func listEventRecords(items map[common.EventRecordID]*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
+func listEventRecords(items map[string]*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
 	ret := make([]*eventstream.EventRecord, 0)
 	cursorMatched := query.CursorAfterID == ""
 	for _, item := range items {

@@ -114,7 +114,7 @@ func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 
 	second := approvalservice.CreateApprovalCommand{
 		ApprovalID:  first.ApprovalID,
-		WorkspaceID: common.WorkspaceID("ws-2"),
+		WorkspaceID: first.WorkspaceID,
 		RunID:       common.RunID("run-2"),
 		StepID:      common.StepID("run-2/step-1"),
 		Reason:      "other approval",
@@ -129,6 +129,47 @@ func TestService_CreateApproval_RejectsDuplicateApprovalID(t *testing.T) {
 	}
 	if got.RunID != first.RunID || got.Reason != first.Reason {
 		t.Fatalf("approval mutated after duplicate create: %+v", got)
+	}
+}
+
+func TestService_CreateApproval_AllowsDuplicateApprovalIDAcrossWorkspaces(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewApprovalRepository()
+	service := NewService(repo, nil)
+
+	first := approvalservice.CreateApprovalCommand{
+		ApprovalID:  common.ApprovalID("approval-workspace-local"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need human approval",
+	}
+	second := approvalservice.CreateApprovalCommand{
+		ApprovalID:  first.ApprovalID,
+		WorkspaceID: common.WorkspaceID("ws-2"),
+		RunID:       common.RunID("run-2"),
+		StepID:      common.StepID("run-2/step-1"),
+		Reason:      "other approval",
+	}
+	if err := service.CreateApproval(ctx, first); err != nil {
+		t.Fatalf("first create approval: %v", err)
+	}
+	if err := service.CreateApproval(ctx, second); err != nil {
+		t.Fatalf("second workspace-local create approval: %v", err)
+	}
+	if _, err := repo.Get(ctx, first.ApprovalID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("unscoped get err = %v, want conflict for duplicate workspace-local approval id", err)
+	}
+	gotFirst, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, first.WorkspaceID), first.ApprovalID)
+	if err != nil {
+		t.Fatalf("get first scoped approval: %v", err)
+	}
+	gotSecond, err := repo.Get(common.ContextWithRuntimeWorkspaceID(ctx, second.WorkspaceID), second.ApprovalID)
+	if err != nil {
+		t.Fatalf("get second scoped approval: %v", err)
+	}
+	if gotFirst.RunID != first.RunID || gotSecond.RunID != second.RunID {
+		t.Fatalf("scoped approvals = %+v/%+v, want distinct workspace-local records", gotFirst, gotSecond)
 	}
 }
 

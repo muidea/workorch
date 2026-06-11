@@ -6,9 +6,11 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func TestCreateAndStartWorkspaceExecutionRunUsesEventHubOwnerCommands(t *testing.T) {
@@ -89,6 +91,38 @@ func TestCreateAndStartWorkspaceExecutionRunContinuesWorkspaceRunSequence(t *tes
 	}
 	if runID != "run-002" {
 		t.Fatalf("runID = %s, want run-002", runID)
+	}
+}
+
+func TestRunObservableAfterStartConflictReadsRunWithContextWorkspaceScope(t *testing.T) {
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-start-conflict-scope")
+	runID := common.RunID("run-001")
+	hub.Subscribe(runevents.TopicRunCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("run get envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) || envelope.Payload[events.PayloadKeyRunID] != string(runID) {
+			t.Fatalf("run get payload scope = workspace:%v run:%v, want %s/%s", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID], workspaceID, runID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyRun: &runmodel.Run{
+					ID:          runID,
+					WorkspaceID: workspaceID,
+					State:       common.RunStateRunning,
+				},
+			},
+		})
+	})
+
+	observable, err := RunObservableAfterStartConflict(common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID), hub, runID)
+	if err != nil {
+		t.Fatalf("RunObservableAfterStartConflict err = %v", err)
+	}
+	if !observable {
+		t.Fatalf("observable = false, want true")
 	}
 }
 

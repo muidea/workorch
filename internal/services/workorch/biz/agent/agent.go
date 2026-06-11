@@ -231,11 +231,16 @@ func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDo
 	}
 }
 
-func (a *Agent) ResolveDecision(ctx context.Context, ticketID string, resolutionType string, note string) error {
+func (a *Agent) ResolveDecision(ctx context.Context, workspaceID string, ticketID string, resolutionType string, note string) error {
 	if a.be == nil {
 		return fmt.Errorf("agent backend is required")
 	}
+	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
+	if wsID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+	}
 	_, err := a.be.Decision().Resolve(ctx, backend.ResolveDecisionRequest{
+		WorkspaceID:    wsID,
 		TicketID:       common.TicketID(ticketID),
 		ResolutionType: resolutionType,
 		Payload:        map[string]any{"note": note},
@@ -243,15 +248,19 @@ func (a *Agent) ResolveDecision(ctx context.Context, ticketID string, resolution
 	return err
 }
 
-func (a *Agent) ResolveApproval(ctx context.Context, approvalID string, approved bool) error {
+func (a *Agent) ResolveApproval(ctx context.Context, workspaceID string, approvalID string, approved bool) error {
 	if a.be == nil {
 		return fmt.Errorf("agent backend is required")
 	}
+	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
+	if wsID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, wsID)
+	}
 	if approved {
-		_, err := a.be.Approval().Approve(ctx, common.ApprovalID(approvalID))
+		_, err := a.be.Approval().Approve(ctx, wsID, common.ApprovalID(approvalID))
 		return err
 	}
-	_, err := a.be.Approval().Reject(ctx, common.ApprovalID(approvalID))
+	_, err := a.be.Approval().Reject(ctx, wsID, common.ApprovalID(approvalID))
 	return err
 }
 

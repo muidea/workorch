@@ -29,6 +29,9 @@ func ListDecisionTicketsByRun(ctx context.Context, hub events.Hub, runID common.
 func DecisionTicketsForQuery(ctx context.Context, hub events.Hub, workspaceID string, runID string) ([]*decisionmodel.Ticket, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
+	if workspaceID != "" {
+		ctx = contextWithGovernanceScope(ctx, common.WorkspaceID(workspaceID))
+	}
 	var (
 		items []*decisionmodel.Ticket
 		err   error

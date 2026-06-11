@@ -14,9 +14,10 @@ func ReadDoDByOwnerCommand(ctx context.Context, hub events.Hub, dodID common.DoD
 	if hub == nil || dodID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGetDoD, "dod", string(dodID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyDoDID: string(dodID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

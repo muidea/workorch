@@ -140,6 +140,9 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 	if m == nil || m.tickets == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := scopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	switch envelope.Topic {
 	case decisionevents.TopicDecisionCommandEnsureTicket:
 		if m.servicePtr == nil {
@@ -291,6 +294,9 @@ func deleteResolutionTicketIDFromPayload(payload map[string]any) common.TicketID
 func (m *Module) handleResolutionCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.resolutions == nil {
 		return common.ErrInvalidArgument
+	}
+	if workspaceID := scopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch envelope.Topic {
 	case decisionevents.TopicDecisionCommandCreateResolution:

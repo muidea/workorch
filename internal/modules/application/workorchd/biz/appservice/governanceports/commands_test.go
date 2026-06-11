@@ -21,6 +21,12 @@ func TestApprovalsForQueryFiltersOwnerCommandResults(t *testing.T) {
 		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
 			t.Fatalf("run payload = %v, want run-001", got)
 		}
+		if envelope.WorkspaceID != "ws-001" {
+			t.Fatalf("workspace envelope = %q, want ws-001", envelope.WorkspaceID)
+		}
+		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != "ws-001" {
+			t.Fatalf("workspace payload = %v, want ws-001", got)
+		}
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
 			Payload: map[string]any{
@@ -48,6 +54,12 @@ func TestDecisionTicketsForQueryFiltersOwnerCommandResults(t *testing.T) {
 	hub.Subscribe(decisionevents.TopicDecisionCommandListTicketsByRun, func(_ context.Context, envelope events.Envelope) error {
 		if got := envelope.Payload[events.PayloadKeyRunID]; got != "run-001" {
 			t.Fatalf("run payload = %v, want run-001", got)
+		}
+		if envelope.WorkspaceID != "ws-001" {
+			t.Fatalf("workspace envelope = %q, want ws-001", envelope.WorkspaceID)
+		}
+		if got := envelope.Payload[events.PayloadKeyWorkspaceID]; got != "ws-001" {
+			t.Fatalf("workspace payload = %v, want ws-001", got)
 		}
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
@@ -221,5 +233,46 @@ func TestResolveApprovalPublishesContractCommand(t *testing.T) {
 	}
 	if item.ID != "approval-contract" || item.State != common.ApprovalStateApproved {
 		t.Fatalf("approval = %+v", item)
+	}
+}
+
+func TestResolveApprovalItemPublishesScopedContractCommand(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(approvalevents.TopicApprovalCommandEnsureApproved, func(_ context.Context, envelope events.Envelope) error {
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(approvalcontracts.ResolveApprovalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want ResolveApprovalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.ApprovalID != "approval-scoped-contract" || cmd.WorkspaceID != "ws-scoped-contract" || cmd.RunID != "run-scoped-contract" {
+			t.Fatalf("command = %+v, want scoped approval command", cmd)
+		}
+		if envelope.WorkspaceID != "ws-scoped-contract" || envelope.RunID != "run-scoped-contract" {
+			t.Fatalf("envelope scope = workspace:%q run:%q, want scoped command envelope", envelope.WorkspaceID, envelope.RunID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != "ws-scoped-contract" || envelope.Payload[events.PayloadKeyRunID] != "run-scoped-contract" {
+			t.Fatalf("payload scope = workspace:%v run:%v, want explicit scope payload", envelope.Payload[events.PayloadKeyWorkspaceID], envelope.Payload[events.PayloadKeyRunID])
+		}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{
+			events.PayloadKeyApproval: &approvalmodel.Approval{
+				ID:          cmd.ApprovalID,
+				WorkspaceID: cmd.WorkspaceID,
+				RunID:       cmd.RunID,
+				State:       common.ApprovalStateApproved,
+			},
+		}})
+	})
+
+	item, err := ApproveApprovalItem(ctx, hub, &approvalmodel.Approval{
+		ID:          "approval-scoped-contract",
+		WorkspaceID: "ws-scoped-contract",
+		RunID:       "run-scoped-contract",
+		State:       common.ApprovalStatePending,
+	})
+	if err != nil {
+		t.Fatalf("ApproveApprovalItem: %v", err)
+	}
+	if item.ID != "approval-scoped-contract" || item.WorkspaceID != "ws-scoped-contract" || item.RunID != "run-scoped-contract" || item.State != common.ApprovalStateApproved {
+		t.Fatalf("approval = %+v, want scoped approved item", item)
 	}
 }

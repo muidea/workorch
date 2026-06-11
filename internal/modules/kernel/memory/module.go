@@ -102,6 +102,9 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := memoryScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	switch envelope.Topic {
 	case memoryevents.TopicMemoryCommandCreate:
 		var cmd memorycontracts.CreateMemoryItemCommand
@@ -168,6 +171,9 @@ func (m *Module) handleMemoryQueryCommand(ctx context.Context, envelope events.E
 func (m *Module) handleMemoryRecallTraceCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
+	}
+	if workspaceID := memoryScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch envelope.Topic {
 	case memoryevents.TopicMemoryRecallTraceCommandUpsert:
@@ -344,6 +350,14 @@ func deleteMemoryIDFromPayload(payload map[string]any) common.MemoryID {
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func memoryScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if workspaceID == "" {
+		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	return workspaceID
 }
 
 func memoryCommandResponse(request events.Envelope, payload map[string]any) error {

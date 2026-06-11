@@ -382,42 +382,42 @@ func (b *eventHubRunBackend) Status(ctx context.Context, wsID common.WorkspaceID
 type eventHubDecisionBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubDecisionBackend) Resolve(ctx context.Context, req ResolveDecisionRequest) (*DecisionInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandDecisionResolve, "", "", "decision", string(req.TicketID), map[string]any{"resolutionType": req.ResolutionType, "payload": req.Payload})
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionResolve, req.WorkspaceID, "", "decision", string(req.TicketID), map[string]any{"resolutionType": req.ResolutionType, "payload": req.Payload})
 	return decodeResultResource[DecisionInfo](result, err)
 }
-func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandDecisionBatch, "", "", "decision", "", map[string]any{"ticketIds": ticketIDStrings(ticketIDs), "resolutionType": resolutionType, "payload": payload})
+func (b *eventHubDecisionBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionBatch, wsID, "", "decision", "", map[string]any{"ticketIds": ticketIDStrings(ticketIDs), "resolutionType": resolutionType, "payload": payload})
 	return decodeResultResources[DecisionInfo](result, err)
 }
 func (b *eventHubDecisionBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]DecisionInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandDecisionList, wsID, "", "decision", "", nil)
 	return decodeResultResources[DecisionInfo](result, err)
 }
-func (b *eventHubDecisionBackend) Get(ctx context.Context, id common.TicketID) (*DecisionInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandDecisionGet, "", "", "decision", string(id), nil)
+func (b *eventHubDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.TicketID) (*DecisionInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandDecisionGet, wsID, "", "decision", string(id), nil)
 	return decodeResultResource[DecisionInfo](result, err)
 }
 
 type eventHubApprovalBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubApprovalBackend) Approve(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, "", "", "approval", string(id), nil)
+func (b *eventHubApprovalBackend) Approve(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalApprove, wsID, "", "approval", string(id), nil)
 	return decodeResultResource[ApprovalInfo](result, err)
 }
-func (b *eventHubApprovalBackend) Reject(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, "", "", "approval", string(id), nil)
+func (b *eventHubApprovalBackend) Reject(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalReject, wsID, "", "approval", string(id), nil)
 	return decodeResultResource[ApprovalInfo](result, err)
 }
-func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, "", "", "approval", "", map[string]any{"approvalIds": approvalIDStrings(ids), "action": action})
+func (b *eventHubApprovalBackend) BatchResolve(ctx context.Context, wsID common.WorkspaceID, ids []common.ApprovalID, action string) ([]ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalBatch, wsID, "", "approval", "", map[string]any{"approvalIds": approvalIDStrings(ids), "action": action})
 	return decodeResultResources[ApprovalInfo](result, err)
 }
 func (b *eventHubApprovalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]ApprovalInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandApprovalList, wsID, "", "approval", "", nil)
 	return decodeResultResources[ApprovalInfo](result, err)
 }
-func (b *eventHubApprovalBackend) Get(ctx context.Context, id common.ApprovalID) (*ApprovalInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandApprovalGet, "", "", "approval", string(id), nil)
+func (b *eventHubApprovalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.ApprovalID) (*ApprovalInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandApprovalGet, wsID, "", "approval", string(id), nil)
 	return decodeResultResource[ApprovalInfo](result, err)
 }
 
@@ -488,16 +488,16 @@ func (b *eventHubMemoryBackend) Create(ctx context.Context, wsID common.Workspac
 	result, err := b.parent.sendCommand(ctx, events.CommandMemoryCreate, wsID, "", "memory", string(m.ID), resourceMap(m))
 	return decodeResultResource[MemoryItemInfo](result, err)
 }
-func (b *eventHubMemoryBackend) Get(ctx context.Context, id common.MemoryID) (*MemoryItemInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandMemoryGet, "", "", "memory", string(id), nil)
+func (b *eventHubMemoryBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) (*MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryGet, wsID, "", "memory", string(id), nil)
 	return decodeResultResource[MemoryItemInfo](result, err)
 }
-func (b *eventHubMemoryBackend) Update(ctx context.Context, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandMemoryUpdate, "", "", "memory", string(id), resourceMap(m))
+func (b *eventHubMemoryBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID, m *MemoryItemInfo) (*MemoryItemInfo, error) {
+	result, err := b.parent.sendCommand(ctx, events.CommandMemoryUpdate, wsID, "", "memory", string(id), resourceMap(m))
 	return decodeResultResource[MemoryItemInfo](result, err)
 }
-func (b *eventHubMemoryBackend) Delete(ctx context.Context, id common.MemoryID) error {
-	_, err := b.parent.sendCommand(ctx, events.CommandMemoryDelete, "", "", "memory", string(id), nil)
+func (b *eventHubMemoryBackend) Delete(ctx context.Context, wsID common.WorkspaceID, id common.MemoryID) error {
+	_, err := b.parent.sendCommand(ctx, events.CommandMemoryDelete, wsID, "", "memory", string(id), nil)
 	return err
 }
 func (b *eventHubMemoryBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]MemoryItemInfo, error) {

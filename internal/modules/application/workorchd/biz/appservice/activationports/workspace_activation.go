@@ -35,7 +35,8 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
 	ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspace.ID)
-	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, workspace.ContextHints); err != nil {
+	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
+	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
 		return readmodelcore.WorkspaceExecutionActivation{}, err
 	}
 

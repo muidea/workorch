@@ -3,14 +3,14 @@ package contextregistryports
 import (
 	"context"
 
-	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
-
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func EnsureWorkspaceExists(ctx context.Context, hub events.Hub, workspaceID string) error {
-	_, err := PublishCommandWithResponse(ctx, hub, workspaceevents.TopicWorkspaceCommandGet, "workspace", workspaceID, map[string]any{
-		events.PayloadKeyWorkspaceID: workspaceID,
-	})
+	id := common.WorkspaceID(workspaceID)
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, id)
+	_, err := ownerreadports.ReadWorkspaceByOwnerCommand(ctx, hub, id)
 	return err
 }

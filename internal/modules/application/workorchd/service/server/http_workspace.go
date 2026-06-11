@@ -149,8 +149,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			http.NotFound(w, r)
 			return
 		}
+		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
 		state.metrics.goalGetRequests.Add(1)
-		item, err := state.readGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID)
+		item, err := state.readGoal(ctx, state.config.Backend, state.config.DataRoot, goalID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -193,8 +194,9 @@ func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState
 			http.NotFound(w, r)
 			return
 		}
+		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
 		state.metrics.dodGetRequests.Add(1)
-		item, err := state.readDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID)
+		item, err := state.readDoD(ctx, state.config.Backend, state.config.DataRoot, dodID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -404,7 +406,8 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
-		current, err := state.readGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID)
+		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
+		current, err := state.readGoal(ctx, state.config.Backend, state.config.DataRoot, goalID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -413,7 +416,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "goal not found in workspace"})
 			return
 		}
-		item, err := state.updateGoal(r.Context(), state.config.Backend, state.config.DataRoot, goalID, req.Text)
+		item, err := state.updateGoal(ctx, state.config.Backend, state.config.DataRoot, goalID, req.Text)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -465,7 +468,8 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
-		current, err := state.readDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID)
+		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
+		current, err := state.readDoD(ctx, state.config.Backend, state.config.DataRoot, dodID)
 		if err != nil {
 			writeBusinessError(w, err)
 			return
@@ -474,7 +478,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "dod not found in workspace"})
 			return
 		}
-		item, err := state.updateDoD(r.Context(), state.config.Backend, state.config.DataRoot, dodID, req.Items)
+		item, err := state.updateDoD(ctx, state.config.Backend, state.config.DataRoot, dodID, req.Items)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

@@ -109,6 +109,9 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := resultScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	switch envelope.Topic {
 	case resultevents.TopicResultCommandCreate:
 		cmd, err := createResultCommandFromPayload(envelope.Payload)
@@ -163,6 +166,9 @@ func (m *Module) handleResultCommand(ctx context.Context, envelope events.Envelo
 func (m *Module) handleArtifactCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.servicePtr == nil {
 		return common.ErrInvalidArgument
+	}
+	if workspaceID := resultScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch envelope.Topic {
 	case resultevents.TopicArtifactCommandCreate:
@@ -360,6 +366,14 @@ func deleteArtifactCommandFromPayload(payload map[string]any) resultcontracts.De
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func resultScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if workspaceID == "" {
+		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	return workspaceID
 }
 
 func resultCommandResponse(request events.Envelope, payload map[string]any) error {

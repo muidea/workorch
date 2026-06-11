@@ -24,6 +24,12 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 		},
 		ContextHints: map[string]any{
 			"mode": "verify",
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds": []any{"mcp-lsp-bridge"},
+			},
+			"managedWorkspaceConfigs": []any{
+				map[string]any{"path": "lsp-bridge/mcp-config.json"},
+			},
 		},
 		EvidencePolicies: []map[string]any{
 			{"kind": "validation"},
@@ -48,6 +54,13 @@ func TestApplyTemplateToWorkspace(t *testing.T) {
 	template.EvidencePolicies[0]["kind"] = "mutated"
 	if got.ContextHints["mode"] != "verify" {
 		t.Fatalf("context hints were not cloned: %v", got.ContextHints)
+	}
+	if _, ok := got.ContextHints["managedWorkspaceConfigs"]; ok {
+		t.Fatalf("managedWorkspaceConfigs were copied into workspace context hints: %v", got.ContextHints)
+	}
+	semanticHints, _ := got.ContextHints["semanticCodeNavigation"].(map[string]any)
+	if _, ok := semanticHints["defaultMCPServerIds"]; ok {
+		t.Fatalf("default MCP server IDs were copied into workspace context hints: %v", got.ContextHints)
 	}
 	if got.EvidencePolicies[0]["kind"] != "validation" {
 		t.Fatalf("evidence policies were not cloned: %v", got.EvidencePolicies)

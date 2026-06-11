@@ -6,7 +6,7 @@
     "command": "lsp-bridge",
     "args": [],
     "env": {
-      "LSP_BRIDGE_CONFIG": "{workspaceInternalDirectory}/lsp-bridge/mcp-config.json",
+      "LSP_BRIDGE_CONFIG": "{workspaceManagedConfig:lsp-bridge/mcp-config.json}",
       "WORKORCH_WORKSPACE_ROOT": "{workspaceDeliverableDirectory}"
     },
     "enabled": true,

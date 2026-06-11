@@ -29,6 +29,9 @@ func ListApprovalsByRun(ctx context.Context, hub events.Hub, runID common.RunID)
 func ApprovalsForQuery(ctx context.Context, hub events.Hub, workspaceID string, runID string) ([]*approvalmodel.Approval, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	runID = strings.TrimSpace(runID)
+	if workspaceID != "" {
+		ctx = contextWithGovernanceScope(ctx, common.WorkspaceID(workspaceID))
+	}
 	var (
 		items []*approvalmodel.Approval
 		err   error

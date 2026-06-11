@@ -89,6 +89,15 @@ func (m *Module) handleListCommand(ctx context.Context, envelope events.Envelope
 		return common.ErrInvalidArgument
 	}
 	query := eventRecordQueryFromPayload(envelope.Payload)
+	if query.WorkspaceID == "" {
+		query.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	if query.RunID == "" {
+		query.RunID = common.RunID(envelope.RunID)
+	}
+	if query.WorkspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, query.WorkspaceID)
+	}
 	items, err := m.servicePtr.ListEvents(ctx, query)
 	if err != nil {
 		return err

@@ -244,6 +244,71 @@ func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T
 	}
 }
 
+func TestProviderCachePlanKeepsCacheablePrefixStableAcrossVolatileProgress(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "stable goal"},
+			"dod":                map[string]any{"items": []any{"stable dod"}},
+			"definitionRevision": "definition-stable",
+		},
+		"currentRuntimeStage":     "execution",
+		"currentRuntimeStageMode": "strict_convergence",
+		"currentProgressDigest": map[string]any{
+			"latestStep": "step-a",
+			"summary":    "first volatile progress",
+		},
+	}
+	changedInput := cloneMap(baseInput)
+	changedInput["currentProgressDigest"] = map[string]any{
+		"latestStep": "step-b",
+		"summary":    "second volatile progress",
+	}
+	changedInput["operatorInputQueue"] = []any{"continue with next step"}
+
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-volatile",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{
+				{Kind: llmcommon.StepKindWorkspaceExecution, Description: "plan next step"},
+				{Kind: "file/read", Description: "read file"},
+			},
+		},
+		Input: baseInput,
+	}
+	changed := base
+	changed.Input = changedInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	changed.PromptContext = buildPromptContextFromRequest(changed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&changed)
+
+	basePlan := base.ContextBudget.CachePlan
+	changedPlan := changed.ContextBudget.CachePlan
+	if basePlan == nil || changedPlan == nil {
+		t.Fatalf("cache plan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
+	}
+	if basePlan.StablePrefixHash != changedPlan.StablePrefixHash ||
+		basePlan.WorkspaceDefinitionHash != changedPlan.WorkspaceDefinitionHash ||
+		basePlan.CapabilityContractHash != changedPlan.CapabilityContractHash ||
+		basePlan.CacheKey != changedPlan.CacheKey {
+		t.Fatalf("cacheable prefix changed under volatile progress: base=%+v changed=%+v", basePlan, changedPlan)
+	}
+	if basePlan.VolatileTailHash == changedPlan.VolatileTailHash {
+		t.Fatalf("volatile tail hash unchanged: %q", basePlan.VolatileTailHash)
+	}
+	if !stringSliceContains(basePlan.AdapterHint.CacheablePrefix, "C1.goal-contract-original") ||
+		stringSliceContains(basePlan.AdapterHint.CacheablePrefix, "C4.current-progress") ||
+		stringSliceContains(basePlan.AdapterHint.CacheablePrefix, "C4.current-action") {
+		t.Fatalf("cacheable prefix sections = %+v, want C0/C1/C2 only", basePlan.AdapterHint.CacheablePrefix)
+	}
+}
+
 func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-provider-prefix",
@@ -296,6 +361,59 @@ func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T)
 		group := promptSectionGroup(sectionID)
 		if group != "C0" && group != "C1" && group != "C2" {
 			t.Fatalf("stable prefix section %q group=%q, want C0/C1/C2", sectionID, group)
+		}
+	}
+}
+
+func TestProviderPromptDoesNotIncludeProjectionOnlyInputState(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-projection-guard",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{{Kind: "file/read", Description: "read file"}},
+		},
+		Input: map[string]any{
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "authoritative run goal"},
+				"dod":  map[string]any{"items": []any{"authoritative run dod"}},
+			},
+			"currentProgressDigest": map[string]any{
+				"summary":            "allowed runtime evidence marker",
+				"nextRequiredAction": "continue",
+			},
+			"processEvidenceTimeline": []any{
+				map[string]any{"sourceRef": "run-001/step-001", "eventType": "runtime_evidence"},
+			},
+			"workspaceProjection": map[string]any{"summary": "FORBIDDEN_WORKSPACE_PROJECTION_STATE"},
+			"workspaceSnapshot":   map[string]any{"summary": "FORBIDDEN_WORKSPACE_SNAPSHOT_STATE"},
+			"runSnapshot":         map[string]any{"summary": "FORBIDDEN_RUN_SNAPSHOT_STATE"},
+			"viewModel":           map[string]any{"summary": "FORBIDDEN_VIEW_MODEL_STATE"},
+		},
+	}
+	req.PromptContext = buildPromptContextFromRequest(req)
+	prompt := buildProviderFacingPrompt(req)
+	joined := prompt.StablePrefix
+	for _, message := range prompt.DynamicMessages {
+		joined += "\n" + message.Content
+	}
+	for _, forbidden := range []string{
+		"FORBIDDEN_WORKSPACE_PROJECTION_STATE",
+		"FORBIDDEN_WORKSPACE_SNAPSHOT_STATE",
+		"FORBIDDEN_RUN_SNAPSHOT_STATE",
+		"FORBIDDEN_VIEW_MODEL_STATE",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("provider prompt leaked projection-only input %q:\n%s", forbidden, joined)
+		}
+	}
+	for _, want := range []string{"authoritative run goal", "authoritative run dod", "allowed runtime evidence marker"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("provider prompt missing allowed runtime context %q:\n%s", want, joined)
 		}
 	}
 }

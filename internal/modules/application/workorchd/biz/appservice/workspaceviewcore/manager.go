@@ -2,11 +2,12 @@ package workspaceviewcore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -27,18 +28,38 @@ type Manager struct {
 	closed             bool
 	rebuildAllInFlight bool
 	rebuildAllPending  bool
-	rebuilding         map[string]struct{}
-	rebuildPending     map[string]struct{}
+	workspaceRebuilds  map[string]*workspaceRebuildState
+	metrics            managerMetrics
+}
+
+type workspaceRebuildState struct {
+	inFlight         bool
+	pending          bool
+	pendingAfterFull bool
+}
+
+type managerMetrics struct {
+	fullRebuildTotal               uint64
+	fullRebuildFailedTotal         uint64
+	fullRebuildDurationMsTotal     int64
+	workspaceRebuildDebouncedTotal uint64
+	scheduleDroppedTotal           uint64
+	workspaceRebuilds              map[string]*workspaceRebuildMetrics
+}
+
+type workspaceRebuildMetrics struct {
+	rebuildTotal    uint64
+	failedTotal     uint64
+	durationMsTotal int64
 }
 
 func NewManager(options ManagerOptions) *Manager {
 	return &Manager{
-		loader:         options.Loader,
-		hub:            options.Hub,
-		schedule:       options.Schedule,
-		store:          NewStore(),
-		rebuilding:     map[string]struct{}{},
-		rebuildPending: map[string]struct{}{},
+		loader:            options.Loader,
+		hub:               options.Hub,
+		schedule:          options.Schedule,
+		store:             NewStore(),
+		workspaceRebuilds: map[string]*workspaceRebuildState{},
 	}
 }
 
@@ -109,6 +130,51 @@ func (m *Manager) Status() Status {
 	return m.store.Status()
 }
 
+func (m *Manager) Metrics() Metrics {
+	if m == nil {
+		return Metrics{}
+	}
+	var heartbeatMetrics Metrics
+	if m.store != nil {
+		heartbeatMetrics = m.store.RunHeartbeatMetrics(time.Now().UTC())
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ret := Metrics{
+		FullRebuildTotal:                m.metrics.fullRebuildTotal,
+		FullRebuildFailedTotal:          m.metrics.fullRebuildFailedTotal,
+		FullRebuildDurationMsTotal:      m.metrics.fullRebuildDurationMsTotal,
+		PendingWorkspaceRebuilds:        m.pendingWorkspaceRebuildsLocked(),
+		WorkspaceRebuildDebouncedTotal:  m.metrics.workspaceRebuildDebouncedTotal,
+		ScheduleDroppedTotal:            m.metrics.scheduleDroppedTotal,
+		ActiveRunHeartbeatTotal:         heartbeatMetrics.ActiveRunHeartbeatTotal,
+		ActiveRunHeartbeatAgeSecondsMax: heartbeatMetrics.ActiveRunHeartbeatAgeSecondsMax,
+		StalledRunTotal:                 heartbeatMetrics.StalledRunTotal,
+		IneffectiveRetryRunTotal:        heartbeatMetrics.IneffectiveRetryRunTotal,
+	}
+	if len(m.metrics.workspaceRebuilds) > 0 {
+		ids := make([]string, 0, len(m.metrics.workspaceRebuilds))
+		for workspaceID := range m.metrics.workspaceRebuilds {
+			ids = append(ids, workspaceID)
+		}
+		sort.Strings(ids)
+		ret.WorkspaceRebuilds = make([]WorkspaceRebuildMetrics, 0, len(ids))
+		for _, workspaceID := range ids {
+			item := m.metrics.workspaceRebuilds[workspaceID]
+			if item == nil {
+				continue
+			}
+			ret.WorkspaceRebuilds = append(ret.WorkspaceRebuilds, WorkspaceRebuildMetrics{
+				WorkspaceID:     workspaceID,
+				RebuildTotal:    item.rebuildTotal,
+				FailedTotal:     item.failedTotal,
+				DurationMsTotal: item.durationMsTotal,
+			})
+		}
+	}
+	return ret
+}
+
 func (m *Manager) ListWorkspaces() ([]appmodelcore.Workspace, Status, error) {
 	if m == nil || m.store == nil {
 		return nil, Status{State: StateFailed}, common.ErrConflict
@@ -160,35 +226,31 @@ func (m *Manager) RebuildAll(ctx context.Context) error {
 	return m.rebuildAll(ctx)
 }
 
-func (m *Manager) rebuildAll(ctx context.Context) error {
+func (m *Manager) rebuildAll(ctx context.Context) (err error) {
+	startedAt := time.Now()
+	defer func() {
+		m.recordFullRebuild(time.Since(startedAt), err)
+	}()
 	m.store.setBuilding()
 	workspaces, err := m.loader.ListWorkspaces(ctx)
 	if err != nil {
 		m.store.setFailed(err)
 		return err
 	}
-	snapshots := make(map[string]readmodelcore.WorkspaceSnapshot, len(workspaces))
-	var degraded error
-	for _, workspace := range workspaces {
-		if strings.TrimSpace(workspace.ID) == "" {
-			continue
-		}
-		snapshot, err := m.loader.ReadWorkspaceSnapshot(ctx, workspace.ID)
-		if err != nil {
-			degraded = errors.Join(degraded, fmt.Errorf("%s: %w", workspace.ID, err))
-			continue
-		}
-		snapshots[workspace.ID] = snapshot
-	}
 	if m.isClosed() {
 		return fmt.Errorf("%w: workspace projection manager closed", common.ErrConflict)
 	}
-	m.store.ReplaceAll(workspaces, snapshots, degraded)
-	m.publishProjectionChanged(ctx, "", "rebuild")
+	m.store.ReplaceWorkspaceList(workspaces, nil)
+	m.publishProjectionChanged(ctx, "", "baseline")
+	for _, workspace := range workspaces {
+		if strings.TrimSpace(workspace.ID) != "" {
+			m.ScheduleRebuildWorkspace(workspace.ID)
+		}
+	}
 	return nil
 }
 
-func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) error {
+func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) (err error) {
 	if m == nil || m.loader == nil || m.store == nil {
 		return common.ErrInvalidArgument
 	}
@@ -199,6 +261,10 @@ func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) erro
 	if workspaceID == "" {
 		return m.RebuildAll(ctx)
 	}
+	startedAt := time.Now()
+	defer func() {
+		m.recordWorkspaceRebuild(workspaceID, time.Since(startedAt), err)
+	}()
 	snapshot, err := m.loader.ReadWorkspaceSnapshot(ctx, workspaceID)
 	if err != nil {
 		workspace, readErr := m.loader.ReadWorkspace(ctx, workspaceID)
@@ -206,6 +272,8 @@ func (m *Manager) RebuildWorkspace(ctx context.Context, workspaceID string) erro
 			m.store.UpsertWorkspace(workspace)
 			m.publishProjectionChanged(ctx, workspaceID, "overview")
 		}
+		m.store.MarkWorkspaceDegraded(workspaceID, err)
+		m.publishProjectionChanged(ctx, workspaceID, "detail_failed")
 		return err
 	}
 	m.store.UpsertSnapshot(snapshot)
@@ -227,12 +295,14 @@ func (m *Manager) ScheduleRebuildWorkspace(workspaceID string) {
 		m.mu.Unlock()
 		return
 	}
-	if _, ok := m.rebuilding[workspaceID]; ok {
-		m.rebuildPending[workspaceID] = struct{}{}
+	rebuildState := m.workspaceRebuildStateLocked(workspaceID)
+	if rebuildState.inFlight {
+		rebuildState.pending = true
+		m.metrics.workspaceRebuildDebouncedTotal++
 		m.mu.Unlock()
 		return
 	}
-	m.rebuilding[workspaceID] = struct{}{}
+	rebuildState.inFlight = true
 	m.mu.Unlock()
 	if !m.submit("workspace_projection_rebuild", func(ctx context.Context) {
 		if err := m.RebuildWorkspace(ctx, workspaceID); err != nil && !m.isClosed() {
@@ -240,19 +310,28 @@ func (m *Manager) ScheduleRebuildWorkspace(workspaceID string) {
 		}
 		reschedule := false
 		m.mu.Lock()
-		if _, ok := m.rebuildPending[workspaceID]; ok && !m.closed {
-			delete(m.rebuildPending, workspaceID)
+		rebuildState := m.workspaceRebuilds[workspaceID]
+		if rebuildState != nil && rebuildState.pending && !m.closed {
+			rebuildState.pending = false
 			reschedule = true
 		}
-		delete(m.rebuilding, workspaceID)
+		if rebuildState != nil {
+			rebuildState.inFlight = false
+		}
+		m.pruneWorkspaceRebuildStateLocked(workspaceID)
 		m.mu.Unlock()
 		if reschedule {
 			m.ScheduleRebuildWorkspace(workspaceID)
 		}
 	}) {
 		m.mu.Lock()
-		delete(m.rebuilding, workspaceID)
-		delete(m.rebuildPending, workspaceID)
+		m.metrics.scheduleDroppedTotal++
+		if rebuildState := m.workspaceRebuilds[workspaceID]; rebuildState != nil {
+			rebuildState.inFlight = false
+			rebuildState.pending = false
+			rebuildState.pendingAfterFull = false
+		}
+		m.pruneWorkspaceRebuildStateLocked(workspaceID)
 		m.mu.Unlock()
 	}
 }
@@ -279,6 +358,7 @@ func (m *Manager) ScheduleRebuildAll() bool {
 		}
 	}) {
 		m.mu.Lock()
+		m.metrics.scheduleDroppedTotal++
 		m.rebuildAllInFlight = false
 		m.rebuildAllPending = false
 		m.mu.Unlock()
@@ -302,16 +382,32 @@ func (m *Manager) finishRebuildAll() {
 	if m == nil {
 		return
 	}
-	reschedule := false
+	rescheduleFull := false
+	var pendingWorkspaces []string
 	m.mu.Lock()
 	if m.rebuildAllPending && !m.closed {
 		m.rebuildAllPending = false
-		reschedule = true
+		rescheduleFull = true
+	}
+	if !rescheduleFull && len(m.workspaceRebuilds) > 0 && !m.closed {
+		pendingWorkspaces = make([]string, 0, len(m.workspaceRebuilds))
+		for workspaceID, rebuildState := range m.workspaceRebuilds {
+			if rebuildState == nil || !rebuildState.pendingAfterFull {
+				continue
+			}
+			rebuildState.pendingAfterFull = false
+			pendingWorkspaces = append(pendingWorkspaces, workspaceID)
+			m.pruneWorkspaceRebuildStateLocked(workspaceID)
+		}
 	}
 	m.rebuildAllInFlight = false
 	m.mu.Unlock()
-	if reschedule {
+	if rescheduleFull {
 		m.ScheduleRebuildAll()
+		return
+	}
+	for _, workspaceID := range pendingWorkspaces {
+		m.ScheduleRebuildWorkspace(workspaceID)
 	}
 }
 
@@ -334,7 +430,7 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 	if strings.TrimSpace(envelope.WorkspaceID) != "" {
 		m.store.MarkStale(envelope.WorkspaceID, envelope.Revision)
 		if m.isRebuildAllInFlight() {
-			m.ScheduleRebuildAll()
+			m.rememberPendingWorkspaceRebuild(envelope.WorkspaceID)
 			return nil
 		}
 		m.ScheduleRebuildWorkspace(envelope.WorkspaceID)
@@ -346,6 +442,86 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 		m.ScheduleRebuildAll()
 	}
 	return nil
+}
+
+func (m *Manager) rememberPendingWorkspaceRebuild(workspaceID string) {
+	if m == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.closed {
+		m.workspaceRebuildStateLocked(workspaceID).pendingAfterFull = true
+	}
+}
+
+func (m *Manager) workspaceRebuildStateLocked(workspaceID string) *workspaceRebuildState {
+	if m.workspaceRebuilds == nil {
+		m.workspaceRebuilds = map[string]*workspaceRebuildState{}
+	}
+	rebuildState := m.workspaceRebuilds[workspaceID]
+	if rebuildState == nil {
+		rebuildState = &workspaceRebuildState{}
+		m.workspaceRebuilds[workspaceID] = rebuildState
+	}
+	return rebuildState
+}
+
+func (m *Manager) pendingWorkspaceRebuildsLocked() int {
+	if len(m.workspaceRebuilds) == 0 {
+		return 0
+	}
+	ret := 0
+	for _, item := range m.workspaceRebuilds {
+		if item != nil && (item.pending || item.pendingAfterFull) {
+			ret++
+		}
+	}
+	return ret
+}
+
+func (m *Manager) recordFullRebuild(duration time.Duration, err error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics.fullRebuildTotal++
+	m.metrics.fullRebuildDurationMsTotal += duration.Milliseconds()
+	if err != nil {
+		m.metrics.fullRebuildFailedTotal++
+	}
+}
+
+func (m *Manager) recordWorkspaceRebuild(workspaceID string, duration time.Duration, err error) {
+	if m == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.metrics.workspaceRebuilds == nil {
+		m.metrics.workspaceRebuilds = map[string]*workspaceRebuildMetrics{}
+	}
+	item := m.metrics.workspaceRebuilds[workspaceID]
+	if item == nil {
+		item = &workspaceRebuildMetrics{}
+		m.metrics.workspaceRebuilds[workspaceID] = item
+	}
+	item.rebuildTotal++
+	item.durationMsTotal += duration.Milliseconds()
+	if err != nil {
+		item.failedTotal++
+	}
+}
+
+func (m *Manager) pruneWorkspaceRebuildStateLocked(workspaceID string) {
+	rebuildState := m.workspaceRebuilds[workspaceID]
+	if rebuildState == nil {
+		return
+	}
+	if !rebuildState.inFlight && !rebuildState.pending && !rebuildState.pendingAfterFull {
+		delete(m.workspaceRebuilds, workspaceID)
+	}
 }
 
 func (m *Manager) isRebuildAllInFlight() bool {
@@ -363,14 +539,20 @@ func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID stri
 	}
 	status := m.store.StatusForWorkspace(workspaceID)
 	payload := map[string]any{
-		"type":              "workspace_projection_changed",
-		"workspaceId":       workspaceID,
-		"globalRevision":    status.GlobalRevision,
-		"workspaceRevision": status.WorkspaceRevision,
-		"workspaceTotal":    status.WorkspaceTotal,
-		"changeKind":        changeKind,
-		"projectionState":   status.State,
-		"updatedAt":         status.UpdatedAt,
+		"type":                    "workspace_projection_changed",
+		"workspaceId":             workspaceID,
+		"globalRevision":          status.GlobalRevision,
+		"workspaceRevision":       status.WorkspaceRevision,
+		"sourceEventRevision":     status.SourceEventRevision,
+		"projectedSourceRevision": status.ProjectedSourceRevision,
+		"workspaceTotal":          status.WorkspaceTotal,
+		"changeKind":              changeKind,
+		"projectionState":         status.State,
+		"updatedAt":               status.UpdatedAt,
+		"rebuiltAt":               status.RebuiltAt,
+	}
+	if status.StaleReason != "" {
+		payload["staleReason"] = status.StaleReason
 	}
 	if status.Error != "" {
 		payload["error"] = status.Error

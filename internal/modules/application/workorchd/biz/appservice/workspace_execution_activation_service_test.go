@@ -2759,6 +2759,203 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	}
 }
 
+func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHasNoOverride(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	for _, id := range []string{"mcp-template-original", "mcp-template-refreshed"} {
+		if err := createTestMCPServerWithExports(ctx, exports, mcpmodule.CreateServerCommand{
+			ServerID:     common.MCPServerID(id),
+			Name:         id,
+			Transport:    "stdio",
+			Command:      id,
+			Enabled:      true,
+			AllowedTools: []string{"tool.lookup"},
+		}); err != nil {
+			t.Fatalf("CreateServer %s: %v", id, err)
+		}
+		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
+			ID:        common.MCPCapabilityID(id + ":tool:tool.lookup"),
+			ServerID:  common.MCPServerID(id),
+			Kind:      "tool",
+			Name:      "tool.lookup",
+			Enabled:   true,
+			RiskLevel: "read_only",
+		}); err != nil {
+			t.Fatalf("CreateCapability %s: %v", id, err)
+		}
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close setup session: %v", err)
+	}
+
+	templateID := "template-mcp-refresh"
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "MCP Refresh Template",
+		ContextHints: map[string]any{
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds":  []any{"mcp-template-original"},
+				"defaultCapabilityIds": []any{"mcp-template-original:tool:tool.lookup"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "template mcp refresh workspace",
+		TemplateID: templateID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	if _, err := UpdateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, templateID, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "MCP Refresh Template",
+		ContextHints: map[string]any{
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds":  []any{"mcp-template-refreshed"},
+				"defaultCapabilityIds": []any{"mcp-template-refreshed:tool:tool.lookup"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceTemplateWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use refreshed template mcp")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"refreshed template mcp is selected"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
+	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-template-refreshed")
+	if contextStringSliceContains(selection["defaultMCPServerIds"], "mcp-template-original") {
+		t.Fatalf("mcpSelection = %+v, want refreshed template default without stale workspace copy", selection)
+	}
+}
+
+func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	for _, id := range []string{"mcp-template-common", "mcp-workspace-override"} {
+		if err := createTestMCPServerWithExports(ctx, exports, mcpmodule.CreateServerCommand{
+			ServerID:     common.MCPServerID(id),
+			Name:         id,
+			Transport:    "stdio",
+			Command:      id,
+			Enabled:      true,
+			AllowedTools: []string{"tool.lookup"},
+		}); err != nil {
+			t.Fatalf("CreateServer %s: %v", id, err)
+		}
+		if err := updateTestMCPCapabilityWithExports(ctx, exports, mcpmodule.UpdateCapabilityCommand{
+			ID:        common.MCPCapabilityID(id + ":tool:tool.lookup"),
+			ServerID:  common.MCPServerID(id),
+			Kind:      "tool",
+			Name:      "tool.lookup",
+			Enabled:   true,
+			RiskLevel: "read_only",
+		}); err != nil {
+			t.Fatalf("CreateCapability %s: %v", id, err)
+		}
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close setup session: %v", err)
+	}
+
+	templateID := "template-mcp-workspace-override"
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:   templateID,
+		Name: "MCP Workspace Override Template",
+		ContextHints: map[string]any{
+			"semanticCodeNavigation": map[string]any{
+				"defaultMCPServerIds":  []any{"mcp-template-common"},
+				"defaultCapabilityIds": []any{"mcp-template-common:tool:tool.lookup"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:      "workspace mcp override",
+		TemplateID: templateID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	session, err = newRuntimeSessionWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("newRuntimeSessionWithBackend #2: %v", err)
+	}
+	exports, err = session.Exports()
+	if err != nil {
+		t.Fatalf("exports #2: %v", err)
+	}
+	workspaceModel, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceModel.ContextHints = map[string]any{
+		"semanticCodeNavigation": map[string]any{
+			"defaultMCPServerIds":  []any{"mcp-workspace-override"},
+			"defaultCapabilityIds": []any{"mcp-workspace-override:tool:tool.lookup"},
+		},
+	}
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceModel); err != nil {
+		t.Fatalf("update workspace override: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close override session: %v", err)
+	}
+
+	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "use workspace mcp override")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(ctx, "file", dataRoot, workspace.ID, []string{"workspace mcp override is selected"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	item, err := ActivateWorkspaceExecutionWithBackend(ctx, "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		GoalID: goal.ID,
+		DoDID:  dod.ID,
+	})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	selection := contextMapFromValue(t, item.Run.ExecutionContext["mcpSelection"])
+	assertAnyStringListContains(t, selection["defaultMCPServerIds"], "mcp-workspace-override")
+	if contextStringSliceContains(selection["defaultMCPServerIds"], "mcp-template-common") {
+		t.Fatalf("mcpSelection = %+v, want workspace override without template default", selection)
+	}
+}
+
 func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
@@ -2792,9 +2989,17 @@ func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testi
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
 	}
-	configPath := filepath.Join(workspace.InternalDirectory, "lsp-bridge", "mcp-config.json")
-	if err := os.Remove(configPath); err != nil {
-		t.Fatalf("remove managed config: %v", err)
+	workspaceConfigPath := filepath.Join(workspace.InternalDirectory, "lsp-bridge", "mcp-config.json")
+	systemConfigPath := filepath.Join(dataRoot, "system", "managed-configs", "lsp-bridge", "mcp-config.json")
+	if _, err := os.Stat(workspaceConfigPath); err == nil {
+		t.Fatalf("workspace managed config was created before activation: %s", workspaceConfigPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat workspace managed config before activation: %v", err)
+	}
+	if _, err := os.Stat(systemConfigPath); err == nil {
+		t.Fatalf("system managed config was created before activation: %s", systemConfigPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat system managed config before activation: %v", err)
 	}
 	goal, err := DefineGoalWithBackend(ctx, "file", dataRoot, workspace.ID, "repair missing managed config")
 	if err != nil {
@@ -2810,8 +3015,13 @@ func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testi
 	}); err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	if _, err := os.Stat(configPath); err != nil {
-		t.Fatalf("managed config stat after activation: %v", err)
+	if _, err := os.Stat(workspaceConfigPath); err == nil {
+		t.Fatalf("workspace managed config was created for template default: %s", workspaceConfigPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat workspace managed config after activation: %v", err)
+	}
+	if _, err := os.Stat(systemConfigPath); err != nil {
+		t.Fatalf("system managed config stat after activation: %v", err)
 	}
 }
 

@@ -8,10 +8,13 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func ensureManagedJSONConfig(target string, content any, mergeMissing bool) error {
+func ensureManagedJSONConfig(target string, content any, mergeMissing bool, overwriteExisting bool) error {
 	defaults, ok := content.(map[string]any)
 	if !ok {
 		return common.ErrInvalidArgument
+	}
+	if overwriteExisting {
+		return writeStableJSONFile(target, defaults)
 	}
 	if existingRaw, err := os.ReadFile(target); err == nil {
 		if !mergeMissing {

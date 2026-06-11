@@ -4,11 +4,20 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func HasContinuationCheckpoint(ctx context.Context, hub events.Hub, runID common.RunID) bool {
+func HasContinuationCheckpointForRun(ctx context.Context, hub events.Hub, item *runmodel.Run) bool {
+	if item == nil {
+		return false
+	}
+	ctx = contextWithRunWorkspace(ctx, item)
+	return hasContinuationCheckpointForRunID(ctx, hub, item.ID)
+}
+
+func hasContinuationCheckpointForRunID(ctx context.Context, hub events.Hub, runID common.RunID) bool {
 	if hub == nil || runID == "" {
 		return false
 	}

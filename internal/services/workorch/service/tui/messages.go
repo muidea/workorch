@@ -5,11 +5,13 @@ import (
 )
 
 type WorkspaceListMsg struct {
+	RequestSeq int64
 	Workspaces []backend.WorkspaceInfo
 	Error      error
 }
 
 type WorkspaceContextMsg struct {
+	RequestSeq        int64
 	WorkspaceID       string
 	ResetMainViewport bool
 	Workspace         *backend.WorkspaceInfo
@@ -24,6 +26,11 @@ type WorkspaceContextMsg struct {
 	Approvals         []backend.ApprovalInfo
 	WorkspaceHasLive  bool
 	Error             error
+}
+
+type WorkspaceContextRetryMsg struct {
+	WorkspaceID       string
+	ResetMainViewport bool
 }
 
 type WorkspaceCreatedMsg struct {

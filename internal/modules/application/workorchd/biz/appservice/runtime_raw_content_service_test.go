@@ -141,6 +141,84 @@ func TestReadRuntimeRawContentWithBackendReturnsVirtualCheckpointAndResultDetail
 	}
 }
 
+func TestReadRuntimeRawContentWithBackendScopesVirtualReadsByURIWorkspace(t *testing.T) {
+	dataRoot := t.TempDir()
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceA := common.WorkspaceID("ws-raw-scope-a")
+	workspaceB := common.WorkspaceID("ws-raw-scope-b")
+	runID := common.RunID("run-raw-scope")
+	checkpointID := common.CheckpointID("run-raw-scope/checkpoint-1")
+	resultID := common.ResultID("run-raw-scope/result-1")
+	ctxA := common.ContextWithRuntimeWorkspaceID(ctx, workspaceA)
+	ctxB := common.ContextWithRuntimeWorkspaceID(ctx, workspaceB)
+	for _, workspaceID := range []common.WorkspaceID{workspaceA, workspaceB} {
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+		if err := exports.Repositories.Workspaces.Create(scopedCtx, &workspacemodel.Workspace{ID: workspaceID, Title: string(workspaceID), State: common.WorkspaceStateActive}); err != nil {
+			t.Fatalf("create workspace %s: %v", workspaceID, err)
+		}
+		if err := exports.Repositories.Runs.Create(scopedCtx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+			t.Fatalf("create run %s: %v", workspaceID, err)
+		}
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctxA, &runmodel.RuntimeCheckpoint{
+		ID:               checkpointID,
+		WorkspaceID:      workspaceA,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		RunStateSnapshot: common.RunStateCompleted,
+		Data:             map[string]any{"workspace": string(workspaceA)},
+	}); err != nil {
+		t.Fatalf("create checkpoint A: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctxB, &runmodel.RuntimeCheckpoint{
+		ID:               checkpointID,
+		WorkspaceID:      workspaceB,
+		RunID:            runID,
+		CheckpointType:   common.CheckpointTypeRunState,
+		RunStateSnapshot: common.RunStateCompleted,
+		Data:             map[string]any{"workspace": string(workspaceB)},
+	}); err != nil {
+		t.Fatalf("create checkpoint B: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctxA, &resultmodel.Result{
+		ID:            resultID,
+		WorkspaceID:   workspaceA,
+		RunID:         runID,
+		State:         common.ResultStateAccepted,
+		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: "workspace-a"},
+	}); err != nil {
+		t.Fatalf("create result A: %v", err)
+	}
+	if err := exports.Repositories.Results.Create(ctxB, &resultmodel.Result{
+		ID:            resultID,
+		WorkspaceID:   workspaceB,
+		RunID:         runID,
+		State:         common.ResultStateAccepted,
+		SummaryDetail: resultmodel.ResultSummary{GoalOutcome: "workspace-b"},
+	}); err != nil {
+		t.Fatalf("create result B: %v", err)
+	}
+
+	checkpointRef := "workorch://workspaces/" + string(workspaceB) + "/runs/" + string(runID) + "/runtime-checkpoints/" + string(checkpointID) + "/data.json"
+	checkpointPayload, err := ReadRuntimeRawContentWithBackend(context.Background(), "file", dataRoot, checkpointRef)
+	if err != nil {
+		t.Fatalf("ReadRuntimeRawContentWithBackend checkpoint: %v", err)
+	}
+	if !strings.Contains(string(checkpointPayload.Content), `"workspace": "ws-raw-scope-b"`) {
+		t.Fatalf("checkpoint payload = %q, want workspace B scoped content", string(checkpointPayload.Content))
+	}
+
+	resultRef := "workorch://workspaces/" + string(workspaceB) + "/runs/" + string(runID) + "/results/" + string(resultID) + "/summary-detail.json"
+	resultPayload, err := ReadRuntimeRawContentWithBackend(context.Background(), "file", dataRoot, resultRef)
+	if err != nil {
+		t.Fatalf("ReadRuntimeRawContentWithBackend result: %v", err)
+	}
+	if !strings.Contains(string(resultPayload.Content), `"GoalOutcome": "workspace-b"`) {
+		t.Fatalf("result payload = %q, want workspace B scoped content", string(resultPayload.Content))
+	}
+}
+
 func TestReadRuntimeRawContentWithBackendRejectsUnsafeRefs(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()

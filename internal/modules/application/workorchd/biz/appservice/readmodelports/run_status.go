@@ -20,6 +20,7 @@ func RunStatus(ctx context.Context, readers RunStatusReaders, runID common.RunID
 	if err != nil {
 		return readmodelcore.RunStatus{}, err
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, item.WorkspaceID)
 	related, err := loadRunStatusRelatedModels(ctx, readers, item)
 	if err != nil {
 		return readmodelcore.RunStatus{}, err

@@ -10,6 +10,7 @@ import (
 )
 
 type workspaceProjectionStatus = workspaceviewcore.Status
+type workspaceProjectionMetrics = workspaceviewcore.Metrics
 type workspaceProjectionManager = workspaceviewcore.Manager
 
 const (

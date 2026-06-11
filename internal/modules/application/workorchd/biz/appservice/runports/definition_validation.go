@@ -17,6 +17,7 @@ func ValidateRunDefinitions(ctx context.Context, hub events.Hub, workspaceID str
 	if hub == nil || goalID == "" || dodID == "" {
 		return common.ErrInvalidArgument
 	}
+	ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
 	var (
 		goal    *workspacemodel.Goal
 		dod     *workspacemodel.DoD

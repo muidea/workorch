@@ -13,7 +13,8 @@ func (r *Reader) readRuntimeCheckpointRaw(ctx context.Context, parsed contentcor
 	if r.eventHub == nil {
 		return contentcore.RuntimeRawContent{}, common.ErrNotFound
 	}
-	item, err := ownerreadports.ReadRuntimeCheckpointByOwnerCommand(ctx, r.eventHub, common.CheckpointID(parsed.ItemPath))
+	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, parsed.WorkspaceID)
+	item, err := ownerreadports.ReadRuntimeCheckpointByOwnerCommand(readCtx, r.eventHub, common.CheckpointID(parsed.ItemPath))
 	if err != nil {
 		return contentcore.RuntimeRawContent{}, err
 	}
@@ -31,7 +32,8 @@ func (r *Reader) readResultRaw(ctx context.Context, parsed contentcore.RuntimeRa
 	if r.eventHub == nil {
 		return contentcore.RuntimeRawContent{}, common.ErrNotFound
 	}
-	item, err := ownerreadports.ReadResultByOwnerCommand(ctx, r.eventHub, common.ResultID(parsed.ItemPath))
+	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, parsed.WorkspaceID)
+	item, err := ownerreadports.ReadResultByOwnerCommand(readCtx, r.eventHub, common.ResultID(parsed.ItemPath))
 	if err != nil {
 		return contentcore.RuntimeRawContent{}, err
 	}

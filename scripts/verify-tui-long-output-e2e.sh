@@ -448,6 +448,17 @@ run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/status.json"
 wait_long_result_snapshot
 
+if [[ "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "1" || "${WORKORCH_TUI_LONG_OUTPUT_VERIFY_TERMINAL_RENDER:-1}" == "true" ]]; then
+  WORKORCH_TUI_TERMINAL_BASE_URL="$BASE_URL" \
+  WORKORCH_TUI_TERMINAL_WORKSPACE_ID="$workspace_id" \
+  WORKORCH_TUI_TERMINAL_WORKSPACE_TITLE="$WORKSPACE_TITLE" \
+  WORKORCH_TUI_TERMINAL_EXPECT_TEXT="LONG-IMPLEMENTATION" \
+  WORKORCH_TUI_TERMINAL_EXERCISE_SCROLL=1 \
+  WORKORCH_TUI_TERMINAL_KEEP_ARTIFACTS="$KEEP_ARTIFACTS" \
+  WORKORCH_TUI_TERMINAL_ARTIFACT_DIR="$TMP_DIR/tui-terminal-render" \
+    python3 "$ROOT_DIR/scripts/verify-tui-terminal-render-smoke.py"
+fi
+
 cat <<EOF
 TUI long output e2e passed.
 
@@ -457,13 +468,11 @@ workspaceTitle: $WORKSPACE_TITLE
 run:          $run_id
 artifacts:    $TMP_DIR
 
-Manual TUI confirmation:
-1. Open workorch TUI.
-2. Switch to workspace "$WORKSPACE_TITLE" ($workspace_id).
-3. Confirm the Result contains LONG-IMPLEMENTATION markers.
-4. Press PgDown/PgUp:
-   - main Result area should scroll;
-   - right Workspaces panel should stay fixed;
-   - bottom prompt/help rows should stay fixed;
-   - terminal mouse drag selection should still copy visible text normally.
+Automated TUI contract coverage:
+- The deployed service produced a long Result with LONG-IMPLEMENTATION markers.
+- verify-tui-agent covers keyboard PgDown/PgUp scrolling, fixed workspace monitor, and mouse reporting disabled.
+- verify-tui-workspace-switch-visual records text snapshots for workspace switch refresh and inactive event isolation.
+- verify-tui-terminal-render exercises the real Bubble Tea renderer through a PTY against a deployed service.
+- this e2e opens the long-output workspace through the PTY renderer, sends PgDown/PgUp, verifies terminal output contains LONG-IMPLEMENTATION, asserts the Workspaces panel plus bottom prompt/help rows remain visible after scroll, and fails if the TUI emits xterm mouse reporting enable sequences.
+- terminal-native drag selection is covered by proxy contract: TUI viewport scrolling stays keyboard-only and the PTY raw output must not enable xterm mouse reporting, so the application does not intercept normal terminal selection/copy.
 EOF

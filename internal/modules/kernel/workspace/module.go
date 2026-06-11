@@ -130,6 +130,9 @@ func (m *Module) handleWorkspaceQueryCommand(ctx context.Context, envelope event
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
+	if workspaceID := workspaceScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	switch envelope.Topic {
 	case workspaceevents.TopicWorkspaceCommandCreate:
 		if m.servicePtr == nil {
@@ -575,6 +578,14 @@ func cloneMapSlice(input []map[string]any) []map[string]any {
 func stringPayload(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func workspaceScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
+	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
+	if workspaceID == "" {
+		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
+	}
+	return workspaceID
 }
 
 func stringSlicePayload(payload map[string]any, key string) []string {

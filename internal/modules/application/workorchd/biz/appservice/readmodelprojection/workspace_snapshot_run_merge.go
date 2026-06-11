@@ -6,6 +6,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret := snapshot
 	if runSnapshot == nil {
 		ret.Outcome = MapWorkspaceOutcome(ret)
+		ret.RunHeartbeat = MapRunHeartbeat(ret)
 		return WorkspaceSnapshotWithContextBundle(ret)
 	}
 
@@ -28,6 +29,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.LLMUsageTraces = MergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = MapWorkspaceOutcome(ret)
+	ret.RunHeartbeat = MapRunHeartbeat(ret)
 	bundle := MapRunContextBundle(*runSnapshot)
 	ret.ContextBundle = &bundle
 	return ret

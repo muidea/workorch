@@ -14,9 +14,10 @@ func ListToolCallsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID c
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListToolCallsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyRunID: string(runID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}
@@ -31,9 +32,10 @@ func ListPatchesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID com
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListPatchesByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyRunID: string(runID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}
@@ -48,9 +50,10 @@ func ListValidationResultsByRunOwnerCommand(ctx context.Context, hub events.Hub,
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, orchestratorevents.TopicOrchestratorCommandListValidationResultsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyRunID: string(runID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

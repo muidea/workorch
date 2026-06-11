@@ -14,6 +14,10 @@ REPOSITORY_SKILL_ID="skill-skillhub-auto-mcp-$VERIFY_SUFFIX"
 SOUL_ID="soul-skillhub-auto-$VERIFY_SUFFIX"
 MOCK_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
+SKILL_HUB_DIR="${WORKORCH_SKILLHUB_HOME:-$HOME/.skill-hub}"
+SKILL_HUB_STATE="$SKILL_HUB_DIR/state.json"
+SKILL_HUB_STATE_BACKUP="$TMP_DIR/skillhub-state-original.json"
+SKILL_HUB_STATE_REPAIRED=0
 
 report_failure() {
   local status=$?
@@ -41,6 +45,9 @@ cleanup() {
   if [[ -n "$MOCK_PID" ]]; then
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$SKILL_HUB_STATE_REPAIRED" == "1" && -f "$SKILL_HUB_STATE_BACKUP" ]]; then
+    cp "$SKILL_HUB_STATE_BACKUP" "$SKILL_HUB_STATE" >/dev/null 2>&1 || true
   fi
   rm -rf "$TMP_DIR"
 }
@@ -230,6 +237,26 @@ sys.exit(1)
 PY
 }
 
+ensure_skillhub_project_state_valid() {
+  if [[ ! -f "$SKILL_HUB_STATE" ]]; then
+    return
+  fi
+  if python3 - "$SKILL_HUB_STATE" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    json.load(handle)
+PY
+  then
+    return
+  fi
+  cp "$SKILL_HUB_STATE" "$SKILL_HUB_STATE_BACKUP"
+  printf '{}\n' >"$SKILL_HUB_STATE"
+  SKILL_HUB_STATE_REPAIRED=1
+  echo "temporarily repaired invalid SkillHub project state for verification: $SKILL_HUB_STATE" >&2
+}
+
 validate_snapshot() {
   python3 - "$TMP_DIR/run-snapshot.json" "$workspace_id" "$GLOBAL_SKILL_ID" "$REPOSITORY_SKILL_ID" "$MCP_SERVER_ID" "$SOUL_ID" <<'PY'
 import json
@@ -306,6 +333,7 @@ trap report_failure ERR
 trap cleanup EXIT
 
 command -v skill-hub >/dev/null
+ensure_skillhub_project_state_valid
 assert_global_skill_enabled
 start_mock_provider
 

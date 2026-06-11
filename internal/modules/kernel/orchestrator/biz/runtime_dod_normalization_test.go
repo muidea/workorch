@@ -83,6 +83,71 @@ func TestNormalizeCompletionGateDoDAssessmentOutputCompletesAssessmentOnlyGoalCo
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputPreservesGovernanceOwnerEvidenceRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-governance-owner-ref-normalize",
+		WorkspaceID:     "ws-governance-owner-ref-normalize",
+		DoDID:           "dod-governance-owner-ref-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{
+					"two Decision tickets are resolved",
+					"one Approval is approved",
+					"MCP loadtest.governed_result evidence is collected",
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-governance-owner-ref-normalize/follow-up-graph",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "Governance and MCP validation evidence are complete.",
+			"items": []map[string]any{
+				{
+					"item":         "two Decision tickets are resolved",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001-step-1-decision", "run-001-llm-after-decision-decision"},
+				},
+				{
+					"item":         "one Approval is approved",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001-llm-after-decision-2-approval"},
+				},
+				{
+					"item":         "MCP loadtest.governed_result evidence is collected",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001/graph-001/001-loadtest-tool"},
+				},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	items, ok := doDAssessmentItemMaps(assessment["items"])
+	if !ok || len(items) != 3 {
+		t.Fatalf("dodAssessment.items = %+v, want 3 items", assessment["items"])
+	}
+	if refs := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(refs, []string{"run-001-step-1-decision", "run-001-llm-after-decision-decision"}) {
+		t.Fatalf("decision evidenceRefs = %+v, want owner decision refs", refs)
+	}
+	if refs := evidenceRefsFromValue(items[1]["evidenceRefs"]); !reflect.DeepEqual(refs, []string{"run-001-llm-after-decision-2-approval"}) {
+		t.Fatalf("approval evidenceRefs = %+v, want owner approval ref", refs)
+	}
+}
+
 func TestDoDAssessmentItemMapsUnwrapsNestedItemsContainer(t *testing.T) {
 	items, ok := doDAssessmentItemMaps(map[string]any{
 		"satisfied": true,

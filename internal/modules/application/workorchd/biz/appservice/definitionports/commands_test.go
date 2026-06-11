@@ -79,6 +79,45 @@ func TestDefineOrConsolidateWorkspaceGoalCreatesWhenMissing(t *testing.T) {
 	}
 }
 
+func TestUpdateGoalViewPublishesWorkspaceScopeFromContext(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-definition-update-scope")
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateGoal, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateGoalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want UpdateGoalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.GoalID != "goal-definition-update-scope" || cmd.Text != "- updated goal" {
+			t.Fatalf("command = %+v, want updated scoped goal", cmd)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyGoal: &workspacemodel.Goal{
+					ID:          cmd.GoalID,
+					WorkspaceID: workspaceID,
+					Text:        cmd.Text,
+				},
+			},
+		})
+	})
+
+	item, err := UpdateGoalView(ctx, hub, "goal-definition-update-scope", "updated goal")
+	if err != nil {
+		t.Fatalf("UpdateGoalView err = %v", err)
+	}
+	if item.WorkspaceID != string(workspaceID) || item.Text != "- updated goal" {
+		t.Fatalf("goal = %+v, want scoped updated goal", item)
+	}
+}
+
 func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -140,6 +179,97 @@ func TestListConsolidatedWorkspaceDoDsUpdatesCanonicalAndDeletesObsolete(t *test
 	}
 	if deleteCount != 1 {
 		t.Fatalf("delete count = %d, want 1", deleteCount)
+	}
+}
+
+func TestUpdateDoDViewPublishesWorkspaceScopeFromContext(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-update-scope")
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-definition-update-scope")
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandUpdateDoD, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.UpdateDoDCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want UpdateDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.DoDID != "dod-definition-update-scope" || len(cmd.Items) != 1 || cmd.Items[0] != "updated dod" {
+			t.Fatalf("command = %+v, want updated scoped dod", cmd)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyDoD: &workspacemodel.DoD{
+					ID:          cmd.DoDID,
+					WorkspaceID: workspaceID,
+					Items:       cmd.Items,
+				},
+			},
+		})
+	})
+
+	item, err := UpdateDoDView(ctx, hub, "dod-definition-update-scope", []string{"updated dod"})
+	if err != nil {
+		t.Fatalf("UpdateDoDView err = %v", err)
+	}
+	if item.WorkspaceID != string(workspaceID) || len(item.Items) != 1 || item.Items[0] != "updated dod" {
+		t.Fatalf("dod = %+v, want scoped updated dod", item)
+	}
+}
+
+func TestDeleteGoalPublishesWorkspaceScopeFromContext(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteGoal, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteGoalCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want DeleteGoalCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.GoalID != "goal-definition-delete-scope" {
+			t.Fatalf("command = %+v, want scoped goal delete", cmd)
+		}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+	})
+
+	if err := DeleteGoal(ctx, hub, "", "goal-definition-delete-scope"); err != nil {
+		t.Fatalf("DeleteGoal err = %v", err)
+	}
+}
+
+func TestDeleteDoDPublishesWorkspaceScopeFromContext(t *testing.T) {
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-definition-delete-scope")
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-definition-delete-scope")
+	hub.Subscribe(workspaceevents.TopicWorkspaceCommandDeleteDoD, func(_ context.Context, envelope events.Envelope) error {
+		if envelope.WorkspaceID != string(workspaceID) {
+			t.Fatalf("envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
+		}
+		if envelope.Payload[events.PayloadKeyWorkspaceID] != string(workspaceID) {
+			t.Fatalf("payload workspace = %v, want %s", envelope.Payload[events.PayloadKeyWorkspaceID], workspaceID)
+		}
+		cmd, ok := envelope.Payload[events.PayloadKeyCommand].(workspacecontracts.DeleteDoDCommand)
+		if !ok {
+			t.Fatalf("command payload type = %T, want DeleteDoDCommand", envelope.Payload[events.PayloadKeyCommand])
+		}
+		if cmd.DoDID != "dod-definition-delete-scope" {
+			t.Fatalf("command = %+v, want scoped dod delete", cmd)
+		}
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{}})
+	})
+
+	if err := DeleteDoD(ctx, hub, "", "dod-definition-delete-scope"); err != nil {
+		t.Fatalf("DeleteDoD err = %v", err)
 	}
 }
 

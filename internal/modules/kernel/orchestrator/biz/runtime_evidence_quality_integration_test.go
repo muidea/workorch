@@ -797,6 +797,81 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsZeroWorkAcceptedEvidence(t *
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementRejectsNegativeScalarShellEvidence(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: memory.NewValidationResultRepository(),
+		},
+	}
+	runID := common.RunID("run-dod-evidence-negative-scalar")
+	stepID := common.StepID("run-dod-evidence-negative-scalar/validate-decisions")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "jq '.decisions | length' snapshot.json"},
+		},
+		Output: map[string]any{
+			"exitCode": 0,
+			"stdout":   "0\n",
+		},
+	}); err != nil {
+		t.Fatalf("seed shell step: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "decision_validation",
+							"scope":             "dod_item",
+							"acceptedStepKinds": []string{shellcommon.StepKindCommand},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
+		"items": []map[string]any{{
+			"id":           "decision_validation",
+			"item":         "decision validation completed",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(stepID)},
+		}},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "non-zero-work valid evidence") {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %v, want negative scalar evidence rejected", err)
+	}
+}
+
+func TestCoverageWorkItemStepUpdateRejectsNegativeScalarShellValidationEvidence(t *testing.T) {
+	update := coverageWorkItemStepUpdate(&runmodel.Step{
+		ID:    "run-coverage-negative-scalar/validate",
+		RunID: "run-coverage-negative-scalar",
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"coverageWorkItemIds": []string{"cwi-001"},
+		},
+		Output: map[string]any{
+			"exitCode": 0,
+			"stdout":   "0",
+		},
+	})
+	if stringSliceContains(update.EvidenceKinds, "validation") {
+		t.Fatalf("update = %+v, want no validation evidence kind for negative scalar shell output", update)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementAllowsReadEvidenceWithActionEvidence(t *testing.T) {
 	ctx := context.Background()
 	validationRepo := memory.NewValidationResultRepository()
@@ -1177,6 +1252,51 @@ func TestCompletionGateNormalizesSupersededFailureEvidenceToLatestSuccess(t *tes
 	items, _ := doDAssessmentItemMaps(assessment["items"])
 	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(latestSuccessStepID)}) {
 		t.Fatalf("evidenceRefs = %+v, want latest successful evidence", got)
+	}
+}
+
+func TestCompletionGatePreservesGovernanceOwnerEvidenceRefs(t *testing.T) {
+	ctx := context.Background()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	run := &runmodel.Run{
+		ID:              common.RunID("run-governance-owner-evidence-normalize"),
+		DoDID:           "dod-governance-owner-evidence-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "done",
+			"items": []map[string]any{
+				{
+					"item":         "two Decision tickets are resolved",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001-step-1-decision", "run-001-llm-after-decision-decision", "loose note"},
+				},
+				{
+					"item":         "one Approval is approved",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-001-llm-after-decision-2-approval"},
+				},
+			},
+		},
+	}
+
+	normalized, err := normalizeCompletionGateDoDAssessmentEvidenceRefs(ctx, orch.steps, orch.evidence, run, output)
+	if err != nil {
+		t.Fatalf("normalizeCompletionGateDoDAssessmentEvidenceRefs: %v", err)
+	}
+	assessment := doDAssessmentFromOutput(normalized)
+	items, _ := doDAssessmentItemMaps(assessment["items"])
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want two normalized items", items)
+	}
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{"run-001-step-1-decision", "run-001-llm-after-decision-decision"}) {
+		t.Fatalf("decision evidenceRefs = %+v, want owner refs with loose note removed", got)
+	}
+	if got := evidenceRefsFromValue(items[1]["evidenceRefs"]); !reflect.DeepEqual(got, []string{"run-001-llm-after-decision-2-approval"}) {
+		t.Fatalf("approval evidenceRefs = %+v, want owner approval ref", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -34,8 +35,12 @@ func BuildWorkspaceExecutionContext(ctx context.Context, request WorkspaceExecut
 		DialogLanguage:         dialogLanguage,
 		EvidencePolicies:       workspace.EvidencePolicies,
 	})
-	defaultMCPServerIDs := activationcore.DefaultMCPServerIDsFromContextHints(workspace.ContextHints)
-	defaultCapabilityIDs := activationcore.DefaultCapabilityIDsFromContextHints(workspace.ContextHints)
+	toolHints := WorkspaceToolContextHintsFor(ctx, request.Hub, workspace)
+	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
+		return nil, err
+	}
+	defaultMCPServerIDs := activationcore.DefaultMCPServerIDsFromContextHints(toolHints.Effective)
+	defaultCapabilityIDs := activationcore.DefaultCapabilityIDsFromContextHints(toolHints.Effective)
 	memoryIDs := activationcore.NormalizeStringIDs(command.MemoryIDs)
 	bindings, err := loadWorkspaceExecutionContextBindings(ctx, request, effectiveGoal, effectiveDoD, memoryIDs)
 	if err != nil {

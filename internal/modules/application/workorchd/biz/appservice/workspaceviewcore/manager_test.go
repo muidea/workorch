@@ -2,10 +2,12 @@ package workspaceviewcore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -113,6 +115,121 @@ func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	}
 }
 
+func TestStoreWorkspaceStatusUsesGlobalRevisionForQuietSnapshot(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{
+		{ID: "ws-quiet", State: "blocked"},
+		{ID: "ws-active", State: "running"},
+	}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-quiet":  {Workspace: readmodelcore.Workspace{ID: "ws-quiet", State: "blocked"}},
+		"ws-active": {Workspace: readmodelcore.Workspace{ID: "ws-active", State: "running"}},
+	}, nil)
+
+	_, initialStatus, err := store.GetSnapshot("ws-quiet")
+	if err != nil {
+		t.Fatalf("get initial quiet snapshot: %v", err)
+	}
+	initialProjectionBytes, err := json.Marshal(initialStatus)
+	if err != nil {
+		t.Fatalf("marshal initial status: %v", err)
+	}
+	var initialProjection map[string]any
+	if err := json.Unmarshal(initialProjectionBytes, &initialProjection); err != nil {
+		t.Fatalf("unmarshal initial status: %v", err)
+	}
+	if _, ok := initialProjection["sourceEventRevision"]; !ok {
+		t.Fatalf("initial projection json = %s, want sourceEventRevision field even when zero", initialProjectionBytes)
+	}
+	if _, ok := initialProjection["projectedSourceRevision"]; !ok {
+		t.Fatalf("initial projection json = %s, want projectedSourceRevision field even when zero", initialProjectionBytes)
+	}
+
+	store.MarkStale("ws-active", 99)
+
+	_, quietStatus, err := store.GetSnapshot("ws-quiet")
+	if err != nil {
+		t.Fatalf("get quiet snapshot: %v", err)
+	}
+	if quietStatus.State != StateReady {
+		t.Fatalf("quiet status = %+v, want ready quiet workspace status", quietStatus)
+	}
+	if quietStatus.SourceEventRevision != 99 || quietStatus.ProjectedSourceRevision != 99 {
+		t.Fatalf("quiet status revisions = %+v, want source/projected revision 99", quietStatus)
+	}
+	if quietStatus.WorkspaceRevision == 0 || quietStatus.UpdatedAt == "" || quietStatus.RebuiltAt == "" {
+		t.Fatalf("quiet status display metadata = %+v, want workspace revision and timestamps", quietStatus)
+	}
+}
+
+func TestStoreKeepsExistingProjectionReadableWhileRebuilding(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running"}},
+	}, nil)
+
+	store.setBuilding()
+
+	items, status, err := store.List()
+	if err != nil {
+		t.Fatalf("list stale workspaces during rebuild: %v", err)
+	}
+	if status.State != StateStale || len(items) != 1 || items[0].ID != "ws-a" {
+		t.Fatalf("status/items = %+v/%+v, want stale existing projection", status, items)
+	}
+	snapshot, detailStatus, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get stale snapshot during rebuild: %v", err)
+	}
+	if detailStatus.State != StateStale || snapshot.Workspace.State != "running" {
+		t.Fatalf("detail/status = %+v/%+v, want stale running snapshot", snapshot, detailStatus)
+	}
+}
+
+func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
+	store := NewStore()
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	store.ReplaceAll([]appmodelcore.Workspace{
+		{ID: "ws-active", State: "running"},
+		{ID: "ws-terminal", State: "completed"},
+	}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-active": {
+			Workspace: readmodelcore.Workspace{ID: "ws-active", State: "running"},
+			RunHeartbeat: readmodelcore.RunHeartbeat{
+				WorkspaceID:               "ws-active",
+				RunID:                     "run-active",
+				State:                     string(common.RunStateRunning),
+				ActivityState:             "stalled",
+				LatestEffectiveProgressAt: now.Add(-12 * time.Minute).Format(time.RFC3339Nano),
+				Stalled:                   true,
+				IneffectiveRetry:          true,
+			},
+		},
+		"ws-terminal": {
+			Workspace: readmodelcore.Workspace{ID: "ws-terminal", State: "completed"},
+			RunHeartbeat: readmodelcore.RunHeartbeat{
+				WorkspaceID:               "ws-terminal",
+				RunID:                     "run-terminal",
+				State:                     string(common.RunStateCompleted),
+				ActivityState:             "stalled",
+				LatestEffectiveProgressAt: now.Add(-30 * time.Minute).Format(time.RFC3339Nano),
+				Stalled:                   true,
+				IneffectiveRetry:          true,
+			},
+		},
+	}, nil)
+
+	metrics := store.RunHeartbeatMetrics(now)
+	if metrics.ActiveRunHeartbeatTotal != 1 {
+		t.Fatalf("active heartbeat total = %d, want 1", metrics.ActiveRunHeartbeatTotal)
+	}
+	if metrics.ActiveRunHeartbeatAgeSecondsMax != int64((12 * time.Minute).Seconds()) {
+		t.Fatalf("active heartbeat age max = %d, want 720", metrics.ActiveRunHeartbeatAgeSecondsMax)
+	}
+	if metrics.StalledRunTotal != 1 || metrics.IneffectiveRetryRunTotal != 1 {
+		t.Fatalf("problem signal totals = stalled %d ineffective %d, want 1/1", metrics.StalledRunTotal, metrics.IneffectiveRetryRunTotal)
+	}
+}
+
 func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
@@ -139,11 +256,16 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 		t.Fatalf("startup full rebuild scheduled %d times, want 1", scheduled["workspace_projection_rebuild_all"])
 	}
 	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
+	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
+	if baselineWorkspaceRebuilds != 1 {
+		t.Fatalf("baseline workspace rebuilds = %d, want 1", baselineWorkspaceRebuilds)
+	}
+	scheduledFuncs["workspace_projection_rebuild"][0](ctx)
 	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
 		t.Fatalf("rebuild workspace: %v", err)
 	}
-	if scheduled["workspace_projection_rebuild"] != 0 {
-		t.Fatalf("scheduled own projection event rebuild count = %d, want 0", scheduled["workspace_projection_rebuild"])
+	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
+		t.Fatalf("scheduled own projection event rebuild count = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
 	}
 	var found events.Envelope
 	for _, item := range hub.Published() {
@@ -170,8 +292,8 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish run state event: %v", err)
 	}
-	if scheduled["workspace_projection_rebuild"] != 1 {
-		t.Fatalf("scheduled rebuild count after run event = %d, want 1", scheduled["workspace_projection_rebuild"])
+	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds+1 {
+		t.Fatalf("scheduled rebuild count after run event = %d, want %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds+1)
 	}
 	status := manager.Status()
 	if status.State != StateStale || status.SourceEventRevision == 0 {
@@ -208,6 +330,9 @@ func TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight(t *testing.T
 	if len(scheduled) != 1 {
 		t.Fatalf("scheduled rebuilds = %d, want one in-flight rebuild before pending rerun", len(scheduled))
 	}
+	if metrics := manager.Metrics(); metrics.WorkspaceRebuildDebouncedTotal != 1 || metrics.PendingWorkspaceRebuilds != 1 {
+		t.Fatalf("debounce metrics = %+v, want one debounced pending workspace rebuild", metrics)
+	}
 
 	scheduled[0](ctx)
 	if len(scheduled) != 2 {
@@ -224,7 +349,7 @@ func TestManagerReschedulesWorkspaceRebuildWhenEventArrivesInFlight(t *testing.T
 	}
 }
 
-func TestManagerSchedulesFullRebuildAfterEventDuringFullRebuild(t *testing.T) {
+func TestManagerSchedulesWorkspaceRebuildAfterWorkspaceEventDuringFullRebuild(t *testing.T) {
 	ctx := context.Background()
 	loader := &blockingProjectionLoader{
 		started: make(chan struct{}),
@@ -237,9 +362,6 @@ func TestManagerSchedulesFullRebuildAfterEventDuringFullRebuild(t *testing.T) {
 	manager := NewManager(ManagerOptions{
 		Loader: loader,
 		Schedule: func(name string, fn func(context.Context)) bool {
-			if name != "workspace_projection_rebuild_all" {
-				t.Fatalf("scheduled task = %q, want workspace_projection_rebuild_all", name)
-			}
 			scheduledMu.Lock()
 			scheduled = append(scheduled, fn)
 			scheduledMu.Unlock()
@@ -262,6 +384,56 @@ func TestManagerSchedulesFullRebuildAfterEventDuringFullRebuild(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("handle workspace event: %v", err)
 	}
+	close(loader.release)
+	if err := <-done; err != nil {
+		t.Fatalf("full rebuild: %v", err)
+	}
+
+	scheduledMu.Lock()
+	if len(scheduled) != 1 {
+		t.Fatalf("scheduled rebuilds = %d, want one workspace rebuild", len(scheduled))
+	}
+	workspaceRebuild := scheduled[0]
+	scheduledMu.Unlock()
+	workspaceRebuild(ctx)
+	if loader.calls != 1 {
+		t.Fatalf("loader list calls = %d, want only initial full rebuild", loader.calls)
+	}
+	snapshot, _, err := manager.ReadWorkspaceSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("read workspace snapshot: %v", err)
+	}
+	if snapshot.Workspace.Title != "snapshot-1" {
+		t.Fatalf("snapshot title = %q, want snapshot-1", snapshot.Workspace.Title)
+	}
+}
+
+func TestManagerSchedulesFullRebuildAfterGlobalWorkspaceEventDuringFullRebuild(t *testing.T) {
+	ctx := context.Background()
+	loader := &blockingProjectionLoader{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var (
+		scheduledMu sync.Mutex
+		scheduled   []scheduledProjectionTask
+	)
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(name string, fn func(context.Context)) bool {
+			scheduledMu.Lock()
+			scheduled = append(scheduled, scheduledProjectionTask{name: name, fn: fn})
+			scheduledMu.Unlock()
+			return true
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- manager.RebuildAll(ctx)
+	}()
+	<-loader.started
+
 	if err := manager.handleEvent(ctx, events.Envelope{
 		Topic:       runevents.TopicRunStateChanged,
 		SubjectType: "workspace",
@@ -276,15 +448,94 @@ func TestManagerSchedulesFullRebuildAfterEventDuringFullRebuild(t *testing.T) {
 	}
 
 	scheduledMu.Lock()
-	if len(scheduled) != 1 {
-		t.Fatalf("scheduled rebuilds = %d, want one follow-up full rebuild", len(scheduled))
+	if len(scheduled) != 2 {
+		t.Fatalf("scheduled rebuilds = %d, want baseline workspace rebuild and follow-up full rebuild", len(scheduled))
 	}
-	followup := scheduled[0]
+	if scheduled[0].name != "workspace_projection_rebuild" || scheduled[1].name != "workspace_projection_rebuild_all" {
+		t.Fatalf("scheduled task names = %q/%q, want workspace rebuild then full rebuild", scheduled[0].name, scheduled[1].name)
+	}
+	followup := scheduled[1].fn
 	scheduledMu.Unlock()
 	followup(ctx)
 	if loader.calls != 2 {
 		t.Fatalf("loader calls = %d, want initial and follow-up full rebuild", loader.calls)
 	}
+}
+
+func TestManagerMetricsTracksProjectionRebuilds(t *testing.T) {
+	ctx := context.Background()
+	loader := &countingProjectionLoader{}
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(string, func(context.Context)) bool {
+			return false
+		},
+	})
+
+	if err := manager.RebuildAll(ctx); err != nil {
+		t.Fatalf("rebuild all: %v", err)
+	}
+	if err := manager.RebuildWorkspace(ctx, "ws-a"); err != nil {
+		t.Fatalf("rebuild workspace: %v", err)
+	}
+	metrics := manager.Metrics()
+	if metrics.FullRebuildTotal != 1 || metrics.FullRebuildFailedTotal != 0 {
+		t.Fatalf("full rebuild metrics = %+v, want one successful full rebuild", metrics)
+	}
+	if len(metrics.WorkspaceRebuilds) != 1 || metrics.WorkspaceRebuilds[0].WorkspaceID != "ws-a" || metrics.WorkspaceRebuilds[0].RebuildTotal != 1 || metrics.WorkspaceRebuilds[0].FailedTotal != 0 {
+		t.Fatalf("workspace rebuild metrics = %+v, want one successful ws-a rebuild", metrics.WorkspaceRebuilds)
+	}
+
+	droppedBefore := metrics.ScheduleDroppedTotal
+	manager.ScheduleRebuildWorkspace("ws-a")
+	metrics = manager.Metrics()
+	if metrics.ScheduleDroppedTotal != droppedBefore+1 {
+		t.Fatalf("schedule dropped total = %d, want one additional failed scheduler counted from %d", metrics.ScheduleDroppedTotal, droppedBefore)
+	}
+	if metrics.WorkspaceRebuildDebouncedTotal != 0 || metrics.PendingWorkspaceRebuilds != 0 {
+		t.Fatalf("debounce/pending metrics = %d/%d, want no pending after schedule rejection", metrics.WorkspaceRebuildDebouncedTotal, metrics.PendingWorkspaceRebuilds)
+	}
+}
+
+func TestManagerMetricsTracksPendingWorkspaceRebuilds(t *testing.T) {
+	ctx := context.Background()
+	loader := &blockingProjectionLoader{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	manager := NewManager(ManagerOptions{
+		Loader: loader,
+		Schedule: func(string, func(context.Context)) bool {
+			return true
+		},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- manager.RebuildAll(ctx)
+	}()
+	<-loader.started
+	if err := manager.handleEvent(ctx, events.Envelope{
+		Topic:       runevents.TopicRunStateChanged,
+		WorkspaceID: "ws-a",
+		SubjectType: "run",
+		SubjectID:   "run-a",
+		Revision:    9,
+	}); err != nil {
+		t.Fatalf("handle workspace event: %v", err)
+	}
+	if metrics := manager.Metrics(); metrics.PendingWorkspaceRebuilds != 1 {
+		t.Fatalf("pending workspace rebuilds = %d, want 1", metrics.PendingWorkspaceRebuilds)
+	}
+	close(loader.release)
+	if err := <-done; err != nil {
+		t.Fatalf("full rebuild: %v", err)
+	}
+}
+
+type scheduledProjectionTask struct {
+	name string
+	fn   func(context.Context)
 }
 
 type fakeProjectionLoader struct {

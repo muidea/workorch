@@ -18,15 +18,38 @@ const (
 )
 
 type Status struct {
-	State               string `json:"state"`
-	GlobalRevision      int64  `json:"globalRevision"`
-	WorkspaceRevision   int64  `json:"workspaceRevision,omitempty"`
-	SourceEventRevision int64  `json:"sourceEventRevision,omitempty"`
-	WorkspaceTotal      int    `json:"workspaceTotal"`
-	UpdatedAt           string `json:"updatedAt,omitempty"`
-	RebuiltAt           string `json:"rebuiltAt,omitempty"`
-	Degraded            bool   `json:"degraded,omitempty"`
-	Error               string `json:"error,omitempty"`
+	State                   string `json:"state"`
+	GlobalRevision          int64  `json:"globalRevision"`
+	WorkspaceRevision       int64  `json:"workspaceRevision,omitempty"`
+	SourceEventRevision     int64  `json:"sourceEventRevision"`
+	ProjectedSourceRevision int64  `json:"projectedSourceRevision"`
+	WorkspaceTotal          int    `json:"workspaceTotal"`
+	UpdatedAt               string `json:"updatedAt,omitempty"`
+	RebuiltAt               string `json:"rebuiltAt,omitempty"`
+	Degraded                bool   `json:"degraded,omitempty"`
+	StaleReason             string `json:"staleReason,omitempty"`
+	Error                   string `json:"error,omitempty"`
+}
+
+type Metrics struct {
+	FullRebuildTotal                uint64
+	FullRebuildFailedTotal          uint64
+	FullRebuildDurationMsTotal      int64
+	PendingWorkspaceRebuilds        int
+	WorkspaceRebuildDebouncedTotal  uint64
+	ScheduleDroppedTotal            uint64
+	WorkspaceRebuilds               []WorkspaceRebuildMetrics
+	ActiveRunHeartbeatTotal         int
+	ActiveRunHeartbeatAgeSecondsMax int64
+	StalledRunTotal                 int
+	IneffectiveRetryRunTotal        int
+}
+
+type WorkspaceRebuildMetrics struct {
+	WorkspaceID     string
+	RebuildTotal    uint64
+	FailedTotal     uint64
+	DurationMsTotal int64
 }
 
 type Loader interface {

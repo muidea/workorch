@@ -12,7 +12,7 @@ import (
 )
 
 func DecisionView(ctx context.Context, hub events.Hub, traces governancecore.AutoGovernanceTraceReader, ticketID common.TicketID, scope common.WorkspaceID) (readmodelcore.Decision, error) {
-	item, err := ReadDecisionTicket(ctx, hub, ticketID)
+	item, err := ReadDecisionTicket(contextWithGovernanceScope(ctx, scope), hub, ticketID)
 	if err != nil {
 		return readmodelcore.Decision{}, err
 	}

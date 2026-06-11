@@ -104,13 +104,21 @@ func (m *Module) handleEnsureApprovedCommand(ctx context.Context, envelope event
 		return common.ErrInvalidArgument
 	}
 	cmd := resolveApprovalCommandFromPayload(envelope.Payload)
+	if workspaceID := resolveApprovalScopedWorkspaceID(cmd, envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	approvalID := cmd.ApprovalID
-	if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
-		return err
+	if resolveApprovalScopedWorkspaceID(cmd, envelope) == "" {
+		if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
+			return err
+		}
 	}
 	item, err := m.servicePtr.EnsureApprovedAndReturn(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if envelopeHasScope(envelope) && !approvalMatchesScope(item, envelope) {
+		return common.ErrNotFound
 	}
 	return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyApproval: item})
 }
@@ -120,13 +128,21 @@ func (m *Module) handleEnsureRejectedCommand(ctx context.Context, envelope event
 		return common.ErrInvalidArgument
 	}
 	cmd := resolveApprovalCommandFromPayload(envelope.Payload)
+	if workspaceID := resolveApprovalScopedWorkspaceID(cmd, envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	}
 	approvalID := cmd.ApprovalID
-	if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
-		return err
+	if resolveApprovalScopedWorkspaceID(cmd, envelope) == "" {
+		if err := m.ensureApprovalScope(ctx, approvalID, envelope); err != nil {
+			return err
+		}
 	}
 	item, err := m.servicePtr.EnsureRejectedAndReturn(ctx, cmd)
 	if err != nil {
 		return err
+	}
+	if envelopeHasScope(envelope) && !approvalMatchesScope(item, envelope) {
+		return common.ErrNotFound
 	}
 	return approvalCommandResponse(envelope, map[string]any{events.PayloadKeyApproval: item})
 }
@@ -134,6 +150,9 @@ func (m *Module) handleEnsureRejectedCommand(ctx context.Context, envelope event
 func (m *Module) handleApprovalCommand(ctx context.Context, envelope events.Envelope) error {
 	if m == nil || m.approvals == nil {
 		return common.ErrInvalidArgument
+	}
+	if workspaceID := approvalScopedWorkspaceID(envelope); workspaceID != "" {
+		ctx = common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
 	}
 	switch envelope.Topic {
 	case approvalevents.TopicApprovalCommandEnsure:
@@ -271,7 +290,9 @@ func resolveApprovalCommandFromPayload(payload map[string]any) approvalcontracts
 		return cmd
 	}
 	return approvalcontracts.ResolveApprovalCommand{
-		ApprovalID: common.ApprovalID(stringPayload(payload, events.PayloadKeyApprovalID)),
+		ApprovalID:  common.ApprovalID(stringPayload(payload, events.PayloadKeyApprovalID)),
+		WorkspaceID: common.WorkspaceID(stringPayload(payload, events.PayloadKeyWorkspaceID)),
+		RunID:       common.RunID(stringPayload(payload, events.PayloadKeyRunID)),
 	}
 }
 
@@ -311,14 +332,26 @@ func envelopeHasScope(envelope events.Envelope) bool {
 		envelope.StepID != ""
 }
 
-func approvalMatchesScope(item *approvalmodel.Approval, envelope events.Envelope) bool {
-	if item == nil {
-		return false
-	}
+func approvalScopedWorkspaceID(envelope events.Envelope) common.WorkspaceID {
 	workspaceID := common.WorkspaceID(stringPayload(envelope.Payload, events.PayloadKeyWorkspaceID))
 	if workspaceID == "" {
 		workspaceID = common.WorkspaceID(envelope.WorkspaceID)
 	}
+	return workspaceID
+}
+
+func resolveApprovalScopedWorkspaceID(cmd approvalcontracts.ResolveApprovalCommand, envelope events.Envelope) common.WorkspaceID {
+	if cmd.WorkspaceID != "" {
+		return cmd.WorkspaceID
+	}
+	return approvalScopedWorkspaceID(envelope)
+}
+
+func approvalMatchesScope(item *approvalmodel.Approval, envelope events.Envelope) bool {
+	if item == nil {
+		return false
+	}
+	workspaceID := approvalScopedWorkspaceID(envelope)
 	if workspaceID != "" && item.WorkspaceID != workspaceID {
 		return false
 	}

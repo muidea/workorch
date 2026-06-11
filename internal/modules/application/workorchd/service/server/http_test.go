@@ -766,6 +766,49 @@ func TestContextRegistryAPIsPersistAcrossMemoryHTTPRequests(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopedMemoryItemRoutesBindWorkspaceScope(t *testing.T) {
+	handler := newTestMux(t, Config{Backend: "memory"})
+	workspaceA := createWorkspaceForHTTP(t, handler, "memory scope A", "workspaces/ws-memory-scope-a")
+	workspaceB := createWorkspaceForHTTP(t, handler, "memory scope B", "workspaces/ws-memory-scope-b")
+	memoryID := "memory-http-scope-shared"
+
+	postAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory", `{
+		"memoryId":"`+memoryID+`",
+		"sourceType":"user",
+		"memoryType":"project_context",
+		"summary":"workspace A scoped memory"
+	}`, http.StatusCreated)
+	postAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/memory", `{
+		"memoryId":"`+memoryID+`",
+		"sourceType":"user",
+		"memoryType":"project_context",
+		"summary":"workspace B scoped memory"
+	}`, http.StatusCreated)
+
+	getA := getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusOK)
+	if !strings.Contains(getA, `"summary": "workspace A scoped memory"`) || strings.Contains(getA, `"workspace B scoped memory"`) {
+		t.Fatalf("workspace A memory response = %s", getA)
+	}
+
+	putAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, `{
+		"sourceType":"user",
+		"memoryType":"project_context",
+		"summary":"workspace A updated memory"
+	}`, http.StatusOK)
+
+	getB := getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/memory/"+memoryID, http.StatusOK)
+	if !strings.Contains(getB, `"summary": "workspace B scoped memory"`) || strings.Contains(getB, `"workspace A updated memory"`) {
+		t.Fatalf("workspace B memory response = %s", getB)
+	}
+
+	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID, http.StatusBadRequest)
+	getAndExpect(t, handler, "/api/v1/workorch/memory/"+memoryID+"?workspaceId="+workspaceB.ID, http.StatusOK)
+
+	deleteAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusOK)
+	getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceA.ID+"/memory/"+memoryID, http.StatusNotFound)
+	getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/memory/"+memoryID, http.StatusOK)
+}
+
 func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	mux := newTestMux(t, Config{Backend: "memory"})
@@ -1052,6 +1095,9 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/resources"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/mcp/servers/:serverId/prompts"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId"},
+		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory/:memoryId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/memory"},
 		{method: http.MethodGet, pattern: "/favicon.ico"},
 		{method: http.MethodGet, pattern: "/console"},
@@ -2314,7 +2360,9 @@ func TestWorkspaceCreateEndpointDefaultsDeliverableDirectory(t *testing.T) {
 }
 
 func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
-	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-http-artifact")
+	runID := common.RunID("run-http-artifact")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
 	dataRoot := t.TempDir()
 	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
 	if err != nil {
@@ -2324,10 +2372,16 @@ func TestArtifactContentEndpointReturnsStoredArtifactFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exports: %v", err)
 	}
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "http artifact", State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+		t.Fatalf("Create run: %v", err)
+	}
 	artifact := &resultmodel.Artifact{
 		ID:           common.ArtifactID("run-http-artifact/artifact/result-summary"),
-		WorkspaceID:  common.WorkspaceID("ws-http-artifact"),
-		RunID:        common.RunID("run-http-artifact"),
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
 		ResultID:     common.ResultID("run-http-artifact/result/dod-assessment"),
 		ArtifactType: resultcommon.ArtifactTypeText,
 		Name:         "Accepted Result Summary",
@@ -2583,6 +2637,115 @@ func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
 	}
 	if dodBody.DoD.ID != dodID || len(dodBody.DoD.Items) != 2 || dodBody.DoD.Items[0] != "updated dod" || dodBody.DoD.State != "ready" {
 		t.Fatalf("dod response = %+v, want updated ready DoD", dodBody.DoD)
+	}
+}
+
+func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
+	workspaceA := createWorkspaceForHTTP(t, handler, "duplicate definition workspace a", "workspaces/dup-definition-a")
+	workspaceB := createWorkspaceForHTTP(t, handler, "duplicate definition workspace b", "workspaces/dup-definition-b")
+	ctx := context.Background()
+	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("exports: %v", err)
+	}
+	goalID := common.GoalID("goal-shared-http")
+	dodID := common.DoDID("dod-shared-http")
+	for _, workspaceID := range []string{workspaceA.ID, workspaceB.ID} {
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID))
+		if err := exports.Repositories.Goals.Create(scopedCtx, &workspacemodel.Goal{
+			ID:          goalID,
+			WorkspaceID: common.WorkspaceID(workspaceID),
+			Text:        "- goal for " + workspaceID,
+		}); err != nil {
+			t.Fatalf("create duplicate goal for %s: %v", workspaceID, err)
+		}
+		if err := exports.Repositories.DoDs.Create(scopedCtx, &workspacemodel.DoD{
+			ID:          dodID,
+			WorkspaceID: common.WorkspaceID(workspaceID),
+			Items:       []string{"dod for " + workspaceID},
+			State:       common.DoDStateReady,
+		}); err != nil {
+			t.Fatalf("create duplicate dod for %s: %v", workspaceID, err)
+		}
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	goalGetReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/goals/"+string(goalID), nil)
+	goalGetRec := httptest.NewRecorder()
+	handler.ServeHTTP(goalGetRec, goalGetReq)
+	if goalGetRec.Code != http.StatusOK {
+		t.Fatalf("goal get status = %d, want 200, body=%s", goalGetRec.Code, goalGetRec.Body.String())
+	}
+	var goalGetBody goalResponse
+	if err := json.Unmarshal(goalGetRec.Body.Bytes(), &goalGetBody); err != nil {
+		t.Fatalf("unmarshal goal get: %v", err)
+	}
+	if goalGetBody.Goal.WorkspaceID != workspaceB.ID || !strings.Contains(goalGetBody.Goal.Text, workspaceB.ID) {
+		t.Fatalf("goal get body = %+v, want workspace B definition", goalGetBody.Goal)
+	}
+
+	goalPutReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/goals/"+string(goalID), strings.NewReader(`{"text":"updated duplicate goal b"}`))
+	goalPutReq.Header.Set("Content-Type", "application/json")
+	goalPutRec := httptest.NewRecorder()
+	handler.ServeHTTP(goalPutRec, goalPutReq)
+	if goalPutRec.Code != http.StatusOK {
+		t.Fatalf("goal update status = %d, want 200, body=%s", goalPutRec.Code, goalPutRec.Body.String())
+	}
+	var goalPutBody goalResponse
+	if err := json.Unmarshal(goalPutRec.Body.Bytes(), &goalPutBody); err != nil {
+		t.Fatalf("unmarshal goal update: %v", err)
+	}
+	if goalPutBody.Goal.WorkspaceID != workspaceB.ID || goalPutBody.Goal.Text != "- updated duplicate goal b" {
+		t.Fatalf("goal update body = %+v, want workspace B update", goalPutBody.Goal)
+	}
+
+	dodPutReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/dods/"+string(dodID), strings.NewReader(`{"items":["updated duplicate dod b"]}`))
+	dodPutReq.Header.Set("Content-Type", "application/json")
+	dodPutRec := httptest.NewRecorder()
+	handler.ServeHTTP(dodPutRec, dodPutReq)
+	if dodPutRec.Code != http.StatusOK {
+		t.Fatalf("dod update status = %d, want 200, body=%s", dodPutRec.Code, dodPutRec.Body.String())
+	}
+	var dodPutBody dodResponse
+	if err := json.Unmarshal(dodPutRec.Body.Bytes(), &dodPutBody); err != nil {
+		t.Fatalf("unmarshal dod update: %v", err)
+	}
+	if dodPutBody.DoD.WorkspaceID != workspaceB.ID || len(dodPutBody.DoD.Items) != 1 || dodPutBody.DoD.Items[0] != "updated duplicate dod b" {
+		t.Fatalf("dod update body = %+v, want workspace B update", dodPutBody.DoD)
+	}
+
+	session, err = appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend #2: %v", err)
+	}
+	exports, err = session.Exports()
+	if err != nil {
+		t.Fatalf("exports #2: %v", err)
+	}
+	goalA, err := exports.Repositories.Goals.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceA.ID)), goalID)
+	if err != nil {
+		t.Fatalf("get workspace A goal: %v", err)
+	}
+	if goalA.Text != "- goal for "+workspaceA.ID {
+		t.Fatalf("workspace A goal = %+v, want unchanged", goalA)
+	}
+	dodA, err := exports.Repositories.DoDs.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceA.ID)), dodID)
+	if err != nil {
+		t.Fatalf("get workspace A dod: %v", err)
+	}
+	if len(dodA.Items) != 1 || dodA.Items[0] != "dod for "+workspaceA.ID {
+		t.Fatalf("workspace A dod = %+v, want unchanged", dodA)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close session #2: %v", err)
 	}
 }
 
@@ -3161,6 +3324,25 @@ func TestTerminalRunSnapshotCacheReusesSnapshotForReadViews(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotCacheByWorkspaceRequiresUniqueCachedRun(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateCompleted)},
+		Run:       appservice.Run{ID: "run-cache-first", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
+	})
+	if cached, ok := state.cachedRunSnapshotByWorkspace("ws-cache-unique"); !ok || cached.Run.ID != "run-cache-first" {
+		t.Fatalf("cached snapshot = %+v ok=%v, want first run cache hit", cached, ok)
+	}
+
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-cache-unique", State: string(common.WorkspaceStateCompleted)},
+		Run:       appservice.Run{ID: "run-cache-second", WorkspaceID: "ws-cache-unique", State: string(common.RunStateCompleted)},
+	})
+	if cached, ok := state.cachedRunSnapshotByWorkspace("ws-cache-unique"); ok {
+		t.Fatalf("cached snapshot = %+v, want miss when one workspace has multiple cached terminal runs", cached)
+	}
+}
+
 func TestRunStatusWaitWarmsTerminalRunSnapshotCache(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	var snapshotReads atomic.Int32
@@ -3286,6 +3468,48 @@ func TestRunSnapshotReadWaitsForTerminalStatusWarmupInflight(t *testing.T) {
 	}
 	if snapshotReads.Load() != 1 {
 		t.Fatalf("snapshot reads = %d, want in-flight warm read reused by snapshot endpoint", snapshotReads.Load())
+	}
+}
+
+func TestRunSnapshotCacheInvalidationPreservesInflightWarmup(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-inflight-clear")
+	runID := "run-inflight-clear"
+
+	if _, duplicate := state.ensureRunSnapshotInflight(ctx, runID); duplicate {
+		t.Fatal("first inflight registration reported duplicate")
+	}
+	state.cacheRunSnapshot(appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateCompleted)},
+		Run:       appservice.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
+	})
+	state.clearRunSnapshotCache()
+	if _, ok := state.cachedRunSnapshot(ctx, runID); ok {
+		t.Fatal("cached snapshot survived invalidation")
+	}
+
+	waitDone := make(chan struct{})
+	var waited appservice.RunSnapshot
+	var waitErr error
+	var waitedInflight bool
+	go func() {
+		defer close(waitDone)
+		waited, waitErr, waitedInflight = state.waitRunSnapshotInflight(ctx, runID)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	state.completeRunSnapshotInflight(ctx, runID, appservice.RunSnapshot{
+		Workspace: appservice.Workspace{ID: "ws-inflight-clear", State: string(common.WorkspaceStateCompleted)},
+		Run:       appservice.Run{ID: runID, WorkspaceID: "ws-inflight-clear", State: string(common.RunStateCompleted)},
+	}, nil)
+	state.finishRunSnapshotInflight(ctx, runID)
+
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("inflight waiter did not complete after cache invalidation")
+	}
+	if waitErr != nil || !waitedInflight || waited.Run.ID != runID {
+		t.Fatalf("waited snapshot/err/inflight = %+v/%v/%v, want completed inflight snapshot", waited, waitErr, waitedInflight)
 	}
 }
 
@@ -3702,6 +3926,42 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	resumed := waitRunStateForHTTP(t, dataRoot, runID, string(common.RunStateFailed))
 	if resumed.BlockingTicketID != "" {
 		t.Fatalf("resumed run = %+v, want cleared decision blocker", resumed)
+	}
+}
+
+func TestDecisionResolveEndpointStoresLongResolutionIDWithSafeFileName(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	runID := "run-decision-long-resolution-http"
+	ticketID := "run-001-repair-001-of-llm-after-approval-" + strings.Repeat("context-gate-retry-", 18) + "context-integrity-decision"
+
+	workspace, started := seedBlockedDecisionRunWithTicketForHTTP(t, dataRoot, "decision long resolution http workspace", runID, ticketID)
+
+	resolveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+url.PathEscape(started.BlockingTicketID)+"/resolve?workspaceId="+url.QueryEscape(workspace.ID), strings.NewReader(`{"resolutionType":"provide_missing_info","resolutionPayload":{"operator":"http-long-id"}}`))
+	resolveReq.Header.Set("Content-Type", "application/json")
+	resolveRec := httptest.NewRecorder()
+	handler.ServeHTTP(resolveRec, resolveReq)
+	if resolveRec.Code != http.StatusOK {
+		t.Fatalf("decision resolve status = %d, want 200, body=%s", resolveRec.Code, resolveRec.Body.String())
+	}
+	var resolved decisionResponse
+	if err := json.Unmarshal(resolveRec.Body.Bytes(), &resolved); err != nil {
+		t.Fatalf("unmarshal decision resolve: %v", err)
+	}
+	if resolved.Decision.State != "resolved" || resolved.Decision.ResolutionType != decisioncommon.ResolutionTypeProvideMissingInfo {
+		t.Fatalf("decision = %+v, want resolved provide_missing_info", resolved.Decision)
+	}
+	if resolved.Decision.ResolutionID == "" || !strings.Contains(resolved.Decision.ResolutionID, started.BlockingTicketID) {
+		t.Fatalf("resolutionID = %q, want workspace-scoped long ticket id", resolved.Decision.ResolutionID)
+	}
+
+	files := resolutionFilesForHTTP(t, dataRoot)
+	if len(files) != 1 {
+		t.Fatalf("resolution file count = %d, want 1: %v", len(files), files)
+	}
+	name := strings.TrimSuffix(filepath.Base(files[0]), filepath.Ext(files[0]))
+	if len(name) > 160 {
+		t.Fatalf("resolution filename segment len = %d, want <= 160, file=%s", len(name), files[0])
 	}
 }
 
@@ -4139,13 +4399,22 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 		return appservice.Run{ID: runID, State: string(common.RunStateCompleted)}, nil
 	}
 
-	state.scheduleGovernanceRunResumes([]string{"run-duplicate-resume"}, 0)
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: "ws-duplicate-resume",
+		RunID:       "run-duplicate-resume",
+	}}, 0)
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatalf("initial governance resume did not start")
 	}
-	state.scheduleGovernanceRunResumes([]string{"run-duplicate-resume", "run-duplicate-resume"}, 0)
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: "ws-duplicate-resume",
+		RunID:       "run-duplicate-resume",
+	}, {
+		WorkspaceID: "ws-duplicate-resume",
+		RunID:       "run-duplicate-resume",
+	}}, 0)
 	time.Sleep(50 * time.Millisecond)
 	if got := state.metrics.runQueueWaiting.Load(); got != 0 {
 		t.Fatalf("runQueueWaiting = %d, want duplicate governance resume coalesced", got)
@@ -4157,15 +4426,69 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 	close(release)
 	waitForCondition(t, time.Second, func() bool {
 		state.runContinuations.governanceMu.Lock()
-		_, stillMarked := state.runContinuations.governanceStarted["run-duplicate-resume"]
+		_, stillMarked := state.runContinuations.governanceStarted["ws-duplicate-resume/run-duplicate-resume"]
 		state.runContinuations.governanceMu.Unlock()
 		return calls.Load() == 1 && state.metrics.runQueueWaiting.Load() == 0 && !stillMarked
 	})
 	state.runContinuations.governanceMu.Lock()
-	_, stillMarked := state.runContinuations.governanceStarted["run-duplicate-resume"]
+	_, stillMarked := state.runContinuations.governanceStarted["ws-duplicate-resume/run-duplicate-resume"]
 	state.runContinuations.governanceMu.Unlock()
 	if stillMarked {
 		t.Fatalf("governance resume mark was not cleared after completion")
+	}
+}
+
+func TestServerStateGovernanceRunResumeAllowsSameRunIDAcrossWorkspaces(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 2,
+	}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	resumed := make(chan string, 2)
+	errs := make(chan error, 2)
+	state.resumeRun = func(ctx context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
+		if runID != "run-001" {
+			err := fmt.Errorf("runID = %q, want run-001", runID)
+			errs <- err
+			return appservice.Run{}, err
+		}
+		workspaceID := string(common.RuntimeWorkspaceIDFromContext(ctx))
+		if workspaceID == "" {
+			err := fmt.Errorf("workspace scope is empty")
+			errs <- err
+			return appservice.Run{}, err
+		}
+		resumed <- workspaceID
+		return appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateCompleted)}, nil
+	}
+
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: "ws-governance-a",
+		RunID:       "run-001",
+	}, {
+		WorkspaceID: "ws-governance-b",
+		RunID:       "run-001",
+	}}, 0)
+
+	got := map[string]bool{}
+	for len(got) < 2 {
+		select {
+		case err := <-errs:
+			t.Fatal(err)
+		case workspaceID := <-resumed:
+			got[workspaceID] = true
+		case <-time.After(time.Second):
+			t.Fatalf("governance resumes = %#v, want both workspaces", got)
+		}
+	}
+	if !got["ws-governance-a"] || !got["ws-governance-b"] {
+		t.Fatalf("governance resumes = %#v, want both workspaces", got)
 	}
 }
 
@@ -4311,6 +4634,47 @@ func TestApprovalBatchResolveEndpointApprovesPendingApprovals(t *testing.T) {
 	}
 	waitRunStateForHTTP(t, dataRoot, firstRunID, string(common.RunStateFailed))
 	waitRunStateForHTTP(t, dataRoot, secondRunID, string(common.RunStateFailed))
+}
+
+func TestApprovalBatchResolveEndpointScopesDuplicateApprovalIDsByWorkspace(t *testing.T) {
+	dataRoot := t.TempDir()
+	handler := newFileMuxWithCleanup(t, dataRoot)
+	approvalID := "approval-shared-http"
+	workspaceA, startedA := seedBlockedApprovalRunWithApprovalForHTTP(t, dataRoot, "approval shared http workspace a", "run-approval-shared-a", approvalID)
+	workspaceB, startedB := seedBlockedApprovalRunWithApprovalForHTTP(t, dataRoot, "approval shared http workspace b", "run-approval-shared-b", approvalID)
+
+	body := strings.NewReader(`{"approvalIds":["` + approvalID + `"],"action":"approve"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/approvals/resolve-batch?workspaceId="+url.QueryEscape(workspaceB.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch approval resolve status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var resolved approvalsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resolved); err != nil {
+		t.Fatalf("unmarshal batch resolved approvals: %v", err)
+	}
+	if len(resolved.Approvals) != 1 || resolved.Approvals[0].ID != approvalID || resolved.Approvals[0].WorkspaceID != workspaceB.ID || resolved.Approvals[0].RunID != startedB.ID || resolved.Approvals[0].State != "approved" {
+		t.Fatalf("resolved approvals = %+v, want only workspace B approval approved", resolved.Approvals)
+	}
+
+	ctx := context.Background()
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	approvalA, err := repos.Approvals.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceA.ID)), common.ApprovalID(startedA.BlockingApprovalID))
+	if err != nil {
+		t.Fatalf("get workspace A approval: %v", err)
+	}
+	if approvalA.State != common.ApprovalStatePending {
+		t.Fatalf("workspace A approval = %+v, want still pending", approvalA)
+	}
+	approvalB, err := repos.Approvals.Get(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceB.ID)), common.ApprovalID(startedB.BlockingApprovalID))
+	if err != nil {
+		t.Fatalf("get workspace B approval: %v", err)
+	}
+	if approvalB.State != common.ApprovalStateApproved {
+		t.Fatalf("workspace B approval = %+v, want approved", approvalB)
+	}
 }
 
 func TestApprovalListAndGetEndpointsReturnPersistedApprovals(t *testing.T) {
@@ -4547,6 +4911,13 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_run_outcomes_total{status="failed"} 1`,
 		`workorch_run_outcomes_total{status="canceled"} 0`,
 		`workorch_server_max_concurrent_runs 1`,
+		`workorch_workspace_projection_rebuild_total{scope="full"}`,
+		`workorch_workspace_projection_pending_rebuilds`,
+		`workorch_workspace_projection_debounced_rebuild_total`,
+		`workorch_workspace_projection_active_run_heartbeats`,
+		`workorch_workspace_projection_active_run_heartbeat_age_seconds_max`,
+		`workorch_workspace_projection_stalled_runs`,
+		`workorch_workspace_projection_ineffective_retry_runs`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)
@@ -4681,6 +5052,18 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, de
 	return body.Workspace
 }
 
+func getAndExpect(t *testing.T, handler http.Handler, path string, wantStatus int) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != wantStatus {
+		t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, wantStatus, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
 func postAndExpect(t *testing.T, handler http.Handler, path string, body string, wantStatus int) string {
 	t.Helper()
 
@@ -4802,6 +5185,60 @@ func seedBlockedDecisionRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	}
 }
 
+func seedBlockedDecisionRunWithTicketForHTTP(t *testing.T, dataRoot string, title string, runID string, ticketID string) (appservice.Workspace, appservice.Run) {
+	t.Helper()
+	workspace, _ := seedBlockedRunForHTTP(t, dataRoot, title, runID)
+	run := seedBlockedDecisionRunWithTicketInWorkspaceForHTTP(t, dataRoot, workspace.ID, runID, ticketID)
+	return workspace, run
+}
+
+func seedBlockedDecisionRunWithTicketInWorkspaceForHTTP(t *testing.T, dataRoot string, workspaceID string, runID string, ticketID string) appservice.Run {
+	t.Helper()
+	stepID := common.StepID(runID + "/decision")
+	ctx := context.Background()
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	ticketRepo := runScopedRepos.Tickets
+	item, err := runRepo.Get(ctx, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	item.State = common.RunStateBlockedOnDecision
+	item.BlockingTicketID = common.TicketID(ticketID)
+	item.BlockingApprovalID = ""
+	if err := runRepo.Update(ctx, item); err != nil {
+		t.Fatalf("update decision run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  common.RunID(runID),
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_decision"},
+	}); err != nil {
+		t.Fatalf("create decision step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:           common.TicketID(ticketID),
+		WorkspaceID:  common.WorkspaceID(workspaceID),
+		RunID:        common.RunID(runID),
+		StepID:       stepID,
+		Reason:       "test long decision gate",
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     "provide test input",
+		State:        common.DecisionTicketStateOpen,
+	}); err != nil {
+		t.Fatalf("create decision ticket: %v", err)
+	}
+	return appservice.Run{
+		ID:               string(item.ID),
+		WorkspaceID:      string(item.WorkspaceID),
+		State:            string(item.State),
+		BlockingTicketID: string(item.BlockingTicketID),
+	}
+}
+
 func seedBlockedApprovalRunForHTTP(t *testing.T, dataRoot string, title string, runID string) (appservice.Workspace, appservice.Run) {
 	t.Helper()
 	workspace, _ := seedBlockedRunForHTTP(t, dataRoot, title, runID)
@@ -4857,6 +5294,58 @@ func seedBlockedApprovalRunInWorkspaceForHTTP(t *testing.T, dataRoot string, wor
 	item, err := runRepo.Get(ctx, common.RunID(runID))
 	if err != nil {
 		t.Fatalf("get approval run: %v", err)
+	}
+	return appservice.Run{
+		ID:                 string(item.ID),
+		WorkspaceID:        string(item.WorkspaceID),
+		State:              string(item.State),
+		BlockingApprovalID: string(item.BlockingApprovalID),
+	}
+}
+
+func seedBlockedApprovalRunWithApprovalForHTTP(t *testing.T, dataRoot string, title string, runID string, approvalID string) (appservice.Workspace, appservice.Run) {
+	t.Helper()
+	workspace, _ := seedBlockedRunForHTTP(t, dataRoot, title, runID)
+	run := seedBlockedApprovalRunWithApprovalInWorkspaceForHTTP(t, dataRoot, workspace.ID, runID, approvalID)
+	return workspace, run
+}
+
+func seedBlockedApprovalRunWithApprovalInWorkspaceForHTTP(t *testing.T, dataRoot string, workspaceID string, runID string, approvalID string) appservice.Run {
+	t.Helper()
+	stepID := common.StepID(runID + "/approval")
+	ctx := context.Background()
+	runScopedRepos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runRepo := runScopedRepos.Runs
+	stepRepo := runScopedRepos.Steps
+	approvalRepo := runScopedRepos.Approvals
+	item, err := runRepo.Get(ctx, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	item.State = common.RunStateBlockedOnApproval
+	item.BlockingApprovalID = common.ApprovalID(approvalID)
+	item.BlockingTicketID = ""
+	if err := runRepo.Update(ctx, item); err != nil {
+		t.Fatalf("update approval run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     stepID,
+		RunID:  common.RunID(runID),
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"stage": "blocked_on_approval"},
+	}); err != nil {
+		t.Fatalf("create approval step: %v", err)
+	}
+	if err := approvalRepo.Create(ctx, &approvalmodel.Approval{
+		ID:          common.ApprovalID(approvalID),
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		RunID:       common.RunID(runID),
+		StepID:      stepID,
+		Reason:      "test shared approval gate",
+		State:       common.ApprovalStatePending,
+	}); err != nil {
+		t.Fatalf("create approval: %v", err)
 	}
 	return appservice.Run{
 		ID:                 string(item.ID),
@@ -4971,6 +5460,26 @@ func startRunForHTTP(t *testing.T, handler http.Handler, workspaceID string, run
 		t.Fatalf("unmarshal started run: %v", err)
 	}
 	return body.Run
+}
+
+func resolutionFilesForHTTP(t *testing.T, dataRoot string) []string {
+	t.Helper()
+	var ret []string
+	if err := filepath.WalkDir(dataRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		if strings.Contains(filepath.ToSlash(path), "/decisions/resolutions/") {
+			ret = append(ret, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk resolution files: %v", err)
+	}
+	return ret
 }
 
 func waitRunStateForHTTP(t *testing.T, dataRoot string, runID string, wantState string) appservice.Run {
@@ -5152,7 +5661,7 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 		t.Fatalf("second run status = %d, want 200", secondStatus)
 	}
 
-	metrics := state.metrics.render(state.config)
+	metrics := state.metrics.render(state.config, state.workspaceProjection)
 	for _, want := range []string{
 		`workorch_run_queue_total 1`,
 		`workorch_run_queue_waiting 0`,
@@ -5242,7 +5751,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 		t.Fatalf("second start status = %d, want 200", secondStatus)
 	}
 
-	metrics := state.metrics.render(state.config)
+	metrics := state.metrics.render(state.config, state.workspaceProjection)
 	for _, want := range []string{
 		`workorch_http_requests_total{endpoint="run_start"} 2`,
 		`workorch_run_queue_total 1`,
@@ -5389,7 +5898,7 @@ func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.
 	close(release)
 	<-done
 
-	metrics := state.metrics.render(state.config)
+	metrics := state.metrics.render(state.config, state.workspaceProjection)
 	for _, want := range []string{
 		`workorch_run_queue_total 1`,
 		`workorch_run_queue_waiting 0`,
@@ -5410,6 +5919,16 @@ func TestConfigFromValuesReturnsErrorForInvalidDuration(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), configServerReadTimeout) {
 		t.Fatalf("error = %v, want config key %s", err, configServerReadTimeout)
+	}
+
+	_, err = ConfigFromValues(map[string]string{
+		configServerStaleDispatchedStepMinAge: "also-not-a-duration",
+	})
+	if err == nil {
+		t.Fatal("expected invalid stale dispatched min age duration error")
+	}
+	if !strings.Contains(err.Error(), configServerStaleDispatchedStepMinAge) {
+		t.Fatalf("error = %v, want config key %s", err, configServerStaleDispatchedStepMinAge)
 	}
 }
 

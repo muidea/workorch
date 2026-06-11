@@ -63,7 +63,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			if answer == "" {
 				answer = "continue"
 			}
-			if err := a.ResolveDecision(ctx, info.TicketID, "provide_missing_info", answer); err != nil {
+			if err := a.ResolveDecision(ctx, info.WorkspaceID, info.TicketID, "provide_missing_info", answer); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				a.ClearNotified()
 				continue
@@ -79,7 +79,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			fmt.Printf("\n⚡ Approval required [%s]\n  %s\n  Approve? [y/N]: ", info.ApprovalID, info.Reason)
 			var answer string
 			fmt.Scanln(&answer)
-			if err := a.ResolveApproval(ctx, info.ApprovalID, answer == "y" || answer == "Y"); err != nil {
+			if err := a.ResolveApproval(ctx, info.WorkspaceID, info.ApprovalID, answer == "y" || answer == "Y"); err != nil {
 				return finish(fmt.Errorf("resolve approval: %w", err))
 			}
 			if err := a.ResumeRun(ctx, info.WorkspaceID, info.RunID); err != nil {

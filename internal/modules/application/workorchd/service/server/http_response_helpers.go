@@ -16,8 +16,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
-func (m *serverMetrics) render(config Config) string {
-	return fmt.Sprintf(
+func (m *serverMetrics) render(config Config, projection *workspaceProjectionManager) string {
+	body := fmt.Sprintf(
 		"# TYPE workorch_http_requests_total counter\n"+
 			"workorch_http_requests_total{endpoint=\"healthz\"} %d\n"+
 			"workorch_http_requests_total{endpoint=\"readyz\"} %d\n"+
@@ -67,7 +67,9 @@ func (m *serverMetrics) render(config Config) string {
 			"workorch_run_outcomes_total{status=\"rejected\"} %d\n"+
 			"workorch_run_outcomes_total{status=\"canceled\"} %d\n"+
 			"# TYPE workorch_server_max_concurrent_runs gauge\n"+
-			"workorch_server_max_concurrent_runs %d\n",
+			"workorch_server_max_concurrent_runs %d\n"+
+			"# TYPE workorch_stale_dispatched_step_min_age_seconds gauge\n"+
+			"workorch_stale_dispatched_step_min_age_seconds %.0f\n",
 		m.healthzRequests.Load(),
 		m.readyzRequests.Load(),
 		m.metricsRequests.Load(),
@@ -112,7 +114,54 @@ func (m *serverMetrics) render(config Config) string {
 		m.runRejected.Load(),
 		m.runCanceled.Load(),
 		config.MaxConcurrentRuns,
+		config.StaleDispatchedStepMinAge.Seconds(),
 	)
+	return body + renderWorkspaceProjectionMetrics(projection)
+}
+
+func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager) string {
+	var metrics workspaceProjectionMetrics
+	if projection != nil {
+		metrics = projection.Metrics()
+	}
+	var b strings.Builder
+	b.WriteString("# TYPE workorch_workspace_projection_rebuild_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_total{scope=\"full\"} %d\n", metrics.FullRebuildTotal))
+	for _, item := range metrics.WorkspaceRebuilds {
+		b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_total{scope=\"workspace\",workspace=\"%s\"} %d\n", prometheusLabelValue(item.WorkspaceID), item.RebuildTotal))
+	}
+	b.WriteString("# TYPE workorch_workspace_projection_rebuild_failed_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_failed_total{scope=\"full\"} %d\n", metrics.FullRebuildFailedTotal))
+	for _, item := range metrics.WorkspaceRebuilds {
+		b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_failed_total{scope=\"workspace\",workspace=\"%s\"} %d\n", prometheusLabelValue(item.WorkspaceID), item.FailedTotal))
+	}
+	b.WriteString("# TYPE workorch_workspace_projection_rebuild_duration_ms_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_duration_ms_total{scope=\"full\"} %d\n", metrics.FullRebuildDurationMsTotal))
+	for _, item := range metrics.WorkspaceRebuilds {
+		b.WriteString(fmt.Sprintf("workorch_workspace_projection_rebuild_duration_ms_total{scope=\"workspace\",workspace=\"%s\"} %d\n", prometheusLabelValue(item.WorkspaceID), item.DurationMsTotal))
+	}
+	b.WriteString("# TYPE workorch_workspace_projection_pending_rebuilds gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_pending_rebuilds %d\n", metrics.PendingWorkspaceRebuilds))
+	b.WriteString("# TYPE workorch_workspace_projection_debounced_rebuild_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_debounced_rebuild_total %d\n", metrics.WorkspaceRebuildDebouncedTotal))
+	b.WriteString("# TYPE workorch_workspace_projection_schedule_dropped_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_schedule_dropped_total %d\n", metrics.ScheduleDroppedTotal))
+	b.WriteString("# TYPE workorch_workspace_projection_active_run_heartbeats gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_active_run_heartbeats %d\n", metrics.ActiveRunHeartbeatTotal))
+	b.WriteString("# TYPE workorch_workspace_projection_active_run_heartbeat_age_seconds_max gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_active_run_heartbeat_age_seconds_max %d\n", metrics.ActiveRunHeartbeatAgeSecondsMax))
+	b.WriteString("# TYPE workorch_workspace_projection_stalled_runs gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_stalled_runs %d\n", metrics.StalledRunTotal))
+	b.WriteString("# TYPE workorch_workspace_projection_ineffective_retry_runs gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_workspace_projection_ineffective_retry_runs %d\n", metrics.IneffectiveRetryRunTotal))
+	return b.String()
+}
+
+func prometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, "\n", `\n`)
+	return value
 }
 
 func resourceIDFromPath(path string, prefix string) (string, bool) {
@@ -290,6 +339,8 @@ func durationFromEnv(name string, fallback time.Duration) (time.Duration, error)
 		return serverConfig.IdleTimeout, nil
 	case configServerShutdownTimeout:
 		return serverConfig.ShutdownTimeout, nil
+	case configServerStaleDispatchedStepMinAge:
+		return serverConfig.StaleDispatchedStepMinAge, nil
 	default:
 		return fallback, nil
 	}

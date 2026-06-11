@@ -14,9 +14,10 @@ func ReadStepByOwnerCommand(ctx context.Context, hub events.Hub, stepID common.S
 	if hub == nil || stepID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGetStep, "step", string(stepID), "", "", map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandGetStep, "step", string(stepID), workspaceID, "", payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyStepID: string(stepID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}
@@ -31,9 +32,10 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID commo
 	if hub == nil || runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepsByRun, "run", string(runID), "", runID, map[string]any{
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepsByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
 		events.PayloadKeyRunID: string(runID),
-	})
+	}, workspaceID))
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package appservice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -57,7 +56,7 @@ func TestCreateWorkspaceWithTemplateInitializesGitRepositoryWhenRequested(t *tes
 	}
 }
 
-func TestCreateWorkspaceWithTemplateEnsuresManagedWorkspaceConfig(t *testing.T) {
+func TestCreateWorkspaceWithTemplateDoesNotCopyManagedWorkspaceConfig(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
@@ -91,18 +90,14 @@ func TestCreateWorkspaceWithTemplateEnsuresManagedWorkspaceConfig(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
 	}
+	if _, ok := item.ContextHints["managedWorkspaceConfigs"]; ok {
+		t.Fatalf("workspace context hints copied managedWorkspaceConfigs: %v", item.ContextHints)
+	}
 	configPath := filepath.Join(item.InternalDirectory, "tools", "config.json")
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read managed config: %v", err)
-	}
-	payload := map[string]any{}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal managed config: %v", err)
-	}
-	languages, _ := payload["languages"].(map[string]any)
-	if _, ok := languages["go"]; !ok {
-		t.Fatalf("managed config languages = %+v, want go", languages)
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatalf("managed config was created during workspace creation: %s", configPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat managed config: %v", err)
 	}
 }
 

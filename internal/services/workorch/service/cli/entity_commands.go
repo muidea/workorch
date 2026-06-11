@@ -202,7 +202,11 @@ var memoryGetCmd = &cobra.Command{
 	Short: "Read a memory item",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		item, err := mustBackend().Memory().Get(ctx(), common.MemoryID(args[0]))
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		item, err := mustBackend().Memory().Get(ctx(), common.WorkspaceID(wsID), common.MemoryID(args[0]))
 		if err != nil {
 			return err
 		}
@@ -242,8 +246,12 @@ var memoryUpdateCmd = &cobra.Command{
 	Short: "Update a memory item",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
 		item := memoryItemFromFlags(cmd)
-		updated, err := mustBackend().Memory().Update(ctx(), common.MemoryID(args[0]), item)
+		updated, err := mustBackend().Memory().Update(ctx(), common.WorkspaceID(wsID), common.MemoryID(args[0]), item)
 		if err != nil {
 			return err
 		}
@@ -261,7 +269,11 @@ var memoryDeleteCmd = &cobra.Command{
 	Short: "Delete a memory item",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := mustBackend().Memory().Delete(ctx(), common.MemoryID(args[0])); err != nil {
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		if err := mustBackend().Memory().Delete(ctx(), common.WorkspaceID(wsID), common.MemoryID(args[0])); err != nil {
 			return err
 		}
 		if jsonOutput {
@@ -455,12 +467,18 @@ func init() {
 	registerMemoryQueryFlags(memoryListCmd)
 	memorySearchCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	registerMemoryQueryFlags(memorySearchCmd)
+	memoryGetCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	memoryCreateCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	memoryCreateCmd.Flags().String("id", "", "Memory ID (optional)")
 	registerMemoryEditFlags(memoryCreateCmd, true)
+	memoryUpdateCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	registerMemoryEditFlags(memoryUpdateCmd, false)
+	memoryDeleteCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	memoryCreateCmd.MarkFlagRequired("workspace")
 	memoryCreateCmd.MarkFlagRequired("summary")
+	memoryGetCmd.MarkFlagRequired("workspace")
+	memoryUpdateCmd.MarkFlagRequired("workspace")
+	memoryDeleteCmd.MarkFlagRequired("workspace")
 
 	// Events
 	rootCmd.AddCommand(eventsCmd)

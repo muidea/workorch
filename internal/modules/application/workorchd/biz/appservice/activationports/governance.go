@@ -13,7 +13,8 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub events.Hub, workspaceID
 	if hub == nil || workspaceID == "" || limit <= 0 {
 		return nil
 	}
-	workspaceTickets, err := ownerreadports.ListDecisionTicketsByWorkspaceOwnerCommand(ctx, hub, workspaceID)
+	readCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	workspaceTickets, err := ownerreadports.ListDecisionTicketsByWorkspaceOwnerCommand(readCtx, hub, workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -22,7 +23,7 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub events.Hub, workspaceID
 		if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
 			continue
 		}
-		run, err := ownerreadports.ReadRunByOwnerCommand(ctx, hub, ticket.RunID)
+		run, err := ownerreadports.ReadRunByOwnerCommand(readCtx, hub, ticket.RunID)
 		if err != nil || run == nil || run.WorkspaceID != workspaceID {
 			continue
 		}
@@ -32,7 +33,7 @@ func WorkspaceGovernanceHistory(ctx context.Context, hub events.Hub, workspaceID
 		if dodID != "" && run.DoDID != dodID {
 			continue
 		}
-		resolution, err := ownerreadports.ReadDecisionResolutionByTicketOwnerCommand(ctx, hub, ticket.ID)
+		resolution, err := ownerreadports.ReadDecisionResolutionByTicketOwnerCommand(readCtx, hub, ticket.ID)
 		if err != nil || resolution == nil {
 			continue
 		}

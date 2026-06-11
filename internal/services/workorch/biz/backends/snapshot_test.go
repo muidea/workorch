@@ -61,6 +61,25 @@ func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotInfoPreservesRunHeartbeat(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-heartbeat", "state": "running"},
+		"runHeartbeat": map[string]any{
+			"workspaceId":               "ws-heartbeat",
+			"runId":                     "run-heartbeat",
+			"activityState":             "no_activity",
+			"latestEffectiveProgressAt": "2026-06-10T00:00:00Z",
+			"stalled":                   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.RunHeartbeat.RunID != "run-heartbeat" || snapshot.RunHeartbeat.ActivityState != "no_activity" || !snapshot.RunHeartbeat.Stalled {
+		t.Fatalf("run heartbeat = %+v, want decoded no_activity stalled heartbeat", snapshot)
+	}
+}
+
 func TestDecodeSnapshotInfoPreservesWorkspaceGoalsAndDoDs(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
 		"workspace": map[string]any{"id": "ws-1", "state": "active"},

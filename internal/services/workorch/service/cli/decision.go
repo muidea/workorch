@@ -54,7 +54,11 @@ var decisionShowCmd = &cobra.Command{
 	Short: "Show decision ticket details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		d, err := mustBackend().Decision().Get(ctx(), common.TicketID(args[0]))
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		d, err := mustBackend().Decision().Get(ctx(), common.WorkspaceID(wsID), common.TicketID(args[0]))
 		if err != nil {
 			return fmt.Errorf("get decision: %w", err)
 		}
@@ -81,6 +85,10 @@ var decisionResolveCmd = &cobra.Command{
 	Short: "Resolve a decision ticket",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		wsID, _ := cmd.Flags().GetString("workspace")
+		if wsID == "" {
+			return fmt.Errorf("--workspace is required")
+		}
 		resType, _ := cmd.Flags().GetString("type")
 		payloadStr, _ := cmd.Flags().GetString("payload")
 		var payload map[string]any
@@ -88,6 +96,7 @@ var decisionResolveCmd = &cobra.Command{
 			payload = map[string]any{"value": payloadStr}
 		}
 		d, err := mustBackend().Decision().Resolve(ctx(), backend.ResolveDecisionRequest{
+			WorkspaceID:    common.WorkspaceID(wsID),
 			TicketID:       common.TicketID(args[0]),
 			ResolutionType: resType,
 			Payload:        payload,
@@ -110,6 +119,10 @@ func init() {
 	decisionListCmd.Flags().String("workspace", "", "Filter by workspace ID")
 	decisionListCmd.Flags().String("run", "", "Filter by run ID")
 
+	decisionShowCmd.Flags().String("workspace", "", "Workspace ID (required)")
+	decisionResolveCmd.Flags().String("workspace", "", "Workspace ID (required)")
 	decisionResolveCmd.Flags().String("type", "provide_missing_info", "Resolution type")
 	decisionResolveCmd.Flags().String("payload", "", "Resolution payload (simple string)")
+	decisionShowCmd.MarkFlagRequired("workspace")
+	decisionResolveCmd.MarkFlagRequired("workspace")
 }

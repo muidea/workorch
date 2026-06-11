@@ -25,8 +25,13 @@ func (c *Client) ListDecisions(ctx context.Context, workspaceID, runID string) (
 }
 
 // GetDecision returns a single decision ticket.
-func (c *Client) GetDecision(ctx context.Context, ticketID string) (*Decision, error) {
-	resp, err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/workorch/decisions/%s", escapePath(ticketID)), nil)
+func (c *Client) GetDecision(ctx context.Context, workspaceID string, ticketID string) (*Decision, error) {
+	path := fmt.Sprintf("/api/v1/workorch/decisions/%s", escapePath(ticketID))
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "GET", joinQuery(path, values), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -34,12 +39,17 @@ func (c *Client) GetDecision(ctx context.Context, ticketID string) (*Decision, e
 }
 
 // ResolveDecision resolves a decision ticket.
-func (c *Client) ResolveDecision(ctx context.Context, ticketID, resolutionType string, payload map[string]any) (*Decision, error) {
+func (c *Client) ResolveDecision(ctx context.Context, workspaceID, ticketID, resolutionType string, payload map[string]any) (*Decision, error) {
 	req := struct {
 		ResolutionType    string         `json:"resolutionType"`
 		ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 	}{ResolutionType: resolutionType, ResolutionPayload: payload}
-	resp, err := c.do(ctx, "POST", fmt.Sprintf("/api/v1/workorch/decisions/%s/resolve", escapePath(ticketID)), req)
+	path := fmt.Sprintf("/api/v1/workorch/decisions/%s/resolve", escapePath(ticketID))
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "POST", joinQuery(path, values), req)
 	if err != nil {
 		return nil, err
 	}
@@ -47,13 +57,17 @@ func (c *Client) ResolveDecision(ctx context.Context, ticketID, resolutionType s
 }
 
 // BatchResolveDecisions resolves multiple decision tickets with the same type.
-func (c *Client) BatchResolveDecisions(ctx context.Context, ticketIDs []string, resolutionType string, payload map[string]any) ([]Decision, error) {
+func (c *Client) BatchResolveDecisions(ctx context.Context, workspaceID string, ticketIDs []string, resolutionType string, payload map[string]any) ([]Decision, error) {
 	req := struct {
 		TicketIDs         []string       `json:"ticketIds"`
 		ResolutionType    string         `json:"resolutionType"`
 		ResolutionPayload map[string]any `json:"resolutionPayload,omitempty"`
 	}{TicketIDs: ticketIDs, ResolutionType: resolutionType, ResolutionPayload: payload}
-	resp, err := c.do(ctx, "POST", "/api/v1/workorch/decisions/resolve-batch", req)
+	values := url.Values{}
+	if workspaceID != "" {
+		values.Set("workspaceId", workspaceID)
+	}
+	resp, err := c.do(ctx, "POST", joinQuery("/api/v1/workorch/decisions/resolve-batch", values), req)
 	if err != nil {
 		return nil, err
 	}
