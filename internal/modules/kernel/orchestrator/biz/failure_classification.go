@@ -556,33 +556,43 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy)) {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) &&
-		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
-		class != failureClassLLMDecisionInvalid &&
-		!runtimeFailureIsLLMContractLoop(failedStep) {
-		return false
-	}
 	stepsForRun, err := steps.ListByRun(ctx, run.ID)
 	if err != nil {
 		return false
 	}
 	duplicateFound := false
+	targetDiagnosticDuplicateFound := false
 	for _, step := range stepsForRun {
 		if step == nil || step.ID == failedStep.ID || step.State != common.StepStateFailed {
 			continue
 		}
 		if strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)) == signature {
 			duplicateFound = true
+			if runtimeFailureHasRepeatedTargetDiagnostic(class, failedStep, step) {
+				targetDiagnosticDuplicateFound = true
+			}
 			break
 		}
 		if targetScope != "" &&
 			strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == class &&
 			runtimeFailureTargetScopeFromStep(step) == targetScope {
 			duplicateFound = true
+			if runtimeFailureHasRepeatedTargetDiagnostic(class, failedStep, step) {
+				targetDiagnosticDuplicateFound = true
+			}
 			break
 		}
 	}
 	if !duplicateFound {
+		return false
+	}
+	if runtimeFailureRepeatedTargetDiagnosticCanEscalate(class, targetScope, attempts, targetDiagnosticDuplicateFound) {
+		return true
+	}
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) &&
+		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
+		class != failureClassLLMDecisionInvalid &&
+		!runtimeFailureIsLLMContractLoop(failedStep) {
 		return false
 	}
 	if runtimeFailureNeedsNoNewEvidenceCheck(class, failedStep) &&
@@ -590,6 +600,83 @@ func shouldBlockOnDuplicateRuntimeFailure(
 		return false
 	}
 	return true
+}
+
+func runtimeFailureRepeatedTargetDiagnosticCanEscalate(class string, targetScope string, attempts int, duplicateFound bool) bool {
+	if !duplicateFound || attempts < 3 || strings.TrimSpace(targetScope) == "" {
+		return false
+	}
+	switch strings.TrimSpace(class) {
+	case failureClassShellCommand, failureClassPatchApply, failureClassMCPRuntime:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeFailureHasRepeatedTargetDiagnostic(class string, current *runModel.Step, previous *runModel.Step) bool {
+	if current == nil || previous == nil {
+		return false
+	}
+	currentSignals := structuredFailureSignalsFromFailureOutput(current.Output, nil, class, stringFromMap(current.Output, failureOutputKeySignature))
+	if !structuredFailureSignalsHaveConcreteTargetEvidence(currentSignals) {
+		return false
+	}
+	previousSignals := structuredFailureSignalsFromFailureOutput(previous.Output, nil, class, stringFromMap(previous.Output, failureOutputKeySignature))
+	if !structuredFailureSignalsHaveConcreteTargetEvidence(previousSignals) {
+		return false
+	}
+	return structuredFailureSignalSetsOverlap(currentSignals, previousSignals)
+}
+
+func structuredFailureSignalSetsOverlap(left map[string]any, right map[string]any) bool {
+	leftTargets := structuredFailureSignalTargetSet(left)
+	rightTargets := structuredFailureSignalTargetSet(right)
+	for target := range leftTargets {
+		if rightTargets[target] {
+			return true
+		}
+	}
+	leftMessages := stringSetFromSlice(stringSliceFromValue(left["messages"]))
+	rightMessages := stringSetFromSlice(stringSliceFromValue(right["messages"]))
+	for message := range leftMessages {
+		if rightMessages[message] {
+			return true
+		}
+	}
+	leftIdentifiers := stringSetFromSlice(stringSliceFromValue(left["identifiers"]))
+	rightIdentifiers := stringSetFromSlice(stringSliceFromValue(right["identifiers"]))
+	for identifier := range leftIdentifiers {
+		if rightIdentifiers[identifier] {
+			return true
+		}
+	}
+	return false
+}
+
+func structuredFailureSignalTargetSet(signals map[string]any) map[string]bool {
+	ret := map[string]bool{}
+	for _, ref := range stringSliceFromValue(signals["targetRefs"]) {
+		if ref = strings.TrimSpace(ref); ref != "" {
+			ret[ref] = true
+		}
+	}
+	for _, lineRef := range mapSliceFromValue(signals["lineRefs"]) {
+		if ref := strings.TrimSpace(stringFromMap(lineRef, "targetRef")); ref != "" {
+			ret[ref] = true
+		}
+	}
+	return ret
+}
+
+func stringSetFromSlice(values []string) map[string]bool {
+	ret := map[string]bool{}
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			ret[value] = true
+		}
+	}
+	return ret
 }
 
 func runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class string, targetScope string, attempts int, maxAttempts int) bool {
@@ -706,24 +793,41 @@ func (o *RuntimeOrchestrator) blockOnDuplicateRuntimeFailure(
 	if execErr != nil && !errors.Is(execErr, common.ErrInvalidArgument) {
 		reasonErr = execErr
 	}
+	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
+	recommendedNextActions := []string{
+		"Use a different grounded recovery strategy instead of repeating the same repair.",
+		"Read current target state and reconcile it with the repeated diagnostics before patching.",
+		"Choose replan when the failed target is no longer the smallest correct repair scope.",
+	}
+	if actions := stringSliceFromValue(diagnostics["recommendedNextActions"]); len(actions) > 0 {
+		recommendedNextActions = actions
+	}
+	decisionContext := map[string]any{
+		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
+		"allowedRecoveryActions":         []string{"replan"},
+		"runtimeRepairLoopState":         "duplicate_failure_escalated",
+		"failureClass":                   class,
+		"failureSignature":               signature,
+		"failureTargetScope":             runtimeFailureTargetScope(signature),
+		"failedStepId":                   string(failedStep.ID),
+		"failedStepKind":                 failedStep.Kind,
+		"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
+		"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
+		"recommendedNextActions":         recommendedNextActions,
+	}
+	for key, value := range diagnostics {
+		if key == "recommendedNextActions" {
+			continue
+		}
+		decisionContext[key] = value
+	}
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "duplicate-failure-decision")),
 		Reason:       localizedDuplicateRuntimeFailureReason(language, signature, reasonErr),
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedDuplicateRuntimeFailureQuestion(language),
-		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
-			decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
-			"allowedRecoveryActions":         []string{"replan"},
-			"runtimeRepairLoopState":         "duplicate_failure_escalated",
-			"failureClass":                   class,
-			"failureSignature":               signature,
-			"failureTargetScope":             runtimeFailureTargetScope(signature),
-			"failedStepId":                   string(failedStep.ID),
-			"failedStepKind":                 failedStep.Kind,
-			"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
-			"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
-		},
+		Context:      decisionContext,
 	}
 	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
 		return err

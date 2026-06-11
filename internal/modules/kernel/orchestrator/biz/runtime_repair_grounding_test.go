@@ -592,6 +592,35 @@ func TestStructuredFailureSignalsFilterExecutionLabelsAndDurations(t *testing.T)
 	}
 }
 
+func TestRuntimeFailureDecisionDiagnosticsIncludesTargetSignalsAndActions(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-decision-diagnostics/step-1",
+		RunID: "run-decision-diagnostics",
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1",
+			"stderr":                  "./main_test.go:20:13: assignment mismatch: 2 variables but constructor returns 1 value",
+			"exitCode":                1,
+		},
+	}
+
+	diagnostics := runtimeFailureDecisionDiagnostics(step, errors.New("exit status 1"))
+
+	signals := mapFromValue(diagnostics["structuredFailureSignals"])
+	if !stringSliceContains(stringSliceFromValue(signals["targetRefs"]), "main_test.go") {
+		t.Fatalf("structuredFailureSignals = %#v, want target ref", signals)
+	}
+	if len(mapSliceFromValue(signals["lineRefs"])) == 0 {
+		t.Fatalf("structuredFailureSignals = %#v, want line refs", signals)
+	}
+	actions := stringSliceFromValue(diagnostics["recommendedNextActions"])
+	if len(actions) == 0 || !strings.Contains(actions[0], "Read the current failure target") {
+		t.Fatalf("recommendedNextActions = %#v, want target-grounded guidance", actions)
+	}
+}
+
 func TestStructuredFailureSignalsKeepExternalReferencesOutOfTargetRefs(t *testing.T) {
 	output := map[string]any{
 		"stderr": strings.Join([]string{

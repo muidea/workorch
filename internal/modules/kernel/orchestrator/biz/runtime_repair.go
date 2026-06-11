@@ -701,33 +701,45 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	language := runDialogLanguage(run)
 	maxAttempts := maxRuntimeRepairAttemptsForPolicy(o.RuntimePolicy())
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
+	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
+	recommendedNextActions := []string{
+		"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",
+		"Prioritize minimal target changes, then rerun targeted verification.",
+		"If key constraints remain unclear, provide a focused decision payload with only missing information.",
+	}
+	if actions := stringSliceFromValue(diagnostics["recommendedNextActions"]); len(actions) > 0 {
+		recommendedNextActions = actions
+	}
+	decisionContext := map[string]any{
+		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
+		"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
+		"attempts":                       o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
+		"maxAttempts":                    maxAttempts,
+		"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+		"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
+		"failureTargetScope":             runtimeFailureTargetScopeFromStep(failedStep),
+		"failedStepId":                   string(failedStep.ID),
+		"repairOfRootStepId":             string(runtimeRepairRootStepID(failedStep)),
+		"failedStepKind":                 failedStep.Kind,
+		"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
+		"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
+		"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
+		"recentRepairAttempts":           o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
+		"recommendedNextActions":         recommendedNextActions,
+	}
+	for key, value := range diagnostics {
+		if key == "recommendedNextActions" {
+			continue
+		}
+		decisionContext[key] = value
+	}
 	spec := runtimeDecisionBlockSpec{
 		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "repair-exhausted-decision")),
 		Reason:       reason,
 		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
 		Question:     localizedRuntimeRepairExhaustionQuestion(language),
-		Context: map[string]any{
-			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
-			decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
-			"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
-			"attempts":                       o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
-			"maxAttempts":                    maxAttempts,
-			"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
-			"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
-			"failureTargetScope":             runtimeFailureTargetScopeFromStep(failedStep),
-			"failedStepId":                   string(failedStep.ID),
-			"repairOfRootStepId":             string(runtimeRepairRootStepID(failedStep)),
-			"failedStepKind":                 failedStep.Kind,
-			"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
-			"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
-			"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
-			"recentRepairAttempts":           o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
-			"recommendedNextActions": []string{
-				"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",
-				"Prioritize minimal target changes, then rerun targeted verification.",
-				"If key constraints remain unclear, provide a focused decision payload with only missing information.",
-			},
-		},
+		Context:      decisionContext,
 	}
 	if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
 		return err
