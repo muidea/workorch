@@ -47,6 +47,14 @@ func FetchWorkspaceContextForSwitch(be backend.Backend, workspaceID string, requ
 	return fetchWorkspaceContext(be, workspaceID, true, optionalRequestSeq(requestSeq))
 }
 
+const activeWorkspacePollInterval = 5 * time.Second
+
+func WaitForActiveWorkspacePoll() tea.Cmd {
+	return tea.Tick(activeWorkspacePollInterval, func(time.Time) tea.Msg {
+		return ActiveWorkspacePollMsg{}
+	})
+}
+
 func RetryWorkspaceContext(workspaceID string, resetMainViewport bool) tea.Cmd {
 	if workspaceID == "" {
 		return nil

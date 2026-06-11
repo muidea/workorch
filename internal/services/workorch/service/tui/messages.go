@@ -33,6 +33,8 @@ type WorkspaceContextRetryMsg struct {
 	ResetMainViewport bool
 }
 
+type ActiveWorkspacePollMsg struct{}
+
 type WorkspaceCreatedMsg struct {
 	Workspace *backend.WorkspaceInfo
 	Error     error
