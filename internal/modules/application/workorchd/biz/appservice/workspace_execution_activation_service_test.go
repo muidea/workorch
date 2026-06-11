@@ -764,7 +764,14 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 		t.Fatalf("DefineDoDWithBackend: %v", err)
 	}
 
-	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{
+		ExecutionContextPatch: map[string]any{
+			"latestOperatorInput": map[string]any{
+				"source":  "tui",
+				"content": "start existing created run",
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
@@ -3787,6 +3794,54 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	}
 	if len(item.Snapshot.Runs) != 1 || item.Snapshot.Workspace.ActiveRunID != activeRunID {
 		t.Fatalf("activation snapshot = %+v, want active run projection", item.Snapshot)
+	}
+}
+
+func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-created-active", "activation created active workspace", "", "workspaces/activation-created-active")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "created active goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"created active dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	created, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspace.ID, "run-activation-created-active", goal.ID, dod.ID)
+	if err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	if created.State != "created" {
+		t.Fatalf("created run = %+v, want created", created)
+	}
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = common.RunID(created.ID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace active run: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
+	}
+	if item.Run.ID != created.ID {
+		t.Fatalf("activation run id = %q, want existing created run %q", item.Run.ID, created.ID)
+	}
+	if item.Run.State == "created" {
+		t.Fatalf("activation run = %+v, want started observable run", item.Run)
+	}
+	if item.Snapshot.Workspace.ActiveRunID != created.ID {
+		t.Fatalf("snapshot activeRunId = %q, want %q", item.Snapshot.Workspace.ActiveRunID, created.ID)
 	}
 }
 

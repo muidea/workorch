@@ -63,6 +63,16 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				}
 				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 			}
+			if run.State == common.RunStateCreated {
+				if err := StartRun(ctx, request.Hub, workspace.ID, run.ID); err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				startedRun, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, run.ID)
+				if err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
+			}
 			return WorkspaceExecutionActivationSnapshot(workspace, run, goal, dod), nil
 		}
 		workspace.ActiveRunID = ""

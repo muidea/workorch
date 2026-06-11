@@ -397,7 +397,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 			if displayRun != nil && runStateIsTerminal(displayRun.State) {
 				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Message: terminalRunContinueMessage(displayRun)}
 			}
-			return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Message: "No active workspace run; submit a goal or use /run restart."}
+			return activateWorkspaceRunWithMessage(ctx, be, wsID, displayRun, operatorInput, "Activating workspace execution")
 		}
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
@@ -409,7 +409,7 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		case common.RunStateBlockedOnApproval:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before continuing."}
 		case common.RunStateCreated:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is created but not running; refreshing workspace state."}
+			return activateWorkspaceRunWithMessage(ctx, be, wsID, run, operatorInput, "Activating workspace execution")
 		case common.RunStateValidating:
 			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
 		default:
@@ -487,13 +487,17 @@ func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput s
 }
 
 func activateWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string) tea.Msg {
+	return activateWorkspaceRunWithMessage(ctx, be, workspaceID, run, operatorInput, "Restarting workspace run")
+}
+
+func activateWorkspaceRunWithMessage(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string, message string) tea.Msg {
 	activated, err := be.Run().Activate(ctx, workspaceID, backend.ActivateRunRequest{
 		ExecutionContextPatch: operatorInputPatch(run, operatorInput),
 	})
 	if err != nil {
 		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
 	}
-	return RunControlMsg{Run: activated, WorkspaceID: string(workspaceID), Message: "Restarting workspace run"}
+	return RunControlMsg{Run: activated, WorkspaceID: string(workspaceID), Message: message}
 }
 
 func operatorInputPatch(run *backend.RunInfo, value string) map[string]any {

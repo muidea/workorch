@@ -962,6 +962,66 @@ func TestContinueRunReturnsBlockedRunWithoutResume(t *testing.T) {
 	}
 }
 
+func TestContinueRunActivatesWorkspaceWhenNoActiveRun(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateCompleted)
+	be.snapshot = &backend.WorkspaceSnapshotInfo{
+		Workspace: backend.WorkspaceInfo{ID: "ws-1"},
+	}
+	msg := ContinueRun(be, "ws-1", "", "continue from tui")()
+	runMsg, ok := msg.(RunControlMsg)
+	if !ok {
+		t.Fatalf("message = %T, want RunControlMsg", msg)
+	}
+	if runMsg.Error != nil {
+		t.Fatalf("error = %v, want nil", runMsg.Error)
+	}
+	if runMsg.Run == nil || runMsg.Run.ID != "run-new" || runMsg.Run.State != common.RunStateRunning {
+		t.Fatalf("run = %+v, want activated workspace run", runMsg.Run)
+	}
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want workspace activation", len(be.activations))
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want activation path", be.resumes)
+	}
+	if got := latestOperatorInputFromPatch(be.activations[0].ExecutionContextPatch); got != "continue from tui" {
+		t.Fatalf("operator input = %q, want continue text", got)
+	}
+}
+
+func TestContinueRunActivatesCreatedRun(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateCreated)
+	msg := ContinueRun(be, "ws-1", "run-continue", "start created run")()
+	runMsg, ok := msg.(RunControlMsg)
+	if !ok {
+		t.Fatalf("message = %T, want RunControlMsg", msg)
+	}
+	if runMsg.Error != nil {
+		t.Fatalf("error = %v, want nil", runMsg.Error)
+	}
+	if runMsg.Run == nil || runMsg.Run.ID != "run-new" {
+		t.Fatalf("run = %+v, want activated run", runMsg.Run)
+	}
+	if len(be.activations) != 1 {
+		t.Fatalf("activations = %d, want activation for created run", len(be.activations))
+	}
+	if len(be.resumes) != 0 {
+		t.Fatalf("resumes = %v, want no resume for created run", be.resumes)
+	}
+	if got := latestOperatorInputFromPatch(be.activations[0].ExecutionContextPatch); got != "start created run" {
+		t.Fatalf("operator input = %q, want created run input", got)
+	}
+}
+
+func latestOperatorInputFromPatch(patch map[string]any) string {
+	if len(patch) == 0 {
+		return ""
+	}
+	latest, _ := patch["latestOperatorInput"].(map[string]any)
+	content, _ := latest["content"].(string)
+	return content
+}
+
 func TestModelInspectCommandsRenderCurrentState(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
