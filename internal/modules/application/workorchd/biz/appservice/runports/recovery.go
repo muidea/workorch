@@ -13,7 +13,7 @@ const StuckRunningRunFailureReason = "stuck running run recovered: no active exe
 const OrphanDispatchedStepRecoveryReason = "orphan dispatched step recovered after service restart"
 const StaleDispatchedStepRecoveryReason = "stale dispatched step recovered by run watchdog"
 const MaxOrphanDispatchedStepRecoveryIterations = 16
-const DefaultStaleDispatchedStepMinAge = 10 * time.Minute
+const DefaultStaleDispatchedStepMinAge = 2 * time.Minute
 
 func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume ResumeRunFunc) ([]appmodelcore.Run, error) {
 	if err := RecoverTerminalActiveWorkspacePointers(ctx, hub); err != nil {

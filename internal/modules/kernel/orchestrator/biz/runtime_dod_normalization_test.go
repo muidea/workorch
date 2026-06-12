@@ -733,6 +733,86 @@ func TestNormalizeCompletionGateDoDAssessmentOutputCompletesRepairFollowUpSupple
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputCompletesRepairFollowUpPrimaryDeliverableWithAcceptedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-repair-primary-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-repair-primary-normalize",
+		DoDID:           "dod-deliverable-coverage-repair-primary-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence"},
+							{"id": "coverage_map", "required": true, "evidenceRole": "supplemental_evidence"},
+						},
+					},
+				},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                    "cwi-001",
+				"sourceRequirementId":   "source_change",
+				"sourceScope":           "deliverable",
+				"evidenceRole":          "primary_state_change",
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"state_change": {"run-deliverable-coverage-repair-primary-normalize/graph-001/001-change"},
+				},
+				"acceptedEvidenceRefs": []string{"run-deliverable-coverage-repair-primary-normalize/graph-001/001-change"},
+				"missingEvidenceKinds": []string{"validation"},
+				"status":               "in_progress",
+			}},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-repair-primary-normalize/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD item is covered and the repair assessment maps the existing evidence.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-repair-primary-normalize/graph-001/002-test"},
+			}},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) != 3 {
+		t.Fatalf("deliverableCoverage.items = %+v, want primary plus supplemental deliverables", items)
+	}
+	wantIDs := []string{"source_change", "validation_report", "coverage_map"}
+	for idx, want := range wantIDs {
+		if got := stringFromMap(items[idx], "id"); got != want {
+			t.Fatalf("deliverableCoverage.items[%d].id = %q, want %q; items=%+v", idx, got, want, items)
+		}
+		if got := stringFromMap(items[idx], "state"); got != "satisfied" {
+			t.Fatalf("deliverableCoverage.items[%d].state = %q, want satisfied", idx, got)
+		}
+		if refs := evidenceRefsFromValue(items[idx]["evidenceRefs"]); len(refs) == 0 {
+			t.Fatalf("deliverableCoverage.items[%d].evidenceRefs is empty", idx)
+		}
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputMapsRepairGoalCoverageByEquivalentText(t *testing.T) {
 	goalText := "针对**非流式响应**，解析返回包中的 `usage` 字段。"
 	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))

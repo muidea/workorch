@@ -22,7 +22,7 @@ const (
 	defaultIdleTimeout                     = 60 * time.Second
 	defaultShutdownTimeout                 = 5 * time.Second
 	defaultMaxConcurrentRuns         int64 = 1
-	defaultStaleDispatchedStepMinAge       = 10 * time.Minute
+	defaultStaleDispatchedStepMinAge       = 2 * time.Minute
 	runSnapshotCacheTTL                    = 2 * time.Second
 	defaultEventRecordPageLimit            = 100
 	maxEventRecordPageLimit                = 500

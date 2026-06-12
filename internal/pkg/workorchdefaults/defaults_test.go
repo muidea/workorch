@@ -552,6 +552,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"concurrency":                false,
 		"quantitative_behavior":      false,
 	}
+	sourceChangeEvidenceFound := false
 	versionControlEvidenceFound := false
 	for _, raw := range requirements {
 		item, ok := raw.(map[string]any)
@@ -559,6 +560,32 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			t.Fatalf("evidence requirement item = %+v, want map", raw)
 		}
 		id, _ := item["id"].(string)
+		if id == "source_change" {
+			if scope, _ := item["scope"].(string); scope != "deliverable" {
+				t.Fatalf("source_change evidence scope = %q, want deliverable", scope)
+			}
+			if role, _ := item["evidenceRole"].(string); role != "primary_state_change" {
+				t.Fatalf("source_change evidenceRole = %q, want primary_state_change", role)
+			}
+			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
+				t.Fatalf("source_change requireDirectEvidence = false, want true")
+			}
+			accepted, ok := item["acceptedStepKinds"].([]any)
+			if !ok {
+				t.Fatalf("source_change acceptedStepKinds = %+v, want list", item["acceptedStepKinds"])
+			}
+			rejected, ok := item["rejectedStepKinds"].([]any)
+			if !ok {
+				t.Fatalf("source_change rejectedStepKinds = %+v, want list", item["rejectedStepKinds"])
+			}
+			assertStringListContains(t, accepted, "patch/apply")
+			assertStringListContains(t, rejected, "file/read")
+			assertStringListContains(t, rejected, "file/list")
+			assertStringListContains(t, rejected, "mcp/resource_read")
+			assertStringListContains(t, rejected, "mcp/prompt_get")
+			sourceChangeEvidenceFound = true
+			continue
+		}
 		if id == "version_control_snapshot" {
 			if scope, _ := item["scope"].(string); scope != "deliverable" {
 				t.Fatalf("version_control_snapshot evidence scope = %q, want deliverable", scope)
@@ -626,6 +653,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	if !versionControlEvidenceFound {
 		t.Fatalf("software-dev evidenceRequirements missing version_control_snapshot in %+v", requirements)
+	}
+	if !sourceChangeEvidenceFound {
+		t.Fatalf("software-dev evidenceRequirements missing source_change in %+v", requirements)
 	}
 }
 

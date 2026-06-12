@@ -310,7 +310,7 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		return assessment
 	}
 	allowPrimary := !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp])
-	required := requiredProfileDeliverableExpectationItems(run, allowPrimary)
+	required := requiredProfileDeliverableExpectationItemsForAssessmentCompletion(run, allowPrimary)
 	if len(required) == 0 {
 		return assessment
 	}
@@ -1180,6 +1180,48 @@ func requiredProfileDeliverableExpectationItems(run *runModel.Run, includePrimar
 		}
 	}
 	return ret
+}
+
+func requiredProfileDeliverableExpectationItemsForAssessmentCompletion(run *runModel.Run, includePrimary bool) []requiredProfileDeliverableExpectation {
+	items := requiredProfileDeliverableExpectationItems(run, true)
+	if includePrimary || len(items) == 0 {
+		return items
+	}
+	ret := make([]requiredProfileDeliverableExpectation, 0, len(items))
+	for _, item := range items {
+		if normalizedCoverageEvidenceRole(item.EvidenceRole) == "supplemental_evidence" ||
+			coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence(run, item.ID) {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func coverageWorkItemsHaveAcceptedPrimaryDeliverableEvidence(run *runModel.Run, deliverableID string) bool {
+	deliverableID = strings.TrimSpace(deliverableID)
+	if run == nil || len(run.ExecutionContext) == 0 || deliverableID == "" {
+		return false
+	}
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "id"))) != deliverableID {
+			continue
+		}
+		if normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")) != "primary_state_change" {
+			continue
+		}
+		if len(mapStringSliceValue(item["acceptedEvidenceByKind"])["state_change"]) > 0 {
+			return true
+		}
+		if len(stringSliceFromValue(item["acceptedEvidenceRefs"])) == 0 {
+			continue
+		}
+		required := stringSet(stringSliceFromValue(item["requiredEvidenceKinds"]))
+		missing := stringSet(coverageMissingEvidenceKinds(item))
+		if required["state_change"] && !missing["state_change"] {
+			return true
+		}
+	}
+	return false
 }
 
 func autoCompletionDeliverableArtifactRefs(run *runModel.Run) []string {

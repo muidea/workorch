@@ -259,6 +259,15 @@
               "description": "Quantified performance, resource, compression, throughput, latency, or budget claims must cite executed measurement evidence with actual numeric output and threshold comparison."
             },
             {
+              "id": "source_change",
+              "scope": "deliverable",
+              "evidenceRole": "primary_state_change",
+              "requireDirectEvidence": true,
+              "acceptedStepKinds": ["patch/apply"],
+              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "description": "A satisfied source_change deliverable must cite direct state-changing patch evidence for the workspace output, not only read-only inspection or summary artifacts."
+            },
+            {
               "id": "version_control_snapshot",
               "scope": "deliverable",
               "evidenceRole": "supplemental_evidence",
