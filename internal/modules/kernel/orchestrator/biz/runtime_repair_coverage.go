@@ -396,6 +396,7 @@ func missingGoalCoverageWithEvidenceCandidates(
 	if len(missing) == 0 {
 		return nil
 	}
+	runSteps := coverageCandidateRunSteps(ctx, steps, run)
 	ret := make([]map[string]any, 0, len(missing))
 	for idx, item := range missing {
 		next := cloneStepPayload(item)
@@ -405,12 +406,12 @@ func missingGoalCoverageWithEvidenceCandidates(
 			next["goalRequirementId"] = goalCoverageRequirementID(idx+1, normalized)
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			if candidates := goalCoverageEvidenceCandidatesForRequirement(ctx, steps, run, failedStep, requirement); len(candidates) > 0 {
+			if candidates := goalCoverageEvidenceCandidatesForRequirementInSteps(runSteps, failedStep, requirement); len(candidates) > 0 {
 				next["evidenceCandidates"] = candidates
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidates(ctx, steps, run, failedStep, requirement, 5)
+			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidatesInSteps(runSteps, failedStep, requirement, 5)
 		}
 		ret = append(ret, next)
 	}
@@ -427,17 +428,18 @@ func missingDoDItemsWithEvidenceCandidates(
 	if len(missing) == 0 {
 		return nil
 	}
+	runSteps := coverageCandidateRunSteps(ctx, steps, run)
 	ret := make([]map[string]any, 0, len(missing))
 	for _, item := range missing {
 		next := cloneStepPayload(item)
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
 			requirement := strings.TrimSpace(stringFromMap(next, "item"))
-			if candidates := goalCoverageEvidenceCandidatesForRequirement(ctx, steps, run, failedStep, requirement); len(candidates) > 0 {
+			if candidates := goalCoverageEvidenceCandidatesForRequirementInSteps(runSteps, failedStep, requirement); len(candidates) > 0 {
 				next["evidenceCandidates"] = candidates
 			}
 		}
 		if len(mapSliceFromValue(next["evidenceCandidates"])) == 0 {
-			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidates(ctx, steps, run, failedStep, strings.TrimSpace(stringFromMap(next, "item")), 5)
+			next["evidenceCandidates"] = latestCoverageBoundActionEvidenceCandidatesInSteps(runSteps, failedStep, strings.TrimSpace(stringFromMap(next, "item")), 5)
 		}
 		ret = append(ret, next)
 	}
@@ -461,15 +463,23 @@ func goalCoverageEvidenceCandidatesForRequirement(
 	failedStep *runModel.Step,
 	requirement string,
 ) []map[string]any {
+	return goalCoverageEvidenceCandidatesForRequirementInSteps(coverageCandidateRunSteps(ctx, steps, run), failedStep, requirement)
+}
+
+func coverageCandidateRunSteps(ctx context.Context, steps repository.StepRepository, run *runModel.Run) []*runModel.Step {
 	if steps == nil || run == nil {
-		return nil
-	}
-	terms := coverageRequirementTerms(requirement)
-	if len(terms) == 0 {
 		return nil
 	}
 	runSteps, err := steps.ListByRun(ctx, run.ID)
 	if err != nil {
+		return nil
+	}
+	return runSteps
+}
+
+func goalCoverageEvidenceCandidatesForRequirementInSteps(runSteps []*runModel.Step, failedStep *runModel.Step, requirement string) []map[string]any {
+	terms := coverageRequirementTerms(requirement)
+	if len(terms) == 0 {
 		return nil
 	}
 	type candidate struct {
@@ -559,11 +569,11 @@ func latestActionEvidenceCandidates(
 	failedStep *runModel.Step,
 	limit int,
 ) []map[string]any {
-	if steps == nil || run == nil || limit <= 0 {
-		return nil
-	}
-	runSteps, err := steps.ListByRun(ctx, run.ID)
-	if err != nil || len(runSteps) == 0 {
+	return latestActionEvidenceCandidatesInSteps(coverageCandidateRunSteps(ctx, steps, run), failedStep, limit)
+}
+
+func latestActionEvidenceCandidatesInSteps(runSteps []*runModel.Step, failedStep *runModel.Step, limit int) []map[string]any {
+	if limit <= 0 || len(runSteps) == 0 {
 		return nil
 	}
 	runSteps = orderedRuntimeContextSteps(runSteps)
@@ -605,15 +615,15 @@ func latestCoverageBoundActionEvidenceCandidates(
 	coverageTarget string,
 	limit int,
 ) []map[string]any {
-	if steps == nil || run == nil || limit <= 0 {
+	return latestCoverageBoundActionEvidenceCandidatesInSteps(coverageCandidateRunSteps(ctx, steps, run), failedStep, coverageTarget, limit)
+}
+
+func latestCoverageBoundActionEvidenceCandidatesInSteps(runSteps []*runModel.Step, failedStep *runModel.Step, coverageTarget string, limit int) []map[string]any {
+	if limit <= 0 || len(runSteps) == 0 {
 		return nil
 	}
 	coverageTarget = normalizeCoverageGapRepairToken(coverageTarget)
 	if coverageTarget == "" {
-		return nil
-	}
-	runSteps, err := steps.ListByRun(ctx, run.ID)
-	if err != nil || len(runSteps) == 0 {
 		return nil
 	}
 	runSteps = orderedRuntimeContextSteps(runSteps)

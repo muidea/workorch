@@ -1212,6 +1212,26 @@ func (r *workspaceScopedStepRepository) ListByRun(ctx context.Context, runID com
 	return nilIfEmpty(ret), nil
 }
 
+func (r *workspaceScopedStepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	ret := []*runmodel.Step{}
+	roots, err := r.store.runRootsByRunID(ctx, runID)
+	if err != nil {
+		if err == common.ErrNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, root := range roots {
+		items, err := r.store.stepRepo(r.store.runPath(root, workspaceScopedStepFile)).ListByRunSummary(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, items...)
+	}
+	sortSteps(ret)
+	return nilIfEmpty(ret), nil
+}
+
 func (r *workspaceScopedStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument

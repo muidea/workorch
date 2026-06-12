@@ -161,6 +161,10 @@ func (r *blockingStepRepository) ListByRun(ctx context.Context, runID common.Run
 	return r.base.ListByRun(ctx, runID)
 }
 
+func (r *blockingStepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	return r.base.ListByRunSummary(ctx, runID)
+}
+
 func (r *blockingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
 	return r.base.Update(ctx, item)
 }

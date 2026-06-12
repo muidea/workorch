@@ -1688,6 +1688,20 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 		t.Fatalf("refreshed output result = %v, want done", refreshed.Output["result"])
 	}
 
+	summaries, err := repo.ListByRunSummary(ctx, common.RunID("run-contract"))
+	if err != nil {
+		t.Fatalf("list step summaries by run: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("list step summaries len = %d, want 2", len(summaries))
+	}
+	if summaries[0].Input["workspaceId"] != "ws-contract" {
+		t.Fatalf("summary input workspaceId = %v, want ws-contract", summaries[0].Input["workspaceId"])
+	}
+	if summaries[0].Output["result"] != "done" {
+		t.Fatalf("summary output result = %v, want done", summaries[0].Output["result"])
+	}
+
 	steps, err = repo.ListByRun(ctx, common.RunID("run-missing"))
 	if err != nil {
 		t.Fatalf("list missing run steps: %v", err)

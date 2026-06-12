@@ -97,6 +97,10 @@ func (r *countingStepRepository) ListByRun(ctx context.Context, runID common.Run
 	return r.inner.ListByRun(ctx, runID)
 }
 
+func (r *countingStepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	return r.inner.ListByRunSummary(ctx, runID)
+}
+
 func (r *countingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
 	r.updateCount.Add(1)
 	return r.inner.Update(ctx, item)
@@ -122,6 +126,10 @@ func (r *blockingCompletedStepRepository) Get(ctx context.Context, id common.Ste
 
 func (r *blockingCompletedStepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
 	return r.inner.ListByRun(ctx, runID)
+}
+
+func (r *blockingCompletedStepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*runmodel.Step, error) {
+	return r.inner.ListByRunSummary(ctx, runID)
 }
 
 func (r *blockingCompletedStepRepository) Update(ctx context.Context, item *runmodel.Step) error {

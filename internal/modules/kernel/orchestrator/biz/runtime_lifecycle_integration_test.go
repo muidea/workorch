@@ -36,6 +36,10 @@ func (r *listFailingStepRepository) ListByRun(context.Context, common.RunID) ([]
 	return nil, r.err
 }
 
+func (r *listFailingStepRepository) ListByRunSummary(context.Context, common.RunID) ([]*runmodel.Step, error) {
+	return nil, r.err
+}
+
 func (r *listFailingStepRepository) Update(ctx context.Context, item *runmodel.Step) error {
 	return r.inner.Update(ctx, item)
 }

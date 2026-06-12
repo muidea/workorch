@@ -286,6 +286,17 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 			t.Fatalf("listed step run = %q, want run-a", item.RunID)
 		}
 	}
+
+	summaries, err := repo.ListByRunSummary(ctx, "run-a")
+	if err != nil {
+		t.Fatalf("list run-a step summaries: %v", err)
+	}
+	if len(summaries) != 2 || summaries[0].ID != "run-a/step-1" || summaries[1].ID != "run-a/step-2" {
+		t.Fatalf("run-a step summaries = %+v, want only run-a steps in order", summaries)
+	}
+	if summaries[0].Output["value"] != "a1" {
+		t.Fatalf("summary output value = %v, want a1", summaries[0].Output["value"])
+	}
 }
 
 func TestToolCallRepositoryStoresItemsWithoutMapRewrite(t *testing.T) {

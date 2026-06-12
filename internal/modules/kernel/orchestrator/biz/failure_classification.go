@@ -556,7 +556,7 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy)) {
 		return false
 	}
-	stepsForRun, err := steps.ListByRun(ctx, run.ID)
+	stepsForRun, err := steps.ListByRunSummary(ctx, run.ID)
 	if err != nil {
 		return false
 	}

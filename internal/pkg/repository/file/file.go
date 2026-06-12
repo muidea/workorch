@@ -1968,6 +1968,40 @@ func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*ru
 	return ret, nil
 }
 
+func (r *StepRepository) ListByRunSummary(_ context.Context, runID common.RunID) ([]*run.Step, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	root := r.stepRoot()
+	dirs, err := repositoryMetadataDirs(repositorySequenceScopeRoot(root, string(runID)))
+	if err != nil {
+		return nil, err
+	}
+	if len(dirs) == 0 {
+		dirs, err = repositoryMetadataDirs(root)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*run.Step, 0, len(dirs))
+	for _, dir := range dirs {
+		item, err := r.loadStepSummaryFromDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		if item.RunID == runID {
+			ret = append(ret, item)
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return string(ret[i].ID) < string(ret[j].ID)
+	})
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
 func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2042,7 +2076,10 @@ func (r *StepRepository) saveStep(item *run.Step) error {
 	if err := writeOptionalMapFile(filepath.Join(dir, "input.json"), item.Input); err != nil {
 		return err
 	}
-	return writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output)
+	if err := writeOptionalMapFile(filepath.Join(dir, "output.json"), item.Output); err != nil {
+		return err
+	}
+	return writeJSONFileAtomic(filepath.Join(dir, "summary.json"), compactStepSummary(item))
 }
 
 func (r *StepRepository) loadStep(id common.StepID) (*run.Step, error) {
@@ -2075,6 +2112,27 @@ func (r *StepRepository) loadStepFromDir(dir string) (*run.Step, error) {
 	item.Input = input
 	item.Output = output
 	return cloneStep(&item), nil
+}
+
+func (r *StepRepository) loadStepSummaryFromDir(dir string) (*run.Step, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "summary.json"))
+	if err == nil {
+		var item run.Step
+		if err := json.Unmarshal(data, &item); err != nil {
+			return nil, err
+		}
+		return cloneStep(&item), nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	item, err := r.loadStepFromDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	summary := compactStepSummary(item)
+	_ = writeJSONFileAtomic(filepath.Join(dir, "summary.json"), summary)
+	return summary, nil
 }
 
 type ToolCallRepository struct {
@@ -3170,6 +3228,16 @@ func cloneStep(item *run.Step) *run.Step {
 	return &cloned
 }
 
+func compactStepSummary(item *run.Step) *run.Step {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Input = compactSummaryMap(item.Input, 0)
+	cloned.Output = compactSummaryMap(item.Output, 0)
+	return &cloned
+}
+
 func cloneToolCall(item *run.ToolCall) *run.ToolCall {
 	cloned := *item
 	cloned.Arguments = cloneMap(item.Arguments)
@@ -3653,6 +3721,80 @@ func cloneMap(input map[string]any) map[string]any {
 		out[k] = cloneAny(v)
 	}
 	return out
+}
+
+func compactSummaryMap(input map[string]any, depth int) map[string]any {
+	if len(input) == 0 || depth > 3 {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	count := 0
+	for k, v := range input {
+		if k == "" {
+			continue
+		}
+		if compactValue, ok := compactSummaryValue(v, depth+1); ok {
+			out[k] = compactValue
+			count++
+			if depth > 0 && count >= 64 {
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func compactSummaryValue(value any, depth int) (any, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return typed, true
+	case string:
+		if len(typed) > 2048 {
+			return typed[:2048], true
+		}
+		return typed, true
+	case []string:
+		if len(typed) > 16 {
+			typed = typed[:16]
+		}
+		return append([]string(nil), typed...), true
+	case map[string]any:
+		if depth > 3 {
+			return nil, false
+		}
+		return compactSummaryMap(typed, depth), true
+	case []map[string]any:
+		if depth > 3 {
+			return nil, false
+		}
+		limit := min(len(typed), 16)
+		out := make([]map[string]any, 0, limit)
+		for _, item := range typed[:limit] {
+			if compactItem := compactSummaryMap(item, depth); len(compactItem) > 0 {
+				out = append(out, compactItem)
+			}
+		}
+		return out, true
+	case []any:
+		if depth > 3 {
+			return nil, false
+		}
+		limit := min(len(typed), 16)
+		out := make([]any, 0, limit)
+		for _, item := range typed[:limit] {
+			if compactItem, ok := compactSummaryValue(item, depth+1); ok {
+				out = append(out, compactItem)
+			}
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func cloneMapSlice(input []map[string]any) []map[string]any {

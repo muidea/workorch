@@ -298,7 +298,7 @@ func runtimeRepairRunHasCompletedStateChangeEvidence(ctx context.Context, repair
 	if repair == nil || repair.steps == nil || runID == "" {
 		return false
 	}
-	steps, err := repair.steps.ListByRun(ctx, runID)
+	steps, err := repair.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return false
 	}

@@ -1364,6 +1364,36 @@ func (r *StepRepository) ListByRun(ctx context.Context, runID common.RunID) ([]*
 	return items, nil
 }
 
+func (r *StepRepository) ListByRunSummary(ctx context.Context, runID common.RunID) ([]*run.Step, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var items []*run.Step
+	workspaceID := common.RuntimeWorkspaceIDFromContext(ctx)
+	matchedWorkspaces := map[common.WorkspaceID]struct{}{}
+	for key, item := range r.items {
+		if item.RunID != runID {
+			continue
+		}
+		itemWorkspaceID := workspaceFromScopedKey(key)
+		if workspaceID != "" && itemWorkspaceID != "" && itemWorkspaceID != workspaceID {
+			continue
+		}
+		matchedWorkspaces[itemWorkspaceID] = struct{}{}
+		items = append(items, compactStepSummary(item))
+	}
+	if workspaceID == "" && len(matchedWorkspaces) > 1 {
+		return nil, common.ErrConflict
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return string(items[i].ID) < string(items[j].ID)
+	})
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
 func (r *StepRepository) Update(ctx context.Context, item *run.Step) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2263,6 +2293,16 @@ func cloneStep(item *run.Step) *run.Step {
 	return &cloned
 }
 
+func compactStepSummary(item *run.Step) *run.Step {
+	if item == nil {
+		return nil
+	}
+	cloned := *item
+	cloned.Input = compactSummaryMap(item.Input, 0)
+	cloned.Output = compactSummaryMap(item.Output, 0)
+	return &cloned
+}
+
 func cloneRun(item *run.Run) *run.Run {
 	cloned := *item
 	if item.ExecutionContext != nil {
@@ -2735,6 +2775,80 @@ func cloneMap(input map[string]any) map[string]any {
 		out[k] = cloneAny(v)
 	}
 	return out
+}
+
+func compactSummaryMap(input map[string]any, depth int) map[string]any {
+	if len(input) == 0 || depth > 3 {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	count := 0
+	for k, v := range input {
+		if k == "" {
+			continue
+		}
+		if compactValue, ok := compactSummaryValue(v, depth+1); ok {
+			out[k] = compactValue
+			count++
+			if depth > 0 && count >= 64 {
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func compactSummaryValue(value any, depth int) (any, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return typed, true
+	case string:
+		if len(typed) > 2048 {
+			return typed[:2048], true
+		}
+		return typed, true
+	case []string:
+		if len(typed) > 16 {
+			typed = typed[:16]
+		}
+		return append([]string(nil), typed...), true
+	case map[string]any:
+		if depth > 3 {
+			return nil, false
+		}
+		return compactSummaryMap(typed, depth), true
+	case []map[string]any:
+		if depth > 3 {
+			return nil, false
+		}
+		limit := min(len(typed), 16)
+		out := make([]map[string]any, 0, limit)
+		for _, item := range typed[:limit] {
+			if compactItem := compactSummaryMap(item, depth); len(compactItem) > 0 {
+				out = append(out, compactItem)
+			}
+		}
+		return out, true
+	case []any:
+		if depth > 3 {
+			return nil, false
+		}
+		limit := min(len(typed), 16)
+		out := make([]any, 0, limit)
+		for _, item := range typed[:limit] {
+			if compactItem, ok := compactSummaryValue(item, depth+1); ok {
+				out = append(out, compactItem)
+			}
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func cloneMapSlice(input []map[string]any) []map[string]any {

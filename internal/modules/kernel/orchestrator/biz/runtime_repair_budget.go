@@ -16,7 +16,7 @@ func (r *repairSubsystem) providerRetryAttemptCount(ctx context.Context, runID c
 	if r == nil || r.steps == nil || runID == "" || rootStepID == "" {
 		return 0
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -47,7 +47,7 @@ func (r *repairSubsystem) hasStateChangingAttempt(ctx context.Context, runID com
 	if r == nil || r.steps == nil || runID == "" {
 		return false
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return false
 	}
@@ -247,7 +247,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCount(ctx context.Context, runID c
 	if r == nil || r.steps == nil || runID == "" {
 		return 0
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -272,7 +272,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForEffectiveScope(ctx context
 	if r == nil || r.steps == nil || runID == "" || failedStep == nil {
 		return 0
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -301,7 +301,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForScopeInWindow(ctx context.
 	if r == nil || r.steps == nil || runID == "" {
 		return 0
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -321,7 +321,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForRootClassInWindow(ctx cont
 	if failureClass == "" {
 		return 0
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -341,7 +341,7 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForFailureTargetInWindow(ctx 
 		return 0
 	}
 	failureClass = strings.TrimSpace(failureClass)
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil {
 		return 0
 	}
@@ -578,7 +578,7 @@ func runtimeRepairExhaustionBlockerHasSuccessEvidence(ctx context.Context, steps
 	if scope.failureSignature == "" && scope.rootStepID == "" && scope.failedStepID == "" {
 		return false
 	}
-	stepsForRun, err := steps.ListByRun(ctx, ticket.RunID)
+	stepsForRun, err := steps.ListByRunSummary(ctx, ticket.RunID)
 	if err != nil {
 		return false
 	}
