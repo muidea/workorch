@@ -665,7 +665,7 @@ func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotMaskFailedDeliverableC
 	}
 }
 
-func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotCompleteRepairFollowUpDeliverableCoverage(t *testing.T) {
+func TestNormalizeCompletionGateDoDAssessmentOutputCompletesRepairFollowUpSupplementalDeliverableCoverage(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-deliverable-coverage-repair-normalize",
 		WorkspaceID:     "ws-deliverable-coverage-repair-normalize",
@@ -679,7 +679,9 @@ func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotCompleteRepairFollowUp
 				"profileContracts": map[string]any{
 					"software-dev": map[string]any{
 						"deliverableExpectations": []map[string]any{
-							{"id": "source_change", "required": true},
+							{"id": "source_change", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence"},
+							{"id": "coverage_map", "required": true, "evidenceRole": "supplemental_evidence"},
 						},
 					},
 				},
@@ -708,9 +710,26 @@ func TestNormalizeCompletionGateDoDAssessmentOutputDoesNotCompleteRepairFollowUp
 	}
 
 	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment := doDAssessmentFromOutput(normalized)
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) != 2 {
+		t.Fatalf("deliverableCoverage.items = %+v, want supplemental deliverables only", items)
+	}
+	wantIDs := []string{"validation_report", "coverage_map"}
+	for idx, want := range wantIDs {
+		if got := stringFromMap(items[idx], "id"); got != want {
+			t.Fatalf("deliverableCoverage.items[%d].id = %q, want %q; items=%+v", idx, got, want, items)
+		}
+		if got := stringFromMap(items[idx], "state"); got != "satisfied" {
+			t.Fatalf("deliverableCoverage.items[%d].state = %q, want satisfied", idx, got)
+		}
+		if refs := stringSliceFromValue(items[idx]["artifactRefs"]); len(refs) == 0 {
+			t.Fatalf("deliverableCoverage.items[%d].artifactRefs is empty", idx)
+		}
+	}
 	_, _, err := validatedCompletionDoDAssessment(run, normalized)
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "deliverableCoverage missing required deliverables: source_change") {
-		t.Fatalf("validatedCompletionDoDAssessment err = %v, want repair follow-up deliverable gap preserved", err)
+		t.Fatalf("validatedCompletionDoDAssessment err = %v, want primary deliverable gap preserved", err)
 	}
 }
 

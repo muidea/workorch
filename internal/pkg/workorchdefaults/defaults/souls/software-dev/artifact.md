@@ -11,6 +11,12 @@
 - final_summary 由 runtime 交付物（Artifact）记录：目标（Goal）达成情况、实现总结、验证总结、已知限制和残余风险
 - deliverable_manifest 由 runtime 交付物（Artifact）记录：所有交付物索引、DoD 条目证据引用和可追溯 URI
 
+## 覆盖规则
+- source_change 是 primary_state_change，必须由真实源码、配置、文档或其他 workspace 状态变更证据支撑，不能只用 summary/report artifact 关闭
+- validation_report、coverage_map、version_control_snapshot、user_deliverable 是 supplemental_evidence，可引用 runtime 生成的 result-summary、deliverable-manifest、workspace-change-diff、git-operation-index 或具体 step evidence
+- 若缺失的是 supplemental_evidence，应优先补全 dodAssessment.deliverableCoverage 的 artifactRefs/evidenceRefs，不要通过 patch/apply 写入 report-only 文件
+- 若缺失的是 primary_state_change，应继续产生受控状态变更或给出 failed assessment/blocker，不要用补充报告冒充代码变更
+
 ## 交付物质量要求
 - unified_diff 只能包含与 Goal 直接相关的文件变更
 - 最终结果必须包含：改动摘要、变更文件、行为变化、验证命令、验证结果、失败/跳过说明、残余风险和后续建议

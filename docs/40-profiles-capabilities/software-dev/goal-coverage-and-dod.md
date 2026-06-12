@@ -53,6 +53,10 @@ evidence policy、deliverable expectation 上的领域特化约束。
 
 - build/test/lint command success 可以作为直接验证证据，但必须映射到具体 Goal / DoD 项。
 - `patch/apply`、`mcp/tool_call`、`shell/command` 等动作证据可以支撑副作用、流式、错误路径和并发声明。
+- `deliverableExpectations.evidenceRole` 决定交付物覆盖闭环：
+  `primary_state_change` 必须由真实 workspace 状态变更或等价主证据支撑；
+  `supplemental_evidence` 可以由 runtime 结果 Artifact、验证证据、版本控制证据或覆盖映射补齐。
+  core runtime 只消费 profile 声明的元数据，不内置 software-dev 专属交付物语义。
 - `file/read`、`file/list`、`mcp/resource_read` 这类只读证据只能作为辅助上下文，不能单独支撑动作类 satisfied 声明。
 - weak / partial evidence 不得直接支撑 accepted result。
 

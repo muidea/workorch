@@ -87,9 +87,7 @@ func normalizeCompletionGateDoDAssessmentOutput(run *runModel.Run, step *runMode
 	normalized := normalizeDoDAssessmentGoalCoverageForRun(assessment, run)
 	normalized = normalizeDoDAssessmentDeliverableCoverageForRun(normalized, run)
 	normalized = normalizeDoDAssessmentCoverageParentSatisfied(normalized)
-	if !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) {
-		normalized = completeDoDAssessmentDeliverableCoverageForRun(normalized, run, step)
-	}
+	normalized = completeDoDAssessmentDeliverableCoverageForRun(normalized, run, step)
 	if boolValue(step.Input[stepInputKeyAssessmentOnly]) &&
 		strings.TrimSpace(stringFromMap(step.Input, "repairObjective")) == "complete_dod_goal_coverage_assessment" {
 		normalized = normalizeDoDAssessmentGoalCoverageForRepairInput(normalized, step.Input)
@@ -311,7 +309,8 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 	if len(assessment) == 0 || run == nil || step == nil {
 		return assessment
 	}
-	required := requiredProfileDeliverableExpectations(run)
+	allowPrimary := !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) && !boolValue(step.Input[stepInputKeyProviderRetryFollowUp])
+	required := requiredProfileDeliverableExpectationItems(run, allowPrimary)
 	if len(required) == 0 {
 		return assessment
 	}
@@ -352,7 +351,8 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		existing[id] = true
 	}
 	missing := make([]string, 0)
-	for _, id := range required {
+	for _, expectation := range required {
+		id := expectation.ID
 		if !existing[id] {
 			missing = append(missing, id)
 		}
@@ -385,6 +385,7 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 			"item":         id,
 			"state":        "satisfied",
 			"evidenceRefs": append([]string(nil), fallbackRefs...),
+			"artifactRefs": autoCompletionDeliverableArtifactRefs(run),
 			"reason":       "auto-derived from accepted DoD/Goal evidence and profile deliverable contract",
 		})
 	}
@@ -1133,6 +1134,23 @@ func validateDoDAssessmentCoversRequiredDeliverables(run *runModel.Run, assessme
 }
 
 func requiredProfileDeliverableExpectations(run *runModel.Run) []string {
+	items := requiredProfileDeliverableExpectationItems(run, true)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]string, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, item.ID)
+	}
+	return ret
+}
+
+type requiredProfileDeliverableExpectation struct {
+	ID           string
+	EvidenceRole string
+}
+
+func requiredProfileDeliverableExpectationItems(run *runModel.Run, includePrimary bool) []requiredProfileDeliverableExpectation {
 	if run == nil || len(run.ExecutionContext) == 0 {
 		return nil
 	}
@@ -1142,7 +1160,7 @@ func requiredProfileDeliverableExpectations(run *runModel.Run) []string {
 		return nil
 	}
 	seen := map[string]bool{}
-	ret := make([]string, 0)
+	ret := make([]requiredProfileDeliverableExpectation, 0)
 	for _, rawProfile := range profileContracts {
 		profile := mapFromValue(rawProfile)
 		if len(profile) == 0 {
@@ -1153,11 +1171,25 @@ func requiredProfileDeliverableExpectations(run *runModel.Run) []string {
 			if id == "" || seen[id] || !boolValue(item["required"]) {
 				continue
 			}
+			role := strings.TrimSpace(stringFromMap(item, "evidenceRole"))
+			if !includePrimary && role != "supplemental_evidence" {
+				continue
+			}
 			seen[id] = true
-			ret = append(ret, id)
+			ret = append(ret, requiredProfileDeliverableExpectation{ID: id, EvidenceRole: role})
 		}
 	}
 	return ret
+}
+
+func autoCompletionDeliverableArtifactRefs(run *runModel.Run) []string {
+	if run == nil || run.ID == "" {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("%s/artifact/result-summary", run.ID),
+		fmt.Sprintf("%s/artifact/deliverable-manifest", run.ID),
+	}
 }
 
 func deliverableCoverageItemsFromAssessment(assessment map[string]any) []map[string]any {
