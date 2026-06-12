@@ -2121,7 +2121,9 @@ func (r *StepRepository) loadStepSummaryFromDir(dir string) (*run.Step, error) {
 		if err := json.Unmarshal(data, &item); err != nil {
 			return nil, err
 		}
-		return cloneStep(&item), nil
+		if stepSummaryCurrent(&item) {
+			return cloneStep(&item), nil
+		}
 	}
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
@@ -3233,8 +3235,8 @@ func compactStepSummary(item *run.Step) *run.Step {
 		return nil
 	}
 	cloned := *item
-	cloned.Input = compactSummaryMap(item.Input, 0)
-	cloned.Output = compactSummaryMap(item.Output, 0)
+	cloned.Input = compactStepSummaryInput(item.Input)
+	cloned.Output = compactStepSummaryOutput(item.Output)
 	return &cloned
 }
 
@@ -3723,28 +3725,109 @@ func cloneMap(input map[string]any) map[string]any {
 	return out
 }
 
-func compactSummaryMap(input map[string]any, depth int) map[string]any {
-	if len(input) == 0 || depth > 3 {
-		return nil
+const stepSummarySchemaVersion = "workorch.step_summary.v2"
+
+func stepSummaryCurrent(item *run.Step) bool {
+	if item == nil || item.Input == nil {
+		return false
 	}
-	out := make(map[string]any, len(input))
-	count := 0
-	for k, v := range input {
-		if k == "" {
-			continue
-		}
-		if compactValue, ok := compactSummaryValue(v, depth+1); ok {
-			out[k] = compactValue
-			count++
-			if depth > 0 && count >= 64 {
-				break
+	return stringFromAny(item.Input["_summarySchemaVersion"]) == stepSummarySchemaVersion
+}
+
+func compactStepSummaryInput(input map[string]any) map[string]any {
+	ret := map[string]any{
+		"_summarySchemaVersion": stepSummarySchemaVersion,
+	}
+	for _, key := range stepSummaryInputKeys {
+		if value, ok := input[key]; ok {
+			if compactValue, ok := compactSummaryValue(value, 0); ok {
+				ret[key] = compactValue
 			}
 		}
 	}
-	if len(out) == 0 {
+	return ret
+}
+
+func compactStepSummaryOutput(output map[string]any) map[string]any {
+	ret := map[string]any{}
+	for _, key := range stepSummaryOutputKeys {
+		if value, ok := output[key]; ok {
+			if compactValue, ok := compactSummaryValue(value, 0); ok {
+				ret[key] = compactValue
+			}
+		}
+	}
+	if len(ret) == 0 {
 		return nil
 	}
-	return out
+	return ret
+}
+
+var stepSummaryInputKeys = []string{
+	"workspaceId",
+	"previousStepId",
+	"previousStepKind",
+	"graphNodeId",
+	"graphRootStepId",
+	"graphPreviousNodeId",
+	"runtimeRepairFollowUp",
+	"runtimeRepairAttempt",
+	"repairOfStepId",
+	"repairOfRootStepId",
+	"repairOfFailureClass",
+	"repairOfFailureSignature",
+	"providerRetryFollowUp",
+	"providerRetryAttempt",
+	"providerRetryRootStepId",
+	"recoveryAction",
+	"recoveryRootStepId",
+	"recoveryLineageType",
+	"recoveryBudgetScope",
+	"failedStepId",
+	"failedStepKind",
+	"failedStepState",
+	"failureClass",
+	"failureSignature",
+	"failureTargetScope",
+	"runtimeStage",
+	"repairObjective",
+	"stateChanging",
+	"assessmentOnly",
+	"noActionableContinuationFollowUp",
+	"fromStaleRepairEvidence",
+	"coverageTargets",
+	"coverageTargetSet",
+}
+
+var stepSummaryOutputKeys = []string{
+	"status",
+	"stage",
+	"summary",
+	"error",
+	"reason",
+	"failureClass",
+	"failureSignature",
+	"contractViolationType",
+	"ignoredExecutionGraphReason",
+	"command",
+	"args",
+	"exitCode",
+	"operation",
+	"stateChanging",
+	"zeroWork",
+	"evidenceQuality",
+	"nextStep",
+	"nextKind",
+	"graphNodeId",
+	"graphRootStepId",
+	"runtimeDiagnostics",
+	"lastFailureDiagnostics",
+	"streamDiagnostics",
+	"patches",
+	"patchRequests",
+	"coverageTargets",
+	"artifactContinuationApply",
+	"llmDecision",
 }
 
 func compactSummaryValue(value any, depth int) (any, bool) {
@@ -3754,37 +3837,37 @@ func compactSummaryValue(value any, depth int) (any, bool) {
 	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		return typed, true
 	case string:
-		if len(typed) > 2048 {
-			return typed[:2048], true
+		if len(typed) > 1024 {
+			return typed[:1024], true
 		}
 		return typed, true
 	case []string:
-		if len(typed) > 16 {
-			typed = typed[:16]
+		if len(typed) > 8 {
+			typed = typed[:8]
 		}
 		return append([]string(nil), typed...), true
 	case map[string]any:
-		if depth > 3 {
+		if depth > 1 {
 			return nil, false
 		}
-		return compactSummaryMap(typed, depth), true
+		return compactSummaryObject(typed, depth+1), true
 	case []map[string]any:
-		if depth > 3 {
+		if depth > 1 {
 			return nil, false
 		}
-		limit := min(len(typed), 16)
+		limit := min(len(typed), 8)
 		out := make([]map[string]any, 0, limit)
 		for _, item := range typed[:limit] {
-			if compactItem := compactSummaryMap(item, depth); len(compactItem) > 0 {
+			if compactItem := compactSummaryObject(item, depth+1); len(compactItem) > 0 {
 				out = append(out, compactItem)
 			}
 		}
 		return out, true
 	case []any:
-		if depth > 3 {
+		if depth > 1 {
 			return nil, false
 		}
-		limit := min(len(typed), 16)
+		limit := min(len(typed), 8)
 		out := make([]any, 0, limit)
 		for _, item := range typed[:limit] {
 			if compactItem, ok := compactSummaryValue(item, depth+1); ok {
@@ -3795,6 +3878,68 @@ func compactSummaryValue(value any, depth int) (any, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func compactSummaryObject(input map[string]any, depth int) map[string]any {
+	if len(input) == 0 || depth > 2 {
+		return nil
+	}
+	out := make(map[string]any, min(len(input), 24))
+	count := 0
+	for _, key := range stepSummaryNestedKeys {
+		if value, ok := input[key]; ok {
+			if compactValue, ok := compactSummaryValue(value, depth+1); ok {
+				out[key] = compactValue
+				count++
+				if count >= 24 {
+					break
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+var stepSummaryNestedKeys = []string{
+	"id",
+	"item",
+	"kind",
+	"state",
+	"source",
+	"summary",
+	"status",
+	"stage",
+	"error",
+	"reason",
+	"class",
+	"failureClass",
+	"failureSignature",
+	"targetRef",
+	"failureTargets",
+	"conflictRef",
+	"serverId",
+	"tool",
+	"uri",
+	"node",
+	"operation",
+	"command",
+	"exitCode",
+	"stateChanging",
+	"zeroWork",
+	"evidenceQuality",
+	"coverageTargets",
+	"patchRequests",
+	"patchType",
+	"diff",
+	"matchedTerms",
+}
+
+func stringFromAny(value any) string {
+	typed, _ := value.(string)
+	return typed
 }
 
 func cloneMapSlice(input []map[string]any) []map[string]any {

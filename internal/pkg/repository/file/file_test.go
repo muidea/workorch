@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -248,11 +249,18 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	repo := NewStepRepository(root)
 	for _, item := range []*runmodel.Step{
 		{
-			ID:     "run-a/step-1",
-			RunID:  "run-a",
-			Kind:   "shell",
-			State:  common.StepStateCompleted,
-			Output: map[string]any{"value": "a1"},
+			ID:    "run-a/step-1",
+			RunID: "run-a",
+			Kind:  "shell",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"workspaceId":             "ws-a",
+				"executionContextPackage": strings.Repeat("x", 8192),
+			},
+			Output: map[string]any{
+				"status": "completed",
+				"value":  "a1",
+			},
 		},
 		{
 			ID:     "run-a/step-2",
@@ -294,8 +302,97 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	if len(summaries) != 2 || summaries[0].ID != "run-a/step-1" || summaries[1].ID != "run-a/step-2" {
 		t.Fatalf("run-a step summaries = %+v, want only run-a steps in order", summaries)
 	}
-	if summaries[0].Output["value"] != "a1" {
-		t.Fatalf("summary output value = %v, want a1", summaries[0].Output["value"])
+	if summaries[0].Input["workspaceId"] != "ws-a" {
+		t.Fatalf("summary input workspaceId = %v, want ws-a", summaries[0].Input["workspaceId"])
+	}
+	if _, ok := summaries[0].Input["executionContextPackage"]; ok {
+		t.Fatalf("summary retained executionContextPackage, want omitted")
+	}
+	if summaries[0].Output["status"] != "completed" {
+		t.Fatalf("summary output status = %v, want completed", summaries[0].Output["status"])
+	}
+	if _, ok := summaries[0].Output["value"]; ok {
+		t.Fatalf("summary retained non-whitelisted output value, want omitted")
+	}
+}
+
+func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "step.json")
+	repo := NewStepRepository(root)
+	stepID := common.StepID("run-legacy/step-1")
+	item := &runmodel.Step{
+		ID:    stepID,
+		RunID: "run-legacy",
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"workspaceId":             "ws-legacy",
+			"runtimeRepairFollowUp":   true,
+			"executionContextPackage": strings.Repeat("x", 8192),
+		},
+		Output: map[string]any{
+			"status":           "completed",
+			"failureSignature": "class=runtime_failed|targetRef=main.go",
+			"rawResponse":      strings.Repeat("y", 8192),
+		},
+	}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	itemDir := filepath.Join(filepath.Dir(root), "steps", "run-legacy", "001-step-1")
+	legacySummary := `{
+		"ID":"run-legacy/step-1",
+		"RunID":"run-legacy",
+		"Kind":"llm/workspace_execution",
+		"State":"completed",
+		"Input":{"workspaceId":"ws-legacy","executionContextPackage":"` + strings.Repeat("z", 4096) + `"},
+		"Output":{"status":"completed","rawResponse":"` + strings.Repeat("r", 4096) + `"}
+	}`
+	if err := os.WriteFile(filepath.Join(itemDir, "summary.json"), []byte(legacySummary), 0o644); err != nil {
+		t.Fatalf("write legacy summary: %v", err)
+	}
+
+	summaries, err := repo.ListByRunSummary(ctx, "run-legacy")
+	if err != nil {
+		t.Fatalf("list run legacy summaries: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summary count = %d, want 1", len(summaries))
+	}
+	if summaries[0].Input["_summarySchemaVersion"] != stepSummarySchemaVersion {
+		t.Fatalf("summary schema = %v, want %s", summaries[0].Input["_summarySchemaVersion"], stepSummarySchemaVersion)
+	}
+	if summaries[0].Input["workspaceId"] != "ws-legacy" || summaries[0].Input["runtimeRepairFollowUp"] != true {
+		t.Fatalf("summary retained input = %+v, want workspace and repair flags", summaries[0].Input)
+	}
+	if _, ok := summaries[0].Input["executionContextPackage"]; ok {
+		t.Fatalf("summary retained executionContextPackage, want omitted")
+	}
+	if summaries[0].Output["failureSignature"] != "class=runtime_failed|targetRef=main.go" {
+		t.Fatalf("summary failureSignature = %v, want retained", summaries[0].Output["failureSignature"])
+	}
+	if _, ok := summaries[0].Output["rawResponse"]; ok {
+		t.Fatalf("summary retained rawResponse, want omitted")
+	}
+
+	rewrittenData, err := os.ReadFile(filepath.Join(itemDir, "summary.json"))
+	if err != nil {
+		t.Fatalf("read rewritten summary: %v", err)
+	}
+	var rewritten runmodel.Step
+	if err := json.Unmarshal(rewrittenData, &rewritten); err != nil {
+		t.Fatalf("unmarshal rewritten summary: %v", err)
+	}
+	if rewritten.Input["_summarySchemaVersion"] != stepSummarySchemaVersion {
+		t.Fatalf("rewritten summary schema = %v, want %s", rewritten.Input["_summarySchemaVersion"], stepSummarySchemaVersion)
+	}
+	if _, ok := rewritten.Input["executionContextPackage"]; ok {
+		t.Fatalf("rewritten summary retained executionContextPackage, want omitted")
+	}
+	if _, ok := rewritten.Output["rawResponse"]; ok {
+		t.Fatalf("rewritten summary retained rawResponse, want omitted")
 	}
 }
 

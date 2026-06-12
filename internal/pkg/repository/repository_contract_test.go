@@ -1635,7 +1635,11 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	}
 
 	fresh.State = common.StepStateCompleted
-	fresh.Output = map[string]any{"result": "done"}
+	fresh.Output = map[string]any{
+		"status":           "completed",
+		"failureSignature": "class=runtime_failed|targetRef=main.go",
+		"result":           "done",
+	}
 	if err := repo.Update(ctx, fresh); err != nil {
 		t.Fatalf("update step: %v", err)
 	}
@@ -1698,8 +1702,14 @@ func testStepRepositoryContract(t *testing.T, factory func() repository.StepRepo
 	if summaries[0].Input["workspaceId"] != "ws-contract" {
 		t.Fatalf("summary input workspaceId = %v, want ws-contract", summaries[0].Input["workspaceId"])
 	}
-	if summaries[0].Output["result"] != "done" {
-		t.Fatalf("summary output result = %v, want done", summaries[0].Output["result"])
+	if summaries[0].Output["status"] != "completed" {
+		t.Fatalf("summary output status = %v, want completed", summaries[0].Output["status"])
+	}
+	if summaries[0].Output["failureSignature"] != "class=runtime_failed|targetRef=main.go" {
+		t.Fatalf("summary output failureSignature = %v, want retained signature", summaries[0].Output["failureSignature"])
+	}
+	if _, ok := summaries[0].Output["result"]; ok {
+		t.Fatalf("summary retained non-whitelisted output result, want omitted")
 	}
 
 	steps, err = repo.ListByRun(ctx, common.RunID("run-missing"))

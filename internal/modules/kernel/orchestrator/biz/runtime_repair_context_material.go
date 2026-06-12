@@ -1692,7 +1692,7 @@ func (r *repairSubsystem) recentRuntimeRepairAttemptSummaries(ctx context.Contex
 	if r == nil || r.steps == nil || runID == "" || failedStep == nil || limit <= 0 {
 		return nil
 	}
-	steps, err := r.steps.ListByRun(ctx, runID)
+	steps, err := r.steps.ListByRunSummary(ctx, runID)
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
