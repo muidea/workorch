@@ -1,0 +1,486 @@
+# Projection-First Read Model And IO Closure Design
+
+Status: active
+
+Type: module-architecture
+
+Last Updated: 2026-06-12
+
+## Purpose
+
+本文根据长期运行后 CPU/IO 高负荷必然复现的核对结果，固化
+`workorchd` 的长期收口设计。
+
+目标是把高频展示读路径从“运行期反复扫描事实日志和大 payload”调整为
+“服务端维护权威 ViewModel projection，Web/TUI 只读取投影并订阅刷新信号”。
+
+本文用于后续代码收口和验收，当前阶段不考虑兼容性。
+
+## Confirmed Problem
+
+长期执行多个 workspace 后，系统会进入持续高 CPU/IO 负载，甚至导致机器无响应。
+
+已确认根因不是单纯的 LLM provider 慢或 TUI 刷新频率问题，而是读路径存在确定性放大：
+
+- `EventRecordRepository.List` 历史上默认读取 event metadata 后继续 hydrate 大 payload。
+- event payload 中包含 LLM request/response、execution graph、checkpoint、artifact/patch 等大对象。
+- TUI/Web/workspace list/status/snapshot/watchdog 等高频读路径会反复触发事件列表读取。
+- workspace projection/list 读取存在无界或近似无界的全局事件扫描。
+- 随着事件总量、payload 体积、workspace 数和执行轮次增加，CPU、GC 和磁盘 IO 必然线性或超线性放大。
+
+合理的文件写入包括：
+
+- 正式状态变更持久化。
+- append-only event metadata 写入。
+- 大 payload 以 ref 方式单独落盘。
+- run/step/result/artifact 等 itemized evidence 写入。
+
+不合理的运行期行为包括：
+
+- 高频展示请求扫描全量 event history。
+- 默认读取 event payload 正文。
+- TUI/Web 为刷新主视图触发重型 snapshot fan-out。
+- watchdog/recovery 为轻量判断间接触发 heavy read-model assembly。
+- projection rebuild 缺少有界 query、去重和 backpressure。
+
+## Design Goals
+
+长期目标：
+
+- `workorchd` 是 workspace ViewModel projection 的服务端 owner。
+- Web/TUI/CLI 主视图只读取服务端整理后的 projection。
+- EventRecord 是事实日志，不作为高频实时视图查询表。
+- 大 payload 默认 ref-only，只有显式 raw/detail/replay 路径才读取正文。
+- workspace list/detail、status bar、prompt hint、SSE refresh 都不能触发全局历史扫描。
+- watchdog、startup recovery、projection gap repair 使用轻量索引或 projection，不使用 heavy snapshot。
+- file backend 长期运行时 CPU/IO 不应随历史 event payload 体积线性增长。
+- 设计保持业务中立，不根据 workspace template、目标文件、测试框架或具体业务语义做分支。
+
+非目标：
+
+- projection 不替代 kernel owner module 的正式状态。
+- projection 不直接执行状态机转换。
+- Web/TUI 不承担服务端状态补偿。
+- 不把 LLM/provider/MCP 等业务能力硬编码进通用 read-model 基础设施。
+
+## Target Architecture
+
+目标读写结构：
+
+```text
+                 kernel owner modules
+       workspace/run/decision/approval/result/...
+                         |
+                  formal repository
+                         |
+              append-only event metadata
+                         |
+              payload refs / raw payload files
+                         |
+                 workorchd projection
+       workspace overview/detail + run heartbeat
+                         |
+        REST snapshot/list + SSE projection changed
+                         |
+                    Web / TUI View
+```
+
+核心边界：
+
+| Layer | Responsibility |
+| --- | --- |
+| Model owner | 正式状态、状态机、业务 command/notification event |
+| EventRecord repository | 事实日志 metadata、可选 payload ref、显式 payload 打开 |
+| Projection manager | 启动 baseline、事件增量投影、gap repair、degraded 状态 |
+| Appservice read ports | projection 查询、detail/raw 显式查询、分页查询 |
+| Server presenter | REST/SSE 参数解析与输出，不做重型聚合 |
+| Web/TUI | 展示 projection、输入 command、订阅刷新，不聚合正式状态 |
+
+## Read Contract
+
+### EventRecord List
+
+`EventRecordRepository.List` 的默认 contract：
+
+- 默认不 hydrate payload。
+- 返回 metadata、payload summary、payload ref。
+- 必须支持 `Limit`。
+- 支持 workspace/run/topic/subject/cursor/time filter。
+- 对高频调用方，必须显式传入 workspace/run scope 和 limit。
+
+只有以下路径允许 `IncludePayload=true`：
+
+- SSE persisted replay 需要恢复完整 envelope。
+- LLM usage trace 需要读取 usage payload。
+- run observability / timeline drill-down 需要从事件 payload 派生诊断进展。
+- 显式 raw/detail/event inspection API。
+- 测试中明确验证 payload round-trip。
+
+禁止：
+
+- workspace list/detail 默认 IncludePayload。
+- TUI/Web 主视图 IncludePayload。
+- watchdog/recovery IncludePayload。
+- 无 query scope 的 IncludePayload。
+
+### Workspace List
+
+workspace list 是高频主视图入口，必须满足：
+
+- 只读取 projection store 或 projection index。
+- 不扫描全局 event history。
+- 不 hydrate payload。
+- 不为每个 workspace 执行 heavy snapshot assembly。
+- 可返回 degraded/stale projection，但必须暴露状态字段。
+
+如果 projection 不 ready：
+
+- 返回 projection state、stale reason、last built time。
+- 允许 detail 后台 warmup。
+- 不在 request path 内同步 full rebuild。
+
+### Workspace Detail
+
+workspace detail 应读取 projection detail：
+
+- 默认只包含 compact task progress、governance、run heartbeat、summary evidence。
+- runtime events 只保留最新有限数量 metadata。
+- LLM usage 只保留 compact summary 和最近有限 trace。
+- historical runs 只保留 active run 与最近有限 run，且不返回 run `ExecutionContext`。
+- workspace `ContextHints` / `EvidencePolicies` 不在默认 detail projection 中返回。
+- full event/raw payload 通过 detail/raw endpoint 打开。
+
+禁止：
+
+- detail 每次请求重新全量扫描 run events。
+- detail 默认返回完整 eventRecords payload。
+- detail 默认返回完整 checkpoint / graph / LLM response body。
+
+### Run Detail And Observability
+
+run snapshot/observability 是显式 drill-down，不属于 workspace 主视图自动刷新路径。
+
+要求：
+
+- 使用 workspace scoped run ID。
+- 默认分页读取 step/tool-call/checkpoint/result/artifact/event。
+- 默认 compact summary。
+- raw body 只能通过受控 ref 打开。
+
+## Write Contract
+
+写入路径保持 append/itemized，不因 projection 优化改变正式状态写入语义：
+
+- owner module 写正式 repository。
+- owner module 发布 notification event。
+- eventstream 追加 event metadata。
+- 大 payload 写 payload ref。
+- projection manager 订阅 event 后异步更新投影。
+
+projection 写入只能写 projection store / projection cache，不写正式 owner repository。
+
+## Projection Store Contract
+
+projection store 需要按 workspace entry 统一管理：
+
+- overview projection
+- detail projection
+- active/projection run id
+- revision
+- source event revision
+- projected source revision
+- updatedAt
+- rebuiltAt
+- stale/degraded/failed state
+- stale reason / last error
+- run heartbeat
+- pending rebuild / in-flight rebuild metadata
+
+同一 workspace 的上述运行期状态不得拆散在多张长期 map 中维护。
+
+projection store 可以是内存优先，后续可增加持久化快照：
+
+- 内存 projection 是服务运行期权威展示源。
+- 持久化 projection snapshot 只用于快速启动 baseline，不是正式状态。
+- projection snapshot 可由 Model + EventRecord 重建。
+
+## Index And Query Direction
+
+为了避免 file backend 运行期全表扫描，需要逐步补齐轻量索引。
+
+### Required Indexes
+
+至少需要以下索引或等价查询能力：
+
+| Index | Purpose |
+| --- | --- |
+| workspace -> latest event metadata | projection baseline / workspace list |
+| workspace/run -> latest event metadata | run heartbeat / detail refresh |
+| workspace/run/topic -> paged event metadata | runtime timeline / observability |
+| event id -> payload ref | explicit raw/detail open |
+| workspace -> active/projection run | workspace overview/detail |
+| workspace/run -> latest step/checkpoint/result/artifact summary | heartbeat / drill-down summary |
+
+索引可以来自：
+
+- file backend marker / segment metadata。
+- repository 内部轻量 index。
+- projection baseline cache。
+- 启动时一次性 compact rebuild。
+
+禁止把“大 payload 正文”放入索引。
+
+### Event Segment Rules
+
+append-only event segment 应保持：
+
+- metadata segment 与 payload file 分离。
+- metadata segment 尽量小而稳定。
+- payload ref 可读且受控。
+- segment scan 可以按 workspace/run/topic 快速缩小范围。
+
+如果当前 file backend 暂时无法做到物理索引，必须先在上层查询收口：
+
+- 所有高频 query 必须带 scope 和 limit。
+- 禁止空 query 用于主视图。
+- full scan 只允许在启动 baseline、维护任务或显式管理命令中出现。
+
+## Projection Update Flow
+
+事件驱动更新规则：
+
+1. owner module 完成正式状态变更。
+2. owner module 发布 notification event。
+3. eventstream append metadata/payload ref。
+4. projection manager observer 只做轻量分类。
+5. observer 把 rebuild/patch task 提交给 framework `BackgroundRoutine`。
+6. projection task 按 workspace 去重、限流、合并。
+7. projection store 更新 revision 和 status。
+8. workorchd 发布 projection changed event。
+9. Web/TUI 收到 SSE 后读取 projection。
+
+observer 禁止：
+
+- 直接执行 heavy snapshot。
+- 直接读取 raw payload。
+- 长时间阻塞 EventHub lane。
+- 为不同 workspace 使用不必要的全局 lane 串行化。
+
+## Watchdog And Recovery Boundary
+
+watchdog 是通用运行期健康检查，不是业务修复器。
+
+允许读取：
+
+- projection run heartbeat。
+- run state compact metadata。
+- latest step/checkpoint compact metadata。
+- governance blocker compact state。
+- stale dispatched / resolved governance blocker / continuation checkpoint summary。
+
+禁止读取：
+
+- 完整 workspace snapshot。
+- 完整 event payload。
+- 全量 LLM response/request body。
+- Web/TUI display-only state。
+
+watchdog 触发动作必须继续通过 appservice/kernel runtime contract：
+
+- resume run
+- recover resolved governance blocker
+- mark generic runtime failure
+- schedule projection repair
+
+不得直接改写正式状态机。
+
+## Web/TUI Contract
+
+Web/TUI 只做 View + Presenter：
+
+- 启动读取 workspace projection list。
+- 切换 workspace 读取 workspace projection detail。
+- 收到 projection changed SSE 后按 workspace scope 刷新。
+- prompt/status/main view 均来自当前 workspace projection。
+- command 提交通过 backend port / REST API，不修改本地正式状态。
+
+Web/TUI 禁止：
+
+- 自行扫描所有 workspace。
+- 自行组合 run/goal/dod/decision/approval/result 正式状态。
+- 为了刷新显示读取 event raw payload。
+- 在 projection not ready 时 fallback 到 heavy fan-out。
+
+## Migration Plan
+
+### Phase 1: Stop Payload Amplification
+
+目标：
+
+- `EventRecordRepository.List` 默认不 hydrate payload。
+- `IncludePayload=true` 只保留在 explicit replay/detail/raw/LLM usage 路径。
+- HTTP `/events` 默认不返回 payload。
+- TUI/Web 主视图不请求 payload。
+
+验收：
+
+- repository contract 测试覆盖默认 payload omitted。
+- explicit payload 测试覆盖 `IncludePayload=true`。
+- run observability 使用独立 payload opt-in query，避免恢复 run event 默认重 payload。
+- pprof 中 `readEventPayload/json.Unmarshal` 不再出现在 TUI idle/status 主热路径。
+
+### Phase 2: Remove Global Event Scans From Main Views
+
+目标：
+
+- workspace list 不使用 `EventRecordQuery{}`。
+- workspace list/detail 读取 projection store。
+- projection baseline/rebuild 内部查询也必须按 workspace/run/topic/limit 收口。
+- status bar/prompt hint 只依赖当前 workspace projection。
+
+验收：
+
+- 静态检查主视图路径无空 event query。
+- workspace snapshot HTTP endpoint 返回 compact projection：历史 runs 有界、LLM usage trace 有界、run execution context 省略、summary 保持完整。
+- TUI 切换 workspace 不触发全局 event scan。
+- Web workspace board refresh 不触发 heavy snapshot fan-out。
+
+### Phase 3: Projection Index And Backpressure
+
+目标：
+
+- projection manager 维护 per-workspace rebuild entry。
+- rebuild task 去重、合并、限流。
+- 不同 workspace 的无共享状态 rebuild 可并行。
+- 同一 workspace 的 rebuild 保持顺序。
+- projection metrics 暴露 pending、dropped、duration、stale count。
+
+验收：
+
+- 多 workspace 并行执行时 projection pending 不持续增长。
+- `workorch_run_requests_in_flight=0` 且无新事件时 CPU 回落到稳定低位。
+- projection rebuild duration 与 event history 总 payload size 无明显相关。
+
+### Phase 4: File Backend Lightweight Index
+
+目标：
+
+- event metadata 查询支持 workspace/run/topic 有界读取。
+- latest event / latest run heartbeat 不依赖扫描全部 segment。
+- payload file 只在 explicit open 时读取。
+- large event segment 支持 rotation 与 cursor。
+
+验收：
+
+- 长历史 workspace 下 workspace list 查询耗时稳定。
+- event list page 查询按 limit 返回。
+- raw/detail 打开大 payload 时只影响该请求，不影响主视图。
+
+### Phase 5: Persisted Projection Snapshot
+
+目标：
+
+- projection store 可定期保存 compact snapshot。
+- 启动时先加载 compact projection snapshot，再进行后台 gap repair。
+- readyz 能表达 projection baseline/stale/degraded。
+
+验收：
+
+- 大历史数据集启动不会同步扫描所有 payload。
+- projection 可服务时间与历史 payload 总量解耦。
+- gap repair 期间 Web/TUI 可展示 degraded projection。
+
+## Verification Plan
+
+### Static Verification
+
+检查项：
+
+- 高频路径不存在 `EventRecordQuery{}`。
+- 高频路径不存在 `IncludePayload=true`。
+- TUI/Web backend 不直接调用 raw event payload。
+- watchdog/recovery 不调用 heavy snapshot assembly。
+- server handler 不直接做 full rebuild。
+
+建议命令：
+
+```bash
+rg "EventRecordQuery\\{\\}" internal
+rg "IncludePayload:\\s*true" internal
+rg "ListProjectedWorkspaces|Snapshot|ListEvents" internal/modules/application internal/services
+```
+
+### Unit And Integration Tests
+
+至少覆盖：
+
+- repository default list omits payload。
+- explicit include payload works。
+- workspace list uses projection / scoped bounded event query。
+- projection changed SSE carries workspace scope and revision。
+- TUI workspace switch consumes projection detail。
+- watchdog uses compact state and does not hydrate payload。
+
+### Runtime Verification
+
+长期运行验证必须采集：
+
+- CPU percent
+- RSS
+- GC pause / heap
+- disk read/write bytes
+- event payload hydrate count
+- event metadata scan count
+- projection rebuild count/duration
+- projection pending/dropped
+- workspace list/detail latency
+- `/metrics` idle baseline
+
+验收标准：
+
+- 多轮执行后，当 `run_requests_in_flight=0` 且无新 projection task 时，CPU 回落。
+- TUI idle 不持续触发磁盘读。
+- Web/TUI workspace switch 不触发 payload hydrate。
+- 历史 payload 总量增长不会导致 workspace list/detail 成本同比增长。
+
+## Code Areas To Close
+
+优先核对以下路径：
+
+- `internal/pkg/repository/event_record_repository.go`
+- `internal/pkg/repository/file/file.go`
+- `internal/pkg/repository/memory/memory.go`
+- `internal/pkg/workorchrepo`
+- `internal/modules/kernel/eventstream`
+- `internal/modules/application/workorchd/biz/appservice/readmodelcore`
+- `internal/modules/application/workorchd/biz/appservice/readmodelports`
+- `internal/modules/application/workorchd/biz/appservice/readmodelprojection`
+- `internal/modules/application/workorchd/biz/appservice/workspaceviewcore`
+- `internal/modules/application/workorchd/service/server`
+- `internal/services/workorch/biz/backends`
+- `internal/services/workorch/service/tui`
+- `web/workorch-console`
+- `scripts/observe-workorch-runtime-closure.sh`
+- `scripts/verify-workorch-managed-full.sh`
+
+## Acceptance Checklist
+
+- [x] Event list default is metadata-only.
+- [x] Payload hydration is opt-in and scope-bound.
+- [ ] Workspace list reads projection, not global event history.
+- [x] Workspace detail projection is compact by default.
+- [ ] TUI prompt/status/main view are projection-driven.
+- [ ] Web board/detail are projection-driven.
+- [ ] Watchdog uses compact state only.
+- [ ] Projection manager has per-workspace dedupe/backpressure.
+- [ ] File backend supports bounded metadata queries.
+- [ ] Metrics expose payload hydrate and metadata scan pressure.
+- [ ] Long-running multi-workspace idle CPU/IO returns to stable baseline.
+
+## Source Documents
+
+- `application-workorchd.md`
+- `mvvp-workspace-viewmodel-architecture.md`
+- `storage-readmodel.md`
+- `../50-product-interface/tui/display-refresh-consistency-design.md`
+- `../70-roadmap/active/workorchd-state-loop-and-projection-closure-plan.md`

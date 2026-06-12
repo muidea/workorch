@@ -66,6 +66,7 @@ const (
 	PayloadKeyOccurredAfter          = "occurredAfter"
 	PayloadKeyOccurredBefore         = "occurredBefore"
 	PayloadKeyLimit                  = "limit"
+	PayloadKeyIncludePayload         = "includePayload"
 	PayloadKeyProviderID             = "providerId"
 	PayloadKeyOperation              = "operation"
 	PayloadKeyItemType               = "itemType"

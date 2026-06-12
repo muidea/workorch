@@ -20,4 +20,5 @@ type EventRecordQuery struct {
 	OccurredAfter  string
 	OccurredBefore string
 	Limit          int
+	IncludePayload bool
 }

@@ -124,11 +124,18 @@ func TestEventRecordRepositoryAppendsJSONLSegmentsWithoutMapRewrite(t *testing.T
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
-	if len(items) != 1 || items[0].Payload["large"] != payload {
-		t.Fatalf("events = %+v, want rehydrated large payload", items)
+	if len(items) != 1 || len(items[0].Payload) != 0 {
+		t.Fatalf("events = %+v, want lightweight event without payload", items)
 	}
 	if items[0].PayloadRef == "" || len(items[0].PayloadSummary) == 0 {
 		t.Fatalf("event payload projection = ref:%q summary:%+v, want ref and summary", items[0].PayloadRef, items[0].PayloadSummary)
+	}
+	withPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: common.RunID("run-jsonl"), IncludePayload: true})
+	if err != nil {
+		t.Fatalf("list events with payload: %v", err)
+	}
+	if len(withPayload) != 1 || withPayload[0].Payload["large"] != payload {
+		t.Fatalf("events = %+v, want rehydrated large payload", withPayload)
 	}
 }
 

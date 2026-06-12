@@ -54,6 +54,7 @@ func eventRecordQueryFromRequest(r *http.Request) appservice.EventRecordQuery {
 		OccurredAfter:  values.Get("occurredAfter"),
 		OccurredBefore: values.Get("occurredBefore"),
 		Limit:          limit,
+		IncludePayload: strings.EqualFold(strings.TrimSpace(values.Get("includePayload")), "true"),
 	}
 }
 

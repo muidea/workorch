@@ -40,6 +40,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
+	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -3636,6 +3637,102 @@ func TestWorkspaceSnapshotEndpointReturnsRelatedRunsAndBlockingItems(t *testing.
 	}
 }
 
+func TestWorkspaceSnapshotEndpointReturnsCompactProjection(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-compact-http")
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}), nil)
+	ctx := context.Background()
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	if err := repos.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "compact projection",
+		DeliverableDirectory: "workspaces/compact-projection",
+		State:                common.WorkspaceStateActive,
+		ActiveRunID:          "run-00",
+		ContextHints:         map[string]any{"large": strings.Repeat("x", 128)},
+		EvidencePolicies:     []map[string]any{{"large": strings.Repeat("x", 128)}},
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	for idx := 0; idx < 12; idx++ {
+		runID := common.RunID(fmt.Sprintf("run-%02d", idx))
+		if err := repos.Runs.Create(ctx, &runmodel.Run{
+			ID:               runID,
+			WorkspaceID:      workspaceID,
+			State:            common.RunStateRunning,
+			ExecutionContext: map[string]any{"large": strings.Repeat("x", 128)},
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+	}
+	for idx := 0; idx < 24; idx++ {
+		runID := common.RunID("run-11")
+		if idx == 0 {
+			runID = "run-00"
+		}
+		if err := repos.EventRecords.Append(ctx, &eventstreammodel.EventRecord{
+			ID:          common.EventRecordID(fmt.Sprintf("usage-%02d", idx)),
+			Version:     events.WorkorchEventVersion,
+			Topic:       runevents.TopicRunLLMUsageRecorded,
+			OccurredAt:  fmt.Sprintf("2026-06-12T00:%02d:00Z", idx),
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			StepID:      common.StepID(fmt.Sprintf("%s/step-%02d", runID, idx)),
+			Payload: map[string]any{
+				events.PayloadKeyWorkspaceID:  string(workspaceID),
+				events.PayloadKeyRunID:        string(runID),
+				events.PayloadKeyStepID:       fmt.Sprintf("%s/step-%02d", runID, idx),
+				events.PayloadKeyProviderID:   "provider-compact",
+				events.PayloadKeyProvider:     "compatible",
+				events.PayloadKeyModel:        "model-compact",
+				events.PayloadKeyOperation:    "chat_completions",
+				events.PayloadKeyInputTokens:  10 + idx,
+				events.PayloadKeyOutputTokens: 1,
+				events.PayloadKeyTotalTokens:  11 + idx,
+				events.PayloadKeyStatus:       "completed",
+			},
+		}); err != nil {
+			t.Fatalf("append usage event %d: %v", idx, err)
+		}
+	}
+	state.rebuildProjectedWorkspace(ctx, string(workspaceID))
+	handler := newMuxWithState(state)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+string(workspaceID)+"/snapshot", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace snapshot: %v", err)
+	}
+	if body.Snapshot.Workspace.ContextHints != nil || body.Snapshot.Workspace.EvidencePolicies != nil {
+		t.Fatalf("workspace heavy fields = %+v, want compact projection", body.Snapshot.Workspace)
+	}
+	if body.Snapshot.Run == nil || body.Snapshot.Run.ExecutionContext != nil {
+		t.Fatalf("run = %+v, want compact active run", body.Snapshot.Run)
+	}
+	if len(body.Snapshot.Runs) != 11 {
+		t.Fatalf("runs = %d, want active run plus latest 10 compact runs", len(body.Snapshot.Runs))
+	}
+	for _, item := range body.Snapshot.Runs {
+		if item.ExecutionContext != nil {
+			t.Fatalf("run %s execution context = %+v, want compact run", item.ID, item.ExecutionContext)
+		}
+	}
+	if len(body.Snapshot.LLMUsageTraces) != 20 {
+		t.Fatalf("llm usage traces = %d, want latest 20 traces", len(body.Snapshot.LLMUsageTraces))
+	}
+	if body.Snapshot.LLMUsageTraces[0].ID != "usage-04" {
+		t.Fatalf("first usage trace = %q, want latest traces retained", body.Snapshot.LLMUsageTraces[0].ID)
+	}
+	if body.Snapshot.LLMUsageSummary.EntryTotal != 24 {
+		t.Fatalf("summary entry total = %d, want full total", body.Snapshot.LLMUsageSummary.EntryTotal)
+	}
+}
+
 func TestRunCreateEndpointReturnsConflictForDuplicateID(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
@@ -4525,6 +4622,99 @@ func TestServerStateGovernanceRunResumeUsesWorkspaceContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("governance resume did not run")
+	}
+}
+
+func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	const workspaceID = "ws-resolved-decision-recovery"
+	const runID = "run-resolved-decision-recovery"
+	const ticketID = "ticket-resolved-decision-recovery"
+	resumed := make(chan common.WorkspaceID, 1)
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID}}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{{
+			ID:               runID,
+			WorkspaceID:      workspaceID,
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: ticketID,
+		}}, nil
+	}
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{{
+			ID:          ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.DecisionTicketStateResolved),
+		}}, nil
+	}
+	state.resumeRun = func(ctx context.Context, _, _, id string, _ ...map[string]any) (appservice.Run, error) {
+		if id != runID {
+			t.Fatalf("runID = %q, want %s", id, runID)
+		}
+		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
+		resumed <- workspaceScope
+		return appservice.Run{ID: runID, WorkspaceID: workspaceID, State: string(common.RunStateRunning)}, nil
+	}
+
+	if err := state.runContinuations.recoverResolvedGovernanceBlockedRuns(context.Background()); err != nil {
+		t.Fatalf("recoverResolvedGovernanceBlockedRuns: %v", err)
+	}
+	select {
+	case workspaceScope := <-resumed:
+		if workspaceScope != workspaceID {
+			t.Fatalf("resume workspace scope = %q, want %s", workspaceScope, workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("resolved governance blocked run was not resumed")
+	}
+}
+
+func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	const workspaceID = "ws-open-decision-recovery"
+	const runID = "run-open-decision-recovery"
+	const ticketID = "ticket-open-decision-recovery"
+	resumed := make(chan struct{}, 1)
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		return []appservice.Workspace{{ID: workspaceID, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID}}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{{
+			ID:               runID,
+			WorkspaceID:      workspaceID,
+			State:            string(common.RunStateBlockedOnDecision),
+			BlockingTicketID: ticketID,
+		}}, nil
+	}
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{{
+			ID:          ticketID,
+			WorkspaceID: workspaceID,
+			RunID:       runID,
+			State:       string(common.DecisionTicketStateOpen),
+		}}, nil
+	}
+	state.resumeRun = func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error) {
+		resumed <- struct{}{}
+		return appservice.Run{}, nil
+	}
+
+	if err := state.runContinuations.recoverResolvedGovernanceBlockedRuns(context.Background()); err != nil {
+		t.Fatalf("recoverResolvedGovernanceBlockedRuns: %v", err)
+	}
+	select {
+	case <-resumed:
+		t.Fatalf("open decision blocked run should not be resumed")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

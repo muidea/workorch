@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-09
+Last Updated: 2026-06-12
 
 ## Purpose
 
@@ -29,7 +29,9 @@ Last Updated: 2026-06-09
 - 让 Web/TUI 在端侧重建 workspace 状态投影
 
 workspace ViewModel 的完整设计以
-`mvvp-workspace-viewmodel-architecture.md` 为准。
+`mvvp-workspace-viewmodel-architecture.md` 为准。长期运行下的 projection-first
+读路径、EventRecord payload、file backend IO 和 CPU/IO 收口设计以
+`projection-first-readmodel-io-closure-design.md` 为准。
 
 ## Main Components
 
@@ -147,6 +149,11 @@ workorchd 启动恢复属于应用层 use-case 组合，职责是把 repository 
 - 应用层只能识别这些通用状态形态，不得根据 workspace template、具体文件、测试框架或业务目标做分支。
 - 恢复后状态仍由 kernel run/orchestrator 决定，appservice 只返回恢复结果投影。
 
+Run watchdog / continuation recovery 是该边界的运行期扩展：workorchd 可以通过 framework `BackgroundRoutine`
+注册启动恢复任务和周期 timer，扫描 stale dispatched、resolved governance blocker、replan continuation
+等通用运行时形态，但不得直接改写正式状态机。详细触发时机、影响范围和后续特性跟踪见
+`../70-roadmap/active/workorchd-state-loop-and-projection-closure-plan.md#p24-run-watchdog--continuation-recovery`。
+
 典型入口包括：
 
 - HTTP read/write handler
@@ -209,4 +216,5 @@ ViewModel projection：
 
 - `repository-structure.md`
 - `mvvp-workspace-viewmodel-architecture.md`
+- `projection-first-readmodel-io-closure-design.md`
 - `../50-product-interface/service-api.md`

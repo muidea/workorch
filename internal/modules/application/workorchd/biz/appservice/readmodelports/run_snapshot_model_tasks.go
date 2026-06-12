@@ -10,7 +10,7 @@ import (
 func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() error, readers RunSnapshotReaders, item *runmodel.Run, models *runSnapshotModels) []func() error {
 	tasks = append(tasks, func() error {
 		var err error
-		models.EventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunEventRecordRepositoryQuery(item.ID, readmodelcore.DefaultEventRecordLimit))
+		models.EventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunObservabilityEventRecordRepositoryQuery(item.ID, readmodelcore.DefaultEventRecordLimit))
 		return err
 	})
 	tasks = append(tasks, func() error {

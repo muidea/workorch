@@ -889,7 +889,13 @@ func (r *EventRecordRepository) List(ctx context.Context, query repository.Event
 			return nil, common.ErrConflict
 		}
 	}
-	return listEventRecords(r.items, query), nil
+	items := listEventRecords(r.items, query)
+	if !query.IncludePayload {
+		for _, item := range items {
+			stripEventRecordPayload(item)
+		}
+	}
+	return items, nil
 }
 
 func (r *EventRecordRepository) Delete(ctx context.Context, id common.EventRecordID) error {
@@ -2545,6 +2551,16 @@ func listEventRecords(items map[string]*eventstream.EventRecord, query repositor
 		return nil
 	}
 	return ret
+}
+
+func stripEventRecordPayload(item *eventstream.EventRecord) {
+	if item == nil || len(item.Payload) == 0 {
+		return
+	}
+	if len(item.PayloadSummary) == 0 {
+		item.PayloadSummary = map[string]any{"fieldCount": len(item.Payload)}
+	}
+	item.Payload = nil
 }
 
 func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {

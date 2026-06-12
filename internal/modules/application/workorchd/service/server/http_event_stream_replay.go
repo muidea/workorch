@@ -44,10 +44,11 @@ func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID 
 		return nil
 	}
 	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, appservice.EventRecordQuery{
-		WorkspaceID:   strings.TrimSpace(workspaceID),
-		RunID:         strings.TrimSpace(runID),
-		CursorAfterID: strings.TrimSpace(lastEventID),
-		Limit:         maxEventRecordPageLimit,
+		WorkspaceID:    strings.TrimSpace(workspaceID),
+		RunID:          strings.TrimSpace(runID),
+		CursorAfterID:  strings.TrimSpace(lastEventID),
+		Limit:          maxEventRecordPageLimit,
+		IncludePayload: true,
 	})
 	if err != nil || len(items) == 0 {
 		return nil

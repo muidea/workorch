@@ -31,6 +31,7 @@ Last Updated: 2026-06-09
 8. [blocks-runtime-adapters.md](blocks-runtime-adapters.md)
 9. [llm-provider-assembly.md](llm-provider-assembly.md)
 10. [storage-readmodel.md](storage-readmodel.md)
+11. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
 
 ## Cross-Layer Boundary
 

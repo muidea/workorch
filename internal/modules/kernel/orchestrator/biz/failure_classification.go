@@ -602,8 +602,10 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	return true
 }
 
+const minRepeatedTargetDiagnosticAttemptsBeforeDecision = 4
+
 func runtimeFailureRepeatedTargetDiagnosticCanEscalate(class string, targetScope string, attempts int, duplicateFound bool) bool {
-	if !duplicateFound || attempts < 3 || strings.TrimSpace(targetScope) == "" {
+	if !duplicateFound || attempts < minRepeatedTargetDiagnosticAttemptsBeforeDecision || strings.TrimSpace(targetScope) == "" {
 		return false
 	}
 	switch strings.TrimSpace(class) {

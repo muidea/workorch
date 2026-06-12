@@ -11,7 +11,7 @@ import (
 
 const (
 	DefaultEventRecordLimit         = 100
-	DefaultLLMUsageEventRecordLimit = 5000
+	DefaultLLMUsageEventRecordLimit = 200
 )
 
 func EventRecordRepositoryQuery(query EventRecordQuery) repository.EventRecordQuery {
@@ -25,6 +25,7 @@ func EventRecordRepositoryQuery(query EventRecordQuery) repository.EventRecordQu
 		OccurredAfter:  strings.TrimSpace(query.OccurredAfter),
 		OccurredBefore: strings.TrimSpace(query.OccurredBefore),
 		Limit:          query.Limit,
+		IncludePayload: query.IncludePayload,
 	}
 }
 
@@ -35,9 +36,16 @@ func RunEventRecordRepositoryQuery(runID common.RunID, limit int) repository.Eve
 	}
 }
 
+func RunObservabilityEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
+	query := RunEventRecordRepositoryQuery(runID, limit)
+	query.IncludePayload = true
+	return query
+}
+
 func RunLLMUsageEventRecordRepositoryQuery(runID common.RunID, limit int) repository.EventRecordQuery {
 	query := RunEventRecordRepositoryQuery(runID, limit)
 	query.Topic = runevents.TopicRunLLMUsageRecorded
+	query.IncludePayload = true
 	return query
 }
 
@@ -51,5 +59,6 @@ func WorkspaceEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit i
 func WorkspaceLLMUsageEventRecordRepositoryQuery(workspaceID common.WorkspaceID, limit int) repository.EventRecordQuery {
 	query := WorkspaceEventRecordRepositoryQuery(workspaceID, limit)
 	query.Topic = runevents.TopicRunLLMUsageRecorded
+	query.IncludePayload = true
 	return query
 }

@@ -75,6 +75,9 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
 				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
 			}
+			if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
+				slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
+			}
 		}},
 		runWatchdogInterval,
 		0,
@@ -110,6 +113,9 @@ func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) 
 			runIDs = append(runIDs, item.ID)
 		}
 		slog.Warn("workorch recovered stuck running runs", "runIDs", runIDs)
+	}
+	if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
+		slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
 	}
 	s.recoverReplanContinuations(ctx)
 	return nil
@@ -159,6 +165,106 @@ func (s *runContinuationScheduler) recoverStaleDispatchedRuns(ctx context.Contex
 	}
 	slog.Warn("workorch recovered stale dispatched runs", "runIDs", runIDs)
 	return nil
+}
+
+func (s *runContinuationScheduler) recoverResolvedGovernanceBlockedRuns(ctx context.Context) error {
+	if s == nil || s.state == nil || s.state.listWorkspaces == nil || s.state.listRuns == nil {
+		return nil
+	}
+	state := s.state
+	workspaces, err := state.listWorkspaces(ctx, state.config.Backend, state.config.DataRoot)
+	if err != nil {
+		return err
+	}
+	var refs []governanceRunResumeRef
+	for _, workspace := range workspaces {
+		workspaceID := strings.TrimSpace(workspace.ID)
+		if workspaceID == "" {
+			continue
+		}
+		runs, err := state.listRuns(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID)), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			slog.Warn("workorch governance blocked run recovery run scan failed", "workspaceID", workspaceID, "err", err)
+			continue
+		}
+		for _, run := range runs {
+			if ref, ok := s.resolvedGovernanceResumeRefForRun(ctx, workspaceID, run); ok {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	s.scheduleGovernanceRunResumeRefs(refs, 0)
+	return nil
+}
+
+func (s *runContinuationScheduler) resolvedGovernanceResumeRefForRun(ctx context.Context, workspaceID string, run appservice.Run) (governanceRunResumeRef, bool) {
+	if s == nil || s.state == nil {
+		return governanceRunResumeRef{}, false
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(run.WorkspaceID)
+	}
+	runID := strings.TrimSpace(run.ID)
+	if workspaceID == "" || runID == "" {
+		return governanceRunResumeRef{}, false
+	}
+	switch common.RunState(run.State) {
+	case common.RunStateBlockedOnDecision:
+		if strings.TrimSpace(run.BlockingTicketID) == "" || !s.runHasResolvedDecision(ctx, workspaceID, runID, run.BlockingTicketID) {
+			return governanceRunResumeRef{}, false
+		}
+	case common.RunStateBlockedOnApproval:
+		if strings.TrimSpace(run.BlockingApprovalID) == "" || !s.runHasResolvedApproval(ctx, workspaceID, runID, run.BlockingApprovalID) {
+			return governanceRunResumeRef{}, false
+		}
+	default:
+		return governanceRunResumeRef{}, false
+	}
+	return governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID}, true
+}
+
+func (s *runContinuationScheduler) runHasResolvedDecision(ctx context.Context, workspaceID string, runID string, ticketID string) bool {
+	if s == nil || s.state == nil || s.state.listDecisions == nil {
+		return false
+	}
+	items, err := s.state.listDecisions(ctx, s.state.config.Backend, s.state.config.DataRoot, workspaceID, runID)
+	if err != nil {
+		slog.Warn("workorch governance blocked run recovery decision lookup failed", "workspaceID", workspaceID, "runID", runID, "ticketID", ticketID, "err", err)
+		return false
+	}
+	for _, item := range items {
+		if item.ID == ticketID &&
+			item.WorkspaceID == workspaceID &&
+			item.RunID == runID &&
+			item.State == string(common.DecisionTicketStateResolved) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *runContinuationScheduler) runHasResolvedApproval(ctx context.Context, workspaceID string, runID string, approvalID string) bool {
+	if s == nil || s.state == nil || s.state.listApprovals == nil {
+		return false
+	}
+	items, err := s.state.listApprovals(ctx, s.state.config.Backend, s.state.config.DataRoot, workspaceID, runID)
+	if err != nil {
+		slog.Warn("workorch governance blocked run recovery approval lookup failed", "workspaceID", workspaceID, "runID", runID, "approvalID", approvalID, "err", err)
+		return false
+	}
+	for _, item := range items {
+		if item.ID == approvalID &&
+			item.WorkspaceID == workspaceID &&
+			item.RunID == runID &&
+			(item.State == string(common.ApprovalStateApproved) || item.State == string(common.ApprovalStateRejected) || item.State == string(common.ApprovalStateResolved)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *runContinuationScheduler) markStartupRecoveryStarted() bool {

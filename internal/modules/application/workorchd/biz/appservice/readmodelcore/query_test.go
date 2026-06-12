@@ -49,6 +49,7 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 		OccurredAfter:  " 2026-01-01T00:00:00Z ",
 		OccurredBefore: " 2026-01-02T00:00:00Z ",
 		Limit:          50,
+		IncludePayload: true,
 	}
 
 	got := EventRecordRepositoryQuery(query)
@@ -71,6 +72,9 @@ func TestEventRecordRepositoryQueryNormalizesFields(t *testing.T) {
 	if got.Limit != 50 {
 		t.Fatalf("limit mismatch: %d", got.Limit)
 	}
+	if !got.IncludePayload {
+		t.Fatalf("include payload mismatch: %v", got.IncludePayload)
+	}
 }
 
 func TestRunEventRecordRepositoryQueries(t *testing.T) {
@@ -84,6 +88,23 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	if got.Limit != 100 {
 		t.Fatalf("limit mismatch: %d", got.Limit)
 	}
+	if got.IncludePayload {
+		t.Fatalf("run event query include payload = true, want false")
+	}
+
+	observability := RunObservabilityEventRecordRepositoryQuery(common.RunID(" run-001 "), 100)
+	if observability.RunID != common.RunID("run-001") {
+		t.Fatalf("observability run id mismatch: %q", observability.RunID)
+	}
+	if observability.Topic != "" {
+		t.Fatalf("observability topic mismatch: %q", observability.Topic)
+	}
+	if observability.Limit != 100 {
+		t.Fatalf("observability limit mismatch: %d", observability.Limit)
+	}
+	if !observability.IncludePayload {
+		t.Fatalf("observability include payload = false, want true")
+	}
 
 	llm := RunLLMUsageEventRecordRepositoryQuery(common.RunID(" run-001 "), 5000)
 	if llm.RunID != common.RunID("run-001") {
@@ -94,6 +115,9 @@ func TestRunEventRecordRepositoryQueries(t *testing.T) {
 	}
 	if llm.Limit != 5000 {
 		t.Fatalf("llm limit mismatch: %d", llm.Limit)
+	}
+	if !llm.IncludePayload {
+		t.Fatalf("llm include payload = false, want true")
 	}
 }
 
@@ -108,6 +132,9 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	if got.Limit != 100 {
 		t.Fatalf("limit mismatch: %d", got.Limit)
 	}
+	if got.IncludePayload {
+		t.Fatalf("workspace event query include payload = true, want false")
+	}
 
 	llm := WorkspaceLLMUsageEventRecordRepositoryQuery(common.WorkspaceID(" ws-001 "), 5000)
 	if llm.WorkspaceID != common.WorkspaceID("ws-001") {
@@ -118,6 +145,9 @@ func TestWorkspaceEventRecordRepositoryQueries(t *testing.T) {
 	}
 	if llm.Limit != 5000 {
 		t.Fatalf("llm limit mismatch: %d", llm.Limit)
+	}
+	if !llm.IncludePayload {
+		t.Fatalf("llm include payload = false, want true")
 	}
 }
 

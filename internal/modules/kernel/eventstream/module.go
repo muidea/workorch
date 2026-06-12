@@ -170,6 +170,7 @@ func eventRecordQueryFromPayload(payload map[string]any) repository.EventRecordQ
 		OccurredAfter:  stringPayload(payload, events.PayloadKeyOccurredAfter),
 		OccurredBefore: stringPayload(payload, events.PayloadKeyOccurredBefore),
 		Limit:          intPayload(payload, events.PayloadKeyLimit),
+		IncludePayload: boolPayload(payload, events.PayloadKeyIncludePayload),
 	}
 }
 
@@ -183,5 +184,16 @@ func intPayload(payload map[string]any, key string) int {
 		return int(value)
 	default:
 		return 0
+	}
+}
+
+func boolPayload(payload map[string]any, key string) bool {
+	switch value := payload[key].(type) {
+	case bool:
+		return value
+	case string:
+		return value == "true"
+	default:
+		return false
 	}
 }

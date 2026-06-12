@@ -103,6 +103,11 @@ read model 应以：
 
 为主，而不是默认返回完整 raw payload。
 
+长期运行时，workspace list/detail、TUI prompt/status、Web board/detail 和 watchdog
+等高频读取必须以服务端 projection 或有界 metadata query 为主，不得通过全量扫描
+event history 或默认 hydrate payload 来临时重建视图。完整收口设计见
+`projection-first-readmodel-io-closure-design.md`。
+
 默认至少应区分：
 
 - summary
@@ -355,5 +360,6 @@ workorch://workspaces/<workspace-id>/runs/<run-id>/steps/<run-id>/graph-002/007-
 
 - `../10-domain-model/workspace-goal-dod.md`
 - `../10-domain-model/event-observability.md`
+- `projection-first-readmodel-io-closure-design.md`
 - `../50-product-interface/service-api.md`
 - `../60-verification/service-acceptance.md`

@@ -807,6 +807,16 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if len(byRun) != 2 || byRun[0].ID != first.ID || byRun[1].ID != second.ID {
 		t.Fatalf("run events = %+v, want ordered first and second", byRun)
 	}
+	if len(byRun[0].Payload) != 0 {
+		t.Fatalf("run events payload = %+v, want lightweight list result without payload", byRun[0].Payload)
+	}
+	byRunWithPayload, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, IncludePayload: true})
+	if err != nil {
+		t.Fatalf("list events by run with payload: %v", err)
+	}
+	if len(byRunWithPayload) != 2 || byRunWithPayload[0].Payload["state"] != "running" {
+		t.Fatalf("run events with payload = %+v, want hydrated payload", byRunWithPayload)
+	}
 	byTopic, err := repo.List(ctx, repository.EventRecordQuery{Topic: second.Topic})
 	if err != nil {
 		t.Fatalf("list events by topic: %v", err)
@@ -3121,8 +3131,15 @@ func testRepositoryBundleContract(t *testing.T, bundle repositoryBundle, reopen 
 	if err != nil {
 		t.Fatalf("reload event records by run: %v", err)
 	}
-	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || reloadedEvents[0].Payload["state"] != string(common.RunStateBlockedOnDecision) {
+	if len(reloadedEvents) != 1 || reloadedEvents[0].ID != eventRecordID || len(reloadedEvents[0].Payload) != 0 {
 		t.Fatalf("reloaded event records = %+v, want %q", reloadedEvents, eventRecordID)
+	}
+	reloadedEventsWithPayload, err := reloaded.eventRecords.List(ctx, repository.EventRecordQuery{RunID: runID, IncludePayload: true})
+	if err != nil {
+		t.Fatalf("reload event records by run with payload: %v", err)
+	}
+	if len(reloadedEventsWithPayload) != 1 || reloadedEventsWithPayload[0].ID != eventRecordID || reloadedEventsWithPayload[0].Payload["state"] != string(common.RunStateBlockedOnDecision) {
+		t.Fatalf("reloaded event records with payload = %+v, want %q", reloadedEventsWithPayload, eventRecordID)
 	}
 
 	reloadedTickets, err := reloaded.tickets.List(ctx)

@@ -988,9 +988,15 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 		return nil, err
 	}
 	ret := listEventRecords(items, query)
-	for _, item := range ret {
-		if err := r.hydrateEventRecordPayload(item); err != nil {
-			return nil, err
+	if query.IncludePayload {
+		for _, item := range ret {
+			if err := r.hydrateEventRecordPayload(item); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		for _, item := range ret {
+			stripEventRecordPayload(item)
 		}
 	}
 	return ret, nil
@@ -1241,6 +1247,16 @@ func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.Even
 	}
 	item.Payload = payload
 	return nil
+}
+
+func stripEventRecordPayload(item *eventstream.EventRecord) {
+	if item == nil || len(item.Payload) == 0 {
+		return
+	}
+	if len(item.PayloadSummary) == 0 {
+		item.PayloadSummary = eventPayloadSummary(item.Payload)
+	}
+	item.Payload = nil
 }
 
 func eventPayloadSummary(payload map[string]any) map[string]any {
