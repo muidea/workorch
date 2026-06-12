@@ -16,22 +16,23 @@ import (
 )
 
 const (
-	decisionContextKeyScope                 = "scope"
-	decisionContextScopeWorkorchRuntime     = "workorch_runtime"
-	decisionContextScopeTargetWorkspace     = "target_workspace"
-	decisionContextScopeExternalDependency  = "external_dependency"
-	decisionContextKeyDependency            = "dependency"
-	decisionContextDependencyLLMProvider    = "llm_provider"
-	decisionContextDependencyContextGate    = "runtime_context_gate"
-	decisionContextKeyRecoveryPolicy        = "recoveryPolicy"
-	decisionContextRecoveryPolicyConfigOnly = "system_config_required"
-	decisionContextRecoveryPolicyRepairPlan = "runtime_repair_exhausted_requires_strategy"
-	decisionContextRecoveryPolicyContext    = "runtime_context_required"
-	decisionContextKeyResultPolicy          = "resultPolicy"
-	decisionContextResultPolicyNone         = "none"
-	decisionContextResultPolicyRejected     = "rejected"
-	decisionContextKeyQuestion              = "decisionQuestion"
-	decisionContextKeyReason                = "decisionReason"
+	decisionContextKeyScope                  = "scope"
+	decisionContextScopeWorkorchRuntime      = "workorch_runtime"
+	decisionContextScopeTargetWorkspace      = "target_workspace"
+	decisionContextScopeExternalDependency   = "external_dependency"
+	decisionContextKeyDependency             = "dependency"
+	decisionContextDependencyLLMProvider     = "llm_provider"
+	decisionContextDependencyContextGate     = "runtime_context_gate"
+	decisionContextDependencyRuntimeContract = "runtime_contract"
+	decisionContextKeyRecoveryPolicy         = "recoveryPolicy"
+	decisionContextRecoveryPolicyConfigOnly  = "system_config_required"
+	decisionContextRecoveryPolicyRepairPlan  = "runtime_repair_exhausted_requires_strategy"
+	decisionContextRecoveryPolicyContext     = "runtime_context_required"
+	decisionContextKeyResultPolicy           = "resultPolicy"
+	decisionContextResultPolicyNone          = "none"
+	decisionContextResultPolicyRejected      = "rejected"
+	decisionContextKeyQuestion               = "decisionQuestion"
+	decisionContextKeyReason                 = "decisionReason"
 )
 
 type runtimeDecisionBlockSpec struct {
@@ -264,7 +265,7 @@ func decisionBlockDeclaresWorkorchRuntimeDependency(context map[string]any) bool
 		return true
 	}
 	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) {
-	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate:
+	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate, decisionContextDependencyRuntimeContract:
 		return true
 	}
 	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) {
@@ -307,7 +308,7 @@ func decisionBlockDeclaresExternalOrRuntimeDependency(context map[string]any) bo
 		return true
 	}
 	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyDependency)) {
-	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate:
+	case decisionContextDependencyLLMProvider, decisionContextDependencyContextGate, decisionContextDependencyRuntimeContract:
 		return true
 	}
 	switch strings.TrimSpace(stringFromMap(context, decisionContextKeyRecoveryPolicy)) {

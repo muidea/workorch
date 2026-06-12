@@ -717,7 +717,7 @@ func behaviorEvidenceRejectReason(requirement profileEvidenceKindRequirement, it
 		return "patch/apply proves an implementation change but cannot by itself prove runtime behavior; run executable validation through the deliverable entrypoint, targeted tests, or a controlled substitute"
 	case "shell/command":
 		if shellStepIsStaticValidationOnly(step) {
-			return "generic build/vet/lint/static command evidence cannot by itself prove runtime behavior; run targeted tests or executable validation through the deliverable entrypoint"
+			return "static or inspection-only evidence cannot by itself prove runtime behavior; provide executable validation through the deliverable entrypoint, targeted behavior checks, or a controlled substitute"
 		}
 	}
 	return ""
@@ -726,7 +726,7 @@ func behaviorEvidenceRejectReason(requirement profileEvidenceKindRequirement, it
 func evidenceRequirementTargetsRuntimeBehavior(requirement profileEvidenceKindRequirement, itemName string) bool {
 	id := strings.ToLower(strings.TrimSpace(requirement.ID))
 	switch id {
-	case "functional_behavior", "external_contract", "runtime_entrypoint", "persistence_or_side_effect", "error_behavior", "streaming_or_long_running", "concurrency":
+	case "functional_behavior", "external_contract", "runtime_entrypoint", "persistence_or_side_effect", "error_behavior", "streaming_or_long_running", "concurrency", "quantitative_behavior":
 		return true
 	}
 	if id != "*" && id != "all" {
@@ -760,31 +760,46 @@ func shellStepIsStaticValidationOnly(step *runModel.Step) bool {
 	if step == nil {
 		return false
 	}
-	text := strings.ToLower(strings.Join([]string{
-		stringFromMap(step.Input, "command"),
-		stringFromMap(step.Input, "cmd"),
-		strings.Join(stringSliceFromValue(step.Input["args"]), " "),
-		stringFromMap(step.Output, "command"),
-		stringFromMap(step.Output, "cmd"),
-		strings.Join(stringSliceFromValue(step.Output["args"]), " "),
-		stringFromMap(step.Output, "stdout"),
-		stringFromMap(step.Output, "stderr"),
-	}, "\n"))
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	for _, marker := range []string{"go test", "npm test", "pnpm test", "yarn test", "pytest", "cargo test", "curl", "go run", "node ", "python "} {
-		if strings.Contains(text, marker) {
-			return false
+	for _, source := range []map[string]any{mapFromValue(step.Input["validationEvidence"]), mapFromValue(step.Output["validationEvidence"])} {
+		if validationEvidenceDeclaresStaticOnly(source) {
+			return true
 		}
 	}
+	for _, source := range []map[string]any{step.Input, step.Output} {
+		for _, tag := range stringListFromValue(source["evidenceTags"]) {
+			if validationEvidenceTagDeclaresStaticOnly(tag) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validationEvidenceDeclaresStaticOnly(evidence map[string]any) bool {
+	if len(evidence) == 0 {
+		return false
+	}
+	for _, key := range []string{"mode", "observationType", "kind"} {
+		if validationEvidenceTagDeclaresStaticOnly(stringFromMap(evidence, key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func validationEvidenceTagDeclaresStaticOnly(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return false
+	}
 	for _, marker := range []string{
-		"go build", "go vet", "gofmt", "go fmt", "staticcheck", "golangci-lint",
-		"npm run build", "npm run lint", "pnpm build", "pnpm lint", "yarn build", "yarn lint",
-		"tsc", "eslint", "ruff", "flake8", "mypy", "cargo build", "cargo check", "cargo clippy",
-		"make build", "make lint", "make vet",
+		"static",
+		"source_inspection",
+		"read_only_inspection",
+		"inspection_only",
+		"syntax_only",
 	} {
-		if strings.Contains(text, marker) {
+		if strings.Contains(value, marker) {
 			return true
 		}
 	}

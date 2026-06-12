@@ -1928,7 +1928,11 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 		Input: map[string]any{
 			stepInputKeyGraphNodeID: "run-tests",
 		},
-		Output: map[string]any{"status": "failed", "stderr": "still failing"},
+		Output: map[string]any{
+			"status":                       "failed",
+			"stderr":                       "still failing",
+			outputKeyContractViolationType: contractViolationCoverageTargetsRequired,
+		},
 	}
 
 	if err := orch.dispatchRuntimeRepairFollowUp(ctx, &runmodel.Run{
@@ -1959,6 +1963,12 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionFailsRun(t *testing.T) {
 	}
 	if ticket.Context[decisionContextKeyRecoveryPolicy] != decisionContextRecoveryPolicyRepairPlan {
 		t.Fatalf("ticket context = %+v, want explicit repair recovery policy", ticket.Context)
+	}
+	if ticket.Context[decisionContextKeyScope] != decisionContextScopeWorkorchRuntime ||
+		ticket.Context[decisionContextKeyDependency] != decisionContextDependencyRuntimeContract ||
+		ticket.Context["blockerKind"] != "runtime_repair_contract_exhausted" ||
+		ticket.Context["contractViolationType"] != contractViolationCoverageTargetsRequired {
+		t.Fatalf("ticket context = %+v, want runtime contract repair exhaustion metadata", ticket.Context)
 	}
 }
 

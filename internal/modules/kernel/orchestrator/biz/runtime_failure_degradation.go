@@ -25,11 +25,11 @@ func degradedRuntimeFailureOutput(run *runModel.Run, step *runModel.Step, output
 	failure["capabilityDegraded"] = true
 	failure["degradedReason"] = firstNonEmptyString(stringFromMap(failure, "error"), errorString(execErr))
 	failure["evidenceQuality"] = string(common.EvidenceQualitySkipped)
-	failure["evidenceReason"] = "auxiliary semantic MCP capability degraded; fallback to direct file/read, build/test, and validation evidence"
+	failure["evidenceReason"] = "auxiliary MCP capability degraded; fallback to direct workspace evidence and validation evidence"
 	failure["evidenceTags"] = []string{"auxiliary_capability_degraded", "semantic_mcp_fallback"}
 	failure["zeroWork"] = true
 	if strings.TrimSpace(stringFromMap(failure, "summary")) == "" {
-		failure["summary"] = "auxiliary semantic MCP capability degraded and was skipped"
+		failure["summary"] = "auxiliary MCP capability degraded and was skipped"
 	}
 	return failure, true
 }
@@ -75,9 +75,6 @@ func runtimeFailureCanDegrade(run *runModel.Run, step *runModel.Step, output map
 		return false
 	}
 	category := runtimeMCPCapabilityCategory(run, serverID, tool)
-	if category == "" && strings.TrimSpace(serverID) == "mcp-lsp-bridge" {
-		category = "code_semantics"
-	}
 	if category != "code_semantics" {
 		return false
 	}

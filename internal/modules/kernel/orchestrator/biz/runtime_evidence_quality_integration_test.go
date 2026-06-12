@@ -245,6 +245,10 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsPatchAndBuildForBehaviorClai
 			Input: map[string]any{
 				"command":         "go build ./...",
 				"coverageTargets": []string{claim},
+				"validationEvidence": map[string]any{
+					"mode":            "static_inspection",
+					"observationType": "static_analysis",
+				},
 			},
 			Output: map[string]any{"stdout": "build passed"},
 		},

@@ -54,6 +54,7 @@ const (
 	contractViolationExecutionNoStateChangingOutput = "execution_no_state_changing_output"
 	contractViolationGraphDependsOnLLMBeforePatch   = "graph_depends_on_llm_before_patch"
 	contractViolationPatchTargetRefRequired         = "patch_target_ref_required"
+	contractViolationCoverageTargetsRequired        = "coverage_targets_required"
 	contractViolationPatchContentRequired           = "patch_content_required"
 	contractViolationPatchUnresolvedTemplate        = "patch_unresolved_template"
 	contractViolationPatchDispatchInvalid           = "patch_dispatch_invalid"
@@ -209,6 +210,9 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 	case strings.Contains(text, "targetref is required") ||
 		strings.Contains(text, "targetref must be set"):
 		return contractViolationPatchTargetRefRequired
+	case strings.Contains(text, "state-changing patch/apply must declare coveragetargets") ||
+		strings.Contains(text, "patch/apply must declare coveragetargets matching"):
+		return contractViolationCoverageTargetsRequired
 	case strings.Contains(text, "patch content contains unresolved runtime template") ||
 		strings.Contains(text, "patch diff contains unresolved runtime template") ||
 		strings.Contains(text, "patch text_replace contains unresolved runtime template"):
@@ -711,11 +715,16 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		recommendedNextActions = actions
 	}
 	decisionContext := map[string]any{
+		decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+		decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
 		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
 		"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
+		"preferredRecoveryActions":       []string{"retry_same_step", "replan", "terminate"},
+		"blockerKind":                    "runtime_repair_contract_exhausted",
 		"attempts":                       o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
 		"maxAttempts":                    maxAttempts,
+		"contractViolationType":          stringFromMap(failedStep.Output, outputKeyContractViolationType),
 		"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
 		"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
 		"failureTargetScope":             runtimeFailureTargetScopeFromStep(failedStep),

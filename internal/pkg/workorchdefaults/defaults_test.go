@@ -472,7 +472,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		t.Fatalf("profileContracts[software-dev] = %+v, want map", contracts["software-dev"])
 	}
 	items, ok := softwareDev["acceptanceDimensions"].([]any)
-	if !ok || len(items) < 9 {
+	if !ok || len(items) < 10 {
 		t.Fatalf("software-dev acceptanceDimensions = %+v, want declared dimensions", softwareDev["acceptanceDimensions"])
 	}
 	want := map[string]bool{
@@ -484,6 +484,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"error_behavior":             false,
 		"streaming_or_long_running":  false,
 		"concurrency":                false,
+		"quantitative_behavior":      false,
 		"deliverable":                false,
 	}
 	for _, raw := range items {
@@ -549,6 +550,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		"streaming_or_long_running":  false,
 		"error_behavior":             false,
 		"concurrency":                false,
+		"quantitative_behavior":      false,
 	}
 	versionControlEvidenceFound := false
 	for _, raw := range requirements {
@@ -594,6 +596,11 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 		}
 		if executable, _ := item["requireExecutableBehaviorEvidence"].(bool); !executable {
 			t.Fatalf("evidence requirement %q requireExecutableBehaviorEvidence = false, want true", id)
+		}
+		if id == "quantitative_behavior" {
+			if claim, _ := item["requireClaimEvidence"].(bool); !claim {
+				t.Fatalf("evidence requirement %q requireClaimEvidence = false, want true", id)
+			}
 		}
 		accepted, ok := item["acceptedStepKinds"].([]any)
 		if !ok {

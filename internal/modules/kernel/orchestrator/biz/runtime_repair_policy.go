@@ -90,6 +90,7 @@ func contractViolationRequiresStateChangingRepair(violationType string) bool {
 		contractViolationExecutionNoStateChangingOutput,
 		contractViolationGraphDependsOnLLMBeforePatch,
 		contractViolationPatchTargetRefRequired,
+		contractViolationCoverageTargetsRequired,
 		contractViolationPatchContentRequired,
 		contractViolationPatchUnresolvedTemplate,
 		contractViolationPatchDispatchInvalid,

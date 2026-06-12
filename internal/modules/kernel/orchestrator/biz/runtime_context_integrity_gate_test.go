@@ -77,6 +77,26 @@ func TestAttachContractViolationTypeClassifiesPatchTargetRef(t *testing.T) {
 	}
 }
 
+func TestAttachContractViolationTypeClassifiesCoverageTargetsRequired(t *testing.T) {
+	output := map[string]any{
+		"error": "invalid argument: coverage-bound state-changing patch/apply must declare coverageTargets matching current Goal, DoD, or deliverable coverage targets",
+	}
+	attachContractViolationType(output, nil)
+
+	if got := output[outputKeyContractViolationType]; got != contractViolationCoverageTargetsRequired {
+		t.Fatalf("contractViolationType = %v, want %s", got, contractViolationCoverageTargetsRequired)
+	}
+	step := &runModel.Step{
+		ID:     common.StepID("run-contract/step-coverage-targets"),
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateFailed,
+		Output: output,
+	}
+	if !stateChangingRepairRequired(nil, step, nil) {
+		t.Fatalf("stateChangingRepairRequired = false, want true from coverage target contract violation")
+	}
+}
+
 func TestRuntimeContextIntegrityGateCoverageTargetFailureCanRecover(t *testing.T) {
 	step := &runModel.Step{
 		ID:    common.StepID("run-ctx-coverage/repair-001"),

@@ -71,6 +71,7 @@ fi
 if matches="$(
   rg -n --hidden -S "$lsp_profile_pattern" internal/modules/kernel internal/modules/blocks internal/pkg \
     -g '!**/*_test.go' \
+    -g '!internal/pkg/workorchdefaults/defaults/**' \
     -g '!**/dist/**' \
     -g '!**/node_modules/**' \
     -g '!**/.git/**'

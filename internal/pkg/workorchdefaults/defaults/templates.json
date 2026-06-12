@@ -55,6 +55,7 @@
       "若 Goal 或 DoD 涉及 CLI、服务、API、脚本、单二进制或其他运行交付入口，必须提供命中最终交付入口的直接验证证据",
       "针对高风险验收维度的测试必须绑定真实交付入口或生产实现；测试文件中临时定义的 fake/mock/helper 只能作为辅助，不能作为唯一 satisfied 证据",
       "若 Goal 或 DoD 涉及流式、错误透传、配置加载、持久化副作用、并发或其他用户可观察行为，必须提供对应行为的直接验证证据或明确跳过原因与影响",
+      "若 Goal 或 DoD 涉及性能、资源占用、压缩率、吞吐、延迟、预算或其他量化指标，必须提供包含实际数值的可执行测量证据，并说明是否达到阈值",
       "每个关键 DoD 条目均有对应的功能测试、集成测试或可解释的替代验证；主路径、错误路径和关键分支均有覆盖说明",
       "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
       "最终结果包含改动摘要、验证命令、验证结果、失败/跳过说明、残余风险和后续建议",
@@ -182,6 +183,7 @@
             { "id": "error_behavior", "required": false, "description": "Error propagation, status, invalid input, dependency failure, or exceptional path behavior" },
             { "id": "streaming_or_long_running", "required": false, "description": "Streaming, incremental output, long-running operation, cancellation, or completion behavior" },
             { "id": "concurrency", "required": false, "description": "Concurrent calls, shared state, locks, races, or resource safety" },
+            { "id": "quantitative_behavior", "required": false, "description": "Measured performance, resource use, compression, throughput, latency, budget, or other quantified behavior promised by Goal or DoD" },
             { "id": "deliverable", "required": false, "description": "Build artifact, binary, package, document, or other user-facing deliverable" }
           ],
           "deliverableExpectations": [
@@ -245,6 +247,16 @@
               "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
               "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
               "description": "Concurrency claims must be supported by executed validation or equivalent runtime action evidence."
+            },
+            {
+              "id": "quantitative_behavior",
+              "scope": "acceptanceDimension",
+              "requireDirectEvidence": true,
+              "requireClaimEvidence": true,
+              "requireExecutableBehaviorEvidence": true,
+              "acceptedStepKinds": ["shell/command", "mcp/tool_call"],
+              "rejectedStepKinds": ["file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"],
+              "description": "Quantified performance, resource, compression, throughput, latency, or budget claims must cite executed measurement evidence with actual numeric output and threshold comparison."
             },
             {
               "id": "version_control_snapshot",
