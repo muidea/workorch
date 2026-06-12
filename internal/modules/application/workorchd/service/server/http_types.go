@@ -475,6 +475,7 @@ type errorResponse struct {
 
 type createWorkspaceFunc func(context.Context, string, string, appservice.CreateWorkspaceCommand) (appservice.Workspace, error)
 type deleteWorkspaceFunc func(context.Context, string, string, string, appservice.DeleteWorkspaceCommand) error
+type refreshWorkspaceTemplateBindingFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceFunc func(context.Context, string, string, string) (appservice.Workspace, error)
 type readWorkspaceSnapshotFunc func(context.Context, string, string, string) (appservice.WorkspaceSnapshot, error)
 type readWorkspaceSoulBindingsFunc func(context.Context, string, string, string) (appservice.WorkspaceSoulBindings, error)
@@ -568,6 +569,7 @@ type serverState struct {
 	validate                     validateFunc
 	createWorkspace              createWorkspaceFunc
 	deleteWorkspace              deleteWorkspaceFunc
+	refreshWorkspaceTemplate     refreshWorkspaceTemplateBindingFunc
 	readWorkspace                readWorkspaceFunc
 	readWorkspaceSnapshot        readWorkspaceSnapshotFunc
 	readWorkspaceSoulBindings    readWorkspaceSoulBindingsFunc
@@ -1013,6 +1015,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		validate:                     defaultValidate,
 		createWorkspace:              defaultCreateWorkspace,
 		deleteWorkspace:              defaultDeleteWorkspace,
+		refreshWorkspaceTemplate:     defaultRefreshWorkspaceTemplateBinding,
 		readWorkspace:                defaultReadWorkspace,
 		readWorkspaceSnapshot:        defaultReadWorkspaceSnapshot,
 		readWorkspaceSoulBindings:    defaultReadWorkspaceSoulBindings,
@@ -1162,6 +1165,15 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			return appservice.DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)
 		})
+	}
+	s.refreshWorkspaceTemplate = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
+		var ret appservice.Workspace
+		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var err error
+			ret, err = appservice.RefreshWorkspaceTemplateBindingWithSession(ctx, session, workspaceID)
+			return err
+		})
+		return ret, err
 	}
 	s.readWorkspace = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
 		var ret appservice.Workspace

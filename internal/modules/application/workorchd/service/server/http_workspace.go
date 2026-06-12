@@ -342,6 +342,26 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			Activation: item,
 		})
 	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "template-binding-refresh" {
+			http.NotFound(w, r)
+			return
+		}
+		item, err := state.refreshWorkspaceTemplate(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
+		writeJSON(w, http.StatusOK, workspaceResponse{
+			Service:   "workorch",
+			Backend:   state.config.Backend,
+			DataRoot:  state.config.DataRoot,
+			Workspace: item,
+		})
+	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/soul-bindings", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
 		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)

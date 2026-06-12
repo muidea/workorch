@@ -537,6 +537,7 @@ func concreteFailureEvidenceAcquisitionGuidance() []string {
 	return []string{
 		"Acquire bounded concrete failure evidence before producing a patch.",
 		"Use only targeted file/list, file/read, shell/command, mcp/tool_call, or equivalent concrete verification capabilities.",
+		"Every executionGraph node must be an evidence acquisition node from repairActionPackage.requiredOutput.acceptedKinds; do not include patch/apply, patch/preview, or llm/workspace_execution in this step.",
 		"Do not return patch/apply until current failure evidence identifies a concrete target, line ref, repair target set, coverage target, or current target snapshot.",
 		"Do not use self-inspection, run snapshot, observability-only, context rehydration, or nested LLM graphs as evidence acquisition.",
 		"If bounded verification produces target refs, line refs, stdout/stderr, exit code, or current snapshots, let the next repair use that evidence for target-scoped state-changing repair.",

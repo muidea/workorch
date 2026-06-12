@@ -523,15 +523,20 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	out["mustIncludeStateChangingNode"] = false
 	out["mustProduceConcreteFailureEvidence"] = true
 	out["acceptedKinds"] = evidenceAcquisitionAcceptedKinds()
+	out["acceptedKindsOnly"] = true
+	out["stateChangingForbidden"] = true
+	out["nestedLLMForbidden"] = true
+	out["patchForbiddenUntilConcreteTargetEvidence"] = true
 	out["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(existing["forbiddenKinds"]),
 		"patch/apply",
+		"patch/preview",
 		"llm_gated_graph",
 		"self_inspection_graph",
 		"context_rehydration_graph",
 		"run_snapshot_graph",
 		"observability_only_graph",
 	))
-	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available"
+	out["evidenceAcquisitionRule"] = "bounded evidence acquisition is required because no concrete state-changing repair target evidence is available; every executionGraph node kind must be in acceptedKinds and must not include patch/apply, patch/preview, or llm/workspace_execution"
 	return out
 }
 

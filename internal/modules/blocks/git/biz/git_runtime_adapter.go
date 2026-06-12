@@ -946,7 +946,11 @@ func classifyGitError(result gitCommandResult, err error) string {
 	switch {
 	case strings.Contains(text, "not a git repository"):
 		return gitcommon.ErrorNotGitRepository
-	case strings.Contains(text, "author identity unknown") || strings.Contains(text, "unable to auto-detect email address"):
+	case strings.Contains(text, "author identity unknown") ||
+		strings.Contains(text, "unable to auto-detect email address") ||
+		strings.Contains(text, "作者身份未知") ||
+		strings.Contains(text, "未提供邮件地址") ||
+		strings.Contains(text, "请告诉我您是谁"):
 		return gitcommon.ErrorIdentityMissing
 	default:
 		return gitcommon.ErrorGitCommandFailed

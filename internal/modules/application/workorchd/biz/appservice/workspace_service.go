@@ -65,6 +65,18 @@ func DeleteWorkspaceWithBackend(ctx context.Context, backend string, dataRoot st
 	return err
 }
 
+func RefreshWorkspaceTemplateBindingWithSession(ctx context.Context, session *RuntimeSession, workspaceID string) (ret Workspace, err error) {
+	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) (Workspace, error) {
+		return workspaceports.RefreshWorkspaceTemplateBinding(ctx, hub, workspaceID)
+	})
+}
+
+func RefreshWorkspaceTemplateBindingWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string) (Workspace, error) {
+	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Workspace, error) {
+		return RefreshWorkspaceTemplateBindingWithSession(ctx, session, workspaceID)
+	})
+}
+
 func DeleteWorkspaceFromEnv(ctx context.Context, workspaceID string, cmd DeleteWorkspaceCommand) error {
 	_, err := withEnvSession(ctx, func(ctx context.Context, session *RuntimeSession) (struct{}, error) {
 		if err := DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd); err != nil {

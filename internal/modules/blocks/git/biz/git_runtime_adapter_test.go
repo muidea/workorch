@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -435,6 +436,15 @@ func TestRuntimeAdapterCommitFailsWhenIdentityMissing(t *testing.T) {
 	}
 	if result.Output["status"] != "failed" || result.Output["errorCode"] != gitcommon.ErrorIdentityMissing {
 		t.Fatalf("output = %+v, want identity_missing failure", result.Output)
+	}
+}
+
+func TestClassifyGitErrorRecognizesLocalizedIdentityMissing(t *testing.T) {
+	result := gitCommandResult{
+		Stderr: "作者身份未知\nfatal: 未提供邮件地址且自动探测被禁用\n",
+	}
+	if got := classifyGitError(result, errors.New("exit status 128")); got != gitcommon.ErrorIdentityMissing {
+		t.Fatalf("classifyGitError = %q, want %q", got, gitcommon.ErrorIdentityMissing)
 	}
 }
 

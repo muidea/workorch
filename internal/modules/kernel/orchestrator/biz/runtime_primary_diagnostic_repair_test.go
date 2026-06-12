@@ -160,6 +160,57 @@ func TestValidateLLMExecutionOutputContractAllowsInferredRelatedShapePatch(t *te
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsTextReplacePrimaryDiagnosticPatch(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-text-replace",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-text-replace/repair-001")
+	step.Input["failureTargetScope"] = "failureTargets=main.go"
+	step.Input[stepInputKeyRepairOfFailureSig] = "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1"
+	step.Input["primaryDiagnosticRepair"] = map[string]any{
+		"required":   true,
+		"targetRefs": []string{"main.go"},
+		"lineRefs":   []map[string]any{{"targetRef": "main.go", "line": 12, "column": 2}},
+		"identifiers": []string{
+			"mcp",
+			"CallToolRequest",
+		},
+	}
+	step.Input["repairActionPackage"] = map[string]any{
+		"primaryDiagnosticRepair": step.Input["primaryDiagnosticRepair"],
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-import",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "text_replace",
+					"targetRef": "main.go",
+					"oldText": strings.Join([]string{
+						"import (",
+						"\t\"context\"",
+						")",
+					}, "\n"),
+					"newText": strings.Join([]string{
+						"import (",
+						"\t\"context\"",
+						"\t\"github.com/mark3labs/mcp-go/mcp\"",
+						")",
+					}, "\n"),
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want text_replace primary diagnostic patch allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsInferredRelatedCommentOnlyPatch(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-primary-diagnostic-inferred-related-comment",

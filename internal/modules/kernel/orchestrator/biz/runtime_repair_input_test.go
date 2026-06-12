@@ -899,6 +899,13 @@ func TestResetRuntimeRepairInputToRejectedResultContinuationSupersedesHistorical
 	if pkg["evidenceAcquisitionRequired"] != true || required["mustProduceConcreteFailureEvidence"] != true || required["mustIncludeStateChangingNode"] != false {
 		t.Fatalf("repairActionPackage = %+v, requiredOutput = %+v, want evidence acquisition contract", pkg, required)
 	}
+	if required["acceptedKindsOnly"] != true || required["stateChangingForbidden"] != true || required["nestedLLMForbidden"] != true || required["patchForbiddenUntilConcreteTargetEvidence"] != true {
+		t.Fatalf("requiredOutput = %+v, want strict evidence acquisition output bounds", required)
+	}
+	forbidden := stringSliceFromValue(required["forbiddenKinds"])
+	if !stringSliceContains(forbidden, "patch/apply") || !stringSliceContains(forbidden, "patch/preview") {
+		t.Fatalf("forbiddenKinds = %+v, want patch kinds forbidden during evidence acquisition", forbidden)
+	}
 	if guidance := stringSliceFromValue(input["repairGuidance"]); len(guidance) < 3 {
 		t.Fatalf("repairGuidance = %+v, want base evidence acquisition and rejected result continuation guidance", guidance)
 	}

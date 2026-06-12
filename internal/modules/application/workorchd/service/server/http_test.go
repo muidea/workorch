@@ -1061,6 +1061,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-activations"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/runtime/payloads"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/events/stream"},
@@ -2060,6 +2061,15 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return nil
 	}
+	state.refreshWorkspaceTemplate = func(ctx context.Context, _, _, workspaceID string) (appservice.Workspace, error) {
+		if got := appservice.EventHubFromContext(ctx); got != hub {
+			t.Fatalf("workspace template refresh event hub = %#v, want injected hub", got)
+		}
+		if workspaceID != "ws-native-read" {
+			t.Fatalf("workspace template refresh id = %q, want ws-native-read", workspaceID)
+		}
+		return appservice.Workspace{ID: workspaceID, Title: "native refreshed", TemplateID: "template-native", State: "active"}, nil
+	}
 	state.createRun = func(ctx context.Context, _, _, workspaceID, runID, goalID, dodID string) (appservice.Run, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("run create event hub = %#v, want injected hub", got)
@@ -2190,6 +2200,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/start", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/runs/run-native-read/resume", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/execution-activations", body: `{"goalId":"goal-native","doDId":"dod-native","llmProviderId":"deepseek","soulId":"soul-native","soulBindings":{"validation":"soul-native-validation"},"skillIds":["skill-native"],"mcpServerIds":["mcp-native"],"memoryIds":["memory-native"],"dialogLanguage":"zh-CN","priority":9,"executionContextPatch":{"latestOperatorInput":{"source":"tui","content":"restart from tui"}}}`, status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-native-read/template-binding-refresh", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions?workspaceId=ws-native-read&runId=run-native-read&cursorAfterId=ticket-native-cursor&limit=2", status: http.StatusOK},
 		{method: http.MethodGet, path: "/api/v1/workorch/decisions/ticket-native-read", status: http.StatusOK},
 		{method: http.MethodPost, path: "/api/v1/workorch/decisions/ticket-native-read/resolve", status: http.StatusOK},

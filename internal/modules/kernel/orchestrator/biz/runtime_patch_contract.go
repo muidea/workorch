@@ -375,6 +375,11 @@ func primaryDiagnosticMetadataIdentifier(value string) bool {
 
 func primaryDiagnosticPatchChangedText(request runtimePatchRequest) string {
 	switch strings.TrimSpace(request.PatchType) {
+	case "text_replace":
+		return primaryDiagnosticNonCommentText(strings.Join([]string{
+			request.OldText,
+			request.NewText,
+		}, "\n"))
 	case "file_write":
 		return primaryDiagnosticNonCommentText(request.Content)
 	case "unified_diff":
@@ -637,6 +642,8 @@ func primaryDiagnosticRequestMentionsIdentifiers(request runtimePatchRequest, co
 		request.Summary,
 		request.Content,
 		request.Diff,
+		request.OldText,
+		request.NewText,
 		stringFromAny(request.Extra["summary"]),
 		stringFromAny(request.Extra["reason"]),
 	}, "\n"))

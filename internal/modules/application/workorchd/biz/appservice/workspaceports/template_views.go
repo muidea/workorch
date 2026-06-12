@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -31,6 +32,28 @@ func ReadWorkspaceTemplate(ctx context.Context, hub events.Hub, templateID strin
 		return workspacecore.WorkspaceTemplate{}, err
 	}
 	return workspacecore.WorkspaceTemplateFromRepository(item), nil
+}
+
+func RefreshWorkspaceTemplateBinding(ctx context.Context, hub events.Hub, workspaceID string) (appmodelcore.Workspace, error) {
+	item, err := ReadWorkspaceRecord(ctx, hub, common.WorkspaceID(strings.TrimSpace(workspaceID)))
+	if err != nil {
+		return appmodelcore.Workspace{}, err
+	}
+	templateID := strings.TrimSpace(item.TemplateID)
+	if templateID == "" {
+		return appmodelcore.Workspace{}, common.ErrInvalidArgument
+	}
+	template, err := ReadWorkspaceTemplate(ctx, hub, templateID)
+	if err != nil {
+		return appmodelcore.Workspace{}, err
+	}
+	if _, err := workspacecore.ApplyTemplateToWorkspace(item, template); err != nil {
+		return appmodelcore.Workspace{}, err
+	}
+	if err := UpdateWorkspaceRecord(ctx, hub, item); err != nil {
+		return appmodelcore.Workspace{}, err
+	}
+	return workspacecore.MapWorkspace(item), nil
 }
 
 func CreateWorkspaceTemplate(ctx context.Context, hub events.Hub, template workspacecore.WorkspaceTemplate) (workspacecore.WorkspaceTemplate, error) {

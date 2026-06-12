@@ -184,6 +184,77 @@ func TestCreateWorkspaceWithTemplateBindsWorkspaceSouls(t *testing.T) {
 	}
 }
 
+func TestRefreshWorkspaceTemplateBindingUpdatesTemplateBoundPolicy(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
+		ID:       "template-policy-refresh",
+		Name:     "policy refresh template",
+		DoDItems: []string{"evidence is available"},
+		ContextHints: map[string]any{
+			"qualityGate": "v1",
+		},
+		EvidencePolicies: []map[string]any{
+			{
+				"id":   "policy-v1",
+				"kind": "initial",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceTemplateWithBackend: %v", err)
+	}
+	workspace, err := CreateWorkspaceWithTemplateWithBackend(ctx, "file", dataRoot, CreateWorkspaceCommand{
+		Title:                "template policy refresh workspace",
+		DeliverableDirectory: "workspaces/template-policy-refresh",
+		TemplateID:           "template-policy-refresh",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithTemplateWithBackend: %v", err)
+	}
+	if workspace.ContextHints["qualityGate"] != "v1" {
+		t.Fatalf("created workspace contextHints = %+v, want v1", workspace.ContextHints)
+	}
+
+	if _, err := UpdateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, "template-policy-refresh", WorkspaceTemplate{
+		Name:     "policy refresh template updated",
+		DoDItems: []string{"evidence is available"},
+		ContextHints: map[string]any{
+			"qualityGate": "v2",
+		},
+		EvidencePolicies: []map[string]any{
+			{
+				"id":                 "policy-v2",
+				"acceptedStepKinds":  []any{"artifact/write"},
+				"requiredConfidence": "high",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceTemplateWithBackend: %v", err)
+	}
+
+	refreshed, err := RefreshWorkspaceTemplateBindingWithBackend(ctx, "file", dataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("RefreshWorkspaceTemplateBindingWithBackend: %v", err)
+	}
+	if refreshed.ID != workspace.ID || refreshed.Title != workspace.Title || refreshed.DeliverableDirectory != workspace.DeliverableDirectory || refreshed.State != workspace.State {
+		t.Fatalf("refreshed workspace identity/state = %+v, want preserved from %+v", refreshed, workspace)
+	}
+	if refreshed.ContextHints["qualityGate"] != "v2" {
+		t.Fatalf("refreshed contextHints = %+v, want v2", refreshed.ContextHints)
+	}
+	if len(refreshed.EvidencePolicies) != 1 || refreshed.EvidencePolicies[0]["id"] != "policy-v2" {
+		t.Fatalf("refreshed evidence policies = %+v, want policy-v2", refreshed.EvidencePolicies)
+	}
+
+	readBack, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if readBack.ContextHints["qualityGate"] != "v2" || len(readBack.EvidencePolicies) != 1 || readBack.EvidencePolicies[0]["id"] != "policy-v2" {
+		t.Fatalf("persisted workspace = %+v, want refreshed template-bound policy", readBack)
+	}
+}
+
 func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 	dataRoot := t.TempDir()
 	created, err := CreateWorkspaceWithBackend(context.Background(), "file", dataRoot, "appservice read workspace", "read description", "workspaces/appservice read workspace")
