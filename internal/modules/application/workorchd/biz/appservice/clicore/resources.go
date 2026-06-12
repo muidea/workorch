@@ -30,29 +30,67 @@ func ResourceMap(v any) map[string]any {
 }
 
 func runResourceMap(run readmodelcore.Run) map[string]any {
-	resource := ResourceMapAlias(run)
-	if resource == nil {
-		return nil
+	resource := map[string]any{
+		"id":                 run.ID,
+		"workspaceId":        run.WorkspaceID,
+		"goalId":             run.GoalID,
+		"doDId":              run.DoDID,
+		"initialStepKind":    run.InitialStepKind,
+		"state":              run.State,
+		"priority":           run.Priority,
+		"blockingTicketId":   run.BlockingTicketID,
+		"blockingApprovalId": run.BlockingApprovalID,
+		"failureReason":      run.FailureReason,
 	}
-	if contextMap, ok := resource["executionContext"].(map[string]any); ok {
-		resource["executionContext"] = CompactExecutionContext(contextMap)
+	if contextMap := CompactExecutionContext(run.ExecutionContext); len(contextMap) > 0 {
+		resource["executionContext"] = contextMap
 	}
 	return resource
 }
 
 func workspaceSnapshotResourceMap(snapshot readmodelcore.WorkspaceSnapshot) map[string]any {
-	slim := snapshot
-	slim.Runs = nil
-	resource := ResourceMapAlias(slim)
-	if resource == nil {
-		return nil
-	}
 	runs := make([]map[string]any, 0, len(snapshot.Runs))
 	for _, run := range snapshot.Runs {
 		runs = append(runs, runResourceMap(run))
 	}
-	resource["runs"] = runs
-	return resource
+	eventRecords := make([]map[string]any, 0, len(snapshot.EventRecords))
+	for _, record := range snapshot.EventRecords {
+		eventRecords = append(eventRecords, map[string]any{
+			"id":             record.ID,
+			"version":        record.Version,
+			"topic":          record.Topic,
+			"occurredAt":     record.OccurredAt,
+			"sourceModule":   record.SourceModule,
+			"subjectType":    record.SubjectType,
+			"subjectId":      record.SubjectID,
+			"workspaceId":    record.WorkspaceID,
+			"runId":          record.RunID,
+			"stepId":         record.StepID,
+			"payloadSummary": CloneResultValue(record.PayloadSummary, 0),
+			"payloadRef":     record.PayloadRef,
+		})
+	}
+	return map[string]any{
+		"workspace":             snapshot.Workspace,
+		"outcome":               snapshot.Outcome,
+		"taskProgress":          snapshot.TaskProgress,
+		"runHeartbeat":          snapshot.RunHeartbeat,
+		"coverageSummary":       CloneResultValue(snapshot.CoverageSummary, 0),
+		"taskDecompositions":    snapshot.TaskDecompositions,
+		"goals":                 snapshot.Goals,
+		"dods":                  snapshot.DoDs,
+		"runs":                  runs,
+		"results":               snapshot.Results,
+		"artifacts":             snapshot.Artifacts,
+		"artifactContinuations": snapshot.ArtifactContinuations,
+		"patches":               snapshot.Patches,
+		"webSources":            snapshot.WebSources,
+		"llmUsageTraces":        snapshot.LLMUsageTraces,
+		"llmUsageSummary":       snapshot.LLMUsageSummary,
+		"eventRecords":          eventRecords,
+		"decisions":             snapshot.Decisions,
+		"approvals":             snapshot.Approvals,
+	}
 }
 
 func ResourceMapAlias(v any) map[string]any {

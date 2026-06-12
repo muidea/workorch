@@ -108,10 +108,11 @@ type AppModel struct {
 	workspaceListRefreshPending  bool
 	workspaceListRequestSeq      int64
 
-	eventCh     chan backend.Event
-	unsubscribe func()
-	initialGoal string
-	options     Options
+	eventCh                 chan backend.Event
+	eventSubscriptionActive bool
+	unsubscribe             func()
+	initialGoal             string
+	options                 Options
 
 	width  int
 	height int
@@ -126,32 +127,37 @@ func NewAppModel(be backend.Backend, defaultWorkspaceID string, initialGoal stri
 func NewAppModelWithOptions(be backend.Backend, defaultWorkspaceID string, initialGoal string, options Options) AppModel {
 	eventCh := make(chan backend.Event, 256)
 	unsubscribe := func() {}
+	eventSubscriptionActive := false
 	if be != nil {
-		if unsub, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
-			if !shouldConsumeBackendSubscriptionEvent(evt.Type) {
-				return
+		if eventsBackend := be.Events(); eventsBackend != nil {
+			if unsub, err := eventsBackend.Subscribe(context.Background(), func(_ context.Context, evt backend.Event) {
+				if !shouldConsumeBackendSubscriptionEvent(evt.Type) {
+					return
+				}
+				enqueueBackendEvent(eventCh, evt)
+			}); err == nil {
+				unsubscribe = unsub
+				eventSubscriptionActive = true
 			}
-			enqueueBackendEvent(eventCh, evt)
-		}); err == nil {
-			unsubscribe = unsub
 		}
 	}
 	return AppModel{
-		be:                     be,
-		mode:                   modeAgentSession,
-		defaultWorkspaceID:     defaultWorkspaceID,
-		activeWorkspaceID:      defaultWorkspaceID,
-		selectedWorkspaceID:    defaultWorkspaceID,
-		eventCh:                eventCh,
-		unsubscribe:            unsubscribe,
-		initialGoal:            strings.TrimSpace(initialGoal),
-		currentTask:            strings.TrimSpace(initialGoal),
-		transcript:             initialTranscript(initialGoal),
-		options:                options,
-		progress:               progressIdle,
-		workspaceRuntimeStates: map[string]*workspaceRuntimeState{},
-		historyCursor:          -1,
-		mainViewport:           newMainViewport(),
+		be:                      be,
+		mode:                    modeAgentSession,
+		defaultWorkspaceID:      defaultWorkspaceID,
+		activeWorkspaceID:       defaultWorkspaceID,
+		selectedWorkspaceID:     defaultWorkspaceID,
+		eventCh:                 eventCh,
+		eventSubscriptionActive: eventSubscriptionActive,
+		unsubscribe:             unsubscribe,
+		initialGoal:             strings.TrimSpace(initialGoal),
+		currentTask:             strings.TrimSpace(initialGoal),
+		transcript:              initialTranscript(initialGoal),
+		options:                 options,
+		progress:                progressIdle,
+		workspaceRuntimeStates:  map[string]*workspaceRuntimeState{},
+		historyCursor:           -1,
+		mainViewport:            newMainViewport(),
 	}
 }
 
@@ -220,7 +226,10 @@ func isBackendEventQueueCritical(eventType backend.EventType) bool {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{FetchAll(m.be), WaitForBackendEvent(m.eventCh)}
+	cmds := []tea.Cmd{FetchAll(m.be)}
+	if m.eventSubscriptionActive {
+		cmds = append(cmds, WaitForBackendEvent(m.eventCh))
+	}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
 			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
@@ -382,7 +391,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case BackendEventMsg:
 		cmd := m.applyBackendEvent(msg.Event)
-		return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
+		if m.eventSubscriptionActive {
+			return m, tea.Batch(WaitForBackendEvent(m.eventCh), cmd)
+		}
+		return m, cmd
 	case RunStartedMsg:
 		if !m.runMessageBelongsToActiveWorkspace(msg.WorkspaceID, msg.Run) {
 			return m, nil

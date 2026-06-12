@@ -586,18 +586,50 @@ func runInfoResourceMap(run RunInfo) map[string]any {
 }
 
 func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any {
-	slim := snapshot
-	slim.Runs = nil
-	resource := resourceMapAlias(slim)
-	if resource == nil {
-		return nil
-	}
 	runs := make([]map[string]any, 0, len(snapshot.Runs))
 	for _, run := range snapshot.Runs {
 		runs = append(runs, runInfoResourceMap(run))
 	}
-	resource["Runs"] = runs
-	return resource
+	eventRecords := make([]map[string]any, 0, len(snapshot.EventRecords))
+	for _, record := range snapshot.EventRecords {
+		eventRecords = append(eventRecords, map[string]any{
+			"ID":             string(record.ID),
+			"Version":        record.Version,
+			"Topic":          record.Topic,
+			"OccurredAt":     record.OccurredAt,
+			"SourceModule":   record.SourceModule,
+			"SubjectType":    record.SubjectType,
+			"SubjectID":      record.SubjectID,
+			"WorkspaceID":    string(record.WorkspaceID),
+			"RunID":          string(record.RunID),
+			"StepID":         string(record.StepID),
+			"PayloadSummary": cloneCLIResultValue(record.PayloadSummary, 0),
+			"PayloadRef":     record.PayloadRef,
+		})
+	}
+	return map[string]any{
+		"Workspace":             snapshot.Workspace,
+		"Projection":            snapshot.Projection,
+		"Outcome":               snapshot.Outcome,
+		"TaskProgress":          snapshot.TaskProgress,
+		"RunHeartbeat":          snapshot.RunHeartbeat,
+		"CoverageSummary":       cloneCLIResultValue(snapshot.CoverageSummary, 0),
+		"TaskDecompositions":    snapshot.TaskDecompositions,
+		"Goals":                 snapshot.Goals,
+		"DoDs":                  snapshot.DoDs,
+		"Runs":                  runs,
+		"Results":               snapshot.Results,
+		"Artifacts":             snapshot.Artifacts,
+		"ArtifactContinuations": snapshot.ArtifactContinuations,
+		"Patches":               snapshot.Patches,
+		"MemoryRecallTraces":    snapshot.MemoryRecallTraces,
+		"WebSources":            snapshot.WebSources,
+		"LLMUsageTraces":        snapshot.LLMUsageTraces,
+		"LLMUsageSummary":       snapshot.LLMUsageSummary,
+		"EventRecords":          eventRecords,
+		"Decisions":             snapshot.Decisions,
+		"Approvals":             snapshot.Approvals,
+	}
 }
 
 func resourceMapAlias(v any) map[string]any {

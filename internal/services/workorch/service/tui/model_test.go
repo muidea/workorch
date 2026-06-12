@@ -3533,6 +3533,16 @@ func TestModelSubscriptionQueuesRunProgressEvents(t *testing.T) {
 	}
 }
 
+func TestModelAllowsBackendWithoutEvents(t *testing.T) {
+	m := NewAppModel(&noEventsBE{fakeBE: newFake(t)}, "ws-a", "")
+	if m.unsubscribe == nil {
+		t.Fatal("expected noop unsubscribe when backend has no event client")
+	}
+	if m.eventSubscriptionActive {
+		t.Fatal("expected event subscription to stay inactive without an event client")
+	}
+}
+
 func TestEnqueueBackendEventKeepsWorkspaceCreatedWhenChannelFull(t *testing.T) {
 	ch := make(chan backend.Event, 1)
 	enqueueBackendEvent(ch, backend.Event{Type: backend.EventStepCompleted, WorkspaceID: "ws-a"})
@@ -4692,6 +4702,12 @@ type subscriptionCaptureBE struct {
 }
 
 func (b *subscriptionCaptureBE) Events() backend.EventsBackend { return b.events }
+
+type noEventsBE struct {
+	*fakeBE
+}
+
+func (b *noEventsBE) Events() backend.EventsBackend { return nil }
 
 type subscriptionCaptureEvents struct {
 	handler backend.EventHandler
