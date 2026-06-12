@@ -33,8 +33,28 @@ type remoteBackend struct {
 	evt  *remoteEventsBackend
 }
 
+type RemoteOption func(*remoteOptions)
+
+type remoteOptions struct {
+	eventStreamView string
+}
+
 // NewRemote creates a Backend that communicates with a remote workorch --server via HTTP.
 func NewRemote(addr string) Backend {
+	return NewRemoteWithOptions(addr)
+}
+
+func NewRemoteProjectionEvents(addr string) Backend {
+	return NewRemoteWithOptions(addr, WithRemoteEventStreamView("projection"))
+}
+
+func NewRemoteWithOptions(addr string, opts ...RemoteOption) Backend {
+	options := remoteOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
 	cl := client.New(addr)
 	b := &remoteBackend{cl: cl}
 	b.ws = &remoteWorkspaceBackend{cl: cl}
@@ -49,8 +69,16 @@ func NewRemote(addr string) Backend {
 	b.mem = &remoteMemoryBackend{cl: cl}
 	b.tmpl = &remoteTemplateBackend{cl: cl}
 	b.cfg = &remoteConfigBackend{cl: cl}
-	b.evt = &remoteEventsBackend{cl: cl}
+	b.evt = &remoteEventsBackend{cl: cl, streamView: strings.TrimSpace(options.eventStreamView)}
 	return b
+}
+
+func WithRemoteEventStreamView(view string) RemoteOption {
+	return func(options *remoteOptions) {
+		if options != nil {
+			options.eventStreamView = strings.TrimSpace(view)
+		}
+	}
 }
 
 func (b *remoteBackend) Workspace() WorkspaceBackend { return b.ws }
@@ -674,6 +702,7 @@ func (b *remoteConfigBackend) Get(ctx context.Context) (*ServiceConfig, error) {
 
 type remoteEventsBackend struct {
 	cl          *client.Client
+	streamView  string
 	mu          sync.Mutex
 	lastEventID string
 }
@@ -718,12 +747,15 @@ func (b *remoteEventsBackend) streamEventsOnce(ctx context.Context, handler Even
 	if err != nil {
 		return false
 	}
+	query := req.URL.Query()
+	if streamView := strings.TrimSpace(b.streamView); streamView != "" {
+		query.Set("view", streamView)
+	}
 	if lastEventID := b.lastEventIDSnapshot(); lastEventID != "" {
 		req.Header.Set("Last-Event-ID", lastEventID)
-		query := req.URL.Query()
 		query.Set("lastEventId", lastEventID)
-		req.URL.RawQuery = query.Encode()
 	}
+	req.URL.RawQuery = query.Encode()
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {

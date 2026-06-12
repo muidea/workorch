@@ -45,7 +45,11 @@ type remoteService struct {
 
 func (s *remoteService) Startup(context.Context) error {
 	ConfigureDirectory(s.args.ConfigDir)
-	s.be = backend.NewRemote(s.args.Remote)
+	if remoteCommandRequiresFullEventStream(s.args.CobraArgs) {
+		s.be = backend.NewRemote(s.args.Remote)
+	} else {
+		s.be = backend.NewRemoteProjectionEvents(s.args.Remote)
+	}
 	return nil
 }
 
@@ -58,6 +62,21 @@ func (s *remoteService) Run(context.Context) error {
 
 func (s *remoteService) Shutdown(context.Context) error {
 	return nil
+}
+
+func remoteCommandRequiresFullEventStream(args []string) bool {
+	for idx := 0; idx < len(args); idx++ {
+		arg := args[idx]
+		switch arg {
+		case "--remote", "--config", "--config-dir", "-config-dir":
+			idx++
+			continue
+		case "":
+			continue
+		}
+		return arg == "agent"
+	}
+	return false
 }
 
 type serverService struct {

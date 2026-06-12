@@ -59,6 +59,26 @@ func TestParseStartupArgsKeepsRemoteBehindBackendBoundary(t *testing.T) {
 	}
 }
 
+func TestRemoteCommandRequiresFullEventStreamOnlyForAgent(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "agent", args: []string{"--remote", "http://127.0.0.1:8080", "agent", "goal"}, want: true},
+		{name: "repl", args: []string{"--remote", "http://127.0.0.1:8080", "repl"}, want: false},
+		{name: "implicit tui", args: []string{"--remote", "http://127.0.0.1:8080"}, want: false},
+		{name: "workspace command", args: []string{"--remote", "http://127.0.0.1:8080", "workspace", "list"}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := remoteCommandRequiresFullEventStream(tc.args); got != tc.want {
+				t.Fatalf("remoteCommandRequiresFullEventStream(%#v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInstallInteractiveLoggingWritesToConfigLogFile(t *testing.T) {
 	dir := t.TempDir()
 	restore := installInteractiveLogging(dir)

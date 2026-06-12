@@ -35,6 +35,7 @@ import (
 	engine "github.com/muidea/magicEngine/http"
 	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
@@ -1224,6 +1225,71 @@ func TestEventStreamRoutePublishesFilteredHubEvents(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for streamed event")
 		}
+	}
+}
+
+func TestEventStreamProjectionViewPublishesOnlyProjectionEvents(t *testing.T) {
+	hub := events.NewMemoryHub()
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
+	server := httptest.NewServer(newMuxWithState(state))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/workorch/events/stream?workspaceId=ws-projection&view=projection", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	lines, readErr := readSSELines(resp.Body)
+	waitSSEConnected(t, lines, readErr)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       runevents.TopicStepStateChanged,
+		WorkspaceID: "ws-projection",
+		RunID:       "run-heavy",
+		StepID:      "run-heavy/step-001",
+		Payload: map[string]any{
+			"state": "completed",
+			"input": strings.Repeat("large runtime payload", 4096),
+		},
+	}); err != nil {
+		t.Fatalf("publish heavy step event: %v", err)
+	}
+
+	select {
+	case line := <-lines:
+		if strings.HasPrefix(line, "data:") {
+			t.Fatalf("projection stream emitted raw step data line: %.120s", line)
+		}
+	case err := <-readErr:
+		t.Fatalf("stream closed before projection event: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: "ws-projection",
+		Payload: map[string]any{
+			"type":              "workspace_projection_changed",
+			"workspaceId":       "ws-projection",
+			"workspaceRevision": 7,
+		},
+	}); err != nil {
+		t.Fatalf("publish projection event: %v", err)
+	}
+
+	_, envelope := readSSEEnvelope(t, lines, readErr)
+	if envelope.Topic != workorchdevents.TopicWorkspaceProjectionChanged || envelope.WorkspaceID != "ws-projection" {
+		t.Fatalf("projection envelope = %+v, want projection change for ws-projection", envelope)
+	}
+	if _, exists := envelope.Payload["input"]; exists {
+		t.Fatalf("projection payload unexpectedly contains raw step input: %+v", envelope.Payload)
 	}
 }
 

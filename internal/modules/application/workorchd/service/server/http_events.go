@@ -9,6 +9,7 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -45,7 +46,11 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		w.Header().Set("Connection", "keep-alive")
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
 		runID := strings.TrimSpace(r.URL.Query().Get("runId"))
+		streamView := normalizeEventStreamView(r.URL.Query().Get("view"))
 		filterEnvelope := func(envelope events.Envelope) bool {
+			if isProjectionEventStreamView(streamView) && envelope.Topic != workorchdevents.TopicWorkspaceProjectionChanged {
+				return false
+			}
 			if workspaceID != "" && envelope.WorkspaceID != workspaceID {
 				return false
 			}
@@ -55,7 +60,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return true
 		}
 		eventCh := make(chan events.Envelope, 128)
-		unsubscribers := subscribeServerStreamEvents(state.eventHub, func(_ context.Context, envelope events.Envelope) error {
+		unsubscribers := subscribeServerStreamEvents(state.eventHub, streamView, func(_ context.Context, envelope events.Envelope) error {
 			if !filterEnvelope(envelope) {
 				return nil
 			}
@@ -69,7 +74,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		if lastEventID == "" {
 			lastEventID = strings.TrimSpace(r.URL.Query().Get("lastEventId"))
 		}
-		for _, envelope := range state.replayEventStreamEnvelopes(r.Context(), lastEventID, workspaceID, runID, filterEnvelope) {
+		for _, envelope := range state.replayEventStreamEnvelopes(r.Context(), lastEventID, workspaceID, runID, streamView, filterEnvelope) {
 			if !writeSSEEnvelope(w, flusher, envelope) {
 				return
 			}

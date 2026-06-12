@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, filter func(events.Envelope) bool) []events.Envelope {
+func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, view string, filter func(events.Envelope) bool) []events.Envelope {
 	lastEventID = strings.TrimSpace(lastEventID)
 	if s == nil || lastEventID == "" {
 		return nil
@@ -28,7 +29,7 @@ func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventI
 		}
 		ret = append(ret, envelope)
 	}
-	for _, envelope := range s.persistedReplayEnvelopes(ctx, lastEventID, workspaceID, runID) {
+	for _, envelope := range s.persistedReplayEnvelopes(ctx, lastEventID, workspaceID, runID, eventStreamReplayTopic(view)) {
 		appendEnvelope(envelope)
 	}
 	if s.eventReplay != nil {
@@ -39,13 +40,21 @@ func (s *serverState) replayEventStreamEnvelopes(ctx context.Context, lastEventI
 	return ret
 }
 
-func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string) []events.Envelope {
+func eventStreamReplayTopic(view string) string {
+	if isProjectionEventStreamView(view) {
+		return workorchdevents.TopicWorkspaceProjectionChanged
+	}
+	return ""
+}
+
+func (s *serverState) persistedReplayEnvelopes(ctx context.Context, lastEventID string, workspaceID string, runID string, topic string) []events.Envelope {
 	if s == nil || s.listEventRecords == nil || strings.TrimSpace(lastEventID) == "" {
 		return nil
 	}
 	items, err := s.listEventRecords(ctx, s.config.Backend, s.config.DataRoot, appservice.EventRecordQuery{
 		WorkspaceID:    strings.TrimSpace(workspaceID),
 		RunID:          strings.TrimSpace(runID),
+		Topic:          strings.TrimSpace(topic),
 		CursorAfterID:  strings.TrimSpace(lastEventID),
 		Limit:          maxEventRecordPageLimit,
 		IncludePayload: true,

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -69,6 +70,77 @@ func TestRemoteEventsBackendSubscribesToSSEStream(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatal("timed out waiting for remote SSE event")
+		}
+	}
+}
+
+func TestRemoteProjectionEventsBackendRequestsProjectionStreamView(t *testing.T) {
+	seenView := make(chan string, 1)
+	envelope := events.Envelope{
+		Topic:       workorchdevents.TopicWorkspaceProjectionChanged,
+		WorkspaceID: "ws-projection",
+		Payload: map[string]any{
+			"type":              "workspace_projection_changed",
+			"workspaceId":       "ws-projection",
+			"workspaceRevision": 3,
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workorch/events/stream" {
+			http.NotFound(w, r)
+			return
+		}
+		seenView <- r.URL.Query().Get("view")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		data, err := json.Marshal(envelope)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		_, _ = fmt.Fprintf(w, "event: workorch\n")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	received := make(chan Event, 2)
+	be := NewRemoteProjectionEvents(server.URL)
+	unsubscribe, err := be.Events().Subscribe(context.Background(), func(_ context.Context, evt Event) {
+		received <- evt
+	})
+	if err != nil {
+		t.Fatalf("subscribe projection remote events: %v", err)
+	}
+	defer unsubscribe()
+
+	select {
+	case view := <-seenView:
+		if view != "projection" {
+			t.Fatalf("stream view = %q, want projection", view)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for projection stream request")
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-received:
+			if evt.Type == EventWorkspaceListChanged {
+				continue
+			}
+			if evt.Type != EventWorkspaceProjectionChanged || evt.WorkspaceID != "ws-projection" {
+				t.Fatalf("event = %+v, want workspace projection event for ws-projection", evt)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for projection remote SSE event")
 		}
 	}
 }

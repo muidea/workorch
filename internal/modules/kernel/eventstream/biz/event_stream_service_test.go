@@ -81,7 +81,7 @@ func TestServicePersistsWorkorchEventsFromHub(t *testing.T) {
 		t.Fatalf("publish run event: %v", err)
 	}
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream"})
+	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream", IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestServicePersistsPatchEventsFromHub(t *testing.T) {
 		t.Fatalf("publish patch event: %v", err)
 	}
 
-	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream"})
+	records, err := repo.List(ctx, repository.EventRecordQuery{RunID: "run-event-stream", IncludePayload: true})
 	if err != nil {
 		t.Fatalf("list event records: %v", err)
 	}

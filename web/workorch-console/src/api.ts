@@ -4,8 +4,9 @@ const apiBase = '/api/v1/workorch';
 
 const inflightGets = new Map<string, Promise<unknown>>();
 
-export function createWorkorchEventStream(query?: { workspaceId?: string; runId?: string; lastEventId?: string }) {
+export function createWorkorchEventStream(query?: { workspaceId?: string; runId?: string; lastEventId?: string; view?: string }) {
   const search = new URLSearchParams();
+  search.set('view', query?.view || 'projection');
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== null && value !== '') {
       search.set(key, String(value));

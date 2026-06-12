@@ -1869,7 +1869,7 @@ func (s *serverState) registerEventReplayRecorder() {
 	if s == nil || s.eventHub == nil || s.eventReplay == nil {
 		return
 	}
-	unsubscribers := subscribeServerStreamEvents(s.eventHub, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribers := subscribeServerStreamEvents(s.eventHub, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
 		s.eventReplay.Append(envelope)
 		return nil
 	})

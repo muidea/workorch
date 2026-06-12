@@ -10,6 +10,14 @@ import type { Approval, ApprovalPage, Decision } from '../types';
 
 const governancePageLimit = 20;
 
+function isGovernanceRefreshEvent(event: { topic: string; payload?: Record<string, unknown> }) {
+  return event.topic === '/workorchd/workspace/projection/changed'
+    || event.payload?.type === 'workspace_projection_changed'
+    || event.topic.includes('approval')
+    || event.topic.includes('governance')
+    || event.topic.includes('run.');
+}
+
 export function ApprovalQueuePage() {
   const { message } = AntApp.useApp();
   const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<React.Key[]>([]);
@@ -44,7 +52,7 @@ export function ApprovalQueuePage() {
   }, []);
 
   useSSE((event) => {
-    if (event.topic.includes('approval') || event.topic.includes('governance') || event.topic.includes('run.')) {
+    if (isGovernanceRefreshEvent(event)) {
       void loadApprovalPage().catch((error: unknown) => message.error(errorMessage(error)));
     }
   }, { debounceMs: 300 });

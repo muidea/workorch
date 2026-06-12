@@ -20,7 +20,7 @@ func TestSubscribeServerStreamEventsReceivesProjectionAcrossHubWrappers(t *testi
 	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
 	publisher := events.NewMagicHubWithHubOwner(rawHub, "workorchd/projection")
 	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
 		received <- envelope
 		return nil
 	})
@@ -52,7 +52,7 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
 	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/workspace")
 	received := make(chan events.Envelope, 1)
-	unsubscribers := subscribeServerStreamEvents(subscriber, func(_ context.Context, envelope events.Envelope) error {
+	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
 		received <- envelope
 		return nil
 	})
@@ -74,5 +74,35 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for owner event across hub wrappers")
+	}
+}
+
+func TestSubscribeServerStreamEventsProjectionViewIgnoresOwnerEvents(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
+	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/workspace")
+	received := make(chan events.Envelope, 1)
+	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewProjection, func(_ context.Context, envelope events.Envelope) error {
+		received <- envelope
+		return nil
+	})
+	defer unsubscribeAll(unsubscribers)
+
+	if err := publisher.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       workspaceevents.TopicWorkspaceCreated,
+		WorkspaceID: "ws-owner",
+		Payload:     events.WorkspacePayload("owner workspace", "", "/tmp/ws-owner", "", common.WorkspaceStateActive, ""),
+	}); err != nil {
+		t.Fatalf("publish owner event: %v", err)
+	}
+
+	select {
+	case envelope := <-received:
+		t.Fatalf("unexpected projection stream envelope = %+v", envelope)
+	case <-time.After(150 * time.Millisecond):
 	}
 }
