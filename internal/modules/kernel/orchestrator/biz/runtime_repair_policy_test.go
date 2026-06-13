@@ -707,6 +707,108 @@ func TestShouldBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWitho
 	}
 }
 
+func TestShouldBlockOnDuplicateRuntimeContractLoopUsingInheritedRepairTargetScope(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-loop-inherited-target")
+	rootStepID := common.StepID(string(runID) + "/graph-001/001-verify")
+	signature := "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=invalid argument: strategyReassessment.required=true requires fields"
+	repo := memory.NewStepRepository()
+	targetPackage := map[string]any{
+		"targetSnapshots": []map[string]any{{
+			"targetRef":   "target.txt",
+			"contentHash": "sha256:target",
+			"complete":    true,
+		}},
+		"currentFailure": map[string]any{
+			"failureClass":       failureClassShellCommand,
+			"failureSignature":   "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=target.txt|exitCode=1",
+			"failureTargetScope": "failureTargets=target.txt",
+		},
+	}
+	steps := []*runmodel.Step{
+		{
+			ID:    common.StepID(string(runID) + "/repair-attempt-001"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  1,
+				stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+				stepInputKeyRepairOfFailureSig:    signature,
+				stepInputKeyRepairOfRootStepID:    string(rootStepID),
+				"repairActionPackage":             targetPackage,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: signature,
+				"stage":                   "llm_execution_graph_plan",
+				"error":                   "invalid argument: strategyReassessment.required=true requires fields",
+			},
+		},
+		{
+			ID:    common.StepID(string(runID) + "/repair-attempt-002"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  2,
+				stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+				stepInputKeyRepairOfFailureSig:    signature,
+				stepInputKeyRepairOfRootStepID:    string(rootStepID),
+				"repairActionPackage":             targetPackage,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassRuntime,
+				failureOutputKeySignature: signature,
+				"stage":                   "llm_execution_graph_plan",
+				"error":                   "invalid argument: strategyReassessment.required=true requires fields",
+			},
+		},
+	}
+	for _, step := range steps {
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	currentFailed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-attempt-003"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  3,
+			stepInputKeyRepairOfFailureClass:  failureClassRuntime,
+			stepInputKeyRepairOfFailureSig:    signature,
+			stepInputKeyRepairOfRootStepID:    string(rootStepID),
+			"repairActionPackage":             targetPackage,
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassRuntime,
+			failureOutputKeySignature: signature,
+			"stage":                   "llm_execution_graph_plan",
+			"error":                   "invalid argument: strategyReassessment.required=true requires fields",
+		},
+	}
+	if err := repo.Create(ctx, currentFailed); err != nil {
+		t.Fatalf("seed current step: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:   repo,
+		tickets: memory.NewDecisionTicketRepository(),
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 3}),
+	}
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if got := runtimeFailureTargetScopeFromStep(currentFailed); got != "failureTargets=target.txt" {
+		t.Fatalf("runtimeFailureTargetScopeFromStep = %q, want target.txt scope", got)
+	}
+	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
+		t.Fatalf("expected repeated runtime contract loop to use inherited target scope and block at budget")
+	}
+}
+
 func TestShouldNotBlockOnDuplicateRuntimeFailureForRepeatedRuntimeContractLoopWithNewEvidence(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-duplicate-runtime-contract-loop-with-evidence")

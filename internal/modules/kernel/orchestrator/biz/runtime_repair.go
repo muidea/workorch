@@ -226,6 +226,17 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 	case strings.Contains(text, "file_edit_conflict") ||
 		strings.Contains(text, "file/edit oldtext not found"):
 		return contractViolationFileEditConflict
+	case strings.Contains(text, "file_write cannot replace existing target"):
+		return contractViolationPatchDispatchInvalid
+	case strings.Contains(text, "executiongraph patch/apply must not depend on same-graph file/read") ||
+		strings.Contains(text, "patch/apply must not depend on same-graph file/read"):
+		return contractViolationGraphDependsOnLLMBeforePatch
+	case strings.Contains(text, "patch text_replace oldtext/newtext must describe") ||
+		strings.Contains(text, "oldtext/newtext must describe a substantive change") ||
+		strings.Contains(text, "patch describes a non-substantive"):
+		return contractViolationPatchContentRequired
+	case strings.Contains(text, "strategyreassessment.required=true"):
+		return contractViolationPatchDispatchInvalid
 	default:
 		return ""
 	}

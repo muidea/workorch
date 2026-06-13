@@ -545,7 +545,7 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	}
 	signature := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeySignature))
 	class := strings.TrimSpace(stringFromMap(failedStep.Output, failureOutputKeyClass))
-	targetScope := runtimeFailureTargetScope(signature)
+	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	attempts := repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
@@ -745,6 +745,9 @@ func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
 		"patch text_replace oldtext/newtext must describe",
 		"invalid llm decision json",
 		"strategyreassessment.required=true",
+		"executiongraph patch/apply must not depend on same-graph file/read",
+		"file_write cannot replace existing target",
+		"concrete validation evidence repair must return bounded",
 		"state-changing repair contract",
 		"scoped state-changing runtime repair requires bounded verification",
 		"primary diagnostic",

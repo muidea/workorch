@@ -669,11 +669,107 @@ func runtimeFailureTargetScopeFromStep(step *runModel.Step) string {
 	if targetScope := runtimeFailureTargetScope(signature); targetScope != "" {
 		return targetScope
 	}
-	return runtimeFailureTargetScope(firstNonEmptyString(
+	if targetScope := runtimeFailureTargetScope(firstNonEmptyString(
 		stringFromMap(step.Input, stepInputKeyRepairOfFailureSig),
 		stringFromMap(step.Input, failureOutputKeySignature),
 		stringFromMap(step.Output, failureOutputKeySignature),
-	))
+	)); targetScope != "" {
+		return targetScope
+	}
+	return runtimeFailureTargetScopeFromRepairEvidence(step)
+}
+
+func runtimeFailureTargetScopeFromRepairEvidence(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	targets := runtimeFailureTargetRefsFromRepairEvidence(step)
+	if len(targets) == 0 {
+		return ""
+	}
+	return "failureTargets=" + strings.Join(targets, ",")
+}
+
+func runtimeFailureTargetRefsFromRepairEvidence(step *runModel.Step) []string {
+	if step == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = normalizeRuntimeFailureTargetValue(value)
+		if value == "" {
+			return
+		}
+		for _, item := range strings.Split(value, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" || seen[item] {
+				continue
+			}
+			seen[item] = true
+			ret = append(ret, item)
+		}
+	}
+	addScope := func(scope string) {
+		scope = strings.TrimSpace(scope)
+		if scope == "" {
+			return
+		}
+		for _, part := range strings.Split(scope, "|") {
+			key, value, ok := strings.Cut(part, "=")
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(key) {
+			case "failureTargets", "targetRef", "conflictRef":
+				add(value)
+			}
+		}
+	}
+	addTargetsFromMap := func(value map[string]any) {
+		if len(value) == 0 {
+			return
+		}
+		for _, key := range []string{"failureTargetScope", "targetScope"} {
+			addScope(stringFromMap(value, key))
+		}
+		for _, key := range []string{"targetRef", "conflictRef"} {
+			add(stringFromMap(value, key))
+		}
+		for _, key := range []string{"failureTargets", "targetRefs", "relatedFailureTargets", "affectedTargets"} {
+			for _, target := range stringSliceFromValue(value[key]) {
+				add(target)
+			}
+		}
+		for _, item := range mapSliceFromValue(value["targetSnapshots"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+		for _, item := range mapSliceFromValue(value["currentTargetSnapshots"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+		for _, item := range mapSliceFromValue(value["failureTargetRepairContext"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+		for _, item := range mapSliceFromValue(value["patchRepairContext"]) {
+			add(stringFromMap(item, "targetRef"))
+		}
+	}
+	for _, source := range []map[string]any{
+		step.Input,
+		step.Output,
+		mapFromValue(step.Input["repairActionPackage"]),
+		mapFromValue(step.Output["repairActionPackage"]),
+		mapFromValue(step.Input["currentFailure"]),
+		mapFromValue(step.Output["currentFailure"]),
+		mapFromValue(mapFromValue(step.Input["repairActionPackage"])["currentFailure"]),
+		mapFromValue(mapFromValue(step.Output["repairActionPackage"])["currentFailure"]),
+	} {
+		addTargetsFromMap(source)
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return limitedStrings(ret, maxLLMContextSliceItems)
 }
 
 func runtimeRepairTargetBudgetWindowRoot(step *runModel.Step) common.StepID {
