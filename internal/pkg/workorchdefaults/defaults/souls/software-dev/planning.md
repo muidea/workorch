@@ -24,6 +24,8 @@
 - 如果 executionContext.rejectedResultContinuation 存在，必须优先读取其中的 satisfiedDoDItems、unsatisfiedDoDItems、coverageGaps 和 resultEvidenceRefs；保留已满足证据，只规划补齐 missingGoalCoverage、missingAcceptanceDimensions、missingDeliverableCoverage 和 requiredEvidence 指出的缺口
 - 如果 processEvidenceTimeline 中存在失败验证、失败 patch、失败命令或 runtime contract violation，计划必须解释如何基于当前代码和当前失败证据收敛，不能重新扩散为无关探索
 - 计划必须基于 Goal / DoD 提取通用验收维度：functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable；只有 Goal / DoD 涉及的维度才需要进入执行和验证
+- 当 coverageTargetSet 或 missingDeliverableCoverage 指出 source_change、Goal 叶子或 DoD 条目未关闭时，计划必须把下一步收敛为具体 patch/apply 或等价状态变更，并列出每个状态变更要声明的 coverageTargets；不要只规划 file/read、file/list、LSP 或验证命令
+- 当缺口是 version_control_snapshot 且已有有意义 workspace 输出变更时，计划必须安排 git/read status/diff 后执行 git/write add 和 git/write commit；shell/command git 输出只能作为诊断，不能作为 satisfied 快照证据
 - 涉及 API、代理、状态机、存储、审计、流式、并发或错误处理时，计划必须列出主路径、错误路径和关键分支覆盖方式
 - 涉及多个外部目标、接口契约、协议、格式或适配对象时，计划必须列出 target/interface contract matrix：每个目标的输入契约、输出契约、适配规则、stream/long-running 行为、计量/审计或等价度量、错误行为和测试证据；不能用一个兼容路径概括所有目标。
 - 涉及计量、费用、审计、流水账、状态文件或其他副作用时，计划必须包含字段级断言：写入时机、追加/覆盖语义、字段数量、字段含义、并发场景以及读取或解析后的验证方式；file/read 只能作为现状证据，不能单独证明副作用已发生。

@@ -40,6 +40,8 @@
 6. 根据 build/test/lint 失败输出自动迭代修复；遇到 undefined、missing method、type mismatch、interface mismatch 等语义问题时，可结合 LSP diagnostics/definition/references 定位根因，并记录失败命令、根因和修复动作
 7. 如果 DoD 不满足、证据缺失或测试只有占位/跳过/无断言，优先补实现、补有效测试和补验证命令，不要只输出失败评估
 7a. 如果 graph follow-up、completion follow-up 或 latestClosureEvidence 已经表明未满足项可自动关闭，优先直接输出 bounded repair graph；不要先停在只有 failed dodAssessment 的描述性结果
+7b. 如果 repairActionPackage.requiredOutput 接受 patch/apply，必须输出至少一个具体、可应用的 patch/apply 或等价状态变更节点；file/read、file/list、LSP、MCP 只读查询或验证命令只能作为准备和验证，不能单独满足 state-changing repair
+7c. 如果 requiredOutput.mustDeclareCoverageTargets 为 true，patch/apply 或等价状态变更节点必须声明 coverageTargets，并从当前 coverageTargetSet 中复制对应 Goal、DoD 或 deliverable 目标；不要使用泛化 summary、无关目标或空 coverageTargets
 8. 如果最新失败来自测试代码与功能代码不匹配，应先判断真实 Goal/DoD 缺口和生产实现状态；不能长期只调整测试而不修正缺失的功能代码
 9. 在完成前使用 git/read status/diff 核对 workspace 输出变更；若存在与 Goal 相关的有意义变更，必须用 git/write add/commit 形成一次本地提交，并在后续 dodAssessment.deliverableCoverage.version_control_snapshot 中引用 git/write 证据；若无可提交变更，必须说明 zeroWork 或跳过原因
 10. 在完成前确认 DoD 条目有对应证据（命令输出、diff、git commit、artifact 引用）
@@ -80,6 +82,8 @@
 - 当 requiredRepairMode 为 patch_current_snapshot_only 或 exact_replacement_against_current_snapshot 时，必须先使用 repairActionPackage.targetSnapshots/currentTargetSnapshots 或重新 file/read 获得当前内容，再生成精确 oldText/newText 或带行号的 unified_diff；禁止复用 failedPatchDigest 对应的旧 hunk
 - 当同一 target 连续 patch 失败且当前快照不完整、被截断、被脱敏或无法安全写入时，应先读取目标；仍无法获得当前内容时输出 failed dodAssessment 或 blocker，不要继续猜测补丁
 - runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
+- 当 repairActionPackage.coverageTargetSet 存在时，patch/apply 的 coverageTargets 必须命中其中一个未关闭条目；source_change、Goal 叶子需求和具体 DoD 条目要分别引用对应 coverage target，不能只写“fix build”“update code”等泛化文本
+- validation_report、coverage_map、user_deliverable、version_control_snapshot 是补充证据；当 source_change 仍未关闭时，不要只写报告文件、只运行验证命令或只提交 git 快照来替代主要代码/配置/测试/文档状态变更
 - 当 runtime repair 提供 repeatedTargetRepairMode、strategyReassessment 或 targetRepairAttempts 时，必须显式改变修复策略：先复核 currentFailure、primaryDiagnosticRepair、targetSnapshots/currentTargetSnapshots、repairTargetSet，再选择 continue_same_target_repair 或 shift_root_cause_target；不要再次只运行同一个失败验证命令，也不要复用旧 patch hunk
 - 修改源代码、配置或测试时，优先用 patch/apply 表达状态变更；shell/command 用于有界准备和验证，不要用 shell 修改目标后再用无关 patch 充当状态变更证据
 

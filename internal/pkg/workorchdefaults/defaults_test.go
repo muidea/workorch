@@ -135,6 +135,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "当前缺口")
 	assertSoulContains(t, planning.SoulMD, "completion follow-up")
 	assertSoulContains(t, planning.SoulMD, "可执行 repair graph")
+	assertSoulContains(t, planning.SoulMD, "coverageTargets")
+	assertSoulContains(t, planning.SoulMD, "git/write add")
 	assertSoulNotContains(t, planning.SoulMD, "provider/protocol matrix")
 	assertSoulNotContains(t, planning.SoulMD, "多供应商")
 	assertSoulNotContains(t, planning.SoulMD, "多模型")
@@ -197,6 +199,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "首要编译阻塞")
 	assertSoulContains(t, execution.SoulMD, "bounded repair graph")
 	assertSoulContains(t, execution.SoulMD, "failed dodAssessment")
+	assertSoulContains(t, execution.SoulMD, "mustDeclareCoverageTargets")
+	assertSoulContains(t, execution.SoulMD, "repairActionPackage.coverageTargetSet")
+	assertSoulContains(t, execution.SoulMD, "补充证据")
 	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
 	assertSoulNotContains(t, execution.SoulMD, "providers[]")
 	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
@@ -242,6 +247,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "不要让旧失败覆盖后续成功证据")
 	assertSoulContains(t, validation.SoulMD, "bounded repair graph")
 	assertSoulContains(t, validation.SoulMD, "目标文件、目标测试和验证命令")
+	assertSoulContains(t, validation.SoulMD, "deliverableCoverage.source_change")
+	assertSoulContains(t, validation.SoulMD, "git/write commit")
+	assertSoulContains(t, validation.SoulMD, "coverageTargets 缺失")
 	assertSoulNotContains(t, validation.SoulMD, "多供应商")
 	assertSoulNotContains(t, validation.SoulMD, "多模型")
 	assertSoulNotContains(t, validation.SoulMD, "Token")
@@ -543,6 +551,12 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if !ok || len(requirements) < 4 {
 		t.Fatalf("software-dev evidenceRequirements = %+v, want declared requirements", softwareDev["evidenceRequirements"])
 	}
+	guidance, ok := softwareDev["stateChangingRepairGuidance"].([]any)
+	if !ok || len(guidance) < 4 {
+		t.Fatalf("software-dev stateChangingRepairGuidance = %+v, want declared guidance", softwareDev["stateChangingRepairGuidance"])
+	}
+	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.")
+	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.")
 	requiredEvidence := map[string]bool{
 		"runtime_entrypoint":         false,
 		"external_contract":          false,
@@ -569,6 +583,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			if direct, _ := item["requireDirectEvidence"].(bool); !direct {
 				t.Fatalf("source_change requireDirectEvidence = false, want true")
+			}
+			if coverageTargets, _ := item["requireCoverageTargets"].(bool); !coverageTargets {
+				t.Fatalf("source_change requireCoverageTargets = false, want true")
 			}
 			accepted, ok := item["acceptedStepKinds"].([]any)
 			if !ok {

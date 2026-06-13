@@ -23,6 +23,8 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - dodAssessment 必须包含 goalCoverage：goalCoverage.satisfied 与 goalCoverage.items；每个当前 Goal 需求都要有 state、evidenceRefs、reason/nextActions（如未满足）
 - dodAssessment 必须包含 acceptanceDimensions：只列 Goal / DoD 涉及的维度，并为 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等相关维度提供 evidenceRefs
 - dodAssessment 必须包含 deliverableCoverage，覆盖 source_change、validation_report、coverage_map、version_control_snapshot、user_deliverable；每项必须有 evidenceRefs 或 artifactRefs
+- deliverableCoverage.source_change 标记 satisfied 时，必须引用 patch/apply 或等价状态变更证据，并且该证据的 coverageTargets 与对应 Goal、DoD 或 deliverable 项对齐；只读检查、泛化验证命令、LSP/MCP 只读结果、summary artifact 或 git 快照都不能替代 source_change 证据
+- deliverableCoverage.version_control_snapshot 标记 satisfied 时，必须引用 git/write commit 证据；shell/command 形式的 git status、git diff、git log 或 git commit 输出只能作为辅助，不得作为唯一 satisfied evidenceRef
 - goalCoverage 必须覆盖 Goal 叶子需求，并说明 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等被 Goal / DoD 涉及的验收维度
 - 如果项目存在显式入口目录、脚本、命令或构建目标，且 Goal / DoD 声明 CLI、服务、API、单二进制或其他可运行交付物，必须验证目标入口可用；未覆盖入口时不得标记对应条目 satisfied
 - 如果 Goal / DoD 要求最终可运行交付物或用户可观察行为，必须通过最终交付入口完成验证，不能只验证库级函数、局部模块或中间适配层后就声称整体 satisfied
@@ -42,6 +44,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 如果证据不足但可由后续自动修复补齐，应返回 failed 的 dodAssessment，并在 failed/skipped 条目的 reason、impact、nextActions 中写明需要补的文件、测试、命令和断言，不要请求用户选择执行目标
 - 对于 graph follow-up、completion follow-up 或 latestClosureEvidence 已经明确指出的 coverage gap，若当前上下文允许自动推进，应优先直接给出 bounded repair graph 或 bounded verification graph，而不是停在只有缺口描述的 failed assessment
 - 当 failed assessment 已经能机械映射到需要补的实现或测试时，nextActions 必须至少点出目标文件、目标测试和验证命令，避免让 runtime 再次做泛化 repair 归约
+- 当 failed assessment 指向 coverageTargets 缺失、只读 graph 不能满足 state-changing、或版本快照证据类型不符时，nextActions 必须明确要求 patch/apply 携带 coverageTargets、或 git/write add/commit 生成版本快照，而不是再次建议泛化重规划
 
 ## evidenceRefs 提示
 - build 证据：shell/command 成功输出
