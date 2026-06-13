@@ -46,6 +46,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 当 failed assessment 已经能机械映射到需要补的实现或测试时，nextActions 必须至少点出目标文件、目标测试和验证命令，避免让 runtime 再次做泛化 repair 归约
 - 当 failed assessment 指向 coverageTargets 缺失、只读 graph 不能满足 state-changing、或版本快照证据类型不符时，nextActions 必须明确要求 patch/apply 携带 coverageTargets、或 git/write add/commit 生成版本快照，而不是再次建议泛化重规划
 - 当 version_control_snapshot 因引用 shell/command、file/read、file/list、LSP 或其他非 git/write commit 证据被拒绝时，必须将 version_control_snapshot 标记 failed，并在 nextActions 中明确要求先 git/read status/diff，再按实际变更执行 git/write add 和 git/write commit；若确无可提交变更，输出 zeroWork/skipped 及原因
+- 如果 runtimeCapabilities.blockKinds 未声明 git/write，不能把 version_control_snapshot 标记 satisfied，也不要建议 shell/command git commit 替代；必须输出真实治理阻塞，要求启用 WorkOrch runtime.git.writeEnabled 后继续
 
 ## evidenceRefs 提示
 - build 证据：shell/command 成功输出
