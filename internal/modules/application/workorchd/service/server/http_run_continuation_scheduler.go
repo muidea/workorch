@@ -348,8 +348,7 @@ func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Contex
 	}
 	for _, workspace := range workspaces {
 		if strings.TrimSpace(workspace.ID) == "" ||
-			strings.TrimSpace(workspace.ActiveRunID) != "" ||
-			workspace.State != string(common.WorkspaceStateFailed) {
+			!workspaceNeedsReplanContinuationRecovery(workspace) {
 			continue
 		}
 		runs, err := state.listRuns(ctx, state.config.Backend, state.config.DataRoot, workspace.ID)
@@ -361,8 +360,28 @@ func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Contex
 			if run.WorkspaceID != workspace.ID || run.State != string(common.RunStateSuperseded) {
 				continue
 			}
+			if activeRunID := strings.TrimSpace(workspace.ActiveRunID); activeRunID != "" && run.ID != activeRunID {
+				continue
+			}
 			s.scheduleReplanContinuationIfNeeded(ctx, workspace.ID, run.ID, run.Priority)
 		}
+	}
+}
+
+func workspaceNeedsReplanContinuationRecovery(workspace appservice.Workspace) bool {
+	state := common.WorkspaceState(strings.TrimSpace(workspace.State))
+	activeRunID := strings.TrimSpace(workspace.ActiveRunID)
+	if state == common.WorkspaceStateFailed && activeRunID == "" {
+		return true
+	}
+	if activeRunID == "" {
+		return false
+	}
+	switch state {
+	case common.WorkspaceStateWaitingDecision, common.WorkspaceStateBlocked:
+		return true
+	default:
+		return false
 	}
 }
 

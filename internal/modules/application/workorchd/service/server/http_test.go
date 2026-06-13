@@ -4795,6 +4795,71 @@ func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
 	}
 }
 
+func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupersededRun(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	const workspaceID = "ws-replan-waiting-decision"
+	const activeRunID = "run-replan-waiting-decision"
+	activated := make(chan string, 1)
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		return []appservice.Workspace{
+			{ID: workspaceID, State: string(common.WorkspaceStateWaitingDecision), ActiveRunID: activeRunID},
+		}, nil
+	}
+	state.listRuns = func(_ context.Context, _, _, gotWorkspaceID string) ([]appservice.Run, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		return []appservice.Run{
+			{ID: "run-replan-older", WorkspaceID: workspaceID, State: string(common.RunStateSuperseded), Priority: 2},
+			{ID: activeRunID, WorkspaceID: workspaceID, State: string(common.RunStateSuperseded), Priority: 6},
+		}, nil
+	}
+	state.listDecisions = func(_ context.Context, _, _, gotWorkspaceID, runID string) ([]appservice.Decision, error) {
+		if gotWorkspaceID != workspaceID || runID != activeRunID {
+			return nil, nil
+		}
+		return []appservice.Decision{
+			{
+				ID:             "ticket-replan-waiting-decision",
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		if cmd.Priority != 6 {
+			t.Fatalf("activation priority = %d, want 6", cmd.Priority)
+		}
+		activated <- gotWorkspaceID
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: activeRunID + "-replan-001", WorkspaceID: gotWorkspaceID, State: string(common.RunStateRunning)},
+		}, nil
+	}
+
+	state.recoverReplanContinuations(context.Background())
+
+	select {
+	case gotWorkspaceID := <-activated:
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("activated workspace = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("waiting decision replan continuation recovery did not schedule activation")
+	}
+}
+
 func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
