@@ -277,7 +277,7 @@ def decision_payload(user_content):
                 "goalCoverage": {
                     "satisfied": True,
                     "items": [{
-                        "requirement": "Plan and execute one approved MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.",
+                        "requirement": "Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.",
                         "state": "satisfied",
                         "evidenceRefs": [evidence]
                     }]
@@ -605,7 +605,7 @@ workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
 [[ -n "$workspace_id" ]]
 
 ensure_goal "$workspace_id" \
-  "Plan and execute one approved MCP stdio repo.summary tool call, then assess the DoD from the tool evidence."
+  "Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence."
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
 [[ -n "$goal_id" ]]
 

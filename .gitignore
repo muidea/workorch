@@ -8,6 +8,7 @@
 /workorch
 /.workorch-data
 /.workorch-workspaces
+/.ci-artifacts
 
 # Runtime/test data must not live under source packages.
 internal/modules/application/**/.workorch-data/

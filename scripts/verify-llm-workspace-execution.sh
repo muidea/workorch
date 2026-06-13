@@ -177,15 +177,52 @@ initial_runs = []
 run_scenarios = {}
 request_sequence = 0
 
-def full_dod_items(step_id):
+def scenario_dod_item(scenario, request=None):
+    content = str((request or {}).get("content") or "").lower()
+    for item in [
+        "multi gate decision then approval can complete",
+        "approval rejection fails safely",
+        "decision can be resolved",
+        "schema failure is observable",
+        "memory recall is visible",
+        "stream usage is recorded",
+        "happy path completes",
+    ]:
+        if item in content:
+            return item
+    return {
+        0: "happy path completes",
+        2: "decision can be resolved",
+        6: "multi gate decision then approval can complete",
+        8: "memory recall is visible",
+    }.get(scenario, "happy path completes")
+
+def scenario_dod_items(scenario, step_id, request=None):
+    item = scenario_dod_item(scenario, request)
+    refs = [step_id]
+    run_id = str((request or {}).get("runId") or "")
+    if run_id and "decision" in item:
+        refs.append(run_id + "-step-1-decision")
+    if run_id and "approval" in item:
+        refs.append(run_id + "-step-1-approval")
     return [
-        {"item": "happy path completes", "state": "satisfied", "evidenceRefs": [step_id]},
-        {"item": "decision can be resolved", "state": "satisfied", "evidenceRefs": [step_id]},
-        {"item": "approval rejection fails safely", "state": "satisfied", "evidenceRefs": [step_id]},
-        {"item": "multi gate decision then approval can complete", "state": "satisfied", "evidenceRefs": [step_id]},
-        {"item": "schema failure is observable", "state": "satisfied", "evidenceRefs": [step_id]},
-        {"item": "memory recall is visible", "state": "satisfied", "evidenceRefs": [step_id]},
+        {"item": item, "state": "satisfied", "evidenceRefs": refs},
     ]
+
+def scenario_from_request_content(request):
+    content = str((request or {}).get("content") or "").lower()
+    for marker, scenario in [
+        ("multi gate decision then approval can complete", 4),
+        ("approval rejection fails safely", 3),
+        ("decision can be resolved", 1),
+        ("schema failure is observable", 7),
+        ("memory recall is visible", 8),
+        ("stream usage is recorded", 9),
+        ("happy path completes", 0),
+    ]:
+        if marker in content:
+            return scenario
+    return -1
 
 def full_goal_coverage(step_id):
     return {
@@ -202,19 +239,27 @@ def full_goal_coverage(step_id):
 def next_scenario(request):
     global request_sequence
     run_id = request.get("runId", "")
-    if run_id and run_id in run_scenarios:
-        request["scenario"] = run_scenarios[run_id]
+    run_key = request.get("runKey", run_id)
+    if run_key and run_key in run_scenarios:
+        request["scenario"] = run_scenarios[run_key]
         return request["scenario"]
-    scenario = request_sequence
-    request_sequence += 1
-    if run_id:
-        run_scenarios[run_id] = scenario
+    scenario = scenario_from_request_content(request)
+    if scenario < 0:
+        scenario = request_sequence
+        request_sequence += 1
+    elif request_sequence <= scenario:
+        request_sequence = scenario + 1
+    if run_key:
+        run_scenarios[run_key] = scenario
     request["scenario"] = scenario
     return scenario
 
 def mark_continuation_scenario(request, scenario):
     global request_sequence
     request["scenario"] = scenario
+    run_key = request.get("runKey", request.get("runId", ""))
+    if run_key:
+        run_scenarios[run_key] = scenario
     if request_sequence <= scenario:
         request_sequence = scenario + 1
 
@@ -223,7 +268,8 @@ def decision_payload(request):
     step_id = request.get("stepId", "")
     if run_id == "probe":
         return {"completionState": "failed", "thoughtSummary": "probe"}
-    scenario = run_scenarios.get(run_id, -1) if run_id else -1
+    run_key = request.get("runKey", run_id)
+    scenario = run_scenarios.get(run_key, -1) if run_key else -1
     if "llm-after-decision" in step_id and scenario == 4:
         mark_continuation_scenario(request, 5)
         return {
@@ -249,7 +295,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Decision path completed.",
-                "items": full_dod_items(step_id),
+                "items": scenario_dod_items(2, step_id, request),
                 "goalCoverage": full_goal_coverage(step_id)
             }
         }
@@ -261,7 +307,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Multi-gate path completed after Decision and Approval.",
-                "items": full_dod_items(step_id),
+                "items": scenario_dod_items(6, step_id, request),
                 "goalCoverage": full_goal_coverage(step_id)
             }
         }
@@ -283,7 +329,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Multi-gate path completed after Decision and Approval.",
-                "items": full_dod_items(step_id),
+                "items": scenario_dod_items(6, step_id, request),
                 "goalCoverage": full_goal_coverage(step_id)
             }
         }
@@ -300,7 +346,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Happy path DoD satisfied.",
-                "items": full_dod_items(step_id),
+                "items": scenario_dod_items(0, step_id, request),
                 "goalCoverage": full_goal_coverage(step_id)
             }
         }
@@ -328,7 +374,7 @@ def decision_payload(request):
             "dodAssessment": {
                 "satisfied": True,
                 "summary": "Decision path completed.",
-                "items": full_dod_items(step_id),
+                "items": scenario_dod_items(2, step_id, request),
                 "goalCoverage": full_goal_coverage(step_id)
             }
         }
@@ -361,7 +407,7 @@ def decision_payload(request):
         "dodAssessment": {
             "satisfied": True,
             "summary": "Memory recall DoD satisfied.",
-            "items": full_dod_items(step_id),
+            "items": scenario_dod_items(scenario, step_id, request),
             "goalCoverage": full_goal_coverage(step_id)
         }
     }
@@ -370,7 +416,8 @@ def usage_payload(request):
     run_id = request.get("runId", "")
     if run_id == "probe":
         return None
-    scenario = request.get("scenario", run_scenarios.get(run_id, -1)) if run_id else request.get("scenario", -1)
+    run_key = request.get("runKey", run_id)
+    scenario = request.get("scenario", run_scenarios.get(run_key, -1)) if run_key else request.get("scenario", -1)
     # Keep scenario-0 without usage so e2e can assert estimated fallback path.
     if scenario == 0:
         return None
@@ -397,12 +444,20 @@ def provider_request_from_payload(payload):
     run_matches = re.findall(r'"runId"\s*:\s*"([^"]+)"', merged_content)
     if not run_matches:
         run_matches = re.findall(r'\brunId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
+    workspace_matches = re.findall(r'"workspaceId"\s*:\s*"([^"]+)"', merged_content)
+    if not workspace_matches:
+        workspace_matches = re.findall(r'\bworkspaceId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
     step_matches = re.findall(r'"stepId"\s*:\s*"([^"]+)"', merged_content)
     if not step_matches:
         step_matches = re.findall(r'\bstepId\b\s*[:=]\s*([A-Za-z0-9._/-]+)', merged_content)
+    workspace_id = workspace_matches[-1] if workspace_matches else ""
+    run_id = run_matches[-1] if run_matches else ""
     return {
-        "runId": run_matches[-1] if run_matches else "",
+        "workspaceId": workspace_id,
+        "runId": run_id,
+        "runKey": (workspace_id + "/" + run_id) if workspace_id and run_id else run_id,
         "stepId": step_matches[-1] if step_matches else "",
+        "content": merged_content,
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -662,24 +717,55 @@ PY
 
 activate_workspace_execution() {
   local output_file="$1"
+  local activation_dod_id="${2:-$dod_id}"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+}
+
+activate_workspace_execution_without_memory() {
+  local output_file="$1"
+  local activation_dod_id="${2:-$dod_id}"
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+    -H 'Content-Type: application/json' \
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
   local output_file="$1"
+  local activation_dod_id="${2:-$dod_id}"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_provider() {
   local output_file="$1"
   local provider_id="$2"
+  local activation_dod_id="${3:-$dod_id}"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+}
+
+create_acceptance_workspace() {
+  local prefix="$1"
+  local title="$2"
+  local description="$3"
+  local dod_items_json="$4"
+
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
+    -d '{"title":"'"$title"'","description":"'"$description"'","templateId":"generic-governed"}' >"$TMP_DIR/$prefix-workspace.json"
+  workspace_id="$(json_path "$TMP_DIR/$prefix-workspace.json" "workspace.id")"
+  [[ -n "$workspace_id" ]]
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
+    -d '{"text":"verify LLM driven workspace execution"}' >"$TMP_DIR/$prefix-goal.json"
+  goal_id="$(json_path "$TMP_DIR/$prefix-goal.json" "goal.id")"
+  [[ -n "$goal_id" ]]
+  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
+    -d '{"items":'"$dod_items_json"'}' >"$TMP_DIR/$prefix-dod.json"
+  dod_id="$(json_path "$TMP_DIR/$prefix-dod.json" "dod.id")"
+  [[ -n "$dod_id" ]]
 }
 
 wait_run_state() {
@@ -989,28 +1075,15 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 json_grep_bool_value apiKeyConfigured true "$TMP_DIR/configuration-updated.json" >/dev/null
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-  -d '{"title":"llm acceptance workspace","description":"verify LLM driven workspace execution","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
-workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
-[[ -n "$workspace_id" ]]
+create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value description "verify LLM driven workspace execution" >/dev/null
-
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
-  -d '{"text":"verify LLM driven workspace execution"}' >"$TMP_DIR/goal.json"
-goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
-[[ -n "$goal_id" ]]
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | json_grep_string_value id "$goal_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" >"$TMP_DIR/goal-read.json"
 goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"
 [[ "$goal_text" == *"verify LLM driven workspace execution"* ]]
-
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
-  -d '{"items":["happy path completes","decision can be resolved","approval rejection fails safely","multi gate decision then approval can complete","schema failure is observable","memory recall is visible"]}' >"$TMP_DIR/dod.json"
-dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
-[[ -n "$dod_id" ]]
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | json_grep_string_value id "$dod_id" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"multi gate decision then approval can complete"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"happy path completes"' >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-defined.json"
 json_grep_string_value id "$workspace_id" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
 
@@ -1070,7 +1143,8 @@ assert_run_recovery_read_models "$happy_run_id" "happy" "completed" "estimated"
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-happy.json"
 grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after-happy.json" >/dev/null
 
-activate_workspace_execution "$TMP_DIR/decision-activation.json"
+create_acceptance_workspace "decision" "llm acceptance decision workspace" "verify LLM decision governance" '["decision can be resolved"]'
+activate_workspace_execution_without_memory "$TMP_DIR/decision-activation.json"
 decision_run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
 wait_run_state_any "$decision_run_id" "$TMP_DIR/decision-current-status.json" "blocked_on_decision" "completed"
 decision_state="$(json_path "$TMP_DIR/decision-current-status.json" "status.state")"
@@ -1118,7 +1192,8 @@ assert_run_recovery_read_models "$decision_run_id" "decision" "completed" "provi
 curl -fsS "$BASE_URL/api/v1/workorch/memory?workspaceId=$workspace_id" >"$TMP_DIR/memory-after-decision.json"
 grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-after-decision.json" >/dev/null
 
-activate_workspace_execution "$TMP_DIR/approval-activation.json"
+create_acceptance_workspace "approval" "llm acceptance approval workspace" "verify LLM approval governance" '["approval rejection fails safely"]'
+activate_workspace_execution_without_memory "$TMP_DIR/approval-activation.json"
 approval_run_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.id")"
 wait_run_state "$approval_run_id" "blocked_on_approval" "$TMP_DIR/approval-blocked-status.json"
 approval_id="$(json_path "$TMP_DIR/approval-blocked-status.json" "status.blockingApprovalId")"
@@ -1134,7 +1209,9 @@ wait_run_state "$approval_run_id" "failed" "$TMP_DIR/approval-rejected-status.js
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/observability" | json_grep_bool_value terminal true >/dev/null
 assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed" "provider_native"
 
-activate_workspace_execution "$TMP_DIR/multi-gate-decision-activation.json"
+create_acceptance_workspace "multi-gate" "llm acceptance multi-gate workspace" "verify LLM decision then approval governance" '["multi gate decision then approval can complete"]'
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"multi gate decision then approval can complete"' >/dev/null
+activate_workspace_execution_without_memory "$TMP_DIR/multi-gate-decision-activation.json"
 multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.id")"
 wait_run_state "$multi_gate_run_id" "blocked_on_decision" "$TMP_DIR/multi-gate-decision-status.json"
 multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-status.json" "status.blockingTicketId")"
@@ -1167,7 +1244,8 @@ json_grep_string_value id "$multi_gate_run_id" "$TMP_DIR/workspace-snapshot-afte
 json_grep_string_value id "$multi_gate_ticket_id" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 json_grep_string_value id "$multi_gate_approval_id" "$TMP_DIR/workspace-snapshot-after-governance.json" >/dev/null
 
-activate_workspace_execution "$TMP_DIR/schema-failure-activation.json"
+create_acceptance_workspace "schema" "llm acceptance schema workspace" "verify LLM schema failure observability" '["schema failure is observable"]'
+activate_workspace_execution_without_memory "$TMP_DIR/schema-failure-activation.json"
 schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
 wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded" "blocked_on_decision"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
@@ -1202,6 +1280,10 @@ else
   assert_run_recovery_read_models "$schema_run_id" "schema-failure" "failed" "provider_native"
 fi
 
+create_acceptance_workspace "memory" "llm acceptance memory workspace" "verify LLM memory recall" '["memory recall is visible"]'
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
+  -d '{"memoryId":"'"$MEMORY_ID"'","sourceType":"user","memoryType":"project_context","content":"Seed memory for acceptance execution.","summary":"Seeded acceptance memory is available to runs.","tags":["acceptance","seed"],"importance":8,"confidence":9,"visibility":"workspace","embeddingProviderId":"verify","embeddingModel":"verify-embedding","embeddingText":"seeded acceptance memory","vector":[0.1,0.2,0.3]}' >"$TMP_DIR/memory-recall-seed.json"
+json_grep_string_value id "$MEMORY_ID" "$TMP_DIR/memory-recall-seed.json" >/dev/null
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
 memory_run_id="$(json_path "$TMP_DIR/memory-recall-activation.json" "activation.run.id")"
 wait_run_state "$memory_run_id" "completed" "$TMP_DIR/memory-recall-completed-status.json"
@@ -1292,6 +1374,12 @@ if errors:
     raise SystemExit(1)
 PY
 assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed" "provider_native"
+
+create_acceptance_workspace "stream" "llm acceptance stream workspace" "verify LLM streaming usage" '["stream usage is recorded"]'
+activate_workspace_execution_without_memory "$TMP_DIR/stream-baseline-activation.json"
+stream_baseline_run_id="$(json_path "$TMP_DIR/stream-baseline-activation.json" "activation.run.id")"
+wait_run_state "$stream_baseline_run_id" "completed" "$TMP_DIR/stream-baseline-completed-status.json"
+assert_run_recovery_read_models "$stream_baseline_run_id" "stream-baseline" "completed" "provider_native"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native"
 stream_native_run_id="$(json_path "$TMP_DIR/stream-native-activation.json" "activation.run.id")"
