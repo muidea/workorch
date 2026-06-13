@@ -28,7 +28,14 @@ export type RuntimeConfiguration = {
   maxRuntimeRepairAttempts?: number;
   maxProviderRetryAttempts?: number;
   shellCommandTimeout?: string;
+  git?: RuntimeGitConfiguration;
   llmOutput?: RuntimeLLMOutputConfiguration;
+};
+
+export type RuntimeGitConfiguration = {
+  enabled?: boolean;
+  writeEnabled?: boolean;
+  defaultTimeout?: string;
 };
 
 export type RuntimeLLMOutputConfiguration = {

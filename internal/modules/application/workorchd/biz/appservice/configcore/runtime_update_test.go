@@ -31,6 +31,9 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	if item.Runtime.ShellCommandTimeout != "45s" {
 		t.Fatalf("shellCommandTimeout = %q, want preserved 45s", item.Runtime.ShellCommandTimeout)
 	}
+	if !item.Runtime.Git.Enabled || !item.Runtime.Git.WriteEnabled || item.Runtime.Git.DefaultTimeout != "35s" {
+		t.Fatalf("git runtime config = %+v, want preserved enabled writable git runtime", item.Runtime.Git)
+	}
 	if item.Runtime.LLMOutput.MaxGraphBytes != 65536 {
 		t.Fatalf("maxGraphBytes = %d, want 65536", item.Runtime.LLMOutput.MaxGraphBytes)
 	}
@@ -42,7 +45,10 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if readBack.Runtime.MaxRuntimeRepairAttempts != 3 || readBack.Runtime.LLMOutput.MaxGraphBytes != 65536 {
+	if readBack.Runtime.MaxRuntimeRepairAttempts != 3 ||
+		readBack.Runtime.LLMOutput.MaxGraphBytes != 65536 ||
+		!workorchconfig.GitRuntimeWriteEnabled(readBack.Runtime.Git) ||
+		readBack.Runtime.Git.DefaultTimeout != "35s" {
 		t.Fatalf("persisted runtime config = %+v, want updated repair budget and graph bytes", readBack.Runtime)
 	}
 }
@@ -84,6 +90,11 @@ dataDir = ".workorch-data"
 maxRuntimeRepairAttempts = 5
 maxProviderRetryAttempts = 7
 shellCommandTimeout = "45s"
+
+[runtime.git]
+enabled = true
+writeEnabled = true
+defaultTimeout = "35s"
 
 [runtime.llmOutput]
 maxPatchContentBytes = 8192

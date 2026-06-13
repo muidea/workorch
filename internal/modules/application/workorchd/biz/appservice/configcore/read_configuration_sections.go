@@ -34,6 +34,7 @@ func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
 		MaxRuntimeRepairAttempts: workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
 		MaxProviderRetryAttempts: workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
 		ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
+		Git:                      runtimeGitConfiguration(cfg.Runtime.Git),
 		LLMOutput:                runtimeLLMOutputConfiguration(cfg.Runtime.LLMOutput),
 	}
 }

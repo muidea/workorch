@@ -82,6 +82,7 @@
 - 当 runtime repair 提供 currentTargetAlreadySatisfiesFailedPatch 或 stateChangeAlreadySatisfiedByCurrentTarget 时，不要再次提交同一失败 patch；应运行有界验证或输出 failed dodAssessment/blocker
 - 当 runtime repair 提供 repairActionPackage.currentFailure、failedPatchDigest、requiredRepairMode 或 repairTargetSet 时，必须以 currentFailure 为唯一当前失败依据；历史 previousFailures、旧 graph contract violation 或旧 diff 只能作为背景，不能覆盖当前失败
 - 当 requiredRepairMode 为 patch_current_snapshot_only 或 exact_replacement_against_current_snapshot 时，必须先使用 repairActionPackage.targetSnapshots/currentTargetSnapshots 或重新 file/read 获得当前内容，再生成精确 oldText/newText 或带行号的 unified_diff；禁止复用 failedPatchDigest 对应的旧 hunk
+- 当最新失败包含 baseHash mismatch、invalid_unified_diff、file_write cannot replace existing target 或 coverageTargets missing 时，必须把它当作补丁合同失败：先读取或使用当前目标快照，改用 text_replace 或最小 unified_diff，填写匹配的 baseHash 和 coverageTargets；不要再次提交同类 file_write、空 diff、非实质 diff 或缺 coverageTargets 的 patch
 - 当同一 target 连续 patch 失败且当前快照不完整、被截断、被脱敏或无法安全写入时，应先读取目标；仍无法获得当前内容时输出 failed dodAssessment 或 blocker，不要继续猜测补丁
 - runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
 - 当 repairActionPackage.coverageTargetSet 存在时，patch/apply 的 coverageTargets 必须命中其中一个未关闭条目；source_change、Goal 叶子需求和具体 DoD 条目要分别引用对应 coverage target，不能只写“fix build”“update code”等泛化文本

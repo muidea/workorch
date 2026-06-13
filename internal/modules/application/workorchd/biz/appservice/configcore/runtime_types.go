@@ -5,7 +5,14 @@ type RuntimeConfiguration struct {
 	MaxRuntimeRepairAttempts int                           `json:"maxRuntimeRepairAttempts"`
 	MaxProviderRetryAttempts int                           `json:"maxProviderRetryAttempts"`
 	ShellCommandTimeout      string                        `json:"shellCommandTimeout"`
+	Git                      RuntimeGitConfiguration       `json:"git"`
 	LLMOutput                RuntimeLLMOutputConfiguration `json:"llmOutput"`
+}
+
+type RuntimeGitConfiguration struct {
+	Enabled        bool   `json:"enabled"`
+	WriteEnabled   bool   `json:"writeEnabled"`
+	DefaultTimeout string `json:"defaultTimeout,omitempty"`
 }
 
 type RuntimeLLMOutputConfiguration struct {

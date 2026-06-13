@@ -33,6 +33,16 @@ function configNumberText(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '-';
 }
 
+function configBoolText(value: boolean | undefined) {
+  if (value === true) {
+    return '启用';
+  }
+  if (value === false) {
+    return '禁用';
+  }
+  return '-';
+}
+
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
@@ -286,6 +296,7 @@ export function ConfigurationPage() {
   const selectedWebSearchProvider = webSearchProviderDrafts[selectedWebSearchProviderIndex];
   const selectedWebSearchProviderStatus = selectedWebSearchProvider ? webSearchStatusByProviderID.get(selectedWebSearchProvider.id) : undefined;
   const llmOutput = configuration?.runtime.llmOutput;
+  const runtimeGit = configuration?.runtime.git;
 
   const selectWebSearchProvider = (index: number) => {
     const item = webSearchProviderDrafts[index];
@@ -410,6 +421,16 @@ export function ConfigurationPage() {
             items={[
               { key: 'backend', label: '后端', children: configuration?.repository.backend || '-' },
               { key: 'dataDir', label: '数据目录', children: configuration?.repository.dataDir || '-' }
+            ]}
+          />
+        </ProCard>
+        <ProCard title="运行期 Git 能力" colSpan="50%">
+          <Descriptions
+            column={1}
+            items={[
+              { key: 'enabled', label: 'Git 读取能力', children: configBoolText(runtimeGit?.enabled) },
+              { key: 'writeEnabled', label: 'Git 写入能力', children: configBoolText(runtimeGit?.writeEnabled) },
+              { key: 'defaultTimeout', label: '默认超时', children: runtimeGit?.defaultTimeout || '-' }
             ]}
           />
         </ProCard>

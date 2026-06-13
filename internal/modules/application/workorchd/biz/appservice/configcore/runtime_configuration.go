@@ -14,6 +14,14 @@ func runtimeShellCommandTimeout(configured string) string {
 	return "60s"
 }
 
+func runtimeGitConfiguration(cfg workorchconfig.GitRuntimeConfig) RuntimeGitConfiguration {
+	return RuntimeGitConfiguration{
+		Enabled:        workorchconfig.GitRuntimeEnabled(cfg),
+		WriteEnabled:   workorchconfig.GitRuntimeWriteEnabled(cfg),
+		DefaultTimeout: strings.TrimSpace(cfg.DefaultTimeout),
+	}
+}
+
 func runtimeLLMOutputConfiguration(cfg workorchconfig.LLMOutputRuntimeConfig) RuntimeLLMOutputConfiguration {
 	normalized, err := workorchconfig.NormalizeLLMOutputRuntimeConfig(cfg)
 	if err != nil {
