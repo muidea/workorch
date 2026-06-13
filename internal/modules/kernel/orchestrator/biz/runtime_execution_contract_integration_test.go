@@ -1526,7 +1526,7 @@ func TestValidateLLMExecutionOutputContractRejectsFollowUpReadOnlyGraph(t *testi
 	}
 
 	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "read-only executionGraph without patch output") {
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "concrete validation evidence") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want follow-up read-only graph rejection", err)
 	}
 }
@@ -1557,7 +1557,7 @@ func TestValidateLLMExecutionOutputContractUsesRuntimeStageForVerificationFollow
 	}
 
 	err := validateLLMExecutionOutputContract(run, step, output)
-	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "read-only executionGraph without patch output") {
+	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "concrete validation evidence") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want runtimeStage-based verification rejection", err)
 	}
 }

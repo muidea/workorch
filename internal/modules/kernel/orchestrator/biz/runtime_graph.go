@@ -2130,7 +2130,7 @@ func (g *graphSubsystem) currentRunProcessEvidenceContext(ctx context.Context, r
 	if g == nil || g.steps == nil || run == nil || run.ID == "" {
 		return nil, nil
 	}
-	steps, err := g.steps.ListByRun(ctx, run.ID)
+	steps, err := g.steps.ListByRunSummary(ctx, run.ID)
 	if err != nil || len(steps) == 0 {
 		return nil, nil
 	}

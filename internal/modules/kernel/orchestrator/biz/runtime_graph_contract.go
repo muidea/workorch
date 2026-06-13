@@ -36,8 +36,11 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if stage == runtimeStageVerification && graphIsConcreteValidationEvidenceGraph(graph) {
 		return nil
 	}
-	if llmFollowUpGraphRequiresStateChangingPatch(step) || stage == runtimeStageVerification {
-		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without patch output", common.ErrInvalidArgument)
+	if stage == runtimeStageVerification {
+		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without concrete validation evidence", common.ErrInvalidArgument)
+	}
+	if llmFollowUpGraphRequiresStateChangingPatch(step) {
+		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation", common.ErrInvalidArgument)
 	}
 	return nil
 }

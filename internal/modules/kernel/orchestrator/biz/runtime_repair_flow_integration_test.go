@@ -1186,6 +1186,79 @@ func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsFailureTargetAcros
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairEffectiveScopeCountsTargetContractCorrectionsAcrossMarkers(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-runtime-repair-target-contract-correction")
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps:   stepRepo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	markers := []string{
+		contractViolationPatchDispatchInvalid,
+		contractViolationGraphDependsOnLLMBeforePatch,
+		contractViolationCoverageTargetsRequired,
+		contractViolationPatchContentRequired,
+	}
+	for idx := 0; idx < defaultMaxRuntimeRepairAttempts; idx++ {
+		attempt := idx + 1
+		marker := markers[idx%len(markers)]
+		if err := stepRepo.Create(ctx, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d", runID, attempt)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRuntimeRepairAttempt:  attempt,
+				stepInputKeyRepairOfRootStepID:    string(runID) + "/graph-001/verify",
+				"repairActionPackage": map[string]any{
+					"repairTargetSet": []string{"target.txt"},
+				},
+			},
+			Output: map[string]any{
+				"stage":                        "llm_execution_graph_plan",
+				"error":                        "runtime repair contract correction failed",
+				outputKeyContractViolationType: marker,
+				failureOutputKeyClass:          failureClassRuntime,
+				failureOutputKeySignature:      fmt.Sprintf("class=runtime_failed|kind=llm/workspace_execution|node=repair-%03d|targetRef=target.txt", attempt),
+			},
+		}); err != nil {
+			t.Fatalf("seed contract correction %d: %v", attempt, err)
+		}
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(runID + "/repair-005"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/graph-001/verify",
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"target.txt"},
+			},
+		},
+		Output: map[string]any{
+			"stage":                        "llm_execution_graph_plan",
+			"error":                        "runtime repair patch/apply unified_diff for target \"target.txt\" is non-substantive",
+			outputKeyContractViolationType: contractViolationPatchContentRequired,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|node=repair-current|targetRef=target.txt",
+		},
+	}
+
+	if got := orch.repairManager().runtimeRepairAttemptCountForStep(ctx, runID, failedStep); got != 0 {
+		t.Fatalf("exact attempt count = %d, want marker-specific signatures to remain independent", got)
+	}
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failedStep); got != defaultMaxRuntimeRepairAttempts {
+		t.Fatalf("effective attempt count = %d, want target contract corrections counted together", got)
+	}
+	if !shouldEscalateRuntimeRepairExhaustion(ctx, orch.repairManager(), orch.policy, orch.tickets != nil, &runmodel.Run{ID: runID, DoDID: common.DoDID("dod-target-contract-correction")}, failedStep) {
+		t.Fatalf("target-scoped contract correction loop should escalate repair exhaustion")
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairTargetScopeUsesCurrentGraphWindow(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-runtime-repair-target-window")

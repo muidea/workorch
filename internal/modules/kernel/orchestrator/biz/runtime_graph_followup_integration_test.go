@@ -1860,6 +1860,33 @@ func TestValidateLLMFollowUpGraphRejectsPatchDuringConcreteFailureEvidenceAcquis
 	}
 }
 
+func TestValidateLLMFollowUpGraphRejectsVerificationReadOnlyGraphAsValidationEvidenceGap(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-validation/follow-up",
+		RunID: "run-validation",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":          true,
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+			{ID: "read", Kind: "file/read", Input: map[string]any{"path": "target.txt"}},
+		}},
+	}
+	err := validateLLMFollowUpGraphStateChangingContract(&runmodel.Run{}, step, output)
+	if err == nil {
+		t.Fatalf("err = nil, want validation evidence contract rejection")
+	}
+	if !strings.Contains(err.Error(), "concrete validation evidence") {
+		t.Fatalf("err = %v, want concrete validation evidence rejection", err)
+	}
+	if strings.Contains(err.Error(), "patch output") || strings.Contains(err.Error(), "patch/apply") {
+		t.Fatalf("err = %v, should not require state-changing patch output for verification", err)
+	}
+}
+
 func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrection(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

@@ -287,10 +287,15 @@ func (r *repairSubsystem) runtimeRepairAttemptCountForEffectiveScope(ctx context
 	}
 	class, _ := runtimeRepairScopeClassAndSignature(failedStep)
 	targetAttempts := runtimeRepairAttemptCountForFailureTargetInSteps(runID, steps, class, targetScope, runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep))
+	attempts := exactAttempts
 	if targetAttempts > exactAttempts {
-		return targetAttempts
+		attempts = targetAttempts
 	}
-	return exactAttempts
+	contractAttempts := runtimeRepairAttemptCountForTargetContractCorrectionInSteps(runID, steps, failedStep, targetScope)
+	if contractAttempts > attempts {
+		attempts = contractAttempts
+	}
+	return attempts
 }
 
 func (r *repairSubsystem) runtimeRepairAttemptCountForScope(ctx context.Context, runID common.RunID, scope runtimeRepairScope) int {
@@ -419,6 +424,48 @@ func runtimeRepairAttemptCountForFailureTargetInSteps(runID common.RunID, steps 
 		count++
 	}
 	return count
+}
+
+func runtimeRepairAttemptCountForTargetContractCorrectionInSteps(runID common.RunID, steps []*runModel.Step, failedStep *runModel.Step, targetScope string) int {
+	targetScope = strings.TrimSpace(targetScope)
+	if targetScope == "" || !runtimeRepairStepIsContractCorrectionFailure(failedStep) {
+		return 0
+	}
+	windowRoot := runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)
+	count := 0
+	for _, step := range steps {
+		if !isRuntimeRepairBudgetStep(runID, step) {
+			continue
+		}
+		if runtimeFailureTargetScopeFromStep(step) != targetScope {
+			continue
+		}
+		if windowRoot != "" && runtimeRepairTargetBudgetWindowRoot(step) != windowRoot {
+			continue
+		}
+		if !runtimeRepairStepIsContractCorrectionFailure(step) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func runtimeRepairStepIsContractCorrectionFailure(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	if strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if marker := strings.TrimSpace(stringFromMap(step.Output, outputKeyContractViolationType)); marker != "" {
+		return true
+	}
+	if runtimeFailureIsLLMContractLoop(step) {
+		return true
+	}
+	return strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == failureClassRuntime &&
+		strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)) != ""
 }
 
 func runtimeRepairStepFailureClass(step *runModel.Step) string {

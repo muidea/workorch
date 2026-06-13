@@ -55,6 +55,7 @@ const (
 	contractViolationGraphDependsOnLLMBeforePatch   = "graph_depends_on_llm_before_patch"
 	contractViolationPatchTargetRefRequired         = "patch_target_ref_required"
 	contractViolationCoverageTargetsRequired        = "coverage_targets_required"
+	contractViolationValidationEvidenceRequired     = "validation_evidence_required"
 	contractViolationPatchContentRequired           = "patch_content_required"
 	contractViolationPatchUnresolvedTemplate        = "patch_unresolved_template"
 	contractViolationPatchDispatchInvalid           = "patch_dispatch_invalid"
@@ -213,13 +214,17 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 	case strings.Contains(text, "state-changing patch/apply must declare coveragetargets") ||
 		strings.Contains(text, "patch/apply must declare coveragetargets matching"):
 		return contractViolationCoverageTargetsRequired
+	case strings.Contains(text, "validation follow-up llm step returned read-only executiongraph without concrete validation evidence") ||
+		strings.Contains(text, "concrete validation evidence repair must return bounded"):
+		return contractViolationValidationEvidenceRequired
 	case strings.Contains(text, "patch content contains unresolved runtime template") ||
 		strings.Contains(text, "patch diff contains unresolved runtime template") ||
 		strings.Contains(text, "patch text_replace contains unresolved runtime template"):
 		return contractViolationPatchUnresolvedTemplate
 	case strings.Contains(text, "patch content is required") ||
 		strings.Contains(text, "patch diff is required") ||
-		strings.Contains(text, "patch oldtext is required"):
+		strings.Contains(text, "patch oldtext is required") ||
+		strings.Contains(text, "is non-substantive"):
 		return contractViolationPatchContentRequired
 	case strings.Contains(text, "patch_dispatch_invalid"):
 		return contractViolationPatchDispatchInvalid
