@@ -74,7 +74,13 @@
 - 不要提交省略号、伪代码、占位函数体、仅说明计划的注释，或用 TODO 代替当前 Goal/DoD 要求完成的逻辑
 - 如果当前文件内容、上下文或 hash 不确定，先 file/read 获取最新内容，再生成精确 oldText/newText 或 unified_diff
 - 读取可能不存在的文件时，先 file/list 确认存在；无法确认时 file/read 必须设置 optional:true，并将 exists:false 作为创建新文件的输入
-- patch 失败时，必须基于当前文件快照重新生成最小可应用补丁，而不是重复提交已经失败的 diff\n- 当 runtime repair 提供 currentTargetAlreadySatisfiesFailedPatch 或 stateChangeAlreadySatisfiedByCurrentTarget 时，不要再次提交同一失败 patch；应运行有界验证或输出 failed dodAssessment/blocker\n- 当 runtime repair 提供 repairActionPackage.currentFailure、failedPatchDigest、requiredRepairMode 或 repairTargetSet 时，必须以 currentFailure 为唯一当前失败依据；历史 previousFailures、旧 graph contract violation 或旧 diff 只能作为背景，不能覆盖当前失败\n- 当 requiredRepairMode 为 patch_current_snapshot_only 或 exact_replacement_against_current_snapshot 时，必须先使用 repairActionPackage.targetSnapshots/currentTargetSnapshots 或重新 file/read 获得当前内容，再生成精确 oldText/newText 或带行号的 unified_diff；禁止复用 failedPatchDigest 对应的旧 hunk\n- 当同一 target 连续 patch 失败且当前快照不完整、被截断、被脱敏或无法安全写入时，应先读取目标；仍无法获得当前内容时输出 failed dodAssessment 或 blocker，不要继续猜测补丁\n- runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
+- patch 失败时，必须基于当前文件快照重新生成最小可应用补丁，而不是重复提交已经失败的 diff
+- 当 runtime repair 提供 currentTargetAlreadySatisfiesFailedPatch 或 stateChangeAlreadySatisfiedByCurrentTarget 时，不要再次提交同一失败 patch；应运行有界验证或输出 failed dodAssessment/blocker
+- 当 runtime repair 提供 repairActionPackage.currentFailure、failedPatchDigest、requiredRepairMode 或 repairTargetSet 时，必须以 currentFailure 为唯一当前失败依据；历史 previousFailures、旧 graph contract violation 或旧 diff 只能作为背景，不能覆盖当前失败
+- 当 requiredRepairMode 为 patch_current_snapshot_only 或 exact_replacement_against_current_snapshot 时，必须先使用 repairActionPackage.targetSnapshots/currentTargetSnapshots 或重新 file/read 获得当前内容，再生成精确 oldText/newText 或带行号的 unified_diff；禁止复用 failedPatchDigest 对应的旧 hunk
+- 当同一 target 连续 patch 失败且当前快照不完整、被截断、被脱敏或无法安全写入时，应先读取目标；仍无法获得当前内容时输出 failed dodAssessment 或 blocker，不要继续猜测补丁
+- runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
+- 当 runtime repair 提供 repeatedTargetRepairMode、strategyReassessment 或 targetRepairAttempts 时，必须显式改变修复策略：先复核 currentFailure、primaryDiagnosticRepair、targetSnapshots/currentTargetSnapshots、repairTargetSet，再选择 continue_same_target_repair 或 shift_root_cause_target；不要再次只运行同一个失败验证命令，也不要复用旧 patch hunk
 - 修改源代码、配置或测试时，优先用 patch/apply 表达状态变更；shell/command 用于有界准备和验证，不要用 shell 修改目标后再用无关 patch 充当状态变更证据
 
 ## 缺陷和验证缺口处理

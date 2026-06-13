@@ -176,7 +176,7 @@ func TestRepeatedTargetDiagnosticUsesAutomaticStrategyRepairBeforeDecision(t *te
 	}
 }
 
-func TestShouldBlockOnRepeatedTargetDiagnosticAfterStrategyRepairBudget(t *testing.T) {
+func TestShouldContinueRepeatedTargetDiagnosticUntilRepairBudgetExhausted(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-repeated-target-diagnostic-exhausted")
 	rootStepID := common.StepID(string(runID) + "/graph-001/001-test")
@@ -212,7 +212,7 @@ func TestShouldBlockOnRepeatedTargetDiagnosticAfterStrategyRepairBudget(t *testi
 		},
 	}
 	steps := []*runmodel.Step{prevFailed}
-	for i := 1; i <= minRepeatedTargetDiagnosticAttemptsBeforeDecision; i++ {
+	for i := 1; i < 6; i++ {
 		steps = append(steps, &runmodel.Step{
 			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d", runID, i)),
 			RunID: runID,
@@ -244,8 +244,81 @@ func TestShouldBlockOnRepeatedTargetDiagnosticAfterStrategyRepairBudget(t *testi
 		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10}),
 	}
 	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
+		t.Fatalf("expected repeated target diagnostics to continue automatic strategy repair before repair budget exhaustion")
+	}
+}
+
+func TestShouldBlockOnRepeatedTargetDiagnosticWhenRepairBudgetExhausted(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-repeated-target-diagnostic-budget-exhausted")
+	rootStepID := common.StepID(string(runID) + "/graph-001/001-test")
+	signature := "class=shell_command_failed|kind=shell/command|failureTargets=main_test.go|exitCode=1|error=main_test.go:20:13: assignment mismatch"
+	repo := memory.NewStepRepository()
+	prevFailed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/failed-prev"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: signature,
+			"stage":                   "shell_command_failed",
+			"stderr":                  "./main_test.go:20:13: assignment mismatch: 2 variables but constructor returns 1 value",
+			"exitCode":                1,
+		},
+	}
+	currentFailed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/failed-current"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRepairOfRootStepID: string(rootStepID),
+		},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: signature,
+			"stage":                   "shell_command_failed",
+			"stderr":                  "./main_test.go:20:13: assignment mismatch: 2 variables but constructor returns 1 value",
+			"exitCode":                1,
+		},
+	}
+	steps := []*runmodel.Step{prevFailed}
+	for i := 1; i <= 6; i++ {
+		steps = append(steps, &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-%03d", runID, i)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+				stepInputKeyRepairOfFailureSig:    signature,
+				stepInputKeyRepairOfRootStepID:    string(rootStepID),
+				"strategyReassessment":            map[string]any{"required": true, "targetRepairAttempts": i},
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassShellCommand,
+				failureOutputKeySignature: signature,
+				"stage":                   "shell_command_failed",
+			},
+		})
+	}
+	steps = append(steps, currentFailed)
+	for _, step := range steps {
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{
+		steps:   repo,
+		tickets: memory.NewDecisionTicketRepository(),
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 6}),
+	}
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
 	if !shouldBlockOnDuplicateRuntimeFailureForTest(ctx, orch, run, currentFailed) {
-		t.Fatalf("expected repeated target diagnostics to escalate after automatic strategy repair budget")
+		t.Fatalf("expected repeated target diagnostics to escalate after repair budget exhaustion")
 	}
 }
 

@@ -586,7 +586,7 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if !duplicateFound {
 		return false
 	}
-	if runtimeFailureRepeatedTargetDiagnosticCanEscalate(class, targetScope, attempts, targetDiagnosticDuplicateFound) {
+	if runtimeFailureRepeatedTargetDiagnosticCanEscalate(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy), targetDiagnosticDuplicateFound) {
 		return true
 	}
 	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) &&
@@ -602,10 +602,8 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	return true
 }
 
-const minRepeatedTargetDiagnosticAttemptsBeforeDecision = 4
-
-func runtimeFailureRepeatedTargetDiagnosticCanEscalate(class string, targetScope string, attempts int, duplicateFound bool) bool {
-	if !duplicateFound || attempts < minRepeatedTargetDiagnosticAttemptsBeforeDecision || strings.TrimSpace(targetScope) == "" {
+func runtimeFailureRepeatedTargetDiagnosticCanEscalate(class string, targetScope string, attempts int, maxAttempts int, duplicateFound bool) bool {
+	if !duplicateFound || maxAttempts <= 0 || attempts < maxAttempts || strings.TrimSpace(targetScope) == "" {
 		return false
 	}
 	switch strings.TrimSpace(class) {
