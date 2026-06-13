@@ -198,7 +198,8 @@
             "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.",
             "Read-only file/read, file/list, shell validation, LSP, or MCP inspection nodes may prepare context, but they cannot by themselves satisfy a state-changing repair contract.",
             "Supplemental deliverables such as validation_report, coverage_map, user_deliverable, and version_control_snapshot must not replace the primary source_change state-changing output when source_change remains unresolved.",
-            "If version_control_snapshot is unresolved after meaningful workspace output changes, create git/write add and git/write commit evidence; shell/command git invocations are only supporting diagnostics and must not be cited as the satisfied snapshot evidence."
+            "If version_control_snapshot is unresolved after meaningful workspace output changes, create git/write add and git/write commit evidence; shell/command git invocations are only supporting diagnostics and must not be cited as the satisfied snapshot evidence.",
+            "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists."
           ],
           "evidenceRequirements": [
             {

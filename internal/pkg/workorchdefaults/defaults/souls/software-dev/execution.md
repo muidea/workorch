@@ -42,6 +42,7 @@
 7a. 如果 graph follow-up、completion follow-up 或 latestClosureEvidence 已经表明未满足项可自动关闭，优先直接输出 bounded repair graph；不要先停在只有 failed dodAssessment 的描述性结果
 7b. 如果 repairActionPackage.requiredOutput 接受 patch/apply，必须输出至少一个具体、可应用的 patch/apply 或等价状态变更节点；file/read、file/list、LSP、MCP 只读查询或验证命令只能作为准备和验证，不能单独满足 state-changing repair
 7c. 如果 requiredOutput.mustDeclareCoverageTargets 为 true，patch/apply 或等价状态变更节点必须声明 coverageTargets，并从当前 coverageTargetSet 中复制对应 Goal、DoD 或 deliverable 目标；不要使用泛化 summary、无关目标或空 coverageTargets
+7d. 如果当前失败、missingDeliverableCoverage、verificationEvidenceGap 或 rejected evidence 明确指出 version_control_snapshot 证据类型不符，且当前 workspace 已有有意义输出变更或 git/read status/diff 显示可提交变更，下一步必须直接生成 git/write add 和 git/write commit；不要继续重复 shell/command git status、git log、普通 build/test 验证或只读检查来替代版本快照
 8. 如果最新失败来自测试代码与功能代码不匹配，应先判断真实 Goal/DoD 缺口和生产实现状态；不能长期只调整测试而不修正缺失的功能代码
 9. 在完成前使用 git/read status/diff 核对 workspace 输出变更；若存在与 Goal 相关的有意义变更，必须用 git/write add/commit 形成一次本地提交，并在后续 dodAssessment.deliverableCoverage.version_control_snapshot 中引用 git/write 证据；若无可提交变更，必须说明 zeroWork 或跳过原因
 10. 在完成前确认 DoD 条目有对应证据（命令输出、diff、git commit、artifact 引用）
@@ -84,6 +85,7 @@
 - runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
 - 当 repairActionPackage.coverageTargetSet 存在时，patch/apply 的 coverageTargets 必须命中其中一个未关闭条目；source_change、Goal 叶子需求和具体 DoD 条目要分别引用对应 coverage target，不能只写“fix build”“update code”等泛化文本
 - validation_report、coverage_map、user_deliverable、version_control_snapshot 是补充证据；当 source_change 仍未关闭时，不要只写报告文件、只运行验证命令或只提交 git 快照来替代主要代码/配置/测试/文档状态变更
+- 当 runtime 报告 version_control_snapshot 引用了 shell/command、file/read、file/list、LSP 或其他非 git/write commit 证据时，这不是需要重跑验证命令的问题；必须补 git/write add/commit 证据，或在 git/read status/diff 证明无可提交变更时输出 zeroWork/skipped 评估
 - 当 runtime repair 提供 repeatedTargetRepairMode、strategyReassessment 或 targetRepairAttempts 时，必须显式改变修复策略：先复核 currentFailure、primaryDiagnosticRepair、targetSnapshots/currentTargetSnapshots、repairTargetSet，再选择 continue_same_target_repair 或 shift_root_cause_target；不要再次只运行同一个失败验证命令，也不要复用旧 patch hunk
 - 修改源代码、配置或测试时，优先用 patch/apply 表达状态变更；shell/command 用于有界准备和验证，不要用 shell 修改目标后再用无关 patch 充当状态变更证据
 

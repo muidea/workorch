@@ -137,6 +137,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, planning.SoulMD, "可执行 repair graph")
 	assertSoulContains(t, planning.SoulMD, "coverageTargets")
 	assertSoulContains(t, planning.SoulMD, "git/write add")
+	assertSoulContains(t, planning.SoulMD, "version_control_snapshot 引用了 shell/command")
+	assertSoulContains(t, planning.SoulMD, "zeroWork 评估")
 	assertSoulNotContains(t, planning.SoulMD, "provider/protocol matrix")
 	assertSoulNotContains(t, planning.SoulMD, "多供应商")
 	assertSoulNotContains(t, planning.SoulMD, "多模型")
@@ -202,6 +204,9 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, execution.SoulMD, "mustDeclareCoverageTargets")
 	assertSoulContains(t, execution.SoulMD, "repairActionPackage.coverageTargetSet")
 	assertSoulContains(t, execution.SoulMD, "补充证据")
+	assertSoulContains(t, execution.SoulMD, "version_control_snapshot 证据类型不符")
+	assertSoulContains(t, execution.SoulMD, "必须直接生成 git/write add 和 git/write commit")
+	assertSoulContains(t, execution.SoulMD, "非 git/write commit 证据")
 	assertSoulNotContains(t, execution.SoulMD, "多 provider/多 LLM 网关")
 	assertSoulNotContains(t, execution.SoulMD, "providers[]")
 	assertSoulNotContains(t, execution.SoulMD, "model_prefixes")
@@ -250,6 +255,8 @@ func TestEmbeddedSoftwareDevSoulsContainPlanningExecutionValidationArtifactGuida
 	assertSoulContains(t, validation.SoulMD, "deliverableCoverage.source_change")
 	assertSoulContains(t, validation.SoulMD, "git/write commit")
 	assertSoulContains(t, validation.SoulMD, "coverageTargets 缺失")
+	assertSoulContains(t, validation.SoulMD, "version_control_snapshot 因引用 shell/command")
+	assertSoulContains(t, validation.SoulMD, "git/write add 和 git/write commit")
 	assertSoulNotContains(t, validation.SoulMD, "多供应商")
 	assertSoulNotContains(t, validation.SoulMD, "多模型")
 	assertSoulNotContains(t, validation.SoulMD, "Token")
@@ -557,6 +564,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput accepts patch/apply, return at least one patch/apply node that performs a concrete source, configuration, test, documentation, or workspace state change directly tied to the current failure.")
 	assertStringListContains(t, guidance, "When repairActionPackage.requiredOutput.mustDeclareCoverageTargets is true, every patch/apply or equivalent state-changing evidence node must include coverageTargets copied from the active coverageTargetSet item it intends to close.")
+	assertStringListContains(t, guidance, "If version_control_snapshot was rejected because it cited shell/command, file/read, file/list, LSP, or other non git/write commit evidence, the next repair must converge on git/read status/diff followed by git/write add and git/write commit, or return a zeroWork/skipped assessment when no commit-worthy change exists.")
 	requiredEvidence := map[string]bool{
 		"runtime_entrypoint":         false,
 		"external_contract":          false,
