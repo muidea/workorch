@@ -1154,9 +1154,7 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input[stepInputKeySoulStage] = soulStageExecution
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
-		delete(input, "concreteFailureEvidenceRequired")
-		delete(input, "boundedValidationRequired")
-		delete(input, "evidenceRepairRequired")
+		clearValidationOnlyConvergenceFields(input)
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
 		input["repairGuidance"] = stateChangingConvergenceGuidance(input["repairGuidance"])
@@ -1307,9 +1305,30 @@ func stateChangingConvergenceGuidance(existing any) []string {
 		"do not return mcp/toolcalls",
 		"do not return patchrequests",
 		"do not return other executable work",
+		"do not repeat assessment-only validation",
+		"produce concrete verification evidence",
+		"produce bounded shell/tool/mcp validation evidence",
+		"unresolved goal/dod/deliverable coverage is currently a validation evidence gap",
+		"do not return patch/apply unless a later validation failure",
+		"bounded executiongraph that runs available verification",
 	}, append(stateChangingRepairGuidance(),
 		"When stateChangingOutputRequired is true, dodAssessment alone cannot satisfy the repair contract; first produce an accepted executable state-changing operation or return a real governance blocker.",
 	)...)
+}
+
+func clearValidationOnlyConvergenceFields(input map[string]any) {
+	if len(input) == 0 {
+		return
+	}
+	for _, key := range []string{
+		"concreteFailureEvidenceRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+		"evidenceRepairSource",
+		"verificationEvidenceGap",
+	} {
+		delete(input, key)
+	}
 }
 
 func appendRepairGuidanceWithout(existing any, blockedSubstrings []string, items ...string) []string {

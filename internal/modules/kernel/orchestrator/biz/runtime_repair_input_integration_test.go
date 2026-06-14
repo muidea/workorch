@@ -2649,6 +2649,91 @@ func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesRepeatedValidationGapWit
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesValidationGapWithCurrentTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target.txt"), []byte("current target\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-repair-validation-current-target")
+	runID := common.RunID("run-repair-validation-current-target")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateActive,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                   "cwi-001",
+					"status":               "open",
+					"missingEvidenceKinds": []string{"validation"},
+					"targetText":           "deliver verified behavior",
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|failureTargets=target.txt",
+			stepOutputKeyDoDAssessment: map[string]any{
+				"satisfied": false,
+				"summary":   "Verification is blocked by a target diagnostic.",
+				"items": []map[string]any{{
+					"item":  "deliver verified behavior",
+					"state": "failed",
+				}},
+			},
+			"missingDoDItems": []map[string]any{{
+				"item":  "deliver verified behavior",
+				"state": "failed",
+			}},
+			"stderr": "./target.txt:2:7: shape mismatch: MissingSymbol",
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true {
+		t.Fatalf("repair input = %+v, want target-backed validation gap escalated to state-changing repair", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	if input["boundedValidationRequired"] != nil || input["evidenceRepairRequired"] != nil {
+		t.Fatalf("repair input = %+v, want validation-only contract cleared after target evidence is available", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputDemotesInheritedCoveragePatchContractToValidation(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{
