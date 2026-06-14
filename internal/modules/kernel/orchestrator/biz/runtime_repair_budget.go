@@ -788,6 +788,7 @@ func runtimeFailureTargetRefsFromRepairEvidence(step *runModel.Step) []string {
 				add(target)
 			}
 		}
+		addPatchPayloadFailureTargets(value, add)
 		for _, item := range mapSliceFromValue(value["targetSnapshots"]) {
 			add(stringFromMap(item, "targetRef"))
 		}

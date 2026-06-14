@@ -93,6 +93,52 @@ func TestMCPFailureTargetsPreferToolInputOverInternalDiagnostics(t *testing.T) {
 	}
 }
 
+func TestPatchPayloadTargetsEnterFailureSignature(t *testing.T) {
+	output := map[string]any{
+		"stage": "patch_apply",
+		"error": "conflict: patch text_replace oldText not found",
+		"patches": []map[string]any{{
+			"targetRef": "target.txt",
+			"patchType": "text_replace",
+		}},
+	}
+
+	targets := failureTargetsForSignature(output)
+	if len(targets) != 1 || targets[0] != "target.txt" {
+		t.Fatalf("failureTargetsForSignature = %#v, want target.txt from patch payload", targets)
+	}
+
+	signature := runtimeFailureSignature(failureClassPatchApply, &runmodel.Step{Kind: "patch/apply", Output: output}, output, nil)
+	if !strings.Contains(signature, "failureTargets=target.txt") {
+		t.Fatalf("signature = %q, want patch payload target scope", signature)
+	}
+}
+
+func TestPatchPayloadTargetsEnterRepairTargetScope(t *testing.T) {
+	step := &runmodel.Step{
+		ID:   "run/graph-002/patch",
+		Kind: "patch/apply",
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|error=conflict patch basehash mismatch",
+			"patchRequests": []map[string]any{{
+				"targetRef": "target.txt",
+				"patchType": "file_write",
+			}},
+		},
+	}
+
+	if got := runtimeFailureTargetScopeFromStep(step); got != "failureTargets=target.txt" {
+		t.Fatalf("runtimeFailureTargetScopeFromStep = %q, want failureTargets=target.txt", got)
+	}
+	targets := runtimeFailureTargetRefsFromRepairEvidence(step)
+	if len(targets) != 1 || targets[0] != "target.txt" {
+		t.Fatalf("runtimeFailureTargetRefsFromRepairEvidence = %#v, want target.txt", targets)
+	}
+}
+
 func TestMCPFailureWithoutExplicitTargetDoesNotPromoteInternalDiagnostics(t *testing.T) {
 	output := map[string]any{
 		"operation": "mcp/tool_call",

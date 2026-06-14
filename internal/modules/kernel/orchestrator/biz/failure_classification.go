@@ -408,6 +408,7 @@ func explicitFailureTargetsForSignature(output map[string]any) []string {
 	for _, target := range stringSliceFromValue(output["failureTargets"]) {
 		add(target)
 	}
+	addPatchPayloadFailureTargets(output, add)
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		add(stringFromMap(diagnostics, "targetRef"))
 		add(stringFromMap(diagnostics, "conflictRef"))
@@ -419,6 +420,21 @@ func explicitFailureTargetsForSignature(output map[string]any) []string {
 		add(target)
 	}
 	return limitedStrings(ret, 5)
+}
+
+func addPatchPayloadFailureTargets(value map[string]any, add func(string)) {
+	if len(value) == 0 || add == nil {
+		return
+	}
+	for _, key := range []string{"patches", "patchRequests"} {
+		for _, item := range mapSliceFromValue(value[key]) {
+			add(stringFromMap(item, "targetRef"))
+			add(stringFromMap(item, "conflictRef"))
+		}
+	}
+	if decision := mapFromValue(value[stepOutputKeyLLMDecision]); len(decision) > 0 {
+		addPatchPayloadFailureTargets(decision, add)
+	}
 }
 
 func capabilityInputFailureTargets(output map[string]any) []string {
