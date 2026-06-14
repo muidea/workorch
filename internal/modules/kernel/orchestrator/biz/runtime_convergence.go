@@ -408,6 +408,13 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RepairActionPackage["requiredOutput"] = required
 		return true
 	}
+	if coverageWorkItemFocusReadyForAssessment(focus) {
+		contract.State = convergenceStateNeedAssessment
+		contract.RuntimeStage = runtimeStageVerification
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = "complete_dod_goal_coverage_assessment"
+		return true
+	}
 	if coverageWorkItemFocusHasActionableFailure(focus) {
 		contract.State = convergenceStateNeedValidation
 		contract.RuntimeStage = runtimeStageVerification
@@ -422,6 +429,39 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 	contract.RuntimeStage = runtimeStageVerification
 	contract.RuntimeStageMode = "strict_convergence"
 	contract.RepairObjective = "complete_dod_goal_coverage_assessment"
+	return true
+}
+
+func coverageWorkItemFocusReadyForAssessment(focus map[string]any) bool {
+	if len(focus) == 0 {
+		return false
+	}
+	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
+	if len(missing) == 0 {
+		missing = stringSet(coverageMissingEvidenceKinds(focus))
+	}
+	if len(missing) > 0 {
+		return false
+	}
+	required := stringSliceFromValue(focus["requiredEvidenceKinds"])
+	if len(required) == 0 {
+		required = []string{"validation"}
+	}
+	acceptedByKind := mapStringSliceValue(focus["acceptedEvidenceByKind"])
+	requiredCounts := mapIntValue(focus["requiredEvidenceCounts"])
+	for _, kind := range required {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		requiredCount := requiredCounts[kind]
+		if requiredCount <= 0 {
+			requiredCount = 1
+		}
+		if coverageEvidenceCountForKind(kind, acceptedByKind[kind]) < requiredCount {
+			return false
+		}
+	}
 	return true
 }
 

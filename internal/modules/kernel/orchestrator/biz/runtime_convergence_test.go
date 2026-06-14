@@ -1795,6 +1795,72 @@ func TestBuildConvergenceContractAssessmentOnlyFailedGapSwitchesToValidation(t *
 	}
 }
 
+func TestBuildConvergenceContractCoverageFocusWithAcceptedEvidenceNeedsAssessment(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":  true,
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                           "cwi-ready",
+				"sourceScope":                  "dod_item",
+				"sourceRequirementId":          "dod-item-ready",
+				"targetText":                   "neutral claim coverage",
+				"status":                       "failed",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{},
+				"acceptedEvidenceRefs":         []string{"run/graph/001-validate"},
+				"acceptedEvidenceByKind":       map[string][]string{"validation": {"run/graph/001-validate"}},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+				"currentGap":                   "required evidence kinds present; coverage assessment required",
+			},
+			"currentFocusItems": []map[string]any{{
+				"id":                           "cwi-ready",
+				"sourceScope":                  "dod_item",
+				"sourceRequirementId":          "dod-item-ready",
+				"targetText":                   "neutral claim coverage",
+				"status":                       "failed",
+				"requiredEvidenceKinds":        []string{"validation"},
+				"missingEvidenceKinds":         []string{},
+				"acceptedEvidenceRefs":         []string{"run/graph/001-validate"},
+				"acceptedEvidenceByKind":       map[string][]string{"validation": {"run/graph/001-validate"}},
+				"nextAllowedConvergenceStates": []string{convergenceStateNeedValidation},
+			}},
+			"summary": map[string]any{"total": 1, "failed": 1},
+		},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"currentFailure":         map[string]any{"failureClass": failureClassDoDCoverageMissing},
+			"requiredOutput":         concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedAssessment, contract)
+	}
+	if contract.RepairObjective != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repairObjective = %q, want assessment objective", contract.RepairObjective)
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied[stepInputKeyRuntimeStage] != runtimeStageVerification ||
+		applied[stepInputKeyAssessmentOnly] != true ||
+		applied["repairObjective"] != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("applied = %+v, want verification assessment-only contract", applied)
+	}
+	for _, key := range []string{"boundedValidationRequired", "stateChangingOutputRequired", "evidenceRepairRequired"} {
+		if _, ok := applied[key]; ok {
+			t.Fatalf("applied[%s] still present in assessment-ready contract: %+v", key, applied[key])
+		}
+	}
+	required := mapFromValue(mapFromValue(applied["repairActionPackage"])["requiredOutput"])
+	if len(required) > 0 {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want executable validation contract stripped", required)
+	}
+}
+
 func TestBuildConvergenceContractPromotesConcreteValidationTargetEvidenceToStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,
