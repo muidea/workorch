@@ -112,6 +112,10 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
 		_ = o.runs.Update(ctx, run)
 	}
+	if changed, bound := o.reconcileCoverageValidationEvidence(ctx, run); changed && o.runs != nil {
+		_ = o.runs.Update(ctx, run)
+		logCoverageReconcilerBinding(run.ID, bound)
+	}
 	_ = o.steps.Update(ctx, step)
 	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if graphBatchStep(step) {

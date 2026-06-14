@@ -316,6 +316,12 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 			return err
 		}
 	}
+	if changed, bound := o.reconcileCoverageValidationEvidence(ctx, run); changed && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return err
+		}
+		logCoverageReconcilerBinding(run.ID, bound)
+	}
 	if err := o.coverageLedger().validateReadyForAcceptance(run); err != nil {
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime completion gate failed", err)
 	}
