@@ -781,8 +781,8 @@ Last Updated: 2026-06-08
 - Background task check: 不启动后台任务。
 - State ownership check: git write 只执行 workspace repo 操作并返回 step output，不直接完成 run/result；它属于明确声明的 git capability evidence，不替代 orchestrator patch result closeout。
 - Workspace scope check: repo root 从 workspace deliverable directory 解析，pathspec 有边界校验。
-- Findings: 本轮复核未发现 git block 直接写 Run/Result/Artifact owner state；`runtime.git.writeEnabled` 在运行配置中必须显式 opt-in，默认配置文件继续显式配置 `writeEnabled=true`。LLM capability catalog 测试已显式隔离配置，避免外部 `CONFIG_PATH` 或其它测试状态影响 git/write capability 断言。
-- Required action: 后续调整 git write 策略时必须同时更新 `workorchconfig` 默认语义、LLM capability catalog、git block runtime policy 和 e2e 配置，不能只改其中一处。
+- Findings: 本轮复核未发现 git block 直接写 Run/Result/Artifact owner state；`git/write` 是默认启用的核心 runtime 数据一致性能力，不再通过 `runtime.git.writeEnabled` 配置开关控制。LLM capability catalog 测试已显式隔离配置，避免外部 `CONFIG_PATH` 或其它测试状态影响 git/write capability 断言。
+- Required action: 后续调整 git write 策略时必须同时更新 `workorchconfig` 默认语义、LLM capability catalog、git block runtime policy 和 e2e 配置，不能只改其中一处；不得重新引入 `runtime.git.writeEnabled` 开关语义。
 - Verification: `go test ./internal/pkg/workorchconfig -count=1 -timeout=120s`; `go test ./internal/modules/blocks/git ./internal/modules/blocks/git/biz ./internal/modules/blocks/llm ./internal/modules/blocks/llm/biz -run 'Git|RuntimeCapabilities|Capability|Config' -count=1 -timeout=240s`; `go test ./internal/modules/blocks/git ./internal/modules/blocks/git/biz ./internal/modules/kernel/orchestrator/biz -run 'Git|Patch' -count=1 -timeout=300s`; `go test ./internal/modules/blocks/llm/biz -count=1`
 - Status: reviewed
 

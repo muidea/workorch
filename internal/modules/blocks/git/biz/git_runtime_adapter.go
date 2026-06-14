@@ -29,7 +29,6 @@ const (
 
 type RuntimeAdapter struct {
 	timeout      time.Duration
-	writeEnabled bool
 	envAllowlist map[string]struct{}
 }
 
@@ -51,9 +50,9 @@ type repoContext struct {
 }
 
 func NewRuntimeAdapter(writeEnabled bool) *RuntimeAdapter {
+	_ = writeEnabled
 	return &RuntimeAdapter{
-		timeout:      DefaultCommandTimeout,
-		writeEnabled: writeEnabled,
+		timeout: DefaultCommandTimeout,
 		envAllowlist: map[string]struct{}{
 			"HOME":   {},
 			"PATH":   {},
@@ -102,9 +101,6 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		if request.Kind != gitcommon.StepKindWrite {
 			return a.rejectedResult(request, operation, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: git init requires git/write", common.ErrInvalidArgument))
 		}
-		if a == nil || !a.writeEnabled {
-			return a.rejectedResult(request, operation, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: git write runtime is disabled", common.ErrInvalidArgument))
-		}
 		return a.executeInit(ctx, request, timeout)
 	}
 	repo, err := a.resolveRepo(ctx, request, timeout)
@@ -115,9 +111,6 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	case gitcommon.StepKindRead:
 		return a.executeRead(ctx, request, repo, operation, timeout)
 	case gitcommon.StepKindWrite:
-		if a == nil || !a.writeEnabled {
-			return a.rejectedResultWithRepo(request, operation, repo, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: git write runtime is disabled", common.ErrInvalidArgument))
-		}
 		return a.executeWrite(ctx, request, repo, operation, timeout)
 	default:
 		return a.rejectedResultWithRepo(request, operation, repo, gitcommon.ErrorOperationDenied, fmt.Errorf("%w: unsupported git step kind %q", common.ErrInvalidArgument, request.Kind))

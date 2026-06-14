@@ -10,8 +10,6 @@ type RuntimeConfiguration struct {
 }
 
 type RuntimeGitConfiguration struct {
-	Enabled        bool   `json:"enabled"`
-	WriteEnabled   bool   `json:"writeEnabled"`
 	DefaultTimeout string `json:"defaultTimeout,omitempty"`
 }
 

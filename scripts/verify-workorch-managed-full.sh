@@ -105,8 +105,6 @@ backend = "file"
 dataDir = "$DATA_DIR"
 
 [runtime.git]
-enabled = true
-writeEnabled = true
 defaultTimeout = "30s"
 
 [llm]

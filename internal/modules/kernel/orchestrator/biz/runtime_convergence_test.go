@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,7 +14,44 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
+
+func TestMain(m *testing.M) {
+	configDir, err := os.MkdirTemp("", "workorch-convergence-test-config-*")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(configDir)
+	if err := writeConvergenceTestConfig(configDir); err != nil {
+		panic(err)
+	}
+	_ = workorchconfig.Close()
+	_ = os.Setenv(workorchconfig.EnvConfigDir, configDir)
+	code := m.Run()
+	_ = workorchconfig.Close()
+	os.Exit(code)
+}
+
+func writeConvergenceTestConfig(configDir string) error {
+	return os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`
+endpointName = "workorch"
+
+[runtime.git]
+defaultTimeout = "30s"
+
+[runtime.llmOutput]
+maxPatchContentBytes = 12288
+maxGraphBytes = 32768
+maxGraphFileWrites = 3
+schemaInvalidLargePreviewThreshold = 8192
+maxArtifactChunkBytes = 8192
+previousChunkTailBytes = 300
+maxChunkRetryAttempts = 3
+maxArtifactPlanAttempts = 2
+maxArtifactReplanAttempts = 2
+`), 0o600)
+}
 
 func TestBuildConvergenceContractNeedStateChangeWithTargetEvidence(t *testing.T) {
 	step := &runmodel.Step{
@@ -569,6 +608,67 @@ func TestBuildConvergenceContractKeepsProfileWriteEvidenceAfterGitWriteFailure(t
 	}
 	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") {
 		t.Fatalf("requiredOutput = %+v, must not downgrade profile write evidence to shell/command", required)
+	}
+}
+
+func TestBuildConvergenceContractBlocksProfileEvidenceWhenAcceptedKindUnavailable(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-unavailable-kind",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "profile_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{"artifact/write"},
+							"acceptedOperations": []string{"seal"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "deliverable",
+			"item":                "profile_snapshot",
+			"coverageTargetToken": "profile_snapshot",
+			"targetText":          "profile_snapshot",
+			"state":               "failed",
+			"source":              "deliverableCoverage",
+		}},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-unavailable-kind/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: satisfied deliverable references insufficient evidence"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedGovernance {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedGovernance, contract)
+	}
+	gap := mapFromValue(contract.RepairActionPackage["runtimeCapabilityGap"])
+	if !stringSliceContains(stringSliceFromValue(gap["missingKinds"]), "artifact/write") {
+		t.Fatalf("runtimeCapabilityGap = %+v, want missing artifact/write", gap)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "shell/command") ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "artifact/write") {
+		t.Fatalf("requiredOutput = %+v, want no substitute executable accepted kinds", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["governanceRequired"] != true || stringFromMap(applied, "runtimeStage") != runtimeStageDecision {
+		t.Fatalf("applied input = %+v, want governance decision stage", applied)
 	}
 }
 

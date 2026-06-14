@@ -37,12 +37,8 @@ func (m *Module) Configure(deps ...Dependencies) error {
 	if err != nil {
 		return err
 	}
-	if !workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git) {
-		m.runtimeAdapter = nil
-		return nil
-	}
 	adapter, err := gitbiz.NewRuntimeAdapterFromTimeoutString(
-		workorchconfig.GitRuntimeWriteEnabled(cfg.Runtime.Git),
+		true,
 		cfg.Runtime.Git.DefaultTimeout,
 	)
 	if err != nil {

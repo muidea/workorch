@@ -636,8 +636,7 @@ func TestRuntimeAdapterParsesDecisionAndReturnsNormalizedOutput(t *testing.T) {
 	configDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`
 [runtime.git]
-enabled = true
-writeEnabled = true
+defaultTimeout = "30s"
 `), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -705,11 +704,11 @@ writeEnabled = true
 	}
 }
 
-func TestDeclaredRuntimeCapabilitiesHideGitWriteWhenDisabled(t *testing.T) {
+func TestDeclaredRuntimeCapabilitiesKeepGitCoreCapabilitiesForLegacyDisabledConfig(t *testing.T) {
 	configDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(configDir, "application.toml"), []byte(`
 [runtime.git]
-enabled = true
+enabled = false
 writeEnabled = false
 `), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -720,10 +719,10 @@ writeEnabled = false
 
 	caps := declaredRuntimeCapabilities()
 	if !runtimeCapabilitiesContainBlock(caps, gitcommon.StepKindRead) {
-		t.Fatalf("runtime capabilities = %+v, want git/read", caps)
+		t.Fatalf("runtime capabilities = %+v, want git/read as core capability even when legacy config is false", caps)
 	}
-	if runtimeCapabilitiesContainBlock(caps, gitcommon.StepKindWrite) {
-		t.Fatalf("runtime capabilities = %+v, git/write must be hidden when disabled", caps)
+	if !runtimeCapabilitiesContainBlock(caps, gitcommon.StepKindWrite) {
+		t.Fatalf("runtime capabilities = %+v, want git/write as core capability even when legacy config is false", caps)
 	}
 }
 

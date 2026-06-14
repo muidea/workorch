@@ -16,8 +16,6 @@ func runtimeShellCommandTimeout(configured string) string {
 
 func runtimeGitConfiguration(cfg workorchconfig.GitRuntimeConfig) RuntimeGitConfiguration {
 	return RuntimeGitConfiguration{
-		Enabled:        workorchconfig.GitRuntimeEnabled(cfg),
-		WriteEnabled:   workorchconfig.GitRuntimeWriteEnabled(cfg),
 		DefaultTimeout: strings.TrimSpace(cfg.DefaultTimeout),
 	}
 }

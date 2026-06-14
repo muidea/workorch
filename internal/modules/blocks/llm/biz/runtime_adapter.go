@@ -30,7 +30,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/dialoglanguage"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -3916,23 +3915,16 @@ func declaredRuntimeCapabilities() llmmodels.RuntimeCapabilities {
 }
 
 func appendGitRuntimeCapabilities(blockKinds []llmmodels.RuntimeBlockCapability) []llmmodels.RuntimeBlockCapability {
-	cfg, err := workorchconfig.Current()
-	enabled := err != nil || workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git)
-	writeEnabled := err != nil || workorchconfig.GitRuntimeWriteEnabled(cfg.Runtime.Git)
-	if enabled {
-		blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
-			Kind:        gitcommon.StepKindRead,
-			Description: "Read local Git repository state for the workspace deliverable repository. Supported operations: status, diff, log, show, branch. This block is read-only and path-scoped; it is not a general Git CLI.",
-			Input:       map[string]any{"operation": "status|diff|log|show|branch", "pathspecs": "[]relative path", "ref": "string", "baseRef": "string", "limit": "number", "reason": "string"},
-		})
-	}
-	if enabled && writeEnabled {
-		blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
-			Kind:        gitcommon.StepKindWrite,
-			Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: init, add, commit. init initializes the workspace deliverable directory when it is not yet a Git repository; add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
-			Input:       map[string]any{"operation": "init|add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
-		})
-	}
+	blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
+		Kind:        gitcommon.StepKindRead,
+		Description: "Read local Git repository state for the workspace deliverable repository. Supported operations: status, diff, log, show, branch. This block is read-only and path-scoped; it is not a general Git CLI.",
+		Input:       map[string]any{"operation": "status|diff|log|show|branch", "pathspecs": "[]relative path", "ref": "string", "baseRef": "string", "limit": "number", "reason": "string"},
+	})
+	blockKinds = append(blockKinds, llmmodels.RuntimeBlockCapability{
+		Kind:        gitcommon.StepKindWrite,
+		Description: "Perform minimal local Git state changes in the workspace deliverable repository. Supported operations: init, add, commit. init initializes the workspace deliverable directory when it is not yet a Git repository; add requires explicit pathspecs; commit only commits already staged changes, rejects detached HEAD, does not run hooks, and does not support remote operations or history rewrite.",
+		Input:       map[string]any{"operation": "init|add|commit", "pathspecs": "[]relative path for add only", "message": "commit message for commit", "expectedHead": "optional full HEAD hash guard", "reason": "string"},
+	})
 	return blockKinds
 }
 

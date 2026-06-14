@@ -34,8 +34,6 @@ maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
 [runtime.git]
-enabled = true
-writeEnabled = true
 defaultTimeout = "45s"
 
 [runtime.llmOutput]
@@ -126,9 +124,7 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime config = %+v, want configured runtime settings", cfg.Runtime)
 	}
-	if !GitRuntimeEnabled(cfg.Runtime.Git) ||
-		!GitRuntimeWriteEnabled(cfg.Runtime.Git) ||
-		cfg.Runtime.Git.DefaultTimeout != "45s" {
+	if !GitRuntimeEnabled(cfg.Runtime.Git) || !GitRuntimeWriteEnabled(cfg.Runtime.Git) || cfg.Runtime.Git.DefaultTimeout != "45s" {
 		t.Fatalf("runtime git config = %+v, want configured git runtime settings", cfg.Runtime.Git)
 	}
 	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
@@ -179,17 +175,26 @@ maxRepeatedSamePrompt = 1
 	}
 }
 
-func TestGitRuntimeWriteEnabledRequiresExplicitOptIn(t *testing.T) {
-	if GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
-		t.Fatal("git runtime write should require explicit opt-in")
+func TestGitRuntimeIsCoreCapability(t *testing.T) {
+	if !GitRuntimeEnabled(GitRuntimeConfig{}) {
+		t.Fatal("git runtime should be enabled by default")
 	}
 	enabled := true
-	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &enabled}) {
-		t.Fatal("git runtime write should respect explicit true")
+	if !GitRuntimeEnabled(GitRuntimeConfig{Enabled: &enabled}) {
+		t.Fatal("git runtime should remain enabled for legacy explicit true")
 	}
 	disabled := false
-	if GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &disabled}) {
-		t.Fatal("git runtime write should respect explicit false")
+	if !GitRuntimeEnabled(GitRuntimeConfig{Enabled: &disabled}) {
+		t.Fatal("git runtime should ignore legacy false because it is a core capability")
+	}
+	if !GitRuntimeWriteEnabled(GitRuntimeConfig{}) {
+		t.Fatal("git runtime write should be enabled by default")
+	}
+	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &enabled}) {
+		t.Fatal("git runtime write should remain enabled for legacy explicit true")
+	}
+	if !GitRuntimeWriteEnabled(GitRuntimeConfig{WriteEnabled: &disabled}) {
+		t.Fatal("git runtime write should ignore legacy false because it is a core capability")
 	}
 }
 

@@ -260,6 +260,18 @@ func populateProfileStateChangingEvidenceConvergenceContract(input map[string]an
 	if contract == nil {
 		return
 	}
+	if gap := mapFromValue(pkg["runtimeCapabilityGap"]); len(gap) > 0 {
+		contract.State = convergenceStateNeedGovernance
+		contract.RuntimeStage = runtimeStageDecision
+		contract.RuntimeStageMode = "structured_governance"
+		contract.GovernanceReason = firstNonEmptyString(
+			stringFromMap(gap, "reason"),
+			"profile evidence requirement cannot be satisfied by currently declared runtime capabilities",
+		)
+		contract.RepairActionPackage = pkg
+		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
+		return
+	}
 	if repairActionPackageRequiresEvidenceAcquisition(pkg) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -1503,6 +1515,27 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if !requiresStateChange {
 		return nil
 	}
+	if gap := profileEvidenceRuntimeCapabilityGap(matchedRequirements); len(gap) > 0 {
+		pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		if len(pkg) == 0 {
+			pkg = map[string]any{}
+		}
+		pkg["coverageRepairRequired"] = true
+		pkg["coverageTargetSet"] = targets
+		pkg["evidenceKindRequirements"] = requirementSummaries
+		pkg["runtimeCapabilityGap"] = gap
+		pkg["requiredOutput"] = map[string]any{
+			"mustNotUseUnavailableKinds":     true,
+			"requiredMissingKinds":           gap["missingKinds"],
+			"availableKinds":                 gap["availableKinds"],
+			"profileEvidenceRequirementRule": "profile evidence requirements are authoritative; if no acceptedStepKinds are declared by runtimeCapabilities.blockKinds, do not substitute unrelated block kinds and request capability/configuration resolution",
+		}
+		pkg["exitCriteria"] = []string{
+			"runtime_capability_enabled_then_profile_required_evidence_produced",
+			"evidence_requirement_policy_changed_then_reassess",
+		}
+		return pkg
+	}
 	primaryStateChangeRequired := coverageTargetsRequirePrimaryStateChangingOutput(targets, matchedRequirements)
 	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 	if len(pkg) == 0 {
@@ -1554,6 +1587,81 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func profileEvidenceRuntimeCapabilityGap(requirements []profileEvidenceKindRequirement) map[string]any {
+	if len(requirements) == 0 {
+		return nil
+	}
+	available := currentRuntimeEvidenceBlockKinds()
+	missing := make([]string, 0)
+	requirementSummaries := make([]map[string]any, 0)
+	for _, requirement := range requirements {
+		if len(requirement.AcceptedStepKinds) == 0 {
+			continue
+		}
+		hasAvailable := false
+		for _, kind := range requirement.AcceptedStepKinds {
+			if available[strings.TrimSpace(kind)] {
+				hasAvailable = true
+				break
+			}
+		}
+		if hasAvailable {
+			continue
+		}
+		missing = append(missing, requirement.AcceptedStepKinds...)
+		requirementSummaries = append(requirementSummaries, map[string]any{
+			"scope":              normalizeEvidenceKindRequirementScope(requirement.Scope),
+			"id":                 requirement.ID,
+			"evidenceRole":       requirement.EvidenceRole,
+			"acceptedStepKinds":  compactUniqueStrings(requirement.AcceptedStepKinds),
+			"acceptedOperations": compactUniqueStrings(requirement.AcceptedOperations),
+			"description":        requirement.Description,
+		})
+	}
+	missing = compactUniqueStrings(missing)
+	if len(missing) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":           "runtime_capability_gap",
+		"missingKinds":   missing,
+		"availableKinds": compactUniqueStrings(mapKeys(available)),
+		"requirements":   requirementSummaries,
+		"reason":         "profile evidence requirement accepts only block kinds that are not declared by current runtime capabilities",
+	}
+}
+
+func currentRuntimeEvidenceBlockKinds() map[string]bool {
+	return map[string]bool{
+		"llm/workspace_execution": true,
+		"shell/command":           true,
+		"file/list":               true,
+		"file/read":               true,
+		"file/edit":               true,
+		"ssh/command":             true,
+		"web/search":              true,
+		"web/fetch":               true,
+		"patch/apply":             true,
+		"patch/preview":           true,
+		"patch/revert":            true,
+		"mcp/tool_call":           true,
+		"mcp/resource_read":       true,
+		"mcp/prompt_get":          true,
+		"git/read":                true,
+		"git/write":               true,
+	}
+}
+
+func mapKeys(input map[string]bool) []string {
+	ret := make([]string, 0, len(input))
+	for key, enabled := range input {
+		if enabled {
+			ret = append(ret, key)
+		}
+	}
+	return ret
 }
 
 func profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg map[string]any, previousRequired map[string]any) map[string]any {

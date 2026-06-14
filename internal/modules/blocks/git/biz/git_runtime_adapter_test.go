@@ -184,7 +184,10 @@ func TestRuntimeAdapterReadInitRejected(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterWriteInitRejectedWhenWriteDisabled(t *testing.T) {
+func TestRuntimeAdapterWriteInitIgnoresLegacyDisabledFlag(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
 	dir := t.TempDir()
 	adapter := NewRuntimeAdapter(false)
 
@@ -193,14 +196,14 @@ func TestRuntimeAdapterWriteInitRejectedWhenWriteDisabled(t *testing.T) {
 		WorkspaceDeliverableDirectory: dir,
 		Input:                         map[string]any{"operation": gitcommon.OperationInit},
 	})
-	if err == nil {
-		t.Fatal("execute init with git/write disabled: expected error")
+	if err != nil {
+		t.Fatalf("execute init with legacy disabled flag: %v\noutput=%+v", err, result.Output)
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
-		t.Fatalf("output = %+v, want init rejected when write disabled", result.Output)
+	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationInit {
+		t.Fatalf("output = %+v, want init completed despite legacy disabled flag", result.Output)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
-		t.Fatalf(".git stat = %v, want no repository initialized", err)
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		t.Fatalf(".git stat: %v, want repository initialized", err)
 	}
 }
 
@@ -238,7 +241,7 @@ func TestRuntimeAdapterWritePathspecDotStillRejected(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterWriteDisabledRejectsAdd(t *testing.T) {
+func TestRuntimeAdapterAddIgnoresLegacyDisabledFlag(t *testing.T) {
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "README.md"), "hello\n")
 	adapter := NewRuntimeAdapter(false)
@@ -248,11 +251,11 @@ func TestRuntimeAdapterWriteDisabledRejectsAdd(t *testing.T) {
 		WorkspaceDeliverableDirectory: repo,
 		Input:                         map[string]any{"operation": gitcommon.OperationAdd, "pathspecs": []any{"README.md"}},
 	})
-	if err == nil {
-		t.Fatal("execute add with write disabled: expected error")
+	if err != nil {
+		t.Fatalf("execute add with legacy disabled flag: %v\noutput=%+v", err, result.Output)
 	}
-	if result.Output["status"] != "rejected" || result.Output["errorCode"] != gitcommon.ErrorOperationDenied {
-		t.Fatalf("output = %+v, want write rejected", result.Output)
+	if result.Output["status"] != "completed" || result.Output["operation"] != gitcommon.OperationAdd {
+		t.Fatalf("output = %+v, want add completed despite legacy disabled flag", result.Output)
 	}
 }
 

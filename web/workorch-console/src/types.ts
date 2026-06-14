@@ -33,8 +33,6 @@ export type RuntimeConfiguration = {
 };
 
 export type RuntimeGitConfiguration = {
-  enabled?: boolean;
-  writeEnabled?: boolean;
   defaultTimeout?: string;
 };
 

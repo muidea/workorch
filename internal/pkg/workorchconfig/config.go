@@ -607,11 +607,13 @@ func boolString(value bool) string {
 }
 
 func GitRuntimeEnabled(cfg GitRuntimeConfig) bool {
-	return cfg.Enabled == nil || *cfg.Enabled
+	_ = cfg
+	return true
 }
 
 func GitRuntimeWriteEnabled(cfg GitRuntimeConfig) bool {
-	return cfg.WriteEnabled != nil && *cfg.WriteEnabled
+	_ = cfg
+	return true
 }
 
 func intString(value int) string {

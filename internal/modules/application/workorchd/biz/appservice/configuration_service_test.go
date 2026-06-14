@@ -35,8 +35,6 @@ maxProviderRetryAttempts = 12
 shellCommandTimeout = "90s"
 
 [runtime.git]
-enabled = true
-writeEnabled = true
 defaultTimeout = "45s"
 
 [runtime.llmOutput]
@@ -118,8 +116,8 @@ maxRepeatedSamePrompt = 1
 		cfg.Runtime.ShellCommandTimeout != "90s" {
 		t.Fatalf("runtime configuration = %+v, want system runtime settings", cfg.Runtime)
 	}
-	if !cfg.Runtime.Git.Enabled || !cfg.Runtime.Git.WriteEnabled || cfg.Runtime.Git.DefaultTimeout != "45s" {
-		t.Fatalf("runtime git configuration = %+v, want enabled writable git runtime", cfg.Runtime.Git)
+	if cfg.Runtime.Git.DefaultTimeout != "45s" {
+		t.Fatalf("runtime git configuration = %+v, want git runtime timeout", cfg.Runtime.Git)
 	}
 	if cfg.Runtime.LLMOutput.MaxPatchContentBytes != 4096 ||
 		cfg.Runtime.LLMOutput.MaxGraphBytes != 16384 ||

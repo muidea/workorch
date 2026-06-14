@@ -33,16 +33,6 @@ function configNumberText(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '-';
 }
 
-function configBoolText(value: boolean | undefined) {
-  if (value === true) {
-    return '启用';
-  }
-  if (value === false) {
-    return '禁用';
-  }
-  return '-';
-}
-
 export function ConfigurationPage() {
   const { message } = AntApp.useApp();
   const [serverForm] = Form.useForm<UpdateServerConfigurationRequest>();
@@ -428,8 +418,8 @@ export function ConfigurationPage() {
           <Descriptions
             column={1}
             items={[
-              { key: 'enabled', label: 'Git 读取能力', children: configBoolText(runtimeGit?.enabled) },
-              { key: 'writeEnabled', label: 'Git 写入能力', children: configBoolText(runtimeGit?.writeEnabled) },
+              { key: 'readCapability', label: 'Git 读取能力', children: '核心能力默认启用' },
+              { key: 'writeCapability', label: 'Git 写入能力', children: '核心能力默认启用' },
               { key: 'defaultTimeout', label: '默认超时', children: runtimeGit?.defaultTimeout || '-' }
             ]}
           />

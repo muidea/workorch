@@ -5,7 +5,6 @@ import (
 
 	gitcommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
-	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 )
 
 func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
@@ -541,12 +540,7 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 }
 
 func evidenceAcquisitionAcceptedKinds() []string {
-	kinds := []string{"file/list", "file/read", "shell/command", "mcp/tool_call"}
-	cfg, err := workorchconfig.Current()
-	if err != nil || workorchconfig.GitRuntimeEnabled(cfg.Runtime.Git) {
-		kinds = append(kinds, gitcommon.StepKindRead)
-	}
-	return kinds
+	return []string{"file/list", "file/read", "shell/command", "mcp/tool_call", gitcommon.StepKindRead}
 }
 
 func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[string]any {

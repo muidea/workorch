@@ -31,8 +31,8 @@ func TestUpdateRuntimeConfigurationPersistsRepairBudgetAndPreservesOmittedFields
 	if item.Runtime.ShellCommandTimeout != "45s" {
 		t.Fatalf("shellCommandTimeout = %q, want preserved 45s", item.Runtime.ShellCommandTimeout)
 	}
-	if !item.Runtime.Git.Enabled || !item.Runtime.Git.WriteEnabled || item.Runtime.Git.DefaultTimeout != "35s" {
-		t.Fatalf("git runtime config = %+v, want preserved enabled writable git runtime", item.Runtime.Git)
+	if item.Runtime.Git.DefaultTimeout != "35s" {
+		t.Fatalf("git runtime config = %+v, want preserved git runtime timeout", item.Runtime.Git)
 	}
 	if item.Runtime.LLMOutput.MaxGraphBytes != 65536 {
 		t.Fatalf("maxGraphBytes = %d, want 65536", item.Runtime.LLMOutput.MaxGraphBytes)
@@ -92,8 +92,6 @@ maxProviderRetryAttempts = 7
 shellCommandTimeout = "45s"
 
 [runtime.git]
-enabled = true
-writeEnabled = true
 defaultTimeout = "35s"
 
 [runtime.llmOutput]
