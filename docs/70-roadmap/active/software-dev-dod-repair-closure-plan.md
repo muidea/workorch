@@ -88,6 +88,7 @@ Last Updated: 2026-05-30
 | SDR-10 | Web/TUI 展示缺失 DoD 与 repair 下一步 | Web / TUI | P1 | completed | `repairLoop` 投影增加 `missingDoDItems/recentAttempts/recommendedNextSteps`，并从失败 step 与升级 ticket 上下文回填 | 用户可直接看到未完成原因与下一步建议，不再只看到泛化 running |
 | SDR-11 | 费用与上下文统计关联 repair 轮次 | Observability | P1 | completed | 保持现有 usage/context/repair attempt 观测链路，并在 repairLoop 中补齐 failure/missingDoD/recentAttempt 信息用于关联分析 | Workspace/Run 可按 repair attempt 与失败上下文对齐排查成本与收敛性 |
 | SDR-12 | validation-only repair 升格为实现修复路径 | 通用后端 | P0 | completed | 同一 coverage gap 已经过至少一轮 validation-only repair 仍未关闭，且仍无 implementation target evidence 时，runtime 标记 `validationRepairEscalatedToImplementation`，下一轮不再继续 bounded validation-only，而是进入 state-changing repair path；若仍缺目标证据，则先取 bounded implementation target evidence | 连续测试/验证无法关闭缺口时，下一轮不会继续 `produce_concrete_validation_evidence`，而会要求实现目标取证或状态变更修复 |
+| SDR-13 | 服务/长运行验证脚本无效循环 | 通用后端 / Template / Soul | P0 | completed | concrete validation evidence graph 在合同阶段拒绝 `nohup`、`setsid`、后台 `&`、`kill/pkill/killall/fuser -k` 等会导致 shell policy 拒绝或进程泄漏的验证脚本；software-dev template/Soul 要求使用前台 bounded harness、临时端口、fake/stub 或等价工具证据 | LLM 不再通过“后台启动服务 + kill”消耗验证轮次；失败被归为可继续的 validation evidence contract violation，并要求生成非破坏性 bounded validation |
 
 ## 验收文档项
 
@@ -166,3 +167,4 @@ Last Updated: 2026-05-30
 | --- | --- |
 | 2026-05-08 | 初始创建。基于 `ws-e1e310fd02e4375e` 最新核对，将 DoD coverage missing、repair loop、Memory 可信度、DoD-to-test、证据质量和 e2e 回归拆分为独立收口任务。 |
 | 2026-05-08 | 完成 SDR-01~SDR-11 收口：新增 `dod_coverage_missing` 分类、missing DoD 结构化透传、leaf DoD 覆盖门禁、repair 升级上下文增强、run-summary gate 版本标记、resultQuality 叶子覆盖与弱证据校验、repairLoop 缺口投影；并通过 `go test`（orchestrator/appservice）与 `scripts/verify-software-dev-goal-dod-e2e.sh`、`scripts/verify-software-requirement-development-orchestration.sh` 验证。 |
+| 2026-06-15 | 完成 SDR-13 收口：concrete validation 合同前置拒绝进程终止/后台驻留 shell graph，software-dev template/Soul 明确服务和长运行入口必须使用非破坏性 bounded validation。 |

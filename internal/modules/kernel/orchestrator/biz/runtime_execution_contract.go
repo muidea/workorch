@@ -156,9 +156,81 @@ func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph 
 		return nil
 	}
 	if graphHasDeclaredConcreteValidationEvidenceNode(graph) {
-		return nil
+		return validateConcreteValidationGraphShellSafety(graph)
 	}
 	return fmt.Errorf("%w: concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute", common.ErrInvalidArgument)
+}
+
+func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutionGraph) error {
+	for _, node := range graph.Nodes {
+		if canonicalRuntimeGraphNodeKind(node.Kind) != "shell/command" {
+			continue
+		}
+		commandLine := runtimeGraphShellCommandLine(node.Input)
+		if commandLine == "" {
+			continue
+		}
+		if shellCommandLineContainsProcessTermination(commandLine) {
+			return fmt.Errorf("%w: concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed", common.ErrInvalidArgument)
+		}
+		if shellCommandLineStartsDetachedProcess(commandLine) {
+			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func runtimeGraphShellCommandLine(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	parts := []string{strings.TrimSpace(stringFromMap(input, "command"))}
+	parts = append(parts, stringSliceFromValue(input["args"])...)
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func shellCommandLineContainsProcessTermination(commandLine string) bool {
+	padded := " " + strings.ToLower(strings.TrimSpace(commandLine)) + " "
+	for _, marker := range []string{
+		" pkill ",
+		" killall ",
+		" xargs kill",
+		" fuser -k",
+		" kill -",
+		" kill ",
+	} {
+		if strings.Contains(padded, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandLineStartsDetachedProcess(commandLine string) bool {
+	lower := strings.ToLower(strings.TrimSpace(commandLine))
+	if lower == "" {
+		return false
+	}
+	padded := " " + lower + " "
+	if strings.Contains(padded, " nohup ") || strings.Contains(padded, " setsid ") {
+		return true
+	}
+	return shellCommandLineContainsStandaloneAmpersand(lower)
+}
+
+func shellCommandLineContainsStandaloneAmpersand(commandLine string) bool {
+	for idx, value := range commandLine {
+		if value != '&' {
+			continue
+		}
+		prevBoundary := idx == 0 || strings.ContainsRune(" \t\r\n;(){}|", rune(commandLine[idx-1]))
+		nextIdx := idx + len(string(value))
+		nextBoundary := nextIdx >= len(commandLine) || strings.ContainsRune(" \t\r\n;(){}|", rune(commandLine[nextIdx]))
+		if prevBoundary && nextBoundary {
+			return true
+		}
+	}
+	return false
 }
 
 func graphHasDeclaredConcreteValidationEvidenceNode(graph runtimemodel.BlockExecutionGraph) bool {

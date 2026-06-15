@@ -2,7 +2,7 @@
 name: workorch-core-template-boundary
 description: "在 WorkOrch 开发、评审或排查中涉及 kernel/orchestrator/appservice、workspaceTemplate、Soul、DoD、evidence policy、prompt/context、ticket/approval、runtime block、memory 或 e2e 时使用；用于强制核对 WorkOrch 基础能力与 workspaceTemplate 业务策略边界，避免把具体场景、语言、工具或模板规则写入 core 通用流程。"
 metadata:
-  version: "1.0.3"
+  version: "1.0.4"
   author: "rangh"
   created_at: "2026-05-09T17:01:44+08:00"
 ---
@@ -137,6 +137,36 @@ rg -n "kernel/.*/(biz|service|repository)|repository\\." internal/services/worko
    - 如果修改了 LLM request rendering，新增或更新 cache 相关回归测试，至少证明动态阶段字段不会改变 C0 `stablePrefixHash`。
    - 如果修改了 Goal/DoD、repair、follow-up、resume、memory 或 context budget，新增或更新回归测试证明最新定义、未关闭 coverage、requiredOutput 和关键 evidence 未丢失且顺序正确。
 
+## 收口修改规范
+
+当任务来自线上 workspace 执行异常、TUI/Web 状态异常、CPU/IO 异常或多轮 repair 不推进时，必须先完成下列核对，再改代码：
+
+1. 记录真实 blocker。
+   - 写明 workspaceId、runId、currentStep、ticket/approval id、failureClass、failureSignature、最后事件时间、最新 evidence refs、实际变更文件和缺失 Goal/DoD。
+   - 区分“还在运行但无目标产出”、“等待 decision/approval”、“validation 合同失败”、“provider transient failure”、“projection 展示滞后”和“端侧输入未提交成功”。
+
+2. 对齐改动落点。
+   - 状态机、coverage ledger、repair budget、projection、EventHub、BackgroundRoutine、REST/TUI port 属于 core 通用能力，必须保持业务中立。
+   - 代码生成偏差、服务验证习惯、测试 harness、提交快照、LSP 使用顺序等属于 `software-dev` template / Soul / profile / skill，不能硬编码进 kernel/orchestrator。
+   - 某个 live workspace 的交付代码缺口只能作为现象和测试样本，不能把目标项目的文件名、语言、端口、协议或工具名写入 core 判定。
+
+3. 优先修正直接阻塞路径。
+   - 若 live blocker 是 validation graph 被 shell policy 拒绝，优先修正 concrete validation contract / Soul 验证策略；不要继续泛化改 context、cache 或 TUI。
+   - 若 live blocker 是处于 decision 但 TUI prompt 不刷新，优先核对 workorchd projection、port DTO、TUI Presenter/ViewModel 订阅链；不要让 TUI 自行推断业务状态。
+   - 若 live blocker 是 CPU/IO 持续过高，优先核对 request-time scan、projection rebuild 去重、watchdog 周期、事件订阅泄漏；不要靠扩大超时或压低日志绕过。
+
+4. Concrete validation graph 规范。
+   - `repairActionPackage.requiredOutput.mustProduceConcreteValidationEvidence=true` 时，LLM 输出必须是 bounded validation evidence graph 或 satisfied assessment with concrete evidenceRefs。
+   - `shell/command` 验证节点必须声明 `validationEvidence.mode` 与 `validationEvidence.observationType`。
+   - 禁止用 `nohup`、`setsid`、后台 `&` 常驻、`kill` / `pkill` / `killall` / `fuser -k` 或进程终止 approval 作为验证策略。
+   - 服务、代理、流式、长运行入口的验证应由 template/Soul 指导为前台 timeout harness、项目测试、临时端口、fake/stub、fixture 或等价 MCP/tool 证据。
+
+5. 反打圈审核。
+   - 每次修改前后比较当前 blocker 是否直接命中新代码路径；若没有命中，不能把改动描述为“已解决 live blocker”。
+   - 修改 prompt/Soul 时必须说明它如何进入 workspace activation / run executionContext / LLM input；只改 markdown 但没有绑定路径的变更不算收口。
+   - 修改 core 合同时必须补充至少一个失败样本单测，证明原错误会被提前拒绝或正确转入下一阶段。
+   - 修改 projection/TUI 时必须证明 workorchd 是 ViewModel owner，TUI 只消费 projection/port DTO，不保留另一套业务状态机。
+
 ## 排查流程
 
 1. 先复盘异常来自哪个层级：template 数据、workspace 绑定数据、run executionContext、block 输出、orchestrator 门禁、read model 展示。
@@ -156,6 +186,8 @@ rg -n "kernel/.*/(biz|service|repository)|repository\\." internal/services/worko
 - 文档同步说明策略归属：core 通用能力、template 数据、Soul 约束或 e2e fixture。
 - 涉及 LLM context/cache 时，必须补充或更新 `docs/workorch-llm-request-cache-aware-context-design.md` / `docs/workorch-runtime-stage-contract-neutrality-design.md` 中的对应约束。
 - 涉及 Goal/DoD 变更、repair/follow-up/resume、memory/context 裁剪时，必须证明 LLM request 中仍包含完整收敛合同和可追溯 evidence。
+- 涉及 live workspace 阻塞收口时，必须补充“修改命中 blocker 路径”的说明：旧失败进入哪个函数、现在会得到什么分类/合同/投影输出、下一步自动恢复路径是什么。
+- 涉及服务/代理/长运行验证时，必须搜索 `nohup|setsid|kill|pkill|killall|fuser -k| &`，确认 core 只做中立 shell 形态限制，profile/Soul 承载具体验证策略。
 
 ## LLM Cache 验证清单
 

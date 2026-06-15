@@ -169,6 +169,9 @@ Last Updated: 2026-05-30
     - 应至少包含 `stateChangePolicy`、`runtimeRepair.prerequisiteManifestTargetPatterns`、`versionControl`、`semanticCodeNavigation`、`profileContracts`、`capabilityUsagePolicies`
   - `evidencePolicies`
     - 应包含 `workEvidenceMarkers`
+- 验证策略
+  - 服务、代理、流式或长运行入口必须通过有界、前台、可自动退出的验证动作证明，例如项目测试 harness、本地 deterministic fake/stub server、临时端口、受 timeout 控制且自然退出的前台命令或等价 MCP/tool 证据
+  - `software-dev` Soul / template 可以要求上述验证习惯，但 WorkOrch core 只校验中立 shell 安全形态；不要把 Go、HTTP、LSP、网关等具体业务判断写入 core
 - 主要验证入口
   - `defaults_test.go`
   - `verify-software-dev-goal-dod-e2e.sh`

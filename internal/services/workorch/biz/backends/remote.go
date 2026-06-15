@@ -99,6 +99,41 @@ func (b *remoteBackend) Events() EventsBackend       { return b.evt }
 
 type remoteWorkspaceBackend struct{ cl *client.Client }
 
+func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
+	if ws == nil {
+		return WorkspaceInfo{}
+	}
+	return WorkspaceInfo{
+		ID:                   common.WorkspaceID(ws.ID),
+		Title:                ws.Title,
+		Description:          ws.Description,
+		DeliverableDirectory: ws.DeliverableDirectory,
+		State:                common.WorkspaceState(ws.State),
+		ActiveRunID:          common.RunID(ws.ActiveRunID),
+		BlockingTicketID:     common.TicketID(ws.BlockingTicketID),
+		BlockingApprovalID:   common.ApprovalID(ws.BlockingApprovalID),
+		TemplateID:           ws.TemplateID,
+		ProfileID:            ws.ProfileID,
+		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
+		SoulBindings:         commonSoulBindings(ws.SoulBindings),
+	}
+}
+
+func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
+	return ProjectionInfo{
+		State:                   input.State,
+		GlobalRevision:          input.GlobalRevision,
+		WorkspaceRevision:       input.WorkspaceRevision,
+		SourceEventRevision:     input.SourceEventRevision,
+		ProjectedSourceRevision: input.ProjectedSourceRevision,
+		UpdatedAt:               input.UpdatedAt,
+		RebuiltAt:               input.RebuiltAt,
+		Degraded:                input.Degraded,
+		StaleReason:             input.StaleReason,
+		Error:                   input.Error,
+	}
+}
+
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req CreateWorkspaceRequest) (*WorkspaceInfo, error) {
 	ws, err := b.cl.CreateWorkspace(ctx, req.Title, req.Description, req.DeliverableDirectory, req.TemplateID)
 	if err != nil {

@@ -1883,7 +1883,8 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 				"id":   "verify",
 				"kind": shellcommon.StepKindCommand,
 				"input": map[string]any{
-					"command": "verify-contract",
+					"command": "sh",
+					"args":    []string{"-c", "printf ok && printf done"},
 					"validationEvidence": map[string]any{
 						"mode":            "controlled_substitute",
 						"observationType": "controlled_substitute_observation",
@@ -1896,6 +1897,104 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationGraphWithEvid
 
 	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want declared concrete evidence mode allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithProcessTermination(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-process-termination",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-process-termination/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify-service",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "timeout 3 ./service & sleep 1; curl -fsS http://127.0.0.1:8080/readyz; kill %1"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "process termination") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want process termination rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithDetachedProcess(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-detached-process",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-detached-process/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageRepair,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify-service",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "nohup ./service >/tmp/service.log 2>&1 & curl -fsS http://127.0.0.1:8080/readyz"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "detached or background processes") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want detached process rejection", err)
 	}
 }
 

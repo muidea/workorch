@@ -219,7 +219,9 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 		strings.Contains(text, "patch/apply must declare coveragetargets matching"):
 		return contractViolationCoverageTargetsRequired
 	case strings.Contains(text, "validation follow-up llm step returned read-only executiongraph without concrete validation evidence") ||
-		strings.Contains(text, "concrete validation evidence repair must return bounded"):
+		strings.Contains(text, "concrete validation evidence repair must return bounded") ||
+		strings.Contains(text, "concrete validation evidence graph must use non-destructive bounded validation") ||
+		strings.Contains(text, "concrete validation evidence graph must not start detached or background processes"):
 		return contractViolationValidationEvidenceRequired
 	case strings.Contains(text, "patch content contains unresolved runtime template") ||
 		strings.Contains(text, "patch diff contains unresolved runtime template") ||

@@ -663,6 +663,7 @@ func concreteValidationEvidenceRepairGuidance() []string {
 		"Each shell/command or mcp/tool_call intended to close behavior coverage must declare input.validationEvidence.mode and input.validationEvidence.observationType as runtime behavior, executable contract, dynamic execution, or controlled substitute evidence.",
 		"Minimal validation node shape: {\"kind\":\"shell/command\",\"input\":{\"command\":\"sh\",\"args\":[\"-c\",\"printf verified\"],\"validationEvidence\":{\"mode\":\"runtime_behavior\",\"observationType\":\"runtime_observation\"}}}.",
 		"If a dependency or environment prerequisite is unavailable, prefer a neutral local fixture, mock/stub, temporary config, isolated working directory, or alternate available port when that can validate the same contract without changing deliverables.",
+		"Concrete validation shell commands must be bounded and non-destructive: do not use nohup, setsid, background '&' service launches, kill/pkill/killall/fuser -k, or approval requests for process termination; use a foreground timeout-controlled harness or controlled substitute instead.",
 		"Do not use read-only inspection, self-inspection, run snapshot, observability, or context rehydration graphs as evidence repair.",
 		"If a verification command or tool later fails with concrete diagnostics, that failure may drive a separate state-changing repair.",
 	}

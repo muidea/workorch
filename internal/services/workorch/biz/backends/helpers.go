@@ -2,7 +2,6 @@ package backend
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
-	client "github.com/muidea/workorch/internal/pkg/workorchclient"
 )
 
 func cloneStringMap(input map[string]string) map[string]string {
@@ -31,41 +30,6 @@ func commonSoulBindings(input map[string]string) map[string]common.SoulID {
 		return nil
 	}
 	return ret
-}
-
-func workspaceInfoFromClient(ws *client.Workspace) WorkspaceInfo {
-	if ws == nil {
-		return WorkspaceInfo{}
-	}
-	return WorkspaceInfo{
-		ID:                   common.WorkspaceID(ws.ID),
-		Title:                ws.Title,
-		Description:          ws.Description,
-		DeliverableDirectory: ws.DeliverableDirectory,
-		State:                common.WorkspaceState(ws.State),
-		ActiveRunID:          common.RunID(ws.ActiveRunID),
-		BlockingTicketID:     common.TicketID(ws.BlockingTicketID),
-		BlockingApprovalID:   common.ApprovalID(ws.BlockingApprovalID),
-		TemplateID:           ws.TemplateID,
-		ProfileID:            ws.ProfileID,
-		DefaultSoulID:        common.SoulID(ws.DefaultSoulID),
-		SoulBindings:         commonSoulBindings(ws.SoulBindings),
-	}
-}
-
-func projectionInfoFromClient(input client.ProjectionStatus) ProjectionInfo {
-	return ProjectionInfo{
-		State:                   input.State,
-		GlobalRevision:          input.GlobalRevision,
-		WorkspaceRevision:       input.WorkspaceRevision,
-		SourceEventRevision:     input.SourceEventRevision,
-		ProjectedSourceRevision: input.ProjectedSourceRevision,
-		UpdatedAt:               input.UpdatedAt,
-		RebuiltAt:               input.RebuiltAt,
-		Degraded:                input.Degraded,
-		StaleReason:             input.StaleReason,
-		Error:                   input.Error,
-	}
 }
 
 func cloneTemplateEvidencePolicies(input []map[string]any) []map[string]any {

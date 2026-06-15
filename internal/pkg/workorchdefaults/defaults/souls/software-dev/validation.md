@@ -28,6 +28,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - goalCoverage 必须覆盖 Goal 叶子需求，并说明 functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable 等被 Goal / DoD 涉及的验收维度
 - 如果项目存在显式入口目录、脚本、命令或构建目标，且 Goal / DoD 声明 CLI、服务、API、单二进制或其他可运行交付物，必须验证目标入口可用；未覆盖入口时不得标记对应条目 satisfied
 - 如果 Goal / DoD 要求最终可运行交付物或用户可观察行为，必须通过最终交付入口完成验证，不能只验证库级函数、局部模块或中间适配层后就声称整体 satisfied
+- 验证服务、代理、流式或长运行入口时，证据必须来自有界、前台、可自动退出的验证动作；不要使用 `nohup`、`setsid`、后台 `&` 常驻、`kill`/`pkill`/`killall`/`fuser -k` 或审批进程终止来制造验证。优先引用测试 harness、本地 deterministic fake/stub server、临时端口、受 timeout 控制且自然退出的前台命令或等价 MCP 工具证据
 - 多外部系统、多接口契约、多协议、多格式或多适配目标必须逐项验证；没有实现或没有测试的目标必须标记 failed/skipped，不得在 summary、goalOutcome 或 implementationSummary 中声称已支持
 - 计量、费用、审计、流水账、状态文件或其他副作用必须用测试或命令证据证明写入/追加行为；file/read 只能证明文件当前存在或可读，不能单独支撑 persistence_or_side_effect satisfied
 - 对 runtime_entrypoint、external_contract、streaming_or_long_running、error_behavior、persistence_or_side_effect、concurrency 等高风险维度，satisfied 项必须给出直接 evidenceRefs，并且这些 evidenceRefs 必须命中可执行、可验证、可追踪的 runtime action；不能只引用 build/race/coverage_map、只读 file/read/file/list、mcp/resource_read、mcp/prompt_get 或总体 artifact 摘要

@@ -767,6 +767,8 @@ func runtimeFailureIsLLMContractLoop(step *runModel.Step) bool {
 		"file_write cannot replace existing target",
 		"validation follow-up llm step returned read-only executiongraph without concrete validation evidence",
 		"concrete validation evidence repair must return bounded",
+		"concrete validation evidence graph must use non-destructive bounded validation",
+		"concrete validation evidence graph must not start detached or background processes",
 		"state-changing repair contract",
 		"scoped state-changing runtime repair requires bounded verification",
 		"primary diagnostic",
