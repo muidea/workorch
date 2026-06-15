@@ -1360,6 +1360,71 @@ func TestBuildConvergenceContractRestoresProfileRequiredStateChangingEvidenceWhe
 	}
 }
 
+func TestBuildConvergenceContractDerivesProfileEvidenceTargetFromCoverageWorkItemContext(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-evidence-cwi-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "profile_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		coverageWorkItemContextKey: map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-profile-snapshot",
+				"source":                "deliverable",
+				"sourceScope":           "deliverable",
+				"sourceRequirementId":   "profile_snapshot",
+				"sourcePath":            "executionContract.profileContracts.neutral-profile.deliverableExpectations[0]",
+				"targetText":            "profile_snapshot",
+				"status":                "open",
+				"evidenceRole":          "supplemental_evidence",
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"missingEvidenceKinds":  []string{"validation", "state_change"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-evidence-cwi-target/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid llm decision json: no json object found"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("convergenceContract = %+v, want profile state-changing evidence from CWI target", contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedOperations"]), gitcommon.OperationCommit) ||
+		boolValue(required["profileEvidenceRequirementDeferred"]) {
+		t.Fatalf("requiredOutput = %+v, want direct profile-required git/write commit contract", required)
+	}
+	targets := mapSliceFromValue(contract.RepairActionPackage["coverageTargetSet"])
+	if len(targets) != 1 || stringFromMap(targets[0], "sourceRequirementId") != "profile_snapshot" {
+		t.Fatalf("coverageTargetSet = %+v, want target derived from coverageWorkItemContext", targets)
+	}
+}
+
 func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:     runtimeStageVerification,

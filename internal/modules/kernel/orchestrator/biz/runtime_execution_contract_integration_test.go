@@ -456,6 +456,48 @@ func TestValidateLLMExecutionOutputContractRejectsUndeclaredStateChangingShellGr
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsStateChangingNodeDuringEvidenceAcquisition(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-acquisition-state-changing-forbidden",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-acquisition-state-changing-forbidden/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "mutate-while-acquiring-evidence",
+				"kind": "shell/command",
+				"input": map[string]any{
+					"command":             "tool",
+					"args":                []string{"sync"},
+					"stateChanging":       true,
+					"stateChangingReason": "mutate workspace state while acquiring evidence",
+					"targetRef":           "workspace-state",
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "concrete failure evidence acquisition must return bounded") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want evidence acquisition state-changing rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsStateChangingShellGraphWithoutBoundedVerification(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-shell-no-verification",

@@ -62,6 +62,11 @@ func graphIsConcreteFailureEvidenceAcquisitionGraph(step *runModel.Step, graph r
 			accepted = configured
 		}
 	}
+	stateChangingForbidden := false
+	if step != nil && step.Input != nil {
+		required := mapFromValue(mapFromValue(step.Input["repairActionPackage"])["requiredOutput"])
+		stateChangingForbidden = boolValue(required["stateChangingForbidden"])
+	}
 	hasEvidenceProducer := false
 	for _, node := range graph.Nodes {
 		kind := canonicalRuntimeGraphNodeKind(node.Kind)
@@ -69,6 +74,9 @@ func graphIsConcreteFailureEvidenceAcquisitionGraph(step *runModel.Step, graph r
 			return false
 		}
 		if !accepted[kind] {
+			return false
+		}
+		if stateChangingForbidden && graphNodeDeclaresStateChangingIntent(node) {
 			return false
 		}
 		hasEvidenceProducer = true

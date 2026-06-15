@@ -1631,6 +1631,9 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		targets = mapSliceFromValue(input["coverageTargetSet"])
 	}
 	if len(targets) == 0 {
+		targets = coverageTargetSetFromWorkItemContext(coverageWorkItemContextFromInput(input))
+	}
+	if len(targets) == 0 {
 		return nil
 	}
 	requirements := coverageTargetEvidenceKindRequirementsFromInput(run, input, targets)
