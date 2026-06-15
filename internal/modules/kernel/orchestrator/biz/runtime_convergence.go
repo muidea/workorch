@@ -338,6 +338,17 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.GovernanceReason = firstNonEmptyString(stringFromMap(focus, "currentGap"), "coverage work item requires governance evidence")
 		return true
 	}
+	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
+		contract.State = convergenceStateNeedEvidence
+		contract.RuntimeStage = runtimeStageRepair
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveAcquireFailureEvidence
+		contract.ConcreteFailureEvidenceRequired = true
+		required := evidenceAcquisitionRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required["mustReferenceCoverageWorkItem"] = true
+		contract.RepairActionPackage["requiredOutput"] = required
+		return true
+	}
 	if coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
@@ -348,6 +359,16 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		}
 	}
 	if missing["state_change"] {
+		if convergenceStateChangeAlreadySatisfied(input) {
+			contract.State = convergenceStateNeedValidation
+			contract.RuntimeStage = runtimeStageVerification
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+			required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+			required["mustReferenceCoverageWorkItem"] = true
+			contract.RepairActionPackage["requiredOutput"] = required
+			return true
+		}
 		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, focus) {
 			contract.State = convergenceStateNeedStateChange
 			contract.RuntimeStage = runtimeStageRepair
@@ -388,6 +409,16 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		return true
 	}
 	if missing["validation"] || missing["artifact"] {
+		if convergenceStateChangeAlreadySatisfied(input) {
+			contract.State = convergenceStateNeedValidation
+			contract.RuntimeStage = runtimeStageVerification
+			contract.RuntimeStageMode = "strict_convergence"
+			contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+			required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+			required["mustReferenceCoverageWorkItem"] = true
+			contract.RepairActionPackage["requiredOutput"] = required
+			return true
+		}
 		if concreteValidationFailureCanDriveStateChange(input, contract.RepairActionPackage) {
 			contract.State = convergenceStateNeedStateChange
 			contract.RuntimeStage = runtimeStageRepair
@@ -574,20 +605,26 @@ func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[
 	if len(input) == 0 {
 		return false
 	}
-	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
-		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+	if convergenceStateChangeAlreadySatisfied(input) {
 		return false
-	}
-	if len(pkg) > 0 {
-		if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
-			boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"]) {
-			return false
-		}
 	}
 	if !inputHasConcreteValidationFailureDiagnostic(input, pkg) {
 		return false
 	}
 	return repairHasImplementationTargetEvidence(input, pkg)
+}
+
+func convergenceStateChangeAlreadySatisfied(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
+		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+		return true
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	return len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
+		boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"])
 }
 
 func inputHasConcreteValidationFailureDiagnostic(input map[string]any, pkg map[string]any) bool {
@@ -641,6 +678,9 @@ func coverageWorkItemConvergenceEligible(input map[string]any) bool {
 
 func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any, failedStep *runModel.Step) bool {
 	if len(input) == 0 || failedStep == nil {
+		return false
+	}
+	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
 		return false
 	}
 	if runtimeFailureIsLLMContractLoop(failedStep) && convergenceCoverageFocusRequiresValidation(input) {
@@ -2055,7 +2095,23 @@ func convergenceConcreteValidationCannotAdvanceWithoutTarget(input map[string]an
 	if failedConcreteValidationAssessmentOutput(failedStep.Output) {
 		return true
 	}
+	if runtimeFailureIsLLMContractLoop(failedStep) && validationContractLoopNeedsConcreteTargetEvidence(failedStep) {
+		return true
+	}
 	return false
+}
+
+func validationContractLoopNeedsConcreteTargetEvidence(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(failedStep.Output, "error"),
+		stringFromMap(failedStep.Output, "reason"),
+		stringFromMap(failedStep.Output, failureOutputKeySignature),
+	}, "\n"))
+	return strings.Contains(text, "validation follow-up llm step returned read-only executiongraph without concrete validation evidence") ||
+		strings.Contains(text, "concrete validation evidence repair must return bounded")
 }
 
 func failedConcreteValidationAssessmentOutput(output map[string]any) bool {

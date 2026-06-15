@@ -3307,3 +3307,110 @@ func TestBuildConvergenceContractValidationAssessmentGapNeedsEvidenceWhenTargetM
 		t.Fatalf("requiredOutput = %+v, want bounded evidence acquisition contract", required)
 	}
 }
+
+func TestBuildConvergenceContractCoverageStateChangeAlreadySatisfiedNeedsValidation(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveStateChangingOutput,
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-state-change",
+				"status":                "open",
+				"sourceScope":           "goal_leaf",
+				"sourceRequirementId":   "goal-req-state-change",
+				"targetText":            "neutral target state change is complete but not validated",
+				"requiredEvidenceKinds": []string{"state_change", "validation"},
+				"missingEvidenceKinds":  []string{"state_change", "validation"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"currentTargetAlreadySatisfiesFailedPatch": []map[string]any{{
+				"targetRef": "target.txt",
+				"state":     "satisfied",
+			}},
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedValidation || contract.RepairObjective != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("convergenceContract = %+v, want validation after already-satisfied state change", contract)
+	}
+	if contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, should not require another state-changing graph", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustProduceConcreteValidationEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want validation-only contract without patch/apply", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["stateChangingOutputRequired"] != nil || applied["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("applied input = %+v, want validation follow-up not repeated state change", applied)
+	}
+}
+
+func TestBuildConvergenceContractValidationReadOnlyContractLoopNeedsEvidenceWhenTargetMissing(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"boundedValidationRequired":  true,
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-validation",
+				"status":                "open",
+				"sourceScope":           "dod_item",
+				"sourceRequirementId":   "dod-validation",
+				"targetText":            "neutral validation evidence remains missing",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-validation-read-only-loop/repair-001",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: cloneStepPayload(input),
+		Output: map[string]any{
+			"stage":               "llm_execution_graph_plan",
+			failureOutputKeyClass: failureClassRuntime,
+			"error":               "invalid argument: validation follow-up llm step returned read-only executionGraph without concrete validation evidence",
+		},
+		State: common.StepStateFailed,
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedEvidence || contract.RepairObjective != repairObjectiveAcquireFailureEvidence {
+		t.Fatalf("convergenceContract = %+v, want evidence acquisition after validation contract loop without target evidence", contract)
+	}
+	if !contract.ConcreteFailureEvidenceRequired || contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, want concrete evidence acquisition without state-changing output", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustProduceConcreteFailureEvidence"] != true ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "file/read") {
+		t.Fatalf("requiredOutput = %+v, want bounded evidence acquisition contract", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		applied["stateChangingOutputRequired"] != nil ||
+		applied["boundedValidationRequired"] != nil {
+		t.Fatalf("applied input = %+v, want evidence acquisition repair", applied)
+	}
+}
