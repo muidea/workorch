@@ -168,6 +168,30 @@ func doDVerificationEvidenceRepairRequired(failedStep *runModel.Step) bool {
 	return strings.TrimSpace(stringFromMap(diagnostics, "kind")) == "dod_evidence_quality_gap"
 }
 
+func doDEvidenceQualityGapRequiresStateChange(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	diagnostics := mapFromValue(step.Output["runtimeDiagnostics"])
+	if strings.TrimSpace(stringFromMap(diagnostics, "kind")) != "dod_evidence_quality_gap" {
+		return false
+	}
+	if boolValue(diagnostics["stateChangingEvidenceNeeded"]) {
+		return true
+	}
+	for _, key := range []string{"missingDoDItems", "missingGoalCoverage", "missingDeliverableCoverage", "evidenceQualityGapItems"} {
+		if coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(diagnostics[key]), "state_change") {
+			return true
+		}
+	}
+	for _, key := range []string{"missingDoDItems", "missingGoalCoverage", "missingDeliverableCoverage"} {
+		if coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(step.Output[key]), "state_change") {
+			return true
+		}
+	}
+	return false
+}
+
 func coverageVerificationGapPresent(input map[string]any, failedStep *runModel.Step) bool {
 	if len(mapSliceFromValue(input["coverageTargetSet"])) > 0 ||
 		len(coverageTargetSetFromRepairInput(input)) > 0 ||

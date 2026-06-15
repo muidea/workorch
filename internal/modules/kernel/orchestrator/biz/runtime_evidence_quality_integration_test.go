@@ -154,6 +154,83 @@ func TestDoDAssessmentEvidenceKindRequirementRejectsReadOnlySideEffectEvidence(t
 	}
 }
 
+func TestDoDAssessmentEvidenceKindRequirementDiagnosticsRequireStateChangingEvidence(t *testing.T) {
+	ctx := context.Background()
+	validationRepo := memory.NewValidationResultRepository()
+	stepRepo := memory.NewStepRepository()
+	orch := &RuntimeOrchestrator{
+		steps: stepRepo,
+		evidence: RuntimeEvidenceRepositories{
+			ValidationResults: validationRepo,
+		},
+	}
+	runID := common.RunID("run-dod-write-evidence-kind")
+	readStepID := common.StepID("run-dod-write-evidence-kind/block/read-snapshot")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    readStepID,
+		RunID: runID,
+		Kind:  "file/read",
+		State: common.StepStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed read step: %v", err)
+	}
+	if err := validationRepo.Create(ctx, &runmodel.ValidationResult{
+		ID:              common.ValidationResultID(string(readStepID) + "/validation/runtime-step"),
+		WorkspaceID:     "ws-dod-write-evidence-kind",
+		RunID:           runID,
+		StepID:          readStepID,
+		ValidationKind:  "runtime_step",
+		State:           common.ValidationResultStatePassed,
+		EvidenceQuality: common.EvidenceQualityValid,
+	}); err != nil {
+		t.Fatalf("seed validation result: %v", err)
+	}
+	run := &runmodel.Run{
+		ID: runID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "write_snapshot",
+							"scope":                 "deliverable",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{gitcommon.StepKindWrite},
+							"acceptedOperations":    []string{gitcommon.OperationCommit},
+							"rejectedStepKinds":     []string{"file/read"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	err := validateDoDAssessmentEvidenceQuality(ctx, orch.steps, orch.evidence, run, map[string]any{
+		"deliverableCoverage": map[string]any{
+			"items": []map[string]any{{
+				"id":           "write_snapshot",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(readStepID)},
+			}},
+		},
+	})
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("validateDoDAssessmentEvidenceQuality err = %T, want runtime diagnostics", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if !boolValue(diagnostics["stateChangingEvidenceNeeded"]) {
+		t.Fatalf("diagnostics = %+v, want stateChangingEvidenceNeeded", diagnostics)
+	}
+	missing := mapSliceFromValue(diagnostics["missingDeliverableCoverage"])
+	if len(missing) != 1 || !stringSliceContains(stringSliceFromValue(missing[0]["requiredEvidenceKinds"]), "state_change") {
+		t.Fatalf("missingDeliverableCoverage = %+v, want state_change requiredEvidenceKinds", missing)
+	}
+	if !stringSliceContains(stringSliceFromValue(missing[0]["acceptedStepKinds"]), gitcommon.StepKindWrite) ||
+		!stringSliceContains(stringSliceFromValue(missing[0]["acceptedOperations"]), gitcommon.OperationCommit) {
+		t.Fatalf("missingDeliverableCoverage = %+v, want accepted write requirement fields", missing)
+	}
+}
+
 func TestDoDAssessmentEvidenceKindRequirementAcceptsActionEvidence(t *testing.T) {
 	ctx := context.Background()
 	validationRepo := memory.NewValidationResultRepository()

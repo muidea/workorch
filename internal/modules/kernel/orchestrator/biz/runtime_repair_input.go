@@ -151,10 +151,17 @@ func applyRuntimeRepairFailureProjection(input map[string]any, failedStep *runMo
 	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		input["runtimeDiagnostics"] = cloneStepPayload(diagnostics)
 		if stringFromMap(diagnostics, "kind") == "dod_evidence_quality_gap" {
-			input["repairObjective"] = repairObjectiveConcreteValidationEvidence
 			input["evidenceRepairRequired"] = true
 			input["verificationEvidenceGap"] = cloneStepPayload(diagnostics)
-			input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
+			if doDEvidenceQualityGapRequiresStateChange(failedStep) {
+				input["repairObjective"] = repairObjectiveStateChangingOutput
+				input["stateChangingOutputRequired"] = true
+				input["stateChangingEvidenceRepairRequired"] = true
+				input["repairGuidance"] = stateChangingEvidenceQualityRepairGuidance()
+			} else {
+				input["repairObjective"] = repairObjectiveConcreteValidationEvidence
+				input["repairGuidance"] = concreteValidationEvidenceRepairGuidance()
+			}
 		}
 	}
 	markCapabilityInputLocatorEvidenceRequired(input, failedStep)
@@ -265,6 +272,9 @@ func applyRuntimeRepairConcreteEvidenceProjection(input map[string]any, failedSt
 	if input == nil || failedStep == nil || !concreteEvidenceRepair {
 		return
 	}
+	if doDEvidenceQualityGapRequiresStateChange(failedStep) {
+		return
+	}
 	claimAlignedEvidenceNeeded := false
 	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		claimAlignedEvidenceNeeded = boolValue(diagnostics["claimAlignedEvidenceNeeded"])
@@ -329,6 +339,29 @@ func applyRuntimeRepairValidationEvidenceProjection(input map[string]any, covera
 		"When an external dependency, credential, service, network endpoint, port, clock, filesystem path, or equivalent runtime prerequisite is unavailable, first try a neutral controlled substitute such as a temporary fixture, local stub/mock, alternate temporary config, isolated working directory, or available ephemeral port through the allowed validation tools; do not mark the item skipped or request a decision until such bounded substitute validation is impossible or would violate the Goal/DoD.",
 		"Do not return patch/apply unless a later validation failure provides concrete target refs, line refs, diagnostics, or current target snapshots.",
 	)
+}
+
+func applyRuntimeRepairStateChangingEvidenceQualityProjection(input map[string]any, failedStep *runModel.Step, required bool) {
+	if input == nil || failedStep == nil || !required {
+		return
+	}
+	input["stateChangingEvidenceRepairRequired"] = true
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	input["evidenceRepairSource"] = "dod_evidence_quality_gap_requires_state_change"
+	delete(input, stepInputKeyAssessmentOnly)
+	delete(input, "assessmentOnlyReason")
+	delete(input, "boundedValidationRequired")
+	delete(input, "concreteFailureEvidenceRequired")
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"], stateChangingEvidenceQualityRepairGuidance()...)
+}
+
+func stateChangingEvidenceQualityRepairGuidance() []string {
+	return []string{
+		"The rejected DoD evidence cites read-only or otherwise insufficient evidence for a requirement whose profile requires state-changing evidence.",
+		"Do not retry assessment-only or validation-only output for this gap; produce accepted state-changing evidence that matches the structured requiredEvidenceKinds, acceptedStepKinds, and acceptedOperations.",
+		"After the state-changing evidence is produced, attach bounded validation or assessment evidence that cites the new evidenceRefs exactly.",
+	}
 }
 
 func applyRuntimeRepairValidationEscalationProjection(input map[string]any, validationRepairEscalatesToStateChanging bool) {
@@ -806,13 +839,15 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	coverageValidationHasTargetEvidence := runtimeRepairHasConcreteImplementationTargetEvidence(input, failedStep)
 	coverageValidationEvidenceRepair := coverageGapEligibleForValidationRepair && !coverageValidationHasTargetEvidence
 	emptyWorkspaceStateChangingRepair := emptyWorkspaceEvidenceShouldStartStateChangingRepair(run, failedStep, input)
+	stateChangingEvidenceQualityRepair := doDEvidenceQualityGapRequiresStateChange(failedStep)
 	validationRepairEscalatesToStateChanging := emptyWorkspaceStateChangingRepair || (coverageGapEligibleForValidationRepair &&
 		coverageValidationHasTargetEvidence &&
 		coverageValidationRepairShouldEscalateToStateChanging(ctx, o.repairManager(), run, failedStep, input))
 	applyRuntimeRepairValidationEscalationProjection(input, validationRepairEscalatesToStateChanging)
 	applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input, emptyWorkspaceStateChangingRepair)
-	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging
-	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && doDVerificationEvidenceRepairRequired(failedStep))
+	applyRuntimeRepairStateChangingEvidenceQualityProjection(input, failedStep, stateChangingEvidenceQualityRepair)
+	coverageValidationEvidenceRepair = coverageValidationEvidenceRepair && !validationRepairEscalatesToStateChanging && !stateChangingEvidenceQualityRepair
+	concreteEvidenceRepair := coverageNeedsConcreteEvidence || coverageValidationEvidenceRepair || (!assessmentOnlyCoverageRepair && !stateChangingEvidenceQualityRepair && doDVerificationEvidenceRepairRequired(failedStep))
 	applyRuntimeRepairConcreteEvidenceProjection(input, failedStep, concreteEvidenceRepair)
 	applyRuntimeRepairAssessmentOnlyCoverageProjection(ctx, o.steps, o.evidence, input, run, failedStep, assessmentOnlyCoverageRepair, coverageNeedsConcreteEvidence, validationRepairEscalatesToStateChanging)
 	applyRuntimeRepairCoverageNeedsConcreteEvidenceProjection(ctx, o.steps, o.evidence, input, run, failedStep, coverageNeedsConcreteEvidence, assessmentOnlyFailedCoverageRepair)

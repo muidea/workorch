@@ -2403,6 +2403,93 @@ func TestRuntimeOrchestrator_RuntimeRepairInputUsesValidationEvidenceForCoverage
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputEscalatesStateChangingEvidenceQualityGap(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-state-changing-evidence-quality")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/assessment"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+			"patchRepairContext": []map[string]any{{
+				"targetRef":        "deliverable.txt",
+				"exists":           true,
+				"contentHash":      "hash-deliverable",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			"runtimeDiagnostics": map[string]any{
+				"kind":                        "dod_evidence_quality_gap",
+				"stateChangingEvidenceNeeded": true,
+				"missingDeliverableCoverage": []map[string]any{{
+					"kind":                  "leaf",
+					"item":                  "stateful_deliverable",
+					"state":                 "failed",
+					"source":                "evidenceKind",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "stateful_deliverable",
+					"targetText":            "stateful_deliverable",
+					"evidenceRefs":          []string{string(runID) + "/graph-001/read-only"},
+					"acceptedStepKinds":     []string{"patch/apply"},
+					"rejectedStepKinds":     []string{"file/read"},
+					"rejectedEvidenceKind":  "file/read",
+					"requiredEvidenceKinds": []string{"validation", "state_change"},
+				}},
+			},
+		},
+	}
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: "ws-repair-state-changing-evidence-quality",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "stateful_deliverable",
+							"scope":                 "deliverable",
+							"requireDirectEvidence": true,
+							"acceptedStepKinds":     []string{"patch/apply"},
+							"rejectedStepKinds":     []string{"file/read"},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 1, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["stateChangingEvidenceRepairRequired"] != true ||
+		input[stepInputKeyAssessmentOnly] != nil ||
+		input["boundedValidationRequired"] != nil {
+		t.Fatalf("repair input = %+v, want state-changing evidence repair without assessment-only or validation-only mode", input)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		!boolValue(required["mustDeclareCoverageTargets"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing coverage evidence contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIgnoresHistoricalTargetForCoverageAssessmentFailure(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

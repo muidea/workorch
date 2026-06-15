@@ -57,10 +57,11 @@ func (e *doDAssessmentEvidenceQualityError) RuntimeFailureDiagnostics() map[stri
 		return nil
 	}
 	ret := map[string]any{
-		"kind":                       "dod_evidence_quality_gap",
-		"scope":                      firstNonEmptyString(e.scope, "dod_item"),
-		"evidenceQualityGapItems":    e.items,
-		"claimAlignedEvidenceNeeded": evidenceQualityGapRequiresClaimAlignedEvidence(e.items),
+		"kind":                        "dod_evidence_quality_gap",
+		"scope":                       firstNonEmptyString(e.scope, "dod_item"),
+		"evidenceQualityGapItems":     e.items,
+		"claimAlignedEvidenceNeeded":  evidenceQualityGapRequiresClaimAlignedEvidence(e.items),
+		"stateChangingEvidenceNeeded": evidenceQualityGapRequiresStateChangingEvidence(e.items),
 	}
 	switch normalizeEvidenceKindRequirementScope(e.scope) {
 	case "goal_coverage":
@@ -75,6 +76,25 @@ func (e *doDAssessmentEvidenceQualityError) RuntimeFailureDiagnostics() map[stri
 	return ret
 }
 
+func evidenceQualityGapRequiresStateChangingEvidence(items []map[string]any) bool {
+	for _, item := range items {
+		if coverageWorkItemRequiresEvidenceKind(item, "state_change") {
+			return true
+		}
+		for _, kind := range stringSliceFromValue(item["acceptedStepKinds"]) {
+			if runtimeStepKindIsStateChangingEvidence(kind) {
+				return true
+			}
+		}
+		for _, operation := range stringSliceFromValue(item["acceptedOperations"]) {
+			if strings.TrimSpace(strings.ToLower(operation)) == "commit" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func evidenceQualityGapRequiresClaimAlignedEvidence(items []map[string]any) bool {
 	for _, item := range items {
 		source := strings.TrimSpace(stringFromMap(item, "source"))
@@ -87,6 +107,38 @@ func evidenceQualityGapRequiresClaimAlignedEvidence(items []map[string]any) bool
 		}
 	}
 	return false
+}
+
+func evidenceKindRequirementEvidenceKinds(requirement profileEvidenceKindRequirement) []string {
+	ret := make([]string, 0, 2)
+	hasStateChange := false
+	hasValidation := requirement.RequireDirect || requirement.RequireExecutableBehaviorEvidence || len(requirement.AcceptedStepKinds) > 0
+	for _, kind := range requirement.AcceptedStepKinds {
+		if runtimeStepKindIsStateChangingEvidence(kind) {
+			hasStateChange = true
+		}
+	}
+	for _, operation := range requirement.AcceptedOperations {
+		if strings.TrimSpace(strings.ToLower(operation)) == "commit" {
+			hasStateChange = true
+		}
+	}
+	if hasValidation {
+		ret = append(ret, "validation")
+	}
+	if hasStateChange {
+		ret = append(ret, "state_change")
+	}
+	return compactUniqueStrings(ret)
+}
+
+func runtimeStepKindIsStateChangingEvidence(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "patch/apply", "patch/preview", "file/edit", "file/write", "git/write":
+		return true
+	default:
+		return false
+	}
 }
 
 func runtimeStepEvidenceQuality(run *runModel.Run, step *runModel.Step, state common.ValidationResultState, output map[string]any) runtimeEvidenceQuality {
@@ -822,17 +874,27 @@ func evidenceKindRequirementError(requirement profileEvidenceKindRequirement, it
 		source = "claimEvidenceAlignment"
 	}
 	cause := fmt.Errorf("%w: %s", common.ErrInvalidArgument, message)
+	scope := normalizeEvidenceKindRequirementScope(requirement.Scope)
 	return &doDAssessmentEvidenceQualityError{
-		scope: normalizeEvidenceKindRequirementScope(requirement.Scope),
+		scope: scope,
 		cause: cause,
 		items: []map[string]any{{
-			"kind":         "leaf",
-			"item":         itemName,
-			"state":        "failed",
-			"source":       source,
-			"evidenceRefs": evidenceRefsFromValue([]string{ref}),
-			"reason":       firstNonEmptyString(reason, requirement.Description, "Referenced evidence step kind cannot satisfy this claim."),
-			"impact":       "This claim cannot be marked satisfied until it is supported by evidence of an appropriate runtime action.",
+			"kind":                  "leaf",
+			"item":                  itemName,
+			"state":                 "failed",
+			"source":                source,
+			"sourceScope":           scope,
+			"sourceRequirementId":   itemName,
+			"targetText":            itemName,
+			"evidenceRefs":          evidenceRefsFromValue([]string{ref}),
+			"reason":                firstNonEmptyString(reason, requirement.Description, "Referenced evidence step kind cannot satisfy this claim."),
+			"currentGap":            firstNonEmptyString(reason, requirement.Description, "Referenced evidence step kind cannot satisfy this claim."),
+			"acceptedStepKinds":     compactUniqueStrings(requirement.AcceptedStepKinds),
+			"acceptedOperations":    compactUniqueStrings(requirement.AcceptedOperations),
+			"rejectedStepKinds":     compactUniqueStrings(requirement.RejectedStepKinds),
+			"rejectedEvidenceKind":  strings.TrimSpace(kind),
+			"requiredEvidenceKinds": evidenceKindRequirementEvidenceKinds(requirement),
+			"impact":                "This claim cannot be marked satisfied until it is supported by evidence of an appropriate runtime action.",
 			"suggestedNextActions": []string{
 				"Run or produce concrete evidence matching the required runtime action.",
 				"Replace read-only or unrelated evidence with a step that verifies the claimed behavior or side effect.",
