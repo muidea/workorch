@@ -2992,6 +2992,83 @@ func TestRuntimeOrchestrator_RuntimeRepairInputNarrowsRepeatedReadOnlyStateChang
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputUsesProgressFailureTargetSnapshotAfterReadOnlyWrapper(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := common.WorkspaceID("ws-repair-progress-target-snapshot")
+	runID := common.RunID("run-repair-progress-target-snapshot")
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "target.txt"), []byte("before\ncurrent\n"), 0644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	workspaceRepo := memory.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateRunning,
+		ActiveRunID:          runID,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"currentExecutionProgress": map[string]any{
+				"lastObservedFailure": map[string]any{
+					"kind":                    "patch/apply",
+					"state":                   "failed",
+					"failureClass":            failureClassPatchApply,
+					"failureReason":           "conflict: replacement matched multiple locations",
+					failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|node=patch-target|failureTargets=target.txt|error=conflict",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationRepairGraphWithoutPatchApply,
+			"stage":                        "llm_execution_graph_plan",
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=invalid argument: state-changing repair returned read-only graph",
+			"error":                        "invalid argument: state-changing repair returned read-only graph",
+		},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	targets := mapSliceFromValue(mapFromValue(input["repairActionPackage"])["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "target.txt" || !strings.Contains(stringFromMap(targets[0], "content"), "before\ncurrent") {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want current target snapshot from progress failure", targets)
+	}
+	if len(mapSliceFromValue(input["failureTargetRepairContext"])) != 1 {
+		t.Fatalf("failureTargetRepairContext = %+v, want current target snapshot", input["failureTargetRepairContext"])
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustReturnPatchApplyNode"]) {
+		t.Fatalf("requiredOutput = %+v, want direct patch from current snapshot", required)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputForbidsRepeatedNoOpPatch(t *testing.T) {
 	ctx := context.Background()
 	orch := &RuntimeOrchestrator{

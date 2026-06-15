@@ -107,6 +107,84 @@ func TestCurrentProgressDigestClearsFailureSupersededByRepairSuccess(t *testing.
 	}
 }
 
+func TestCurrentProgressDigestPreservesStructuredFailureTargetScope(t *testing.T) {
+	runID := common.RunID("run-progress-target-scope")
+	step := &runModel.Step{
+		ID:    common.StepID(runID + "/graph-001/002-check-target"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|stage=validation",
+			"failureTargetScope":      "failureTargets=target.txt",
+			"error":                   "target check failed",
+		},
+	}
+	run := &runModel.Run{ID: runID, WorkspaceID: "ws-progress-target-scope"}
+
+	item := processEvidenceTimelineItem(run, step, 1)
+	if item["failureTargetScope"] != "failureTargets=target.txt" || item["targetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("timeline item = %+v, want structured target scope", item)
+	}
+	digest := currentProgressDigestFromProcessEvidenceTimeline([]map[string]any{item})
+	last := mapFromValue(digest["lastObservedFailure"])
+	if last["failureTargetScope"] != "failureTargets=target.txt" || last["targetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("lastObservedFailure = %+v, want target scope preserved", last)
+	}
+	failure := currentFailureFromProgressDigest(digest)
+	if failure["failureTargetScope"] != "failureTargets=target.txt" || failure["targetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("currentFailure = %+v, want target scope preserved", failure)
+	}
+	compact := compactProcessEvidenceTimelineForRuntimeContext([]map[string]any{item})
+	if len(compact) != 1 || compact[0]["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("compact timeline = %+v, want target scope preserved", compact)
+	}
+}
+
+func TestRejectedResultContinuationPreservesStructuredFailureTargetScope(t *testing.T) {
+	continuation := map[string]any{
+		"summary":            "result still lacks required evidence",
+		"failureTargetScope": "failureTargets=target.txt",
+	}
+
+	timeline := processEvidenceTimelineFromRejectedResultContinuation(continuation)
+	if len(timeline) != 1 || timeline[0]["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("timeline = %+v, want rejected result target scope", timeline)
+	}
+	digest := currentProgressDigestFromRejectedResultContinuation(continuation, timeline)
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["failureTargetScope"] != "failureTargets=target.txt" || failure["targetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("lastObservedFailure = %+v, want rejected result target scope", failure)
+	}
+}
+
+func TestCurrentExecutionProgressPromotionPreservesStructuredFailureTargetScope(t *testing.T) {
+	input := map[string]any{
+		"currentExecutionProgress": map[string]any{
+			"latestActionEvidence": []map[string]any{{
+				"stepId":             "run-001/graph-001/002-check-target",
+				"kind":               "shell/command",
+				"state":              string(common.StepStateFailed),
+				"failureTargetScope": "failureTargets=target.txt",
+				"outputSummary": map[string]any{
+					"stderrPreview": "target check failed",
+				},
+			}},
+		},
+	}
+
+	digest := currentProgressDigestFromCurrentExecutionProgress(input, nil)
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["failureTargetScope"] != "failureTargets=target.txt" || failure["targetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("lastObservedFailure = %+v, want promoted target scope", failure)
+	}
+	currentFailure := currentFailureFromProgressDigest(digest)
+	if currentFailure["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("currentFailure = %+v, want target scope", currentFailure)
+	}
+}
+
 func TestProcessEvidenceTimelineOmitsRejectedLLMDecisionSummary(t *testing.T) {
 	runID := common.RunID("run-rejected-llm-summary")
 	step := &runModel.Step{

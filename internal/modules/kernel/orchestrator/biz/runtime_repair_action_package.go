@@ -825,8 +825,10 @@ func structuredFailureSignalsFromProgressEvidence(progress map[string]any) map[s
 				output = mapFromValue(item["output"])
 			}
 			add(output)
+			add(item)
 		}
 	}
+	add(mapFromValue(progress["lastObservedFailure"]))
 	add(map[string]any{
 		"error":                   stringFromMap(progress, "failureReason"),
 		failureOutputKeyClass:     stringFromMap(progress, "failureClass"),
@@ -952,6 +954,7 @@ func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[str
 		repairActionTargetRefFromScope(stringFromMap(input, "failureTargetScope")),
 	))
 	add("targetScope", stringFromMap(input, "failureTargetScope"))
+	add("failureTargetScope", firstNonEmptyString(stringFromMap(input, "failureTargetScope"), stringFromMap(output, "failureTargetScope"), stringFromMap(output, "targetScope")))
 	add("error", firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(input, "failureReason")))
 	add("reason", firstNonEmptyString(stringFromMap(output, "reason"), stringFromMap(input, "failureReason")))
 	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {

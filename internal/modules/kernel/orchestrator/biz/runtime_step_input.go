@@ -234,6 +234,7 @@ func primaryActionableFailureFromReplanContinuation(continuation map[string]any)
 			"evidenceValidity":          stringFromMap(item, "evidenceValidity"),
 			"targetRef":                 stringFromMap(item, "targetRef"),
 			"targetScope":               stringFromMap(item, "targetScope"),
+			"failureTargetScope":        stringFromMap(item, "failureTargetScope"),
 			"source":                    stringFromMap(item, "source"),
 		}
 		if strings.TrimSpace(stringFromMap(failure, "failureClass")) == "" && strings.TrimSpace(stringFromMap(item, "kind")) == "shell/command" {
@@ -313,6 +314,7 @@ func currentProgressDigestFromPrimaryActionableFailure(failure map[string]any) m
 	add("evidenceValidity", firstNonEmptyString(stringFromMap(failure, "evidenceValidity"), "actionable_failure"))
 	add("targetRef", stringFromMap(failure, "targetRef"))
 	add("targetScope", firstNonEmptyString(stringFromMap(failure, "targetScope"), stringFromMap(failure, "failureTargetScope")))
+	add("failureTargetScope", firstNonEmptyString(stringFromMap(failure, "failureTargetScope"), stringFromMap(failure, "targetScope")))
 	add("source", firstNonEmptyString(stringFromMap(failure, "source"), "replanContinuation"))
 	if len(lastFailure) == 0 {
 		return nil

@@ -405,6 +405,12 @@ func explicitFailureTargetsForSignature(output map[string]any) []string {
 	}
 	add(stringFromMap(output, "targetRef"))
 	add(stringFromMap(output, "conflictRef"))
+	for _, target := range repairPatchTargetRefsFromScopeText(firstNonEmptyString(
+		stringFromMap(output, "failureTargetScope"),
+		stringFromMap(output, "targetScope"),
+	)) {
+		add(target)
+	}
 	for _, target := range stringSliceFromValue(output["failureTargets"]) {
 		add(target)
 	}
@@ -412,6 +418,12 @@ func explicitFailureTargetsForSignature(output map[string]any) []string {
 	if diagnostics := mapFromValue(output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		add(stringFromMap(diagnostics, "targetRef"))
 		add(stringFromMap(diagnostics, "conflictRef"))
+		for _, target := range repairPatchTargetRefsFromScopeText(firstNonEmptyString(
+			stringFromMap(diagnostics, "failureTargetScope"),
+			stringFromMap(diagnostics, "targetScope"),
+		)) {
+			add(target)
+		}
 		for _, target := range stringSliceFromValue(diagnostics["failureTargets"]) {
 			add(target)
 		}

@@ -850,6 +850,13 @@ func runtimeFailureTargetRefsFromRepairEvidence(step *runModel.Step) []string {
 			add(stringFromMap(item, "targetRef"))
 		}
 	}
+	addTargetsFromProgress := func(value map[string]any) {
+		if signals := structuredFailureSignalsFromProgressEvidence(value); len(signals) > 0 {
+			for _, target := range stringSliceFromValue(signals["targetRefs"]) {
+				add(target)
+			}
+		}
+	}
 	for _, source := range []map[string]any{
 		step.Input,
 		step.Output,
@@ -861,6 +868,14 @@ func runtimeFailureTargetRefsFromRepairEvidence(step *runModel.Step) []string {
 		mapFromValue(mapFromValue(step.Output["repairActionPackage"])["currentFailure"]),
 	} {
 		addTargetsFromMap(source)
+	}
+	for _, source := range []map[string]any{
+		mapFromValue(step.Input["currentExecutionProgress"]),
+		mapFromValue(step.Output["currentExecutionProgress"]),
+		mapFromValue(mapFromValue(step.Input["repairActionPackage"])["currentExecutionProgress"]),
+		mapFromValue(mapFromValue(step.Output["repairActionPackage"])["currentExecutionProgress"]),
+	} {
+		addTargetsFromProgress(source)
 	}
 	if len(ret) == 0 {
 		return nil

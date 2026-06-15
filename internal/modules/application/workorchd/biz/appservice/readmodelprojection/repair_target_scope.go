@@ -14,6 +14,14 @@ func readModelFailureTargetScopeFromStep(step *presenter.StepView) string {
 	if scope := readModelFailureTargetScope(signature); scope != "" {
 		return scope
 	}
+	for _, scope := range []string{
+		readModelStringValue(step.Output["failureTargetScope"]),
+		readModelStringValue(step.Output["targetScope"]),
+	} {
+		if target := readModelFailureTargetScope(scope); target != "" {
+			return target
+		}
+	}
 	return strings.TrimSpace(readModelFirstNonEmptyString(
 		readModelStringValue(step.Output["targetRef"]),
 		readModelStringValue(step.Output["path"]),

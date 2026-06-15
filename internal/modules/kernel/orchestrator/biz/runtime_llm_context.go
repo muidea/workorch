@@ -240,6 +240,13 @@ func processEvidenceTimelineFromRejectedResultContinuation(continuation map[stri
 	if currentGap != "" {
 		item["failureReason"] = currentGap
 	}
+	if targetRef := rejectedResultContinuationTargetRef(continuation); targetRef != "" {
+		item["targetRef"] = targetRef
+	}
+	if targetScope := rejectedResultContinuationTargetScope(continuation); targetScope != "" {
+		item["targetScope"] = targetScope
+		item["failureTargetScope"] = targetScope
+	}
 	if evidence := stringSliceFromValue(continuation["requiredEvidence"]); len(evidence) > 0 {
 		item["requiredEvidence"] = limitedStrings(evidence, 8)
 	}
@@ -267,6 +274,13 @@ func currentProgressDigestFromRejectedResultContinuation(continuation map[string
 	}
 	if sourceRef := firstNonEmptyString(stringFromMap(continuation, "sourceRef"), stringFromMap(continuation, "resultId")); sourceRef != "" {
 		lastFailure["sourceRef"] = sourceRef
+	}
+	if targetRef := rejectedResultContinuationTargetRef(continuation); targetRef != "" {
+		lastFailure["targetRef"] = targetRef
+	}
+	if targetScope := rejectedResultContinuationTargetScope(continuation); targetScope != "" {
+		lastFailure["targetScope"] = targetScope
+		lastFailure["failureTargetScope"] = targetScope
 	}
 	if len(timeline) > 0 {
 		if stepID := strings.TrimSpace(stringFromMap(timeline[0], "stepId")); stepID != "" {
@@ -317,6 +331,41 @@ func rejectedResultContinuationCurrentGap(continuation map[string]any) string {
 		requiredJoined,
 		stringFromMap(continuation, "summary"),
 		stringFromMap(continuation, "goalOutcome"),
+	)
+}
+
+func rejectedResultContinuationTargetRef(continuation map[string]any) string {
+	if len(continuation) == 0 {
+		return ""
+	}
+	diagnostics := mapFromValue(continuation["diagnostics"])
+	runtimeDiagnostics := mapFromValue(diagnostics["runtimeDiagnostics"])
+	if len(runtimeDiagnostics) == 0 {
+		runtimeDiagnostics = mapFromValue(continuation["runtimeDiagnostics"])
+	}
+	return firstNonEmptyString(
+		stringFromMap(continuation, "targetRef"),
+		stringFromMap(diagnostics, "targetRef"),
+		stringFromMap(runtimeDiagnostics, "targetRef"),
+	)
+}
+
+func rejectedResultContinuationTargetScope(continuation map[string]any) string {
+	if len(continuation) == 0 {
+		return ""
+	}
+	diagnostics := mapFromValue(continuation["diagnostics"])
+	runtimeDiagnostics := mapFromValue(diagnostics["runtimeDiagnostics"])
+	if len(runtimeDiagnostics) == 0 {
+		runtimeDiagnostics = mapFromValue(continuation["runtimeDiagnostics"])
+	}
+	return firstNonEmptyString(
+		stringFromMap(continuation, "failureTargetScope"),
+		stringFromMap(continuation, "targetScope"),
+		stringFromMap(diagnostics, "failureTargetScope"),
+		stringFromMap(diagnostics, "targetScope"),
+		stringFromMap(runtimeDiagnostics, "failureTargetScope"),
+		stringFromMap(runtimeDiagnostics, "targetScope"),
 	)
 }
 
@@ -396,6 +445,8 @@ func processEvidenceTimelineFromReplanContinuation(replan map[string]any) []map[
 		"failureClass",
 		"failureSignature",
 		"failureReason",
+		"targetRef",
+		"targetScope",
 		"failureTargetScope",
 	} {
 		if value, ok := failureContext[key]; ok && value != nil {
@@ -450,6 +501,10 @@ func compactProcessEvidenceTimelineForRuntimeContext(input []map[string]any) []m
 			"stage",
 			"graphNodeId",
 			"graphRootStepId",
+			stepInputKeyRepairOfStepID,
+			"targetRef",
+			"targetScope",
+			"failureTargetScope",
 			"summary",
 			"inputSummary",
 			"failureClass",
@@ -577,6 +632,8 @@ func compactDecisionPayloadForRuntimeContext(input map[string]any) map[string]an
 		"reason",
 		failureOutputKeyClass,
 		failureOutputKeySignature,
+		"targetRef",
+		"targetScope",
 		"failureTargetScope",
 		"failedStepId",
 		"failedStepKind",
@@ -605,6 +662,8 @@ func compactFailureContextForRuntimeContext(input map[string]any) map[string]any
 	for _, key := range []string{
 		failureOutputKeyClass,
 		failureOutputKeySignature,
+		"targetRef",
+		"targetScope",
 		"failureTargetScope",
 		"failedStepId",
 		"failedStepKind",
@@ -661,6 +720,8 @@ func compactFailureStepOutputForRuntimeContext(output map[string]any) map[string
 		failureOutputKeyClass,
 		failureOutputKeySignature,
 		"failureCategory",
+		"targetRef",
+		"targetScope",
 		"failureTargetScope",
 		"exitCode",
 		"command",

@@ -848,6 +848,13 @@ func failureTargetRepairRefs(step *runModel.Step) []string {
 			add(target)
 		}
 	}
+	for _, value := range []any{step.Input["currentExecutionProgress"], step.Output["currentExecutionProgress"]} {
+		if signals := structuredFailureSignalsFromProgressEvidence(mapFromValue(value)); len(signals) > 0 {
+			for _, target := range stringSliceFromValue(signals["targetRefs"]) {
+				add(target)
+			}
+		}
+	}
 	return ret
 }
 

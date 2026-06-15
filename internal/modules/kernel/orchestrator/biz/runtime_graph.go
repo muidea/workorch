@@ -2203,6 +2203,13 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	if artifact := processEvidenceArtifactContinuationSummary(step); len(artifact) > 0 {
 		item["artifactContinuation"] = artifact
 	}
+	if targetRef := processEvidenceTargetRef(step); targetRef != "" {
+		item["targetRef"] = targetRef
+	}
+	if targetScope := processEvidenceTargetScope(step); targetScope != "" {
+		item["targetScope"] = targetScope
+		item["failureTargetScope"] = targetScope
+	}
 	if outputRef := stepOutputRefForLLMContext(run, step); outputRef != "" {
 		item["payloadRef"] = outputRef
 		item["outputRef"] = outputRef
@@ -2256,6 +2263,29 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 		item["toolEvidence"] = toolEvidence
 	}
 	return item
+}
+
+func processEvidenceTargetRef(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	return firstNonEmptyString(
+		stringFromMap(step.Output, "targetRef"),
+		stringFromMap(step.Input, "targetRef"),
+	)
+}
+
+func processEvidenceTargetScope(step *runModel.Step) string {
+	if step == nil {
+		return ""
+	}
+	return firstNonEmptyString(
+		stringFromMap(step.Output, "failureTargetScope"),
+		stringFromMap(step.Output, "targetScope"),
+		stringFromMap(step.Input, "failureTargetScope"),
+		stringFromMap(step.Input, "targetScope"),
+		runtimeFailureTargetScope(stringFromMap(step.Output, failureOutputKeySignature)),
+	)
 }
 
 func processEvidenceArtifactContinuationSummary(step *runModel.Step) map[string]any {
@@ -2664,7 +2694,7 @@ func processEvidenceDigestStep(item map[string]any) map[string]any {
 		return nil
 	}
 	ret := map[string]any{}
-	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "failureClass", "failureSignature", "failureReason", "concreteFailureDiagnostic", "evidenceValidity", "rejectedOutputSummaryOmitted", "omittedContentReason"} {
+	for _, key := range []string{"order", "sourceRef", "stepId", "kind", "actionKind", "state", "stage", "graphNodeId", "graphRootStepId", stepInputKeyRepairOfStepID, "targetRef", "targetScope", "failureTargetScope", "failureClass", "failureSignature", "failureReason", "concreteFailureDiagnostic", "evidenceValidity", "rejectedOutputSummaryOmitted", "omittedContentReason"} {
 		if value, ok := item[key]; ok && value != nil {
 			ret[key] = value
 		}

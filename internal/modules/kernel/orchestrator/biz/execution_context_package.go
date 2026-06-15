@@ -193,7 +193,8 @@ func currentFailureFromProgressDigest(digest map[string]any) map[string]any {
 	add("source", stringFromMap(failure, "source"))
 	add("evidenceValidity", stringFromMap(failure, "evidenceValidity"))
 	add("targetRef", stringFromMap(failure, "targetRef"))
-	add("targetScope", stringFromMap(failure, "targetScope"))
+	add("targetScope", firstNonEmptyString(stringFromMap(failure, "targetScope"), stringFromMap(failure, "failureTargetScope")))
+	add("failureTargetScope", firstNonEmptyString(stringFromMap(failure, "failureTargetScope"), stringFromMap(failure, "targetScope")))
 	if len(ret) == 0 {
 		return nil
 	}
@@ -390,7 +391,11 @@ func currentProgressDigestFromCurrentExecutionProgress(input map[string]any, pre
 			if len(output) == 0 {
 				output = mapFromValue(item["output"])
 			}
-			if len(output) == 0 || !structuredFailureSignalsHaveConcreteTargetEvidence(structuredFailureSignalsFromFailureOutput(output, nil, "", "")) {
+			signals := mergeStructuredFailureSignals(
+				structuredFailureSignalsFromFailureOutput(output, nil, "", ""),
+				structuredFailureSignalsFromFailureOutput(item, nil, "", ""),
+			)
+			if len(output) == 0 || !structuredFailureSignalsHaveConcreteTargetEvidence(signals) {
 				continue
 			}
 			reason := truncateLLMContextString(firstNonEmptyString(
@@ -426,6 +431,23 @@ func currentProgressDigestFromCurrentExecutionProgress(input map[string]any, pre
 			}
 			if nodeID := strings.TrimSpace(stringFromMap(item, "graphNodeId")); nodeID != "" {
 				failure["graphNodeId"] = nodeID
+			}
+			if targetRef := firstNonEmptyString(
+				stringFromMap(item, "targetRef"),
+				stringFromMap(output, "targetRef"),
+			); targetRef != "" {
+				failure["targetRef"] = targetRef
+			}
+			if targetScope := firstNonEmptyString(
+				stringFromMap(item, "failureTargetScope"),
+				stringFromMap(item, "targetScope"),
+				stringFromMap(output, "failureTargetScope"),
+				stringFromMap(output, "targetScope"),
+				stringFromMap(progress, "failureTargetScope"),
+				stringFromMap(progress, "targetScope"),
+			); targetScope != "" {
+				failure["targetScope"] = targetScope
+				failure["failureTargetScope"] = targetScope
 			}
 			ret["lastObservedFailure"] = failure
 			ret["currentGap"] = reason
