@@ -2831,6 +2831,71 @@ func TestRuntimeOrchestrator_RuntimeRepairInputSwitchesInheritedStateChangingReq
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputNarrowsRepeatedReadOnlyStateChangingLoopToPatchApply(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-repeated-read-only-patch-only")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"contentHash":      "hash-main",
+					"content":          "package main\nfunc main() {}\n",
+				}},
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationRepairGraphWithoutPatchApply,
+			"stage":                        "llm_execution_graph_plan",
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|failureTargets=main.go",
+			"error":                        "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+		},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-repair-repeated-read-only-patch-only",
+		DoDID:           common.DoDID("dod"),
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if !boolValue(required["mustReturnPatchApplyNode"]) {
+		t.Fatalf("requiredOutput = %+v, want patch-apply-only narrowing marker", required)
+	}
+	if got := stringSliceFromValue(required["acceptedKinds"]); len(got) != 1 || got[0] != "patch/apply" {
+		t.Fatalf("acceptedKinds = %+v, want [patch/apply]", got)
+	}
+	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustPatchDirectlyFromProvidedSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want current target snapshot patch contract", required)
+	}
+	joined := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
+	if !strings.Contains(joined, "Return a concrete patch/apply node") {
+		t.Fatalf("repairGuidance = %q, want explicit patch/apply narrowing", joined)
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputCarriesResolvedGovernanceAndFailedGraph(t *testing.T) {
 	ctx := context.Background()
 	ticketRepo := memory.NewDecisionTicketRepository()

@@ -566,10 +566,11 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if signature == "" || !runtimeFailureEligibleForDuplicateEscalation(failedStep, class) || attempts == 0 {
 		return false
 	}
-	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) {
+	maxAttempts := repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep)
+	if requiresDoDAssessmentCompletionGate(run) && schemaInvalidRepairCanContinueWithinBudget(failedStep) && attempts < maxAttempts {
 		return false
 	}
-	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy)) {
+	if runtimeFailureCanContinueMechanicallyBeforeDuplicateEscalation(class, targetScope, attempts, maxAttempts) {
 		return false
 	}
 	stepsForRun, err := steps.ListByRunSummary(ctx, run.ID)
@@ -602,10 +603,10 @@ func shouldBlockOnDuplicateRuntimeFailure(
 	if !duplicateFound {
 		return false
 	}
-	if runtimeFailureRepeatedTargetDiagnosticCanEscalate(class, targetScope, attempts, maxRuntimeRepairAttemptsForPolicy(policy), targetDiagnosticDuplicateFound) {
+	if runtimeFailureRepeatedTargetDiagnosticCanEscalate(class, targetScope, attempts, maxAttempts, targetDiagnosticDuplicateFound) {
 		return true
 	}
-	if requiresDoDAssessmentCompletionGate(run) && attempts < maxRuntimeRepairAttemptsForPolicy(policy) &&
+	if requiresDoDAssessmentCompletionGate(run) && attempts < maxAttempts &&
 		!runtimeFailureTargetUsesRunBudget(class, targetScope) &&
 		class != failureClassLLMDecisionInvalid &&
 		!runtimeFailureIsLLMContractLoop(failedStep) {

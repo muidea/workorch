@@ -710,7 +710,7 @@ func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSu
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
-	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(policy)
+	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep)
 }
 
 func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
@@ -723,7 +723,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		return common.ErrInvalidArgument
 	}
 	language := runDialogLanguage(run)
-	maxAttempts := maxRuntimeRepairAttemptsForPolicy(o.RuntimePolicy())
+	maxAttempts := o.repairManager().effectiveMaxRuntimeRepairAttempts(ctx, o.RuntimePolicy(), run, failedStep)
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
 	recommendedNextActions := []string{
@@ -792,7 +792,7 @@ func shouldAttemptRuntimeRepair(ctx context.Context, repair *repairSubsystem, po
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return false
 	}
-	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= maxRuntimeRepairAttemptsForPolicy(policy) {
+	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep) {
 		return false
 	}
 	return !isLLMProviderRuntimeFailure(run, failedStep)

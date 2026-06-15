@@ -43,6 +43,25 @@ func (r *repairSubsystem) effectiveMaxProviderRetryAttempts(ctx context.Context,
 	return maxProviderRetryAttemptsBeforeStateChange
 }
 
+const maxRepeatedStateChangingContractLoopAttempts = 3
+
+func (r *repairSubsystem) effectiveMaxRuntimeRepairAttempts(ctx context.Context, policy RuntimePolicy, run *runModel.Run, failedStep *runModel.Step) int {
+	maxAttempts := maxRuntimeRepairAttemptsForPolicy(policy)
+	if maxAttempts <= maxRepeatedStateChangingContractLoopAttempts {
+		return maxAttempts
+	}
+	if run == nil || failedStep == nil || !requiresDoDAssessmentCompletionGate(run) {
+		return maxAttempts
+	}
+	if !runtimeRepairStepIsRepeatedStateChangingContractLoop(failedStep) {
+		return maxAttempts
+	}
+	if !runtimeRepairContractLoopHasConcreteTargetEvidence(failedStep) {
+		return maxAttempts
+	}
+	return maxRepeatedStateChangingContractLoopAttempts
+}
+
 func (r *repairSubsystem) hasStateChangingAttempt(ctx context.Context, runID common.RunID) bool {
 	if r == nil || r.steps == nil || runID == "" {
 		return false
@@ -468,6 +487,34 @@ func runtimeRepairStepIsContractCorrectionFailure(step *runModel.Step) bool {
 		strings.TrimSpace(stringFromMap(step.Output, failureOutputKeySignature)) != ""
 }
 
+func runtimeRepairStepIsRepeatedStateChangingContractLoop(step *runModel.Step) bool {
+	if step == nil || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if !inputRequiresStateChangingOutput(step.Input) {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(step.Output, outputKeyContractViolationType)) {
+	case contractViolationRepairGraphWithoutPatchApply,
+		contractViolationRepairNoStateChangingOutput,
+		contractViolationRepairReturnedGraph:
+		return true
+	}
+	text := strings.ToLower(strings.Join([]string{
+		stringFromMap(step.Output, "error"),
+		stringFromMap(step.Output, "reason"),
+		stringFromMap(step.Output, failureOutputKeySignature),
+	}, "\n"))
+	return stateChangingReadOnlyGraphFailureText(text)
+}
+
+func runtimeRepairContractLoopHasConcreteTargetEvidence(step *runModel.Step) bool {
+	if step == nil {
+		return false
+	}
+	return repairHasImplementationTargetEvidence(step.Input, mapFromValue(step.Input["repairActionPackage"]))
+}
+
 func runtimeRepairStepFailureClass(step *runModel.Step) string {
 	if step == nil {
 		return ""
@@ -506,7 +553,7 @@ func duplicateRuntimeFailureBlockerCanAutoResume(
 		return false
 	}
 	attempts := repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep)
-	return attempts > 0 && attempts < maxRuntimeRepairAttemptsForPolicy(policy)
+	return attempts > 0 && attempts < repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep)
 }
 
 func runtimeRepairExhaustionBlockerCanAutoResume(
@@ -529,11 +576,12 @@ func runtimeRepairExhaustionBlockerCanAutoResume(
 	if !strings.HasSuffix(string(ticket.ID), "repair-exhausted-decision") {
 		return false
 	}
-	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxRuntimeRepairAttemptsForPolicy(policy) {
-		return false
-	}
 	failedStep, err := steps.Get(ctx, ticket.StepID)
 	if err != nil || failedStep == nil || failedStep.State != common.StepStateFailed {
+		return false
+	}
+	maxAttempts := repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep)
+	if attempts, ok := ticket.Context["attempts"]; !ok || intFromAny(attempts) < maxAttempts {
 		return false
 	}
 	if isLLMProviderRuntimeFailure(run, failedStep) {
@@ -552,7 +600,7 @@ func runtimeRepairExhaustionBlockerCanAutoResume(
 			return false
 		}
 	}
-	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxRuntimeRepairAttemptsForPolicy(policy)
+	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) < maxAttempts
 }
 
 func runtimeRepairExhaustionHasCompletedCoverageEvidence(context map[string]any) bool {

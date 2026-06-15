@@ -549,6 +549,47 @@ func applyRuntimeRepairStateChangingActionPackageProjection(
 	}
 }
 
+func applyRuntimeRepairRepeatedReadOnlyStateChangingProjection(input map[string]any, failedStep *runModel.Step, attempt int) {
+	if input == nil || failedStep == nil || attempt < 2 {
+		return
+	}
+	if !runtimeRepairStepIsRepeatedStateChangingContractLoop(failedStep) {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 || !repairHasImplementationTargetEvidence(input, pkg) {
+		return
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		required = stateChangingRepairRequiredOutput()
+	}
+	required["mustUseCurrentTargetSnapshot"] = true
+	required["mustPatchDirectlyFromProvidedSnapshot"] = true
+	required["mustRebuildFromCurrentEvidence"] = true
+	required["mustReturnPatchApplyNode"] = true
+	required["patchApplyOnlyReason"] = "repeated_state_changing_repair_returned_read_only_graph_with_concrete_target_evidence"
+	if len(stringSliceFromValue(required["acceptedOperations"])) == 0 {
+		required["acceptedKinds"] = []string{"patch/apply"}
+		delete(required, "toolStateChangingInputContract")
+		delete(required, "toolStateChangingRule")
+	}
+	required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]),
+		"read_only_graph",
+		"inspection_only_graph",
+		"shell_only_graph",
+	))
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+		"The previous state-changing repair already failed because it returned a read-only or inspection-only graph.",
+		"Current target snapshots and repair target evidence are already available. Return a concrete patch/apply node that edits one of those targets directly; do not spend another turn on file/read, git/read, or inspection-only graph planning.",
+		"If verification is still needed, make it depend on the patch/apply node and keep it bounded to the same failure target or declared related failure target.",
+	)
+}
+
 func applyRuntimeRepairFailureScopeProjection(input map[string]any, class string, signature string) {
 	if input == nil {
 		return
@@ -836,6 +877,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	inheritPriorRepairContext(input, failedStep)
 	preserveStateChangingSchemaInvalidRepairContract(input, failedStep)
 	applyRuntimeRepairStateChangingActionPackageProjection(input, failedStep, execErr)
+	applyRuntimeRepairRepeatedReadOnlyStateChangingProjection(input, failedStep, attempt)
 	applyRuntimeRepairValidationEscalationFollowUpGuidance(input)
 	assessmentOnlySchemaInvalidRepair := preserveAssessmentOnlySchemaInvalidRepairContract(input, failedStep)
 	if !assessmentOnlySchemaInvalidRepair {

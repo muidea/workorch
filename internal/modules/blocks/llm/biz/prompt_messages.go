@@ -1968,25 +1968,32 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 	}
 	if stateChangingDecisionRequest(request.Input) {
 		required := stateChangingDecisionRequiredOutput(request.Input)
+		requirements := []string{
+			"State-changing output is required by the current Stage Contract",
+			"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract",
+			"Use the effective Goal and DoD already supplied in the request",
+			"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
+			"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
+			"If multiple dependent operations are needed, executionGraph is allowed only when it contains an accepted state-changing path declared by requiredOutput",
+			"Do not return read-only, inspection-only, or shell-only executionGraph",
+			"When failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots already contains a complete current target snapshot, do not return file/read for that target; use the snapshot to produce patch/apply, an accepted declared state-changing shell/mcp operation, failed dodAssessment, or a real blocker",
+			"If more current evidence is truly required, return a real blocker or wait for an explicit acquire_concrete_failure_evidence contract; do not satisfy this state-changing contract with file/read-only nodes",
+			"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
+			"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
+			"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
+			"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
+			"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
+		}
+		if boolValue(required["mustReturnPatchApplyNode"]) {
+			requirements = append(requirements,
+				"The previous state-changing repair already failed because it returned a read-only or inspection-only graph.",
+				"Return at least one concrete patch/apply node that edits one of the provided current target snapshots directly. Do not return file/read, git/read, shell/command, or mcp/tool_call as the only actionable nodes in this turn.",
+			)
+		}
 		return marshalPromptSection("Current Requested Action", map[string]any{
 			"type":           "produce_state_changing_repair_or_failed_assessment",
 			"requiredOutput": required,
-			"requirements": []string{
-				"State-changing output is required by the current Stage Contract",
-				"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract",
-				"Use the effective Goal and DoD already supplied in the request",
-				"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
-				"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
-				"If multiple dependent operations are needed, executionGraph is allowed only when it contains an accepted state-changing path declared by requiredOutput",
-				"Do not return read-only, inspection-only, or shell-only executionGraph",
-				"When failureTargetRepairContext, patchRepairContext, or repairActionPackage.targetSnapshots already contains a complete current target snapshot, do not return file/read for that target; use the snapshot to produce patch/apply, an accepted declared state-changing shell/mcp operation, failed dodAssessment, or a real blocker",
-				"If more current evidence is truly required, return a real blocker or wait for an explicit acquire_concrete_failure_evidence contract; do not satisfy this state-changing contract with file/read-only nodes",
-				"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
-				"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
-				"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
-				"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
-				"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
-			},
+			"requirements":   requirements,
 		})
 	}
 	requirements := []string{

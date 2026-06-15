@@ -573,6 +573,52 @@ func TestProviderRetryBudgetUsesPolicyAfterStateChangeAttempt(t *testing.T) {
 	}
 }
 
+func TestEffectiveMaxRuntimeRepairAttemptsShrinksForRepeatedReadOnlyStateChangingLoopWithTargetEvidence(t *testing.T) {
+	ctx := context.Background()
+	repair := newRepairSubsystem(memory.NewStepRepository(), nil)
+	policy := NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 10})
+	run := &runmodel.Run{
+		ID:              "run-read-only-state-changing-loop",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		DoDID:           common.DoDID("dod"),
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-read-only-state-changing-loop/repair-002",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"contentHash":      "hash-main",
+					"content":          "package main\n",
+				}},
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationRepairGraphWithoutPatchApply,
+			"stage":                        "llm_execution_graph_plan",
+			"error":                        "invalid argument: state-changing llm repair step returned executionGraph without patch/apply",
+		},
+	}
+
+	if got := repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failed); got != maxRepeatedStateChangingContractLoopAttempts {
+		t.Fatalf("effective max runtime repair attempts = %d, want %d", got, maxRepeatedStateChangingContractLoopAttempts)
+	}
+}
+
 func TestCoverageStateChangeGapEscalatesAfterValidationOnlyRepair(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-coverage-state-change-gap")
