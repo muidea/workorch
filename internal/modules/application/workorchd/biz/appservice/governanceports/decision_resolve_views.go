@@ -84,9 +84,13 @@ func prepareDecisionResolution(ticket *decisionmodel.Ticket, resolutionType stri
 	if err := governancecore.EnsureDecisionTicketWorkspaceScope(scope, ticket); err != nil {
 		return nil, "", err
 	}
-	if ticket.State != common.DecisionTicketStateOpen {
-		return nil, "", common.ErrConflict
-	}
+	// State-check is delegated to the kernel: kernel.EnsureResolvedTicketAndReturn
+	// performs an orphan-resolution recovery (accepts matching payload on an
+	// already-resolved ticket idempotently) and returns ErrConflict for state
+	// mismatches. Re-checking state here would block the idempotent path before
+	// the kernel can do its orphan check. The batch path's pre-validation loop
+	// no longer short-circuits on state=resolved, so the per-ticket kernel call
+	// is the single source of truth for conflict detection.
 	normalizedPayload, normalizedType := governancecore.NormalizeDecisionResolutionPayloadForTicket(ticket, payload, resolutionType)
 	if err := governancecore.ValidateDecisionResolutionPayloadForTicket(ticket, normalizedPayload); err != nil {
 		return nil, "", err

@@ -180,15 +180,44 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
-	if ticket.State == common.DecisionTicketStateResolved {
-		resolution, err := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if resolution.ID != cmd.ResolutionID || resolution.Type != cmd.Type || !sameResolutionPayload(resolution.Payload, cmd.Payload) {
+
+	// Orphan resolution recovery: a resolution file may already exist for this
+	// ticket even when ticket.State is still "open" (e.g. an operator manually
+	// reset the run back to blocked_on_decision without deleting the
+	// resolution, or an external fixture wrote state=open while leaving the
+	// resolution on disk). Production code never reverts a resolved ticket to
+	// open, so this mismatch is recoverable. When a persisted resolution
+	// matches the new request, accept it idempotently and sync the ticket
+	// state to "resolved" so the run orchestrator's ResumeRun check at
+	// runtime_lifecycle.go (ticket.State == Resolved) passes. We do NOT
+	// re-publish TopicTicketResolved because the original resolution
+	// already fired that event.
+	existingResolution, resErr := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
+	if resErr != nil && !errors.Is(resErr, common.ErrNotFound) {
+		return nil, nil, resErr
+	}
+	if existingResolution != nil {
+		if existingResolution.ID != cmd.ResolutionID ||
+			existingResolution.Type != cmd.Type ||
+			!sameResolutionPayload(existingResolution.Payload, cmd.Payload) {
 			return nil, nil, common.ErrConflict
 		}
-		return ticket, resolution, nil
+		if ticket.State != common.DecisionTicketStateResolved {
+			ticket.State = common.DecisionTicketStateResolved
+			ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			if err := s.tickets.Update(ctx, ticket); err != nil {
+				return nil, nil, err
+			}
+		}
+		return ticket, existingResolution, nil
+	}
+
+	if ticket.State == common.DecisionTicketStateResolved {
+		// Resolution file was deleted but ticket state is still "resolved";
+		// preserve the existing strict behavior. Re-creating a resolution
+		// here would be a fresh write — treat as ErrConflict to surface the
+		// invariant violation rather than silently accept.
+		return nil, nil, common.ErrConflict
 	}
 	if ticket.State != common.DecisionTicketStateOpen {
 		return nil, nil, common.ErrConflict

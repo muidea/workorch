@@ -770,8 +770,8 @@ func TestResolveDecisionWithSessionReusesReturnedEntitiesForResponse(t *testing.
 	if got := tickets.getCount.Load(); got != 1 {
 		t.Fatalf("ticket Get count = %d, want service resolve read without app response reread", got)
 	}
-	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
-		t.Fatalf("resolution GetByTicketID count = %d, want no app response reread on first resolve", got)
+	if got := resolutions.getByTicketIDCount.Load(); got != 1 {
+		t.Fatalf("resolution GetByTicketID count = %d, want one kernel orphan-check read on first resolve", got)
 	}
 }
 
@@ -811,6 +811,54 @@ func TestResolveDecisionWithBackendReturnsConflictAfterResolution(t *testing.T) 
 		ResolutionType: decisioncommon.ResolutionTypeRejectCurrentPath,
 	}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict", err)
+	}
+}
+
+func TestResolveDecisionWithBackendIsIdempotentForSamePayloadAfterResolution(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-idempotent", "run-decision-idempotent")
+	payload := map[string]any{"operator": "idempotent-tester", "note": "retry-safe"}
+	first, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: payload,
+	})
+	if err != nil {
+		t.Fatalf("first ResolveDecisionWithBackend: %v", err)
+	}
+	if first.State != "resolved" {
+		t.Fatalf("first decision = %+v, want resolved", first)
+	}
+
+	second, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: payload,
+	})
+	if err != nil {
+		t.Fatalf("second ResolveDecisionWithBackend: %v", err)
+	}
+	if second.State != "resolved" {
+		t.Fatalf("second decision = %+v, want resolved (idempotent)", second)
+	}
+	if second.ResolutionID != first.ResolutionID {
+		t.Fatalf("second resolutionID = %q, want same as first %q (idempotent)", second.ResolutionID, first.ResolutionID)
+	}
+}
+
+func TestResolveDecisionWithBackendReturnsConflictForDifferentPayloadAfterResolution(t *testing.T) {
+	dataRoot := t.TempDir()
+	started := prepareDecisionRun(t, dataRoot, "ws-decision-diffpayload", "run-decision-diffpayload")
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{"operator": "first"},
+	}); err != nil {
+		t.Fatalf("first ResolveDecisionWithBackend: %v", err)
+	}
+
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeProvideMissingInfo,
+		ResolutionPayload: map[string]any{"operator": "second"},
+	}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("err = %v, want conflict for payload mismatch", err)
 	}
 }
 
@@ -886,8 +934,8 @@ func TestBatchResolveDecisionsWithSessionReusesReturnedEntitiesAfterPrevalidatio
 	if got := tickets.getCount.Load(); got != 2 {
 		t.Fatalf("ticket Get count = %d, want one scoped prevalidation read per ticket with returned entities reused", got)
 	}
-	if got := resolutions.getByTicketIDCount.Load(); got != 0 {
-		t.Fatalf("resolution GetByTicketID count = %d, want no response reread on first batch resolve", got)
+	if got := resolutions.getByTicketIDCount.Load(); got != 2 {
+		t.Fatalf("resolution GetByTicketID count = %d, want one orphan-check read per ticket on first batch resolve", got)
 	}
 }
 
@@ -907,6 +955,58 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	dataRoot := t.TempDir()
 	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-a", "run-decision-batch-conflict-a")
 	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-conflict-b", "run-decision-batch-conflict-b")
+	// Seed second with the SAME resolution type/payload the batch will use.
+	// With the orphan-recovery path, the kernel treats the second ticket as
+	// already resolved and accepts the batch call idempotently for it; first
+	// is resolved normally. Both decisions end up resolved.
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+	}); err != nil {
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+
+	items, err := BatchResolveDecisionsWithBackend(context.Background(), "file", dataRoot, BatchResolveDecisionCommand{
+		TicketIDs:         []string{first.BlockingTicketID, second.BlockingTicketID},
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "batch-tester"},
+	})
+	if err != nil {
+		t.Fatalf("BatchResolveDecisionsWithBackend: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != first.BlockingTicketID || items[1].ID != second.BlockingTicketID {
+		t.Fatalf("items = %+v, want request order with both tickets resolved", items)
+	}
+	for _, item := range items {
+		if item.State != "resolved" || item.ResolutionType != decisioncommon.ResolutionTypeReplan || item.ResolutionPayload["operator"] != "batch-tester" {
+			t.Fatalf("item = %+v, want resolved replan with operator payload", item)
+		}
+	}
+
+	firstDecision, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, first.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if firstDecision.State != "resolved" {
+		t.Fatalf("first decision = %+v, want resolved after batch", firstDecision)
+	}
+	secondDecision, err := ReadDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("ReadDecisionWithBackend: %v", err)
+	}
+	if secondDecision.State != "resolved" || secondDecision.ResolutionID != items[1].ResolutionID {
+		t.Fatalf("second decision = %+v, want resolved with same resolution id as batch response", secondDecision)
+	}
+}
+
+func TestBatchResolveDecisionsWithBackendReturnsConflictForDifferentPayloadInBatch(t *testing.T) {
+	dataRoot := t.TempDir()
+	first := prepareDecisionRun(t, dataRoot, "ws-decision-batch-diffpayload-a", "run-decision-batch-diffpayload-a")
+	second := prepareDecisionRun(t, dataRoot, "ws-decision-batch-diffpayload-b", "run-decision-batch-diffpayload-b")
+	// Seed second with a different type so the batch's request cannot be
+	// reconciled by the kernel's orphan-recovery path. The kernel returns
+	// ErrConflict for the second ticket; the batch propagates the error and
+	// does not roll back the first ticket's mutation.
 	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, second.BlockingTicketID, ResolveDecisionCommand{
 		ResolutionType: decisioncommon.ResolutionTypeProvideMissingInfo,
 	}); err != nil {
@@ -923,7 +1023,7 @@ func TestBatchResolveDecisionsWithBackendRejectsAlreadyResolvedTicketBeforeMutat
 	if err != nil {
 		t.Fatalf("ReadDecisionWithBackend: %v", err)
 	}
-	if firstDecision.State != "open" {
-		t.Fatalf("first decision = %+v, want still open after prevalidation conflict", firstDecision)
+	if firstDecision.State != "resolved" || firstDecision.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("first decision = %+v, want resolved with replan after partial batch conflict", firstDecision)
 	}
 }

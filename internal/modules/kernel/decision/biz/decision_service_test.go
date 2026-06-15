@@ -464,8 +464,10 @@ func TestService_EnsureResolvedTicketAndReturnReturnsResolvedEntitiesWithoutExtr
 	if got := ticketRepo.getCount.Load(); got != 1 {
 		t.Fatalf("ticket Get count = %d, want one read reused for response", got)
 	}
-	if got := resolutionRepo.getByTicketIDCount.Load(); got != 0 {
-		t.Fatalf("resolution GetByTicketID count = %d, want created resolution reused for response", got)
+	// orphan-recovery path: GetByTicketID runs once per call before the
+	// resolution is created, then the response reuses that result.
+	if got := resolutionRepo.getByTicketIDCount.Load(); got != 1 {
+		t.Fatalf("resolution GetByTicketID count = %d, want one orphan-check read", got)
 	}
 }
 
@@ -504,8 +506,168 @@ func TestService_EnsureResolvedTicketAndReturnIdempotentReturnsPersistedResoluti
 	if got := ticketRepo.getCount.Load(); got != 2 {
 		t.Fatalf("ticket Get count = %d, want one per ensure call", got)
 	}
-	if got := resolutionRepo.getByTicketIDCount.Load(); got != 1 {
-		t.Fatalf("resolution GetByTicketID count = %d, want only idempotent lookup", got)
+	// orphan-recovery: first call reads once (not found), then creates;
+	// second call reads once (found) and reuses the result. Total = 2.
+	if got := resolutionRepo.getByTicketIDCount.Load(); got != 2 {
+		t.Fatalf("resolution GetByTicketID count = %d, want one orphan-check per call", got)
+	}
+}
+
+// TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdempotent
+// verifies the recovery path for an orphan resolution: a resolution file
+// exists on disk (GetByTicketID returns it) but the ticket is still in
+// "open" state (e.g. an operator manually reset the run back to
+// blocked_on_decision without deleting the resolution). When the new
+// request matches the persisted resolution on ID/Type/Payload, the call
+// is accepted idempotently and the ticket state is synced to "resolved"
+// so a subsequent ResumeRun can pass the ticket.State check.
+func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := newCountingDecisionTicketRepository()
+	resolutionRepo := newCountingDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-orphan-recover"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	// Persist a resolution directly without going through resolveTicketItem,
+	// so the ticket stays in "open" state. This is the orphan shape.
+	orphan := &decisionModel.Resolution{
+		ID:       common.ResolutionID("resolution-orphan-recover"),
+		TicketID: createCmd.TicketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"actor": "operator", "intent": "retry_same_step"},
+	}
+	if err := resolutionRepo.inner.Create(ctx, orphan); err != nil {
+		t.Fatalf("seed orphan resolution: %v", err)
+	}
+
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: orphan.ID,
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      map[string]any{"actor": "operator", "intent": "retry_same_step"},
+	}
+	ticket, resolution, err := service.EnsureResolvedTicketAndReturn(ctx, cmd)
+	if err != nil {
+		t.Fatalf("orphan recovery: %v", err)
+	}
+	if ticket == nil || ticket.State != common.DecisionTicketStateResolved {
+		t.Fatalf("ticket = %+v, want state resolved after orphan recovery", ticket)
+	}
+	if resolution == nil || resolution.ID != orphan.ID {
+		t.Fatalf("resolution = %+v, want persisted orphan %q", resolution, orphan.ID)
+	}
+
+	// Ticket state should have been synced to resolved.
+	persisted, err := ticketRepo.inner.Get(ctx, createCmd.TicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if persisted.State != common.DecisionTicketStateResolved {
+		t.Fatalf("persisted ticket state = %q, want resolved", persisted.State)
+	}
+}
+
+// TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadReturnsConflict
+// covers the "operator tried to change the decision" case: an orphan
+// resolution exists, but the new request's payload differs. The fix must
+// not silently accept a different decision.
+func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadReturnsConflict(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-orphan-payload-mismatch"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	orphan := &decisionModel.Resolution{
+		ID:       common.ResolutionID("resolution-orphan-payload-mismatch"),
+		TicketID: createCmd.TicketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"actor": "operator", "intent": "retry_same_step"},
+	}
+	if err := resolutionRepo.Create(ctx, orphan); err != nil {
+		t.Fatalf("seed orphan resolution: %v", err)
+	}
+
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: orphan.ID,
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      map[string]any{"actor": "operator", "intent": "terminate"},
+	}
+	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, cmd); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("orphan + different payload err = %v, want conflict", err)
+	}
+
+	// Ticket state must remain open (orphan recovery did not run).
+	persisted, err := ticketRepo.Get(ctx, createCmd.TicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if persisted.State != common.DecisionTicketStateOpen {
+		t.Fatalf("persisted ticket state = %q, want unchanged open", persisted.State)
+	}
+}
+
+// TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturnsConflict
+// covers the "operator supplies a different ResolutionID" case: the new
+// request claims a different resolution ID than the persisted orphan.
+// Must return ErrConflict so the operator knows to clean up the orphan
+// first.
+func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentIDReturnsConflict(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	service := NewService(ticketRepo, resolutionRepo, nil)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-orphan-id-mismatch"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	orphan := &decisionModel.Resolution{
+		ID:       common.ResolutionID("resolution-orphan-id-mismatch"),
+		TicketID: createCmd.TicketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"actor": "operator"},
+	}
+	if err := resolutionRepo.Create(ctx, orphan); err != nil {
+		t.Fatalf("seed orphan resolution: %v", err)
+	}
+
+	cmd := decisionservice.ResolveTicketCommand{
+		ResolutionID: common.ResolutionID("resolution-different-id"),
+		TicketID:     createCmd.TicketID,
+		Type:         decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:      map[string]any{"actor": "operator"},
+	}
+	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, cmd); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("orphan + different resolutionID err = %v, want conflict", err)
 	}
 }
 
