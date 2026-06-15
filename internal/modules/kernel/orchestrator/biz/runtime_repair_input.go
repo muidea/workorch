@@ -931,5 +931,28 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
+	refreshRuntimeRepairOutputDecisionContract(input, failedStep)
 	return input
+}
+
+func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep *runModel.Step) {
+	if input == nil {
+		return
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		return
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if len(required) == 0 {
+		return
+	}
+	var output map[string]any
+	if failedStep != nil {
+		output = failedStep.Output
+	}
+	if contract := repairActionOutputDecisionContract(input, pkg, required, output); len(contract) > 0 {
+		pkg["outputDecisionContract"] = contract
+		input["repairActionPackage"] = pkg
+	}
 }

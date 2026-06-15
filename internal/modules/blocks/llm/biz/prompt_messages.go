@@ -537,9 +537,11 @@ func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any 
 		"currentFailure",
 		"lastFailureDiagnostics",
 		"requiredOutput",
+		"outputDecisionContract",
 		"structuredFailureSignals",
 		"recentRepairAttempts",
 		"previousRejectedOutputSummary",
+		"lastRejectedOutputContract",
 		"forbiddenActions",
 		"repairBudget",
 		"exitCriteria",
@@ -1968,9 +1970,11 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 	}
 	if stateChangingDecisionRequest(request.Input) {
 		required := stateChangingDecisionRequiredOutput(request.Input)
+		outputContract := recordFromAny(recordFromAny(request.Input["repairActionPackage"])["outputDecisionContract"])
 		requirements := []string{
 			"State-changing output is required by the current Stage Contract",
 			"Use repairActionPackage.requiredOutput.acceptedKinds as the authoritative allowed state-changing output contract",
+			"Use repairActionPackage.outputDecisionContract.requiredMode, allowedOutputs, and forbiddenOutputs as the current authoritative action selection contract when present",
 			"Use the effective Goal and DoD already supplied in the request",
 			"Return direct state-changing output, failed dodAssessment, or a real requiredDecision/requiredApproval blocker",
 			"Do not return run snapshot, observability, self-inspection, context rehydration, or replan-through-LLM graphs",
@@ -1983,6 +1987,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
 			"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
 			"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
+			"Do not return no-op patch/apply content; text_replace oldText and newText must be different substantive literal strings",
 			"If an earlier stream was incomplete, continue by producing a complete fresh JSON object rather than inspecting the run again",
 		}
 		if boolValue(required["mustReturnPatchApplyNode"]) {
@@ -1991,11 +1996,15 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Return at least one concrete patch/apply node that edits one of the provided current target snapshots directly. Do not return file/read, git/read, shell/command, or mcp/tool_call as the only actionable nodes in this turn.",
 			)
 		}
-		return marshalPromptSection("Current Requested Action", map[string]any{
+		section := map[string]any{
 			"type":           "produce_state_changing_repair_or_failed_assessment",
 			"requiredOutput": required,
 			"requirements":   requirements,
-		})
+		}
+		if len(outputContract) > 0 {
+			section["outputDecisionContract"] = outputContract
+		}
+		return marshalPromptSection("Current Requested Action", section)
 	}
 	requirements := []string{
 		"Use runtimeCapabilities only",

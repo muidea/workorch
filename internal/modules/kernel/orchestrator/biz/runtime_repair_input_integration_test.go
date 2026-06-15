@@ -2977,9 +2977,89 @@ func TestRuntimeOrchestrator_RuntimeRepairInputNarrowsRepeatedReadOnlyStateChang
 	if !boolValue(required["mustUseCurrentTargetSnapshot"]) || !boolValue(required["mustPatchDirectlyFromProvidedSnapshot"]) {
 		t.Fatalf("requiredOutput = %+v, want current target snapshot patch contract", required)
 	}
+	decisionContract := mapFromValue(mapFromValue(input["repairActionPackage"])["outputDecisionContract"])
+	if decisionContract["requiredMode"] != "state_changing_patch_apply" {
+		t.Fatalf("outputDecisionContract = %+v, want state_changing_patch_apply", decisionContract)
+	}
+	forbidden := strings.Join(stringSliceFromValue(decisionContract["forbiddenOutputs"]), "\n")
+	if !strings.Contains(forbidden, "read_only_or_inspection_only_graph") ||
+		!strings.Contains(forbidden, "shell_only_validation_for_state_change") {
+		t.Fatalf("forbiddenOutputs = %q, want read-only and shell-only state-change forbiddance", forbidden)
+	}
 	joined := strings.Join(stringSliceFromValue(input["repairGuidance"]), "\n")
 	if !strings.Contains(joined, "Return a concrete patch/apply node") {
 		t.Fatalf("repairGuidance = %q, want explicit patch/apply narrowing", joined)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairInputForbidsRepeatedNoOpPatch(t *testing.T) {
+	ctx := context.Background()
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: memory.NewWorkspaceRepository(),
+	}
+	runID := common.RunID("run-repair-noop-patch")
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "main.go",
+					"exists":           true,
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"contentHash":      "hash-main",
+					"content":          "package main\nfunc main() {}\n",
+				}},
+				"requiredOutput": stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationPatchContentRequired,
+			"stage":                        "llm_execution_graph_plan",
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|failureTargets=main.go",
+			"error":                        "invalid argument: executionGraph patch/apply input invalid: patch text_replace oldText/newText must describe a substantive change",
+		},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-repair-noop-patch",
+		DoDID:           common.DoDID("dod"),
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failedStep, 2, common.ErrInvalidArgument)
+
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if !boolValue(required["mustAvoidNoOpPatch"]) || !boolValue(required["mustProduceSubstantivePatch"]) {
+		t.Fatalf("requiredOutput = %+v, want no-op patch forbiddance", required)
+	}
+	forbiddenKinds := strings.Join(stringSliceFromValue(required["forbiddenKinds"]), "\n")
+	if !strings.Contains(forbiddenKinds, "identical_text_replace") {
+		t.Fatalf("forbiddenKinds = %q, want identical_text_replace", forbiddenKinds)
+	}
+	decisionContract := mapFromValue(actionPackage["outputDecisionContract"])
+	forbiddenOutputs := strings.Join(stringSliceFromValue(decisionContract["forbiddenOutputs"]), "\n")
+	if decisionContract["requiredMode"] != "state_changing_output" ||
+		!strings.Contains(forbiddenOutputs, "no_op_text_replace") ||
+		!strings.Contains(forbiddenOutputs, "identical_oldText_newText") {
+		t.Fatalf("outputDecisionContract = %+v, want no-op text_replace forbiddance", decisionContract)
+	}
+	rejected := mapFromValue(actionPackage["lastRejectedOutputContract"])
+	if rejected["forbiddenPattern"] != "no_op_text_replace" {
+		t.Fatalf("lastRejectedOutputContract = %+v, want no_op_text_replace", rejected)
 	}
 }
 

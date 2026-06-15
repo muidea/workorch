@@ -127,6 +127,19 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if mode := repairActionRequiredRepairMode(input, pkg, rawFailedOutput...); mode != "" {
 		pkg["requiredRepairMode"] = mode
 	}
+	if repairActionFailureIndicatesNoOpPatch(input, firstRawFailureOutput(input, rawFailedOutput...)) {
+		pkg["lastRejectedOutputContract"] = map[string]any{
+			"reason":           "patch_content_required",
+			"forbiddenPattern": "no_op_text_replace",
+			"requirement":      "patch/apply text_replace oldText and newText must be different substantive literal strings",
+		}
+		requiredOutput["mustAvoidNoOpPatch"] = true
+		requiredOutput["mustProduceSubstantivePatch"] = true
+		requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
+			"no_op_patch",
+			"identical_text_replace",
+		))
+	}
 	if contract := mapFromValue(input["capabilityPolicyRepairContract"]); len(contract) > 0 {
 		pkg["capabilityPolicyRepairRequired"] = true
 		pkg["capabilityPolicyRepairContract"] = compactLLMContextMap(contract, 1)
@@ -188,6 +201,9 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	}
 	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
 	addStrategyReassessmentRequiredOutputContract(pkg, requiredOutput)
+	if contract := repairActionOutputDecisionContract(input, pkg, requiredOutput, rawFailedOutput...); len(contract) > 0 {
+		pkg["outputDecisionContract"] = contract
+	}
 	if len(pkg) <= 1 {
 		return nil
 	}
@@ -411,7 +427,8 @@ func stateChangingRepairRequiredOutput() map[string]any {
 				"boundedReason",
 			},
 		},
-		"toolStateChangingRule": "when shell/command or mcp/tool_call is the state-changing node, declare input.stateChanging=true, input.targetRef, input.stateChangingReason, and a relation field such as relatedFailureTargets/targetRefs/affectedTargets; a dependent verification shell/tool node must declare verificationScope, targetRef, relatedFailureTargets, or boundedReason",
+		"toolStateChangingRule":      "when shell/command or mcp/tool_call is the state-changing node, declare input.stateChanging=true, input.targetRef, input.stateChangingReason, and a relation field such as relatedFailureTargets/targetRefs/affectedTargets; a dependent verification shell/tool node must declare verificationScope, targetRef, relatedFailureTargets, or boundedReason",
+		"patchSubstantiveChangeRule": "patch/apply text_replace oldText and newText must be exact non-empty literal strings that describe a substantive change; identical oldText/newText is a no-op and is invalid",
 		"forbiddenKinds": []string{
 			"read_only_graph",
 			"llm_gated_graph",
@@ -419,6 +436,7 @@ func stateChangingRepairRequiredOutput() map[string]any {
 			"context_rehydration_graph",
 			"same_graph_file_read_before_patch",
 			"incomplete_patch_apply_input",
+			"no_op_patch",
 		},
 		"patchApplyInputContract": map[string]any{
 			"text_replace": []string{"targetRef", "oldText", "newText"},
@@ -1336,6 +1354,9 @@ func repairActionForbiddenActions(input map[string]any, pkg map[string]any) []st
 	if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 {
 		ret = append(ret, "repeat_same_failed_patch")
 	}
+	if repairActionFailureIndicatesNoOpPatch(input, firstRawFailureOutput(input)) {
+		ret = append(ret, "repeat_no_op_text_replace")
+	}
 	return limitedStrings(compactUniqueStrings(ret), 8)
 }
 
@@ -1363,6 +1384,117 @@ func repairActionFailureIndicatesStalePatch(input map[string]any, output map[str
 		strings.Contains(text, "hunk header") ||
 		strings.Contains(text, "malformed unified") ||
 		strings.Contains(text, "invalid unified")
+}
+
+func repairActionFailureIndicatesNoOpPatch(input map[string]any, output map[string]any) bool {
+	text := strings.ToLower(strings.Join(repairForbiddenReuseTextValues(input, output), "\n"))
+	indicatesNoOp := strings.Contains(text, "oldtext/newtext must describe") ||
+		strings.Contains(text, "describe a substantive change") ||
+		strings.Contains(text, "non-substantive") ||
+		strings.Contains(text, "no-op")
+	return indicatesNoOp &&
+		(strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) == contractViolationPatchContentRequired ||
+			strings.Contains(text, "patch text_replace oldtext/newtext must describe") ||
+			strings.Contains(text, "oldtext/newtext must describe a substantive change"))
+}
+
+func repairActionOutputDecisionContract(input map[string]any, pkg map[string]any, requiredOutput map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	if len(pkg) == 0 || len(requiredOutput) == 0 {
+		return nil
+	}
+	mode := repairActionOutputContractMode(input, pkg, requiredOutput)
+	if mode == "" {
+		return nil
+	}
+	contract := map[string]any{
+		"requiredMode":   mode,
+		"allowedOutputs": repairActionOutputContractAllowedOutputs(mode, requiredOutput),
+		"forbiddenOutputs": repairActionOutputContractForbiddenOutputs(input, pkg, requiredOutput,
+			firstRawFailureOutput(input, rawFailedOutput...)),
+		"fallbackWhenNotPossible": repairActionOutputContractFallback(mode),
+	}
+	if boolValue(requiredOutput["mustUseCurrentTargetSnapshot"]) || len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		contract["evidenceRule"] = "use provided current target snapshots directly; do not add same-turn read/list steps before a required state-changing patch"
+	}
+	if len(mapFromValue(pkg["lastRejectedOutputContract"])) > 0 {
+		contract["lastRejectedOutputContract"] = pkg["lastRejectedOutputContract"]
+	}
+	return contract
+}
+
+func repairActionOutputContractMode(input map[string]any, pkg map[string]any, requiredOutput map[string]any) string {
+	switch {
+	case boolValue(requiredOutput["mustProduceConcreteValidationEvidence"]):
+		return "produce_concrete_validation_evidence"
+	case boolValue(pkg["evidenceAcquisitionRequired"]) || stringFromMap(input, "repairObjective") == repairObjectiveAcquireFailureEvidence:
+		return "acquire_concrete_failure_evidence"
+	case boolValue(requiredOutput["mustReturnPatchApplyNode"]) || onlyAcceptedRepairKind(requiredOutput, "patch/apply"):
+		return "state_changing_patch_apply"
+	case boolValue(requiredOutput["mustIncludeStateChangingNode"]):
+		return "state_changing_output"
+	default:
+		return ""
+	}
+}
+
+func onlyAcceptedRepairKind(requiredOutput map[string]any, kind string) bool {
+	kinds := stringSliceFromValue(requiredOutput["acceptedKinds"])
+	return len(kinds) == 1 && kinds[0] == kind
+}
+
+func repairActionOutputContractAllowedOutputs(mode string, requiredOutput map[string]any) []string {
+	switch mode {
+	case "produce_concrete_validation_evidence":
+		return []string{"bounded_validation_evidence_graph", "failed_dodAssessment", "real_governance_blocker"}
+	case "acquire_concrete_failure_evidence":
+		return []string{"bounded_evidence_acquisition_graph", "failed_dodAssessment", "real_governance_blocker"}
+	case "state_changing_patch_apply":
+		return []string{"patch/apply_text_replace_substantive", "patch/apply_unified_diff_complete", "patch/apply_file_write_complete_when_safe", "failed_dodAssessment", "real_governance_blocker"}
+	case "state_changing_output":
+		kinds := stringSliceFromValue(requiredOutput["acceptedKinds"])
+		if len(kinds) == 0 {
+			kinds = stateChangingRepairAcceptedKinds()
+		}
+		ret := make([]string, 0, len(kinds)+2)
+		for _, kind := range kinds {
+			ret = append(ret, "accepted_state_change:"+kind)
+		}
+		ret = append(ret, "failed_dodAssessment", "real_governance_blocker")
+		return compactUniqueStrings(ret)
+	default:
+		return nil
+	}
+}
+
+func repairActionOutputContractForbiddenOutputs(input map[string]any, pkg map[string]any, requiredOutput map[string]any, output map[string]any) []string {
+	ret := []string{}
+	ret = append(ret, stringSliceFromValue(requiredOutput["forbiddenKinds"])...)
+	ret = append(ret, stringSliceFromValue(pkg["forbiddenActions"])...)
+	if boolValue(requiredOutput["mustReturnPatchApplyNode"]) || onlyAcceptedRepairKind(requiredOutput, "patch/apply") {
+		ret = append(ret,
+			"read_only_or_inspection_only_graph",
+			"shell_only_validation_for_state_change",
+			"mcp_only_validation_for_state_change",
+		)
+	}
+	if repairActionFailureIndicatesNoOpPatch(input, output) || boolValue(requiredOutput["mustAvoidNoOpPatch"]) {
+		ret = append(ret, "no_op_text_replace", "identical_oldText_newText", "repeat_same_non_substantive_patch")
+	}
+	if boolValue(requiredOutput["mustUseCurrentTargetSnapshot"]) || len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		ret = append(ret, "same_turn_read_before_patch_for_known_target")
+	}
+	return limitedStrings(compactUniqueStrings(ret), 16)
+}
+
+func repairActionOutputContractFallback(mode string) string {
+	switch mode {
+	case "state_changing_patch_apply", "state_changing_output":
+		return "failed_dodAssessment_or_real_governance_blocker; do not substitute read-only inspection for required state change"
+	case "produce_concrete_validation_evidence", "acquire_concrete_failure_evidence":
+		return "failed_dodAssessment_or_real_governance_blocker when bounded evidence cannot be produced"
+	default:
+		return "failed_dodAssessment_or_real_governance_blocker"
+	}
 }
 
 func repairActionBudgetState(input map[string]any, pkg map[string]any) map[string]any {

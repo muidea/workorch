@@ -1048,6 +1048,11 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 					"forbiddenKinds":               []string{"read_only_graph", "shell_only_graph"},
 					"mustIncludeStateChangingNode": true,
 				},
+				"outputDecisionContract": map[string]any{
+					"requiredMode":     "state_changing_patch_apply",
+					"allowedOutputs":   []string{"patch/apply_text_replace_substantive", "failed_dodAssessment", "real_governance_blocker"},
+					"forbiddenOutputs": []string{"read_only_or_inspection_only_graph", "no_op_text_replace", "identical_oldText_newText"},
+				},
 			},
 			"executionContextPackage": map[string]any{
 				"goal": map[string]any{"text": "create the requested artifact"},
@@ -1076,6 +1081,12 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 		"hunk/context/base mismatch",
 		"Do not use shell commands to modify workspace files",
 		"complete fresh JSON object",
+		"outputDecisionContract",
+		"state_changing_patch_apply",
+		"patch/apply_text_replace_substantive",
+		"no_op_text_replace",
+		"identical_oldText_newText",
+		"oldText and newText must be different substantive literal strings",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("prompt missing %q, joined=%s", want, joined)
