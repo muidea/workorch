@@ -1104,6 +1104,56 @@ func TestValidateLLMExecutionOutputContractAllowsGoalCoverageObjectByTextWhenIdE
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCoverageTargetBySourceRequirementID(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-repair-source-requirement-target",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-repair-source-requirement-target/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeySoulStage:             soulStageExecution,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "goal",
+				"source":              "goal",
+				"sourceRequirementId": "goal-req-001-neutral",
+				"targetText":          "**Goal**: support transparent gateway forwarding",
+				"coverageTargetToken": "**Goal**: support transparent gateway forwarding",
+				"state":               "evidence_ready",
+			}},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "repair-main",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "file_write",
+					"targetRef": "main.go",
+					"content":   "package main\n",
+					"coverageTargets": []map[string]any{{
+						"source":              "goal",
+						"sourceRequirementId": "goal-req-001-neutral",
+						"targetText":          "Goal: support transparent gateway forwarding",
+					}},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want sourceRequirementId coverage target allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsGoalCoverageRawTarget(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-coverage-raw-target",

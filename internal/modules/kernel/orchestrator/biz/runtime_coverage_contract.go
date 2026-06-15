@@ -139,20 +139,23 @@ func coverageBoundTargetTokens(step *runModel.Step) []string {
 		ret = append(ret, value)
 	}
 	addCoverageTargetMap := func(item map[string]any) {
-		add(firstNonEmptyString(
-			stringFromMap(item, "coverageTargetToken"),
-			stringFromMap(item, "goalRequirementId"),
-			stringFromMap(item, "targetText"),
-			stringFromMap(item, "item"),
-			stringFromMap(item, "raw"),
-			stringFromMap(item, "requirement"),
-			stringFromMap(item, "goal"),
-			stringFromMap(item, "goalItem"),
-			stringFromMap(item, "id"),
-			stringFromMap(item, "expectationId"),
-			stringFromMap(item, "description"),
-			stringFromMap(item, "title"),
-		))
+		for _, key := range []string{
+			"coverageTargetToken",
+			"goalRequirementId",
+			"sourceRequirementId",
+			"targetText",
+			"item",
+			"raw",
+			"requirement",
+			"goal",
+			"goalItem",
+			"id",
+			"expectationId",
+			"description",
+			"title",
+		} {
+			add(stringFromMap(item, key))
+		}
 	}
 	for _, item := range mapSliceFromValue(step.Input["missingDoDItems"]) {
 		add(stringFromMap(item, "item"))
@@ -332,6 +335,7 @@ func patchNodeCoverageTargetTokens(input map[string]any) []string {
 
 func normalizeCoverageGapRepairToken(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer("**", "", "__", "", "`", "").Replace(value)
 	for _, prefix := range []string{"goal:", "dod:", "deliverable:", "acceptance:", "expectation:"} {
 		if strings.HasPrefix(value, prefix) {
 			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
