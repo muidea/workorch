@@ -3559,7 +3559,7 @@ func providerPromptContractWarnings(request llmmodels.ProviderRequest) []string 
 		strings.Contains(lowerAction, `"type": "plan_next_step"`) {
 		warnings = append(warnings, "state_changing_current_action_conflicts_with_plan_next_step")
 	}
-	required := stateChangingDecisionRequiredOutput(request.Input)
+	required := stateChangingDecisionRequiredOutput(request.Input, promptSnapshotBudgetForRequest(request))
 	for _, accepted := range stringSliceFromValue(required["acceptedKinds"]) {
 		if accepted == "" {
 			continue

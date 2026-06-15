@@ -647,7 +647,7 @@ func TestRepairActionPackagePromptSectionBoundsDuplicatedDynamicContext(t *testi
 		},
 	}
 
-	encoded := repairActionPackagePromptSection(input)
+	encoded := repairActionPackagePromptSection(input, defaultPromptSnapshotBudget())
 	if len(encoded) > 24000 {
 		t.Fatalf("repair action package length = %d, want bounded C3 projection", len(encoded))
 	}
@@ -690,7 +690,7 @@ func TestValidationSignalPayloadBoundsFailedStepContext(t *testing.T) {
 		"failedExecutionGraph": map[string]any{"nodes": []map[string]any{{"input": strings.Repeat("graph-noise ", 900)}}},
 	}
 
-	payload := validationSignalPayload(input)
+	payload := validationSignalPayload(input, defaultPromptSnapshotBudget())
 	encoded := marshalPromptSection("Validation Signal", payload)
 	if len(encoded) > 28000 {
 		t.Fatalf("validation signal length = %d, want bounded payload", len(encoded))
@@ -1177,6 +1177,64 @@ func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testin
 	if strings.Contains(current.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
 		!strings.Contains(current.Content, `"mustPatchDirectlyFromProvidedSnapshot":false`) {
 		t.Fatalf("current action did not use prompt-safe requiredOutput: %s", current.Content)
+	}
+}
+
+func TestBuildProviderPromptMessagesUsesProviderProfileSnapshotBudget(t *testing.T) {
+	content := "package main\n" + strings.Repeat("x", repairSnapshotPromptContentLimit+64)
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-profile-snapshot-budget",
+		RunID:          "run-profile-snapshot-budget",
+		StepID:         "step-profile-snapshot-budget",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				MaxInputTokens:         200000,
+				ReservedOutputTokens:   16000,
+				SafetyRatio:            0.8,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                         []string{"patch/apply"},
+					"mustUseCurrentTargetSnapshot":          true,
+					"mustPatchDirectlyFromProvidedSnapshot": true,
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"content":          content,
+					"contentHash":      "sha256-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	repair, ok := promptContextSectionByID(context, "C3.repair-action-package")
+	if !ok {
+		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if strings.Contains(repair.Content, "contentTruncatedForPrompt") ||
+		strings.Contains(repair.Content, "promptSnapshotContentIncomplete") {
+		t.Fatalf("repair prompt unexpectedly truncated provider-budgeted snapshot: %s", repair.Content)
+	}
+	for _, want := range []string{
+		`"contentView":"complete"`,
+		`"mustUseCurrentTargetSnapshot":true`,
+		`"mustPatchDirectlyFromProvidedSnapshot":true`,
+	} {
+		if !strings.Contains(repair.Content, want) {
+			t.Fatalf("repair prompt missing %q: %s", want, repair.Content)
+		}
 	}
 }
 

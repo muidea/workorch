@@ -131,13 +131,17 @@ if previousStep.outputMode == incrementalArtifact and previousFailure is schema_
 return executionGraph
 ```
 
-建议初始阈值由配置控制：
+建议初始阈值由配置控制，并优先给 provider 足够上下文承载完整当前目标快照：
 
-- `maxPatchContentBytes`: 8 KiB 到 16 KiB。
-- `maxGraphBytes`: 24 KiB 到 48 KiB。
-- `maxGraphFileWrites`: 2 到 4。
-- `schemaInvalidLargePreviewThreshold`: 8 KiB。
-- `maxArtifactChunkBytes`: 4 KiB 到 12 KiB。
+- `maxPatchContentBytes`: 默认 64 KiB，可按 provider context window 调大；超过该预算时不得继续在单次 JSON 中输出超大 `file_write`。
+- `maxGraphBytes`: 默认 128 KiB。
+- `maxGraphFileWrites`: 默认 3，避免一次 graph 生成过多状态变更目标。
+- `schemaInvalidLargePreviewThreshold`: 默认 32 KiB。
+- `maxArtifactChunkBytes`: 默认 16 KiB。
+
+输出粒度必须保持中立：Runtime 只声明 `outputGranularityPolicy`，要求 LLM 优先生成“小而内聚”的状态变更目标，避免单个过大的生成文件；当真实交付内容无法完整放入当前 JSON 合同时，应切换到 `incrementalArtifact` plan/chunk/assemble，或由 template/Soul 指导拆分为多个内聚目标资源。Core 不按语言、文件名或业务模板判断如何拆分。
+
+目标快照预算必须区别“provider prompt 可见片段”和“真实完整内容”。当完整内容超出 prompt 可承载范围时，prompt 中只能标记为 `contentView=partial_prefix`、`contentComplete=false`、`safeForFileWrite=false`，并要求后续通过按需 evidence acquisition 获取精确片段或完整内容；不得把截断内容当成完整 `file_write` 基准。
 
 切换状态机：
 

@@ -255,11 +255,11 @@ func Save(next Config) error {
 
 func DefaultLLMOutputRuntimeConfig() LLMOutputRuntimeConfig {
 	return LLMOutputRuntimeConfig{
-		MaxPatchContentBytes:               12288,
-		MaxGraphBytes:                      32768,
+		MaxPatchContentBytes:               65536,
+		MaxGraphBytes:                      131072,
 		MaxGraphFileWrites:                 3,
-		SchemaInvalidLargePreviewThreshold: 8192,
-		MaxArtifactChunkBytes:              8192,
+		SchemaInvalidLargePreviewThreshold: 32768,
+		MaxArtifactChunkBytes:              16384,
 		PreviousChunkTailBytes:             300,
 		MaxChunkRetryAttempts:              3,
 		MaxArtifactPlanAttempts:            2,

@@ -35,6 +35,11 @@ func TestOutputModeSelectorKeepsSmallStateChangingRepairOnExecutionGraph(t *test
 	if required["outputMode"] != outputModeExecutionGraph || required["mustIncludeStateChangingNode"] != true {
 		t.Fatalf("requiredOutput = %+v, want executionGraph state-changing contract", required)
 	}
+	granularity := mapFromValue(required["outputGranularityPolicy"])
+	if !boolValue(granularity["mustAvoidMonolithicGeneratedFiles"]) ||
+		granularity["maxPatchContentBytesRef"] != "input.llmOutputPolicy.maxPatchContentBytes" {
+		t.Fatalf("outputGranularityPolicy = %+v, want bounded cohesive output contract", granularity)
+	}
 	if input["artifactOutputContract"] != nil {
 		t.Fatalf("artifactOutputContract = %+v, want nil for small graph", input["artifactOutputContract"])
 	}

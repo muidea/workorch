@@ -150,6 +150,73 @@ func TestBuildConvergenceContractUsesProfileRequiredStateChangingEvidenceForCove
 	}
 }
 
+func TestBuildConvergenceContractPreservesStrategyReassessmentForProfileStateChange(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-strategy-reassessment",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                 "version_control_snapshot",
+							"scope":              "deliverable",
+							"acceptedStepKinds":  []string{gitcommon.StepKindWrite},
+							"acceptedOperations": []string{gitcommon.OperationCommit},
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID: "run-convergence-profile-strategy-reassessment/repair-001",
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:     runtimeStageVerification,
+			stepInputKeyRuntimeStageMode: "strict_convergence",
+			"repairObjective":            repairObjectiveConcreteValidationEvidence,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "version_control_snapshot",
+				"coverageTargetToken": "version_control_snapshot",
+				"targetText":          "version_control_snapshot",
+				"state":               "failed",
+				"source":              "deliverableCoverage",
+			}},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": concreteValidationEvidenceRequiredOutput(nil),
+				"strategyReassessment": map[string]any{
+					"required": true,
+					"requiredDecisionFields": []string{
+						"failedSurface",
+						"rootCauseTarget",
+						"repairTargetDecision",
+						"repairMode",
+						"forbiddenRepair",
+						"verificationPlan",
+					},
+				},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q", contract.State, convergenceStateNeedStateChange)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if !boolValue(required["mustDeclareStrategyReassessmentFields"]) {
+		t.Fatalf("requiredOutput = %+v, want strategy reassessment declaration", required)
+	}
+	if modes := stringSliceFromValue(required["strategyReassessmentRepairModes"]); !stringSliceContains(modes, "continue_same_target_repair") ||
+		!stringSliceContains(modes, "shift_root_cause_target") {
+		t.Fatalf("strategyReassessmentRepairModes = %+v, want enum modes", required["strategyReassessmentRepairModes"])
+	}
+	if fields := stringSliceFromValue(required["strategyReassessmentRequiredFields"]); !stringSliceContains(fields, "repairMode") {
+		t.Fatalf("strategyReassessmentRequiredFields = %+v, want repairMode", fields)
+	}
+}
+
 func TestBuildConvergenceContractDefersPrimaryStateChangeWithoutTargetWhenProfileWriteEvidenceIsSupplementary(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-mixed",

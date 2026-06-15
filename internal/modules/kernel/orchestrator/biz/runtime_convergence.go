@@ -1708,7 +1708,16 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required := stateChangingRepairRequiredOutput()
 	for key, value := range mapFromValue(pkg["requiredOutput"]) {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustDeclareStrategyReassessmentFields", "strategyReassessmentRequiredFields", "strategyReassessmentMatchRule", "mustReassessRepeatedFailedSurface":
+		case "mustReturnValidJSON",
+			"mustNotReuseRejectedJSON",
+			"forbiddenStalePatchReuse",
+			"mustDeclareStrategyReassessmentFields",
+			"strategyReassessmentRequiredFields",
+			"strategyReassessmentRepairModes",
+			"strategyReassessmentMatchRule",
+			"mustReassessRepeatedFailedSurface",
+			"sameTargetContinuationRule",
+			"rootCauseTargetShiftRule":
 			required[key] = value
 		}
 	}
@@ -1739,6 +1748,7 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
 		required["primaryStateChangingRule"] = "when unresolved coverage targets include general deliverable, goal, or DoD state change beyond profile-specific write evidence, include a primary state-changing artifact before any supplementary evidence-only write such as snapshot/commit"
 	}
+	addStrategyReassessmentRequiredOutputContract(pkg, required)
 	pkg["requiredOutput"] = required
 	pkg["exitCriteria"] = []string{
 		"profile_required_state_changing_evidence_produced_then_verify",

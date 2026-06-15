@@ -387,6 +387,7 @@ func applyOutputModeRequiredOutput(input map[string]any, selection outputModeSel
 	if len(required) == 0 {
 		required = stateChangingRepairRequiredOutput()
 	}
+	applyOutputGranularityRequiredOutputContract(required)
 	required["outputMode"] = selection.Mode
 	switch selection.Mode {
 	case outputModeIncrementalArtifact:

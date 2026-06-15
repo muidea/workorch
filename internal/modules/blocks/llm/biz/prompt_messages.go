@@ -35,10 +35,67 @@ var promptHeadingPattern = regexp.MustCompile(`(?m)^\s{0,3}#{2,}\s*`)
 var promptBoldPattern = regexp.MustCompile(`\*\*([^\*]+)\*\*`)
 
 const (
-	repairSnapshotPromptContentLimit     = 8192
-	validationSnapshotPromptContentLimit = 4096
-	repairSnapshotPromptItemLimit        = 2
+	repairSnapshotPromptContentLimit        = 65536
+	validationSnapshotPromptContentLimit    = 32768
+	maxRepairSnapshotPromptContentLimit     = 262144
+	maxValidationSnapshotPromptContentLimit = 131072
+	repairSnapshotPromptItemLimit           = 2
 )
+
+type promptSnapshotBudget struct {
+	RepairContentLimit     int
+	ValidationContentLimit int
+	ItemLimit              int
+}
+
+func promptSnapshotBudgetForRequest(request llmmodels.ProviderRequest) promptSnapshotBudget {
+	budget := defaultPromptSnapshotBudget()
+	profile := request.Config.ContextProfile
+	availableTokens := profile.MaxInputTokens
+	if availableTokens <= 0 {
+		availableTokens = profile.ContextWindowTokens
+	}
+	if profile.ReservedOutputTokens > 0 && availableTokens > profile.ReservedOutputTokens {
+		availableTokens -= profile.ReservedOutputTokens
+	}
+	if availableTokens <= 0 {
+		return budget
+	}
+	safetyRatio := profile.SafetyRatio
+	if safetyRatio <= 0 || safetyRatio > 1 {
+		safetyRatio = 0.8
+	}
+	tokensPerByte := profile.EstimatedTokensPerByte
+	if tokensPerByte <= 0 {
+		tokensPerByte = 0.25
+	}
+	availableBytes := int(float64(availableTokens) * safetyRatio / tokensPerByte)
+	if profile.MaxRequestBytes > 0 {
+		availableBytes = min(availableBytes, profile.MaxRequestBytes)
+	}
+	if profile.BytesHardLimit > 0 {
+		availableBytes = min(availableBytes, profile.BytesHardLimit)
+	}
+	if availableBytes <= 0 {
+		return budget
+	}
+	totalSnapshotBytes := availableBytes / 4
+	if totalSnapshotBytes <= 0 {
+		return budget
+	}
+	perRepairSnapshot := totalSnapshotBytes / max(1, budget.ItemLimit)
+	budget.RepairContentLimit = min(maxRepairSnapshotPromptContentLimit, max(budget.RepairContentLimit, perRepairSnapshot))
+	budget.ValidationContentLimit = min(maxValidationSnapshotPromptContentLimit, max(budget.ValidationContentLimit, perRepairSnapshot/2))
+	return budget
+}
+
+func defaultPromptSnapshotBudget() promptSnapshotBudget {
+	return promptSnapshotBudget{
+		RepairContentLimit:     repairSnapshotPromptContentLimit,
+		ValidationContentLimit: validationSnapshotPromptContentLimit,
+		ItemLimit:              repairSnapshotPromptItemLimit,
+	}
+}
 
 func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerPromptMessageBuildResult {
 	if turns := requestPromptContextTurns(request); len(turns) > 0 {
@@ -111,8 +168,9 @@ func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerProm
 		"model":       request.Model,
 		"schema":      request.Schema,
 	}))
-	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input))
-	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input))
+	snapshotBudget := promptSnapshotBudgetForRequest(request)
+	appendSection("C3.stage-contract", "user", "normalize_allowed", stageContractPromptSection(request.Input, snapshotBudget))
+	appendSection("C3.repair-action-package", "user", "normalize_allowed", repairActionPackagePromptSection(request.Input, snapshotBudget))
 	appendSection("C4.previous-decision", "assistant", "normalize_allowed", previousDecisionPromptSection(request.Input))
 	for _, event := range executionSignalPromptEvents(request) {
 		appendSection(event.SectionID, event.Role, "normalize_allowed", event.Content)
@@ -464,7 +522,7 @@ func effectiveGoalDoDPromptSection(input map[string]any) string {
 	return marshalPromptSection("Effective Goal and DoD View", section)
 }
 
-func stageContractPromptSection(input map[string]any) string {
+func stageContractPromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
 	section := map[string]any{}
 	for _, key := range []string{
 		"currentRuntimeStage",
@@ -501,7 +559,7 @@ func stageContractPromptSection(input map[string]any) string {
 	}
 	copyMapValue(section, "definitionChangeImpact", definitionChangeImpactPayload(input))
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
-		if required := promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit); required != nil {
+		if required := promptRequiredOutputForRepairPackage(pkg, snapshotBudget.RepairContentLimit); required != nil {
 			section["requiredOutput"] = required
 		}
 		copyMapValue(section, "forbiddenActions", pkg["forbiddenActions"])
@@ -513,19 +571,19 @@ func stageContractPromptSection(input map[string]any) string {
 	return marshalPromptSection("Stage Contract", section)
 }
 
-func repairActionPackagePromptSection(input map[string]any) string {
+func repairActionPackagePromptSection(input map[string]any, snapshotBudget promptSnapshotBudget) string {
 	pkg := recordFromAny(input["repairActionPackage"])
 	if len(pkg) == 0 {
 		return ""
 	}
-	section := compactRepairActionPackagePromptPayload(pkg)
+	section := compactRepairActionPackagePromptPayload(pkg, snapshotBudget)
 	if len(section) == 0 {
 		return ""
 	}
 	return marshalPromptSection("Current Repair Action Package", section)
 }
 
-func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any {
+func compactRepairActionPackagePromptPayload(pkg map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
 	if len(pkg) == 0 {
 		return nil
 	}
@@ -565,9 +623,9 @@ func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any 
 		section["coverageTargetSet"] = targets
 	}
 	if targetSnapshots := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targetSnapshots) > 0 {
-		section["targetSnapshots"] = compactRepairSnapshotsForPrompt(targetSnapshots, repairSnapshotPromptItemLimit, repairSnapshotPromptContentLimit)
+		section["targetSnapshots"] = compactRepairSnapshotsForPrompt(targetSnapshots, snapshotBudget.ItemLimit, snapshotBudget.RepairContentLimit)
 	}
-	if required := promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit); required != nil {
+	if required := promptRequiredOutputForRepairPackage(pkg, snapshotBudget.RepairContentLimit); required != nil {
 		section["requiredOutput"] = required
 	}
 	if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
@@ -691,6 +749,7 @@ type timelineEventSelection struct {
 
 func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionSignalPromptEvent {
 	events := make([]executionSignalPromptEvent, 0, 8)
+	snapshotBudget := promptSnapshotBudgetForRequest(request)
 	appendEvent := func(sectionID, title string, value any) {
 		content := marshalPromptSection(title, value)
 		if strings.TrimSpace(content) == "" {
@@ -708,7 +767,7 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if currentFailure := currentFailureSignalPayload(request.Input); len(currentFailure) > 0 {
 		appendEvent("C4.current-failure", "Current Failure Signal", currentFailure)
 	}
-	if progress := currentProgressSignalPayload(request.Input); len(progress) > 0 {
+	if progress := currentProgressSignalPayload(request.Input, snapshotBudget); len(progress) > 0 {
 		appendEvent("C4.current-progress", "Current Progress Signal", progress)
 	}
 	if coverageWorkItems := coverageWorkItemSignalPayload(request.Input); len(coverageWorkItems) > 0 {
@@ -720,7 +779,7 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if impact := definitionChangeImpactSignalPayload(request.Input); len(impact) > 0 {
 		appendEvent("C4.definition-change-impact", "Definition Change Impact Signal", impact)
 	}
-	if validation := validationSignalPayload(request.Input); len(validation) > 0 {
+	if validation := validationSignalPayload(request.Input, snapshotBudget); len(validation) > 0 {
 		appendEvent("C4.validation-signal", "Validation Signal", validation)
 	}
 	if governance := governanceDecisionSignalPayload(request.Input); len(governance) > 0 {
@@ -991,7 +1050,7 @@ func currentFailureSignalPayload(input map[string]any) map[string]any {
 	return payload
 }
 
-func currentProgressSignalPayload(input map[string]any) map[string]any {
+func currentProgressSignalPayload(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
 	payload := map[string]any{}
 	if progress := compactCurrentExecutionProgressSignal(recordFromAny(input["currentExecutionProgress"])); len(progress) > 0 {
 		payload["currentExecutionProgress"] = progress
@@ -1017,7 +1076,7 @@ func currentProgressSignalPayload(input map[string]any) map[string]any {
 		if targets := compactCoverageTargetSetForPrompt(mapSliceFromAny(repairPkg["coverageTargetSet"]), 6); len(targets) > 0 {
 			payload["coverageTargetSet"] = targets
 		}
-		if required := promptRequiredOutputForRepairPackage(repairPkg, repairSnapshotPromptContentLimit); required != nil {
+		if required := promptRequiredOutputForRepairPackage(repairPkg, snapshotBudget.RepairContentLimit); required != nil {
 			payload["requiredOutput"] = budgetProviderValue(required, 0, 1024, 6, 12, 3)
 		}
 		if value, ok := repairPkg["exitCriteria"]; ok {
@@ -1152,14 +1211,17 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		if content, ok := item["content"].(string); ok {
 			if contentLimit > 0 && len(content) > contentLimit {
 				out["content"] = content[:contentLimit] + "\n[TRUNCATED]"
+				out["contentView"] = "partial_prefix"
 				out["contentTruncatedForPrompt"] = true
 				out["contentComplete"] = false
 				out["safeForFileWrite"] = false
 				out["promptContentComplete"] = false
 				out["promptSafeForFileWrite"] = false
-				out["promptSafetyNote"] = "content truncated for provider prompt; do not use as a complete file_write snapshot"
+				out["promptExtractionRequired"] = true
+				out["promptSafetyNote"] = "content truncated for provider prompt; do not use as a complete file_write snapshot; acquire exact current content or a targeted segment before complete rewrite"
 			} else {
 				out["content"] = content
+				out["contentView"] = "complete"
 			}
 		}
 		if len(out) > 0 {
@@ -1664,7 +1726,7 @@ func compactFailedStepInputSignal(input map[string]any) map[string]any {
 	if context := compactCoverageWorkItemContextRef(recordFromAny(input["coverageWorkItemContext"])); len(context) > 0 {
 		out["coverageWorkItemContextRef"] = context
 	}
-	if pkg := compactRepairActionPackagePromptPayload(recordFromAny(input["repairActionPackage"])); len(pkg) > 0 {
+	if pkg := compactRepairActionPackagePromptPayload(recordFromAny(input["repairActionPackage"]), defaultPromptSnapshotBudget()); len(pkg) > 0 {
 		out["repairActionPackage"] = budgetProviderValue(pkg, 0, 1024, 4, 10, 2)
 	}
 	if timeline := compactProcessEvidenceTimelineSignal(mapSliceFromAny(input["processEvidenceTimeline"])); len(timeline) > 0 {
@@ -1716,7 +1778,7 @@ func limitedStringSlice(values []string, limit int) []string {
 	return out
 }
 
-func validationSignalPayload(input map[string]any) map[string]any {
+func validationSignalPayload(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
 	payload := map[string]any{}
 	if failedInput := compactFailedStepInputSignal(recordFromAny(input["failedStepInput"])); len(failedInput) > 0 {
 		payload["failedStepInput"] = failedInput
@@ -1731,7 +1793,7 @@ func validationSignalPayload(input map[string]any) map[string]any {
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
-			payload["targetSnapshots"] = compactRepairSnapshotsForPrompt(targets, repairSnapshotPromptItemLimit, validationSnapshotPromptContentLimit)
+			payload["targetSnapshots"] = compactRepairSnapshotsForPrompt(targets, snapshotBudget.ItemLimit, snapshotBudget.ValidationContentLimit)
 		}
 		if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
 			payload["workspaceFileManifestSummary"] = manifest
@@ -1973,6 +2035,7 @@ func numericValue(value any) float64 {
 }
 
 func currentActionPromptSection(request llmmodels.ProviderRequest) string {
+	snapshotBudget := promptSnapshotBudgetForRequest(request)
 	if !isDecisionSchemaRequest(request) {
 		if request.Repair != nil {
 			return marshalPromptSection("Current Requested Action", map[string]any{
@@ -2024,7 +2087,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		})
 	}
 	if concreteValidationDecisionRequest(request.Input) {
-		required := concreteValidationDecisionRequiredOutput(request.Input)
+		required := concreteValidationDecisionRequiredOutput(request.Input, snapshotBudget)
 		return marshalPromptSection("Current Requested Action", map[string]any{
 			"type":           "produce_concrete_validation_evidence_or_failed_assessment",
 			"requiredOutput": required,
@@ -2040,7 +2103,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		})
 	}
 	if stateChangingDecisionRequest(request.Input) {
-		required := stateChangingDecisionRequiredOutput(request.Input)
+		required := stateChangingDecisionRequiredOutput(request.Input, snapshotBudget)
 		outputContract := recordFromAny(recordFromAny(request.Input["repairActionPackage"])["outputDecisionContract"])
 		requirements := []string{
 			"State-changing output is required by the current Stage Contract",
@@ -2055,6 +2118,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"When repairActionPackage.targetSnapshots, failureTargetRepairContext, or repairTargetSet already identifies concrete repair targets, prioritize direct state-changing edits to those targets before auxiliary validation scaffolding, supplemental evidence resources, or unrelated supporting files.",
 			"If more current evidence is truly required, return a real blocker or wait for an explicit acquire_concrete_failure_evidence contract; do not satisfy this state-changing contract with file/read-only nodes",
 			"Patch content, diffs, and exact text replacements must be complete, concrete, directly applicable, and never copied from redacted or truncated snapshots",
+			"Keep state-changing content bounded to small cohesive targets; if the requested content would exceed llmOutputPolicy budgets or become one oversized generated file, use the runtime-selected incrementalArtifact plan/chunk contract or split it across cohesive target resources.",
 			"file_write content must be non-empty and cannot represent deletion; when no supported state-changing output can satisfy the request, return failed dodAssessment or a real blocker",
 			"When failed evidence includes current target snapshots, update those targets directly with auditable state-change artifacts before rerunning verification",
 			"Do not use shell commands to modify workspace files when a patch artifact can represent the change; shell commands should prepare or verify after the accepted state-changing artifact",
@@ -2108,9 +2172,9 @@ func concreteValidationDecisionRequest(input map[string]any) bool {
 	return boolValue(required["mustProduceConcreteValidationEvidence"])
 }
 
-func concreteValidationDecisionRequiredOutput(input map[string]any) map[string]any {
+func concreteValidationDecisionRequiredOutput(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
 	pkg := recordFromAny(input["repairActionPackage"])
-	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, validationSnapshotPromptContentLimit))
+	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, snapshotBudget.ValidationContentLimit))
 	if len(required) > 0 {
 		return required
 	}
@@ -2139,9 +2203,9 @@ func stateChangingDecisionRequest(input map[string]any) bool {
 	return false
 }
 
-func stateChangingDecisionRequiredOutput(input map[string]any) map[string]any {
+func stateChangingDecisionRequiredOutput(input map[string]any, snapshotBudget promptSnapshotBudget) map[string]any {
 	pkg := recordFromAny(input["repairActionPackage"])
-	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit))
+	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, snapshotBudget.RepairContentLimit))
 	if len(required) > 0 {
 		return required
 	}

@@ -413,7 +413,7 @@ func mergePriorRepairActionPackageEvidence(pkg map[string]any, requiredOutput ma
 }
 
 func stateChangingRepairRequiredOutput() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"mustIncludeStateChangingNode": true,
 		"acceptedKinds":                stateChangingRepairAcceptedKinds(),
 		"toolStateChangingInputContract": map[string]any{
@@ -443,6 +443,25 @@ func stateChangingRepairRequiredOutput() map[string]any {
 			"file_write":   []string{"targetRef", "content"},
 			"unified_diff": []string{"targetRef", "diff"},
 		},
+	}
+	applyOutputGranularityRequiredOutputContract(out)
+	return out
+}
+
+func applyOutputGranularityRequiredOutputContract(requiredOutput map[string]any) {
+	if len(requiredOutput) == 0 {
+		return
+	}
+	requiredOutput["outputGranularityPolicy"] = map[string]any{
+		"preferSmallCohesiveTargets":                    true,
+		"mustAvoidMonolithicGeneratedFiles":             true,
+		"splitLargeDeliverablesAcrossCohesiveTargets":   true,
+		"largeContentRequiresIncrementalArtifactOrPlan": true,
+		"maxPatchContentBytesRef":                       "input.llmOutputPolicy.maxPatchContentBytes",
+		"maxGraphBytesRef":                              "input.llmOutputPolicy.maxGraphBytes",
+		"maxGraphFileWritesRef":                         "input.llmOutputPolicy.maxGraphFileWrites",
+		"granularityRule":                               "keep each state-changing patch/apply target bounded and cohesive; if a requested deliverable is too large for one complete patch/apply payload, return the runtime-selected incrementalArtifact plan/chunk contract or split it across cohesive target resources instead of emitting one oversized file_write",
+		"completeContentRule":                           "do not emit partial file_write content as if it were complete; partial large content must use incremental artifact continuation or an explicit follow-up contract",
 	}
 }
 

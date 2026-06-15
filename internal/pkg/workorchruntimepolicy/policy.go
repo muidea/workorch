@@ -3,11 +3,11 @@ package workorchruntimepolicy
 const (
 	defaultMaxRuntimeRepairAttempts  = 10
 	defaultMaxProviderRetryAttempts  = 10
-	defaultMaxPatchContentBytes      = 12288
-	defaultMaxGraphBytes             = 32768
+	defaultMaxPatchContentBytes      = 65536
+	defaultMaxGraphBytes             = 131072
 	defaultMaxGraphFileWrites        = 3
-	defaultSchemaInvalidPreviewBytes = 8192
-	defaultMaxArtifactChunkBytes     = 8192
+	defaultSchemaInvalidPreviewBytes = 32768
+	defaultMaxArtifactChunkBytes     = 16384
 	defaultPreviousChunkTailBytes    = 300
 	defaultMaxChunkRetryAttempts     = 3
 	defaultMaxArtifactPlanAttempts   = 2

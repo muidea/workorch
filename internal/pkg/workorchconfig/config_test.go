@@ -390,8 +390,8 @@ backend = "file"
 dataDir = ".workorch-data"
 
 [runtime.llmOutput]
-maxPatchContentBytes = 50000
-maxGraphBytes = 32768
+maxPatchContentBytes = 200000
+maxGraphBytes = 131072
 	`)
 	_ = Close()
 	t.Setenv(EnvConfigDir, configDir)
