@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -557,7 +558,7 @@ func primaryDiagnosticFileWriteChangesLine(oldContent string, newContent string,
 
 func primaryDiagnosticRequestHasMatchingDeclaration(request runtimePatchRequest, contract map[string]any) bool {
 	targetRefs := stringSliceFromValue(contract["targetRefs"])
-	identifiers := stringSliceFromValue(contract["identifiers"])
+	identifiers := primaryDiagnosticContractIdentifiers(contract)
 	lineRefs := mapSliceFromValue(contract["lineRefs"])
 	for _, key := range []string{"primaryDiagnosticResolution", "primaryDiagnosticResolutions", "addressesFailureSignals"} {
 		if primaryDiagnosticDeclarationMatches(request.Extra[key], request, targetRefs, identifiers, lineRefs) {
@@ -647,7 +648,7 @@ func primaryDiagnosticRequestMentionsIdentifiers(request runtimePatchRequest, co
 		stringFromAny(request.Extra["summary"]),
 		stringFromAny(request.Extra["reason"]),
 	}, "\n"))
-	return primaryDiagnosticTextMentionsAny(text, stringSliceFromValue(contract["identifiers"]))
+	return primaryDiagnosticTextMentionsAny(text, primaryDiagnosticContractIdentifiers(contract))
 }
 
 func primaryDiagnosticTextMentionsAny(text string, values []string) bool {
@@ -657,11 +658,73 @@ func primaryDiagnosticTextMentionsAny(text string, values []string) bool {
 	}
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if value != "" && strings.Contains(text, value) {
+		if value == "" {
+			continue
+		}
+		if primaryDiagnosticLooksSimpleIdentifier(value) {
+			if primaryDiagnosticTextContainsIdentifier(text, value) {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(text, value) {
 			return true
 		}
 	}
 	return false
+}
+
+func primaryDiagnosticContractIdentifiers(contract map[string]any) []string {
+	if len(contract) == 0 {
+		return nil
+	}
+	ret := stringSliceFromValue(contract["identifiers"])
+	for _, message := range stringSliceFromValue(contract["messages"]) {
+		ret = append(ret, extractStructuredFailureLinePayloadIdentifiers(message)...)
+	}
+	return limitedStrings(compactUniqueStrings(ret), maxLLMContextSliceItems)
+}
+
+func primaryDiagnosticLooksSimpleIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func primaryDiagnosticTextContainsIdentifier(text string, identifier string) bool {
+	text = strings.ToLower(text)
+	identifier = strings.ToLower(strings.TrimSpace(identifier))
+	if text == "" || identifier == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(text[start:], identifier)
+		if idx < 0 {
+			return false
+		}
+		absolute := start + idx
+		beforeOK := absolute == 0 || !primaryDiagnosticIdentifierRune(rune(text[absolute-1]))
+		after := absolute + len(identifier)
+		afterOK := after >= len(text) || !primaryDiagnosticIdentifierRune(rune(text[after]))
+		if beforeOK && afterOK {
+			return true
+		}
+		start = absolute + len(identifier)
+		if start >= len(text) {
+			return false
+		}
+	}
+}
+
+func primaryDiagnosticIdentifierRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
 
 func primaryDiagnosticTextMentionsLineRef(text string, lineRefs []map[string]any) bool {

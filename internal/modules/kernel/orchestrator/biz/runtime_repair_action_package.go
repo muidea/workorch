@@ -1428,7 +1428,7 @@ func repairActionOutputContractMode(input map[string]any, pkg map[string]any, re
 		return "produce_concrete_validation_evidence"
 	case boolValue(pkg["evidenceAcquisitionRequired"]) || stringFromMap(input, "repairObjective") == repairObjectiveAcquireFailureEvidence:
 		return "acquire_concrete_failure_evidence"
-	case boolValue(requiredOutput["mustReturnPatchApplyNode"]) || onlyAcceptedRepairKind(requiredOutput, "patch/apply"):
+	case repairActionRequiresPatchApplyOutput(pkg, requiredOutput):
 		return "state_changing_patch_apply"
 	case boolValue(requiredOutput["mustIncludeStateChangingNode"]):
 		return "state_changing_output"
@@ -1440,6 +1440,16 @@ func repairActionOutputContractMode(input map[string]any, pkg map[string]any, re
 func onlyAcceptedRepairKind(requiredOutput map[string]any, kind string) bool {
 	kinds := stringSliceFromValue(requiredOutput["acceptedKinds"])
 	return len(kinds) == 1 && kinds[0] == kind
+}
+
+func repairActionRequiresPatchApplyOutput(pkg map[string]any, requiredOutput map[string]any) bool {
+	if boolValue(requiredOutput["mustReturnPatchApplyNode"]) || onlyAcceptedRepairKind(requiredOutput, "patch/apply") {
+		return true
+	}
+	if primary := mapFromValue(pkg["primaryDiagnosticRepair"]); boolValue(primary["required"]) && len(mapSliceFromValue(pkg["targetSnapshots"])) > 0 {
+		return true
+	}
+	return false
 }
 
 func repairActionOutputContractAllowedOutputs(mode string, requiredOutput map[string]any) []string {
@@ -1470,7 +1480,7 @@ func repairActionOutputContractForbiddenOutputs(input map[string]any, pkg map[st
 	ret := []string{}
 	ret = append(ret, stringSliceFromValue(requiredOutput["forbiddenKinds"])...)
 	ret = append(ret, stringSliceFromValue(pkg["forbiddenActions"])...)
-	if boolValue(requiredOutput["mustReturnPatchApplyNode"]) || onlyAcceptedRepairKind(requiredOutput, "patch/apply") {
+	if repairActionRequiresPatchApplyOutput(pkg, requiredOutput) {
 		ret = append(ret,
 			"read_only_or_inspection_only_graph",
 			"shell_only_validation_for_state_change",

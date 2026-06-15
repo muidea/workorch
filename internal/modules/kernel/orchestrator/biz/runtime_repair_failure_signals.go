@@ -455,11 +455,8 @@ func structuredFailureBareTargetLooksLikeNumericMeasurement(base string, ext str
 }
 
 func extractStructuredFailureIdentifiers(text string) []string {
+	ret := extractStructuredFailureLinePayloadIdentifiers(text)
 	matches := structuredFailureIdentifierPattern.FindAllString(text, maxLLMContextSliceItems*4)
-	if len(matches) == 0 {
-		return nil
-	}
-	ret := make([]string, 0, len(matches))
 	for _, value := range matches {
 		value = strings.TrimSpace(value)
 		if !structuredFailureIdentifierUseful(value) {
@@ -467,7 +464,55 @@ func extractStructuredFailureIdentifiers(text string) []string {
 		}
 		ret = append(ret, value)
 	}
-	return ret
+	return compactUniqueStrings(ret)
+}
+
+func extractStructuredFailureLinePayloadIdentifiers(text string) []string {
+	lines := strings.Split(text, "\n")
+	ret := make([]string, 0, min(len(lines), maxLLMContextSliceItems))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || containsRuntimeRedactionMarker(line) {
+			continue
+		}
+		matches := structuredFailureLineRefPattern.FindAllStringIndex(line, maxLLMContextSliceItems)
+		for _, match := range matches {
+			if len(match) < 2 || match[1] >= len(line) {
+				continue
+			}
+			payload := strings.TrimLeft(line[match[1]:], ": \t")
+			if payload == "" {
+				continue
+			}
+			for _, value := range structuredFailureLinePayloadIdentifierPattern.FindAllString(payload, maxLLMContextSliceItems*2) {
+				value = strings.TrimSpace(value)
+				if !structuredFailureLinePayloadIdentifierUseful(value) {
+					continue
+				}
+				ret = append(ret, value)
+				if len(ret) >= maxLLMContextSliceItems {
+					return compactUniqueStrings(ret)
+				}
+			}
+		}
+	}
+	return compactUniqueStrings(ret)
+}
+
+func structuredFailureLinePayloadIdentifierUseful(value string) bool {
+	if value == "" || len(value) < 2 || len(value) > 96 {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if structuredFailureIdentifierStopWords[lower] {
+		return false
+	}
+	for _, r := range value {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func structuredFailureIdentifierUseful(value string) bool {
@@ -618,6 +663,7 @@ func runtimeValueContainsRedactionMarker(value any, depth int) bool {
 var structuredFailureLineRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+):([0-9]+)(?::([0-9]+))?`)
 var structuredFailureTargetRefPattern = regexp.MustCompile(`(?:^|[\s"'(\[=])([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_./\\-]+)(?::[0-9]+(?::[0-9]+)?)?`)
 var structuredFailureIdentifierPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{2,}`)
+var structuredFailureLinePayloadIdentifierPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 var providerFailureHTTPStatusPattern = regexp.MustCompile(`\bhttp status\s+([0-9]{3})\b`)
 
 var structuredFailureIdentifierStopWords = map[string]bool{

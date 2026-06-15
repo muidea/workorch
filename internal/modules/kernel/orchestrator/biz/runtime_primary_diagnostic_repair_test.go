@@ -211,6 +211,143 @@ func TestValidateLLMExecutionOutputContractAllowsTextReplacePrimaryDiagnosticPat
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsImportPatchForLinePayloadShortIdentifier(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-line-payload-import",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-line-payload-import/repair-001")
+	step.Input["failureTargetScope"] = "failureTargets=main.go"
+	step.Input[stepInputKeyRepairOfFailureSig] = "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1"
+	step.Input["primaryDiagnosticRepair"] = map[string]any{
+		"required":   true,
+		"targetRefs": []string{"main.go"},
+		"lineRefs": []map[string]any{
+			{"targetRef": "main.go", "line": 23, "column": 11},
+			{"targetRef": "main.go", "line": 24, "column": 11},
+		},
+		"messages": []string{
+			"./main.go:23:11: undefined: io",
+			"./main.go:24:11: undefined: io",
+		},
+	}
+	step.Input["repairActionPackage"] = map[string]any{
+		"primaryDiagnosticRepair": step.Input["primaryDiagnosticRepair"],
+		"targetSnapshots": []map[string]any{{
+			"targetRef": "main.go",
+			"content": strings.Join([]string{
+				"package main",
+				"",
+				"import (",
+				"\t\"context\"",
+				"\t\"fmt\"",
+				"\t\"log\"",
+				")",
+				"",
+				"type LSPClient struct {",
+				"\tstdin io.WriteCloser",
+				"\tstdout io.ReadCloser",
+				"}",
+			}, "\n"),
+		}},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "fix-import",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"patchType": "text_replace",
+						"targetRef": "main.go",
+						"oldText": strings.Join([]string{
+							"import (",
+							"\t\"context\"",
+							"\t\"fmt\"",
+							"\t\"log\"",
+							")",
+						}, "\n"),
+						"newText": strings.Join([]string{
+							"import (",
+							"\t\"context\"",
+							"\t\"fmt\"",
+							"\t\"io\"",
+							"\t\"log\"",
+							")",
+						}, "\n"),
+						"summary": "add io import for io.WriteCloser and io.ReadCloser",
+					},
+				},
+				{
+					"dependsOn": []string{"fix-import"},
+					"id":        "assign-pipes",
+					"kind":      "patch/apply",
+					"input": map[string]any{
+						"patchType": "text_replace",
+						"targetRef": "main.go",
+						"oldText": strings.Join([]string{
+							"\tstdout, err := cmd.StdoutPipe()",
+							"\tif err != nil {",
+							"\t\treturn err",
+							"\t}",
+						}, "\n"),
+						"newText": strings.Join([]string{
+							"\tstdout, err := cmd.StdoutPipe()",
+							"\tif err != nil {",
+							"\t\treturn err",
+							"\t}",
+							"\tclient.stdin = stdin",
+							"\tclient.stdout = stdout",
+						}, "\n"),
+						"summary": "assign io pipes to client after creation",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want import patch for line payload short identifier allowed", err)
+	}
+}
+
+func TestStructuredFailureSignalsExtractShortLinePayloadIdentifier(t *testing.T) {
+	output := map[string]any{
+		"stderr": strings.Join([]string{
+			"./main.go:23:11: undefined: io",
+			"./main.go:24:11: undefined: io",
+		}, "\n"),
+		failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1",
+	}
+
+	signals := structuredFailureSignalsFromFailureOutput(output, errors.New("exit status 1"), failureClassShellCommand, "")
+
+	if !stringSliceContains(stringSliceFromValue(signals["identifiers"]), "io") {
+		t.Fatalf("structuredFailureSignals = %#v, want short line payload identifier io", signals)
+	}
+}
+
+func TestRepairActionOutputDecisionContractNarrowsPrimaryDiagnosticToPatchApply(t *testing.T) {
+	pkg := map[string]any{
+		"primaryDiagnosticRepair": map[string]any{"required": true},
+		"targetSnapshots":         []map[string]any{{"targetRef": "main.go", "content": "package main\n"}},
+	}
+	required := stateChangingRepairRequiredOutput()
+	required["mustIncludeStateChangingNode"] = true
+
+	contract := repairActionOutputDecisionContract(map[string]any{}, pkg, required)
+
+	if contract["requiredMode"] != "state_changing_patch_apply" {
+		t.Fatalf("outputDecisionContract = %+v, want state_changing_patch_apply", contract)
+	}
+	forbidden := strings.Join(stringSliceFromValue(contract["forbiddenOutputs"]), "\n")
+	if !strings.Contains(forbidden, "shell_only_validation_for_state_change") {
+		t.Fatalf("forbiddenOutputs = %q, want shell-only validation forbidden", forbidden)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsInferredRelatedCommentOnlyPatch(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-primary-diagnostic-inferred-related-comment",

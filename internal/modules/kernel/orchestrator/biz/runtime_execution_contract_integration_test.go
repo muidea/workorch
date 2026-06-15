@@ -2048,6 +2048,47 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithDet
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsStateChangingGraphWithDetachedProcess(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-state-changing-detached-process",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-state-changing-detached-process/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "start-service",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command":               "sh",
+					"args":                  []string{"-c", "./service >/tmp/service.log 2>&1 & echo $!"},
+					"stateChanging":         true,
+					"targetRef":             "service-process",
+					"stateChangingReason":   "start a long-running process",
+					"relatedFailureTargets": []string{"service-process"},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "state-changing execution graph") ||
+		!strings.Contains(err.Error(), "detached or background processes") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want state-changing detached process rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsObservationModeAlias(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-observation-mode",

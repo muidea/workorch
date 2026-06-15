@@ -55,6 +55,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			if outputModeIsIncrementalArtifact(step.Input) && artifactOutputPhaseFromInput(step.Input) == artifactOutputPhaseContext {
 				return nil
 			}
+			if err := validateExecutionGraphShellSafety(graph, "state-changing execution graph"); err != nil {
+				return err
+			}
 			if allowPatchRepairValidationEvidenceGraph(step, graph) {
 				return nil
 			}
@@ -175,6 +178,29 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 		}
 		if shellCommandLineStartsDetachedProcess(commandLine) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+func validateExecutionGraphShellSafety(graph runtimemodel.BlockExecutionGraph, scope string) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "execution graph"
+	}
+	for _, node := range graph.Nodes {
+		if canonicalRuntimeGraphNodeKind(node.Kind) != "shell/command" {
+			continue
+		}
+		commandLine := runtimeGraphShellCommandLine(node.Input)
+		if commandLine == "" {
+			continue
+		}
+		if shellCommandLineContainsProcessTermination(commandLine) {
+			return fmt.Errorf("%w: %s must use non-destructive bounded shell commands; process termination is not allowed", common.ErrInvalidArgument, scope)
+		}
+		if shellCommandLineStartsDetachedProcess(commandLine) {
+			return fmt.Errorf("%w: %s must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument, scope)
 		}
 	}
 	return nil

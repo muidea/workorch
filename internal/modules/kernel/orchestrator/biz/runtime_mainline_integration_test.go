@@ -726,6 +726,68 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 	}
 }
 
+func TestRuntimeStepProgressRecorderSkipsDuplicateNonTerminalPayload(t *testing.T) {
+	ctx := context.Background()
+	previousInterval := runtimeStepProgressMinInterval
+	runtimeStepProgressMinInterval = time.Millisecond
+	defer func() { runtimeStepProgressMinInterval = previousInterval }()
+
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		nil,
+		runRepo,
+		stepRepo,
+		memory.NewWorkspaceRepository(),
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: checkpointRepo},
+		events.NewMemoryHub(),
+	)
+	run := &runmodel.Run{ID: "run-progress-dedupe", WorkspaceID: "ws-progress-dedupe", State: common.RunStateRunning}
+	step := &runmodel.Step{ID: "run-progress-dedupe/step-1", RunID: run.ID, Kind: llmWorkspaceExecutionStepKind, State: common.StepStateDispatched}
+	recorder := orch.runtimeStepProgressRecorder(ctx, run, step)
+	if recorder == nil {
+		t.Fatal("runtimeStepProgressRecorder returned nil")
+	}
+	progress := runtimemodel.StepExecutionProgress{
+		Event:   "runtime_step_progress",
+		Stage:   "llm_provider_stream",
+		Summary: "provider stream receiving",
+		Data: map[string]any{
+			"streaming":          true,
+			"receivedDeltaCount": 2,
+			"receivedBytes":      42,
+		},
+	}
+	if err := recorder(progress); err != nil {
+		t.Fatalf("record first progress: %v", err)
+	}
+	time.Sleep(2 * runtimeStepProgressMinInterval)
+	if err := recorder(progress); err != nil {
+		t.Fatalf("record duplicate progress: %v", err)
+	}
+	progress.Data["receivedBytes"] = 84
+	time.Sleep(2 * runtimeStepProgressMinInterval)
+	if err := recorder(progress); err != nil {
+		t.Fatalf("record changed progress: %v", err)
+	}
+
+	checkpoints, err := checkpointRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if got := countRuntimeProgressCheckpoints(checkpoints); got != 2 {
+		t.Fatalf("progress checkpoints = %d, want first and changed payload only; checkpoints=%+v", got, checkpoints)
+	}
+	if !hasRuntimeProgressCheckpointData(checkpoints, "llm_provider_stream", 42) ||
+		!hasRuntimeProgressCheckpointData(checkpoints, "llm_provider_stream", 84) {
+		t.Fatalf("checkpoints = %+v, want both first and changed progress payloads", checkpoints)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunRecordsFailedExecutionEvidence(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -789,6 +851,16 @@ func TestRuntimeOrchestrator_StartRunRecordsFailedExecutionEvidence(t *testing.T
 	if !hasRunCheckpointState(checkpoints, common.RunStateFailed) || !hasCheckpointEvent(checkpoints, "step_failed") {
 		t.Fatalf("checkpoints = %+v, want failed run and step checkpoints", checkpoints)
 	}
+}
+
+func countRuntimeProgressCheckpoints(items []*runmodel.RuntimeCheckpoint) int {
+	count := 0
+	for _, item := range items {
+		if item != nil && item.Data != nil && item.Data["event"] == "runtime_step_progress" {
+			count++
+		}
+	}
+	return count
 }
 
 func hasRuntimeProgressCheckpointData(items []*runmodel.RuntimeCheckpoint, stage string, receivedBytes int) bool {

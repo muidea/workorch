@@ -417,6 +417,9 @@ func validateShellCommandPolicy(command string, args []string, deliverableDirect
 		if shellScriptIsDangerous(args) {
 			return fmt.Errorf("%w: destructive shell script is not allowed", common.ErrInvalidArgument)
 		}
+		if shellScriptStartsDetachedProcess(args) {
+			return fmt.Errorf("%w: detached or background shell script is not allowed; use a bounded foreground command or wait for all background work", common.ErrInvalidArgument)
+		}
 	}
 	return nil
 }
@@ -517,6 +520,56 @@ func shellScriptIsDangerous(args []string) bool {
 			if strings.Contains(padded, marker) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func shellScriptStartsDetachedProcess(args []string) bool {
+	for idx, arg := range args {
+		if arg != "-c" || idx+1 >= len(args) {
+			continue
+		}
+		script := strings.ToLower(strings.TrimSpace(args[idx+1]))
+		if script == "" {
+			continue
+		}
+		padded := " " + script + " "
+		if strings.Contains(padded, " nohup ") || strings.Contains(padded, " setsid ") {
+			return true
+		}
+		if !shellCommandLineContainsStandaloneAmpersand(script) {
+			continue
+		}
+		if shellScriptWaitsForBackgroundWork(script) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func shellScriptWaitsForBackgroundWork(script string) bool {
+	padded := " " + strings.ToLower(strings.TrimSpace(script)) + " "
+	trimmed := strings.TrimSpace(padded)
+	return strings.Contains(padded, " wait ") ||
+		strings.Contains(padded, ";wait ") ||
+		strings.Contains(padded, "&&wait ") ||
+		strings.HasPrefix(trimmed, "wait ") ||
+		strings.HasSuffix(trimmed, " wait") ||
+		trimmed == "wait"
+}
+
+func shellCommandLineContainsStandaloneAmpersand(commandLine string) bool {
+	for idx, value := range commandLine {
+		if value != '&' {
+			continue
+		}
+		prevBoundary := idx == 0 || strings.ContainsRune(" \t\r\n;(){}|", rune(commandLine[idx-1]))
+		nextIdx := idx + len(string(value))
+		nextBoundary := nextIdx >= len(commandLine) || strings.ContainsRune(" \t\r\n;(){}|", rune(commandLine[nextIdx]))
+		if prevBoundary && nextBoundary {
+			return true
 		}
 	}
 	return false

@@ -451,6 +451,7 @@ func TestRuntimeAdapter_ExecuteRuntimeStepRejectsDangerousCommands(t *testing.T)
 		{name: "fuser kill port", command: "fuser", args: []any{"-k", "8080/tcp"}},
 		{name: "shell fuser kill port", command: "sh", args: []any{"-c", "fuser -k 8080/tcp 2>/dev/null || true"}},
 		{name: "shell lsof xargs kill", command: "sh", args: []any{"-c", "lsof -ti :8080 | xargs kill -9"}},
+		{name: "shell detached background", command: "sh", args: []any{"-c", "./service >/tmp/service.log 2>&1 & echo $!"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

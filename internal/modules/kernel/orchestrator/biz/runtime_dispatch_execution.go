@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -331,27 +332,30 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
 }
 
+var runtimeStepProgressMinInterval = 5 * time.Second
+
 func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, run *runModel.Run, step *runModel.Step) runtimemodel.StepExecutionProgressFunc {
 	if o == nil || run == nil || step == nil || o.checkpointManager() == nil {
 		return nil
 	}
 	var mu sync.Mutex
 	last := time.Time{}
+	lastSignature := ""
 	return func(progress runtimemodel.StepExecutionProgress) error {
 		event := strings.TrimSpace(progress.Event)
 		if event == "" {
 			event = "step_progress"
 		}
+		terminal := event == "runtime_step_done" || event == "runtime_step_failed"
 		now := time.Now().UTC()
-		if event != "runtime_step_done" && event != "runtime_step_failed" && !last.IsZero() && now.Sub(last) < 5*time.Second {
+		if !terminal && !last.IsZero() && now.Sub(last) < runtimeStepProgressMinInterval {
 			return nil
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if event != "runtime_step_done" && event != "runtime_step_failed" && !last.IsZero() && now.Sub(last) < 5*time.Second {
+		if !terminal && !last.IsZero() && now.Sub(last) < runtimeStepProgressMinInterval {
 			return nil
 		}
-		last = now
 		data := map[string]any{}
 		for key, value := range progress.Data {
 			if key == "" || value == nil {
@@ -365,8 +369,26 @@ func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, r
 		if summary := strings.TrimSpace(progress.Summary); summary != "" {
 			data["summary"] = summary
 		}
+		signature := runtimeStepProgressSignature(event, data)
+		if !terminal && signature != "" && signature == lastSignature {
+			return nil
+		}
+		last = now
+		lastSignature = signature
 		return o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data)
 	}
+}
+
+func runtimeStepProgressSignature(event string, data map[string]any) string {
+	payload := map[string]any{
+		"event": event,
+		"data":  data,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf("%s:%v", event, data)
+	}
+	return string(raw)
 }
 
 func (o *RuntimeOrchestrator) validateGraphExpansionBoundary(
