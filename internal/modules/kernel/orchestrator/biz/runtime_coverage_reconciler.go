@@ -132,6 +132,9 @@ func reconcileValidationAcceptable(v *runModel.ValidationResult) bool {
 	if v == nil {
 		return false
 	}
+	if strings.TrimSpace(v.ValidationKind) != "runtime_step" {
+		return false
+	}
 	if v.State != common.ValidationResultStatePassed {
 		return false
 	}

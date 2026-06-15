@@ -577,6 +577,58 @@ func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionSamePayloadIsIdem
 	}
 }
 
+func TestService_EnsureResolvedTicketAndReturn_OrphanResolutionPublishesResolvedEvent(t *testing.T) {
+	ctx := context.Background()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	hub := events.NewMemoryHub()
+	service := NewService(ticketRepo, resolutionRepo, hub)
+
+	createCmd := decisionservice.CreateTicketCommand{
+		TicketID:    common.TicketID("ticket-orphan-event"),
+		WorkspaceID: common.WorkspaceID("ws-1"),
+		RunID:       common.RunID("run-1"),
+		StepID:      common.StepID("run-1/step-1"),
+		Reason:      "need operator decision",
+	}
+	if err := service.CreateTicket(ctx, createCmd); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	orphan := &decisionModel.Resolution{
+		ID:       common.ResolutionID("resolution-orphan-event"),
+		TicketID: createCmd.TicketID,
+		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
+		Payload:  map[string]any{"actor": "operator"},
+	}
+	if err := resolutionRepo.Create(ctx, orphan); err != nil {
+		t.Fatalf("seed orphan resolution: %v", err)
+	}
+
+	if _, _, err := service.EnsureResolvedTicketAndReturn(ctx, decisionservice.ResolveTicketCommand{
+		ResolutionID: orphan.ID,
+		TicketID:     createCmd.TicketID,
+		Type:         orphan.Type,
+		Payload:      map[string]any{"actor": "operator"},
+	}); err != nil {
+		t.Fatalf("orphan recovery: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 2 {
+		t.Fatalf("len(published) = %d, want 2", len(published))
+	}
+	if published[1].Topic != decisionevents.TopicTicketResolved {
+		t.Fatalf("second topic = %s, want %s", published[1].Topic, decisionevents.TopicTicketResolved)
+	}
+	if published[1].Payload[events.PayloadKeyResolutionID] != string(orphan.ID) {
+		t.Fatalf("resolution id payload = %v, want %s", published[1].Payload[events.PayloadKeyResolutionID], orphan.ID)
+	}
+	if published[1].Payload[events.PayloadKeyState] != string(common.DecisionTicketStateResolved) {
+		t.Fatalf("resolved state payload = %v, want resolved", published[1].Payload[events.PayloadKeyState])
+	}
+}
+
 // TestService_EnsureResolvedTicketAndReturn_OrphanResolutionDifferentPayloadReturnsConflict
 // covers the "operator tried to change the decision" case: an orphan
 // resolution exists, but the new request's payload differs. The fix must

@@ -313,3 +313,18 @@ func TestReconcile_StepKindNotBindable(t *testing.T) {
 		t.Fatalf("reconcile = (%v,%d), want (false,0) — file/read must not bind validation", changed, bound)
 	}
 }
+
+func TestReconcile_RejectsNonRuntimeStepValidationKind(t *testing.T) {
+	run := makeReconcileRun("- go-build-verify 通过 编译 验证", nil)
+	c := newCoverageSubsystem()
+	c.ensure(run)
+
+	step := reconcileStepShell("run-recon-1/graph-007/002-go-build-verify", "go")
+	validation := reconcileValidValidation("val-011", step.ID)
+	validation.ValidationKind = "go_test"
+
+	changed, bound := c.reconcileValidationEvidence(run, []*runmodel.ValidationResult{validation}, []*runmodel.Step{step})
+	if changed || bound != 0 {
+		t.Fatalf("reconcile = (%v,%d), want (false,0) — non runtime_step validation must not auto-bind", changed, bound)
+	}
+}

@@ -134,26 +134,7 @@ func (s *Service) resolveTicketItem(ctx context.Context, ticket *decisionModel.T
 	if err := s.tickets.Update(ctx, ticket); err != nil {
 		return nil, err
 	}
-	if s.eventHub == nil {
-		return resolution, nil
-	}
-	if err := s.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        decisionevents.TopicTicketResolved,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "decision_ticket",
-		SubjectID:    string(ticket.ID),
-		WorkspaceID:  string(ticket.WorkspaceID),
-		RunID:        string(ticket.RunID),
-		StepID:       string(ticket.StepID),
-		Payload: events.DecisionResolutionPayload(
-			ticket.Reason,
-			ticket.State,
-			resolution.ID,
-			resolution.Type,
-			resolution.Payload,
-		),
-	}); err != nil {
+	if err := s.publishResolvedTicketEvent(ctx, ticket, resolution); err != nil {
 		return nil, err
 	}
 	return resolution, nil
@@ -189,9 +170,10 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 	// open, so this mismatch is recoverable. When a persisted resolution
 	// matches the new request, accept it idempotently and sync the ticket
 	// state to "resolved" so the run orchestrator's ResumeRun check at
-	// runtime_lifecycle.go (ticket.State == Resolved) passes. We do NOT
-	// re-publish TopicTicketResolved because the original resolution
-	// already fired that event.
+	// runtime_lifecycle.go (ticket.State == Resolved) passes. Because the
+	// current owner state is transitioning from open -> resolved again, we
+	// must publish TopicTicketResolved so workorchd projections, SSE, and TUI
+	// stay consistent with the repaired owner state.
 	existingResolution, resErr := s.resolutions.GetByTicketID(ctx, cmd.TicketID)
 	if resErr != nil && !errors.Is(resErr, common.ErrNotFound) {
 		return nil, nil, resErr
@@ -206,6 +188,9 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 			ticket.State = common.DecisionTicketStateResolved
 			ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			if err := s.tickets.Update(ctx, ticket); err != nil {
+				return nil, nil, err
+			}
+			if err := s.publishResolvedTicketEvent(ctx, ticket, existingResolution); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -227,6 +212,29 @@ func (s *Service) EnsureResolvedTicketAndReturn(ctx context.Context, cmd decisio
 		return nil, nil, err
 	}
 	return ticket, resolution, nil
+}
+
+func (s *Service) publishResolvedTicketEvent(ctx context.Context, ticket *decisionModel.Ticket, resolution *decisionModel.Resolution) error {
+	if s == nil || s.eventHub == nil || ticket == nil || resolution == nil {
+		return nil
+	}
+	return s.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        decisionevents.TopicTicketResolved,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "decision_ticket",
+		SubjectID:    string(ticket.ID),
+		WorkspaceID:  string(ticket.WorkspaceID),
+		RunID:        string(ticket.RunID),
+		StepID:       string(ticket.StepID),
+		Payload: events.DecisionResolutionPayload(
+			ticket.Reason,
+			ticket.State,
+			resolution.ID,
+			resolution.Type,
+			resolution.Payload,
+		),
+	})
 }
 
 func ticketMatchesResolveScope(ticket *decisionModel.Ticket, cmd decisioncontracts.ResolveTicketCommand) bool {

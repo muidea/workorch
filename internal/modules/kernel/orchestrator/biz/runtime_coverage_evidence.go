@@ -551,12 +551,19 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 		// which caused cwi items with valid accepted evidence to be misclassified and
 		// tripped the dodAssessment satisfaction gate.
 		acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
+		requiredCounts := mapIntValue(item["requiredEvidenceCounts"])
 		acceptedCoversAll := true
 		acceptedCoversAny := false
 		for kind := range required {
-			if count := len(acceptedByKind[kind]); count > 0 {
+			requiredCount := requiredCounts[kind]
+			if requiredCount <= 0 {
+				requiredCount = 1
+			}
+			count := coverageEvidenceCountForKind(kind, acceptedByKind[kind])
+			if count > 0 {
 				acceptedCoversAny = true
-			} else {
+			}
+			if count < requiredCount {
 				acceptedCoversAll = false
 			}
 		}
@@ -572,7 +579,7 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 			}
 		case acceptedCoversAny:
 			// Partial progress; surface as in_progress so the gate can keep iterating.
-			if currentStatus := strings.TrimSpace(stringFromMap(item, "status")); currentStatus != "in_progress" && currentStatus != "evidence_ready" && currentStatus != "satisfied" {
+			if strings.TrimSpace(stringFromMap(item, "status")) != "in_progress" {
 				changed = true
 			}
 			item["status"] = "in_progress"
