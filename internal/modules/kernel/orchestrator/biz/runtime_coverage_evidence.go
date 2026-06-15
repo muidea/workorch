@@ -537,15 +537,62 @@ func coverageApplyWorkItemEvidence(item map[string]any, kinds []string, refs []s
 			item["status"] = "in_progress"
 		}
 	} else {
-		if strings.TrimSpace(stringFromMap(item, "status")) != "failed" {
-			changed = true
+		// Rejection branch. A rejection is recorded in the rejection lineage, but the
+		// cwi status demotion depends on whether accepted evidence already satisfies the
+		// required kinds:
+		//   - accepted covers all required kinds  -> the cwi is already "evidence_ready"
+		//     or "satisfied"; the rejection is informational only. Do not demote.
+		//   - accepted covers some required kinds -> the cwi is in flight; use
+		//     "in_progress" rather than "failed" so the completion gate still sees it as
+		//     actively progressing toward a satisfied state.
+		//   - accepted covers no required kind    -> the cwi is genuinely failing; keep
+		//     "failed" as the authoritative LLM/runtime verdict.
+		// The previous behavior unconditionally demoted to "failed" on any rejection,
+		// which caused cwi items with valid accepted evidence to be misclassified and
+		// tripped the dodAssessment satisfaction gate.
+		acceptedByKind := mapStringSliceValue(item["acceptedEvidenceByKind"])
+		acceptedCoversAll := true
+		acceptedCoversAny := false
+		for kind := range required {
+			if count := len(acceptedByKind[kind]); count > 0 {
+				acceptedCoversAny = true
+			} else {
+				acceptedCoversAll = false
+			}
 		}
-		item["status"] = "failed"
-		if strings.TrimSpace(reason) != "" {
-			if strings.TrimSpace(stringFromMap(item, "currentGap")) != reason {
+		switch {
+		case acceptedCoversAll:
+			// Already evidence_ready / satisfied; record the rejection as lineage
+			// but keep the current status. Only the gap text reflects the rejection.
+			if strings.TrimSpace(reason) != "" {
+				if strings.TrimSpace(stringFromMap(item, "currentGap")) != reason {
+					changed = true
+				}
+				item["currentGap"] = reason
+			}
+		case acceptedCoversAny:
+			// Partial progress; surface as in_progress so the gate can keep iterating.
+			if currentStatus := strings.TrimSpace(stringFromMap(item, "status")); currentStatus != "in_progress" && currentStatus != "evidence_ready" && currentStatus != "satisfied" {
 				changed = true
 			}
-			item["currentGap"] = reason
+			item["status"] = "in_progress"
+			if strings.TrimSpace(reason) != "" {
+				if strings.TrimSpace(stringFromMap(item, "currentGap")) != reason {
+					changed = true
+				}
+				item["currentGap"] = reason
+			}
+		default:
+			if strings.TrimSpace(stringFromMap(item, "status")) != "failed" {
+				changed = true
+			}
+			item["status"] = "failed"
+			if strings.TrimSpace(reason) != "" {
+				if strings.TrimSpace(stringFromMap(item, "currentGap")) != reason {
+					changed = true
+				}
+				item["currentGap"] = reason
+			}
 		}
 	}
 	if !changed {

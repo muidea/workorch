@@ -990,6 +990,166 @@ func TestCoverageWorkItemsRecordFailedStepRejectedEvidence(t *testing.T) {
 	}
 }
 
+func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-accepted-then-rejected",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "实现 基础 转发 请求 和 预期 回复 通过 go-build-verify"},
+		},
+	}
+	c := newCoverageSubsystem()
+	c.ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		t.Fatalf("expected cwi to be built from goal")
+	}
+
+	// First, accept a validation evidence via a successful shell step — moves cwi to evidence_ready.
+	acceptStep := &runmodel.Step{
+		ID:     "run-cwi-accepted-then-rejected/graph-001/001-go-build-verify",
+		RunID:  run.ID,
+		Kind:   "shell/command",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{
+			"exitCode":         0,
+			"command":          "go",
+			"coverageTargets":  []string{"go-build-verify"},
+		},
+	}
+	if !c.updateFromCompletedStep(run, acceptStep) {
+		t.Fatalf("updateFromCompletedStep changed=false on first accept")
+	}
+	items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	priorCwi := items[0]
+	if got := stringFromMap(priorCwi, "status"); got != "evidence_ready" {
+		t.Fatalf("after accept: status = %q, want evidence_ready", got)
+	}
+
+	// Then a destructive shell step fails — its rejection is recorded, but the
+	// cwi already has accepted validation covering all required kinds, so the
+	// status must NOT be demoted to "failed".
+	rejectStep := &runmodel.Step{
+		ID:     "run-cwi-accepted-then-rejected/graph-001/002-go-build-verify",
+		RunID:  run.ID,
+		Kind:   "shell/command",
+		State:  common.StepStateFailed,
+		Output: map[string]any{
+			"exitCode":        1,
+			"command":         "curl",
+			"coverageTargets": []string{"go-build-verify"},
+			"error":           "destructive shell script is not allowed",
+		},
+	}
+	if !c.updateFromFailedStep(run, rejectStep, "") {
+		t.Fatalf("updateFromFailedStep changed=false on rejection")
+	}
+	items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	afterReject := items[0]
+	if got := stringFromMap(afterReject, "status"); got == "failed" {
+		t.Fatalf("after rejection: status = %q, want NOT demoted to failed when accepted evidence covers all required kinds", got)
+	}
+	if got := stringFromMap(afterReject, "status"); got != "evidence_ready" {
+		t.Fatalf("after rejection: status = %q, want evidence_ready preserved", got)
+	}
+	rejected := mapStringSliceValue(afterReject["rejectedEvidenceByKind"])
+	if len(rejected["validation"]) == 0 {
+		t.Fatalf("rejectedEvidenceByKind = %+v, want rejection lineage preserved even without demotion", rejected)
+	}
+	accepted := mapStringSliceValue(afterReject["acceptedEvidenceByKind"])
+	if len(accepted["validation"]) == 0 {
+		t.Fatalf("acceptedEvidenceByKind = %+v, want accepted validation refs preserved", accepted)
+	}
+}
+
+func TestCoverageWorkItemsRejectionWithPartialAcceptedSetsInProgress(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-cwi-partial-accepted",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true, "evidenceRole": "primary_state_change"},
+						},
+					},
+				},
+			},
+		},
+	}
+	c := newCoverageSubsystem()
+	c.ensure(run)
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(items) == 0 {
+		t.Fatalf("expected cwi to be built from deliverable expectations")
+	}
+	// Find the deliverable cwi (evidenceRole=primary_state_change, required=state_change+validation)
+	var cwiIdx int = -1
+	for i, item := range items {
+		if role := normalizedCoverageEvidenceRole(stringFromMap(item, "evidenceRole")); role == "primary_state_change" {
+			cwiIdx = i
+			break
+		}
+	}
+	if cwiIdx < 0 {
+		t.Fatalf("no primary_state_change cwi found; items=%+v", items)
+	}
+	if req := items[cwiIdx]["requiredEvidenceKinds"]; len(stringSliceFromValue(req)) < 2 {
+		t.Fatalf("expected cwi to require both validation+state_change, got %v", req)
+	}
+
+	// First, accept a state_change evidence via artifact/write. targetText for the
+	// deliverable cwi is "source_change" (or the deliverable id), so use a
+	// coverageTarget that matches.
+	stateChangeStep := &runmodel.Step{
+		ID:     "run-cwi-partial-accepted/graph-001/001-source-change",
+		RunID:  run.ID,
+		Kind:   "artifact/write",
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"coverageTargets": []string{"source_change"}},
+	}
+	if !c.updateFromCompletedStep(run, stateChangeStep) {
+		t.Fatalf("updateFromCompletedStep changed=false on state_change")
+	}
+	items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	priorCwi := items[cwiIdx]
+	if got := stringFromMap(priorCwi, "status"); got != "in_progress" {
+		t.Fatalf("after partial bind: status = %q, want in_progress", got)
+	}
+
+	// Now a failed step tries to bind validation (the missing kind) but fails
+	// (e.g. destructive shell). Since state_change is already bound, the cwi is
+	// in progress, not failed. The rejection is recorded but does not demote.
+	failedStep := &runmodel.Step{
+		ID:     "run-cwi-partial-accepted/graph-001/002-source-change-verify",
+		RunID:  run.ID,
+		Kind:   "shell/command",
+		State:  common.StepStateFailed,
+		Output: map[string]any{
+			"exitCode":        1,
+			"command":         "curl",
+			"coverageTargets": []string{"source_change"},
+			"error":           "destructive shell script is not allowed",
+		},
+	}
+	if !c.updateFromFailedStep(run, failedStep, "") {
+		t.Fatalf("updateFromFailedStep changed=false on rejection")
+	}
+	items = mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	afterReject := items[cwiIdx]
+	if got := stringFromMap(afterReject, "status"); got == "failed" {
+		t.Fatalf("after rejection with partial accepted: status = %q, want NOT failed (state_change is bound)", got)
+	}
+	accepted := mapStringSliceValue(afterReject["acceptedEvidenceByKind"])
+	if len(accepted["state_change"]) == 0 {
+		t.Fatalf("acceptedEvidenceByKind.state_change must be preserved, got %+v", accepted)
+	}
+	rejected := mapStringSliceValue(afterReject["rejectedEvidenceByKind"])
+	if len(rejected["validation"]) == 0 {
+		t.Fatalf("rejectedEvidenceByKind.validation must record the rejection, got %+v", rejected)
+	}
+}
+
 func TestCoverageWorkItemsAcceptanceGateRequiresSatisfiedItems(t *testing.T) {
 	run := &runmodel.Run{
 		ID:               "run-cwi-acceptance-gate",
