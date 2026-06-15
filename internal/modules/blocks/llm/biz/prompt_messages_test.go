@@ -1097,6 +1097,113 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 	}
 }
 
+func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testing.T) {
+	longContent := "package main\n" + strings.Repeat("x", repairSnapshotPromptContentLimit+64)
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-truncated-snapshot",
+		RunID:          "run-truncated-snapshot",
+		StepID:         "step-truncated-snapshot",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                             []string{"patch/apply"},
+					"mustUseCurrentTargetSnapshot":              true,
+					"mustPatchDirectlyFromProvidedSnapshot":     true,
+					"directCompleteFileWriteFromPromptSnapshot": true,
+				},
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"content":          longContent,
+					"contentHash":      "sha256-target",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+					"redacted":         false,
+					"truncated":        false,
+					"isBinary":         false,
+				}},
+			},
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "produce requested change"},
+				"dod":  map[string]any{"items": []any{"change is present"}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	repair, ok := promptContextSectionByID(context, "C3.repair-action-package")
+	if !ok {
+		t.Fatalf("missing repair action package section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		`"contentTruncatedForPrompt":true`,
+		`"contentComplete":false`,
+		`"safeForFileWrite":false`,
+		`"promptSnapshotContentIncomplete":true`,
+		`"mustNotUsePromptSnapshotForCompleteFileWrite":true`,
+		`"directCompleteFileWriteFromPromptSnapshotAllowed":false`,
+		`"directCompleteFileWriteFromPromptSnapshot":false`,
+		`"mustUseCurrentTargetSnapshot":false`,
+		`"mustPatchDirectlyFromProvidedSnapshot":false`,
+	} {
+		if !strings.Contains(repair.Content, want) {
+			t.Fatalf("repair prompt missing %q: %s", want, repair.Content)
+		}
+	}
+	if strings.Contains(repair.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
+		strings.Contains(repair.Content, `"directCompleteFileWriteFromPromptSnapshot":true`) ||
+		strings.Contains(repair.Content, `"safeForFileWrite":true`) {
+		t.Fatalf("repair prompt retained unsafe complete snapshot contract: %s", repair.Content)
+	}
+
+	stage, ok := promptContextSectionByID(context, "C3.stage-contract")
+	if !ok {
+		t.Fatalf("missing stage contract section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if strings.Contains(stage.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
+		!strings.Contains(stage.Content, `"mustPatchDirectlyFromProvidedSnapshot":false`) {
+		t.Fatalf("stage contract did not use prompt-safe requiredOutput: %s", stage.Content)
+	}
+
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing current action section; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if strings.Contains(current.Content, `"mustPatchDirectlyFromProvidedSnapshot":true`) ||
+		!strings.Contains(current.Content, `"mustPatchDirectlyFromProvidedSnapshot":false`) {
+		t.Fatalf("current action did not use prompt-safe requiredOutput: %s", current.Content)
+	}
+}
+
+func TestPromptRequiredOutputTreatsUnavailableProviderSnapshotAsIncomplete(t *testing.T) {
+	pkg := map[string]any{
+		"requiredOutput": map[string]any{
+			"mustUseCurrentTargetSnapshot":          true,
+			"mustPatchDirectlyFromProvidedSnapshot": true,
+		},
+		"targetSnapshots": []map[string]any{{
+			"targetRef":        "target.txt",
+			"content":          "[REDACTED]",
+			"contentHash":      "sha256-target",
+			"contentComplete":  true,
+			"safeForFileWrite": false,
+			"redacted":         true,
+		}},
+	}
+
+	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit))
+	if !boolValue(required["promptSnapshotContentIncomplete"]) ||
+		boolValue(required["mustUseCurrentTargetSnapshot"]) ||
+		boolValue(required["mustPatchDirectlyFromProvidedSnapshot"]) {
+		t.Fatalf("requiredOutput = %+v, want unavailable provider snapshot treated as incomplete", required)
+	}
+}
+
 func TestBuildProviderPromptMessagesCarriesIncrementalArtifactStageContract(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-artifact-contract",

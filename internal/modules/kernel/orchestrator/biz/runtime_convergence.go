@@ -1085,6 +1085,7 @@ func stateChangingRepairActionPackageForConvergence(input map[string]any, failed
 		if boolValue(required["mustIncludeStateChangingNode"]) {
 			applyConcreteRepairEvidenceOutputContract(input, existing, required)
 			addStrategyReassessmentRequiredOutputContract(existing, required)
+			existing["requiredOutput"] = required
 			return existing
 		}
 	}
@@ -1165,8 +1166,11 @@ func preserveStateChangingRequiredOutputSignals(required map[string]any, existin
 			"readBeforePatchRecoveryRule",
 			"mustDeclareStrategyReassessmentFields",
 			"strategyReassessmentRequiredFields",
+			"strategyReassessmentRepairModes",
 			"strategyReassessmentMatchRule",
 			"mustReassessRepeatedFailedSurface",
+			"sameTargetContinuationRule",
+			"rootCauseTargetShiftRule",
 			"estimatedPatchContentBytes",
 			"estimatedGraphBytes",
 			"expectedStateChangingArtifactCount",

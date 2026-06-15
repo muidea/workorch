@@ -909,17 +909,21 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 	if limit <= 0 || len(items) == 0 {
 		return nil, nil, nil
 	}
-	candidates := make([]*memorymodel.MemoryItem, 0, len(items))
-	seen := map[string]struct{}{}
+	candidateByKey := map[string]*memorymodel.MemoryItem{}
 	for _, item := range items {
 		if item == nil || item.ID == "" {
 			continue
 		}
 		key := memorySelectionDuplicateKey(item)
-		if _, ok := seen[key]; ok {
+		if key == "" {
 			continue
 		}
-		seen[key] = struct{}{}
+		if existing := candidateByKey[key]; existing == nil || memorySelectionCandidatePreferred(item, existing, currentRunID, runStates) {
+			candidateByKey[key] = item
+		}
+	}
+	candidates := make([]*memorymodel.MemoryItem, 0, len(candidateByKey))
+	for _, item := range candidateByKey {
 		candidates = append(candidates, item)
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
@@ -982,6 +986,26 @@ func selectStepInputMemoryItems(items []*memorymodel.MemoryItem, currentRunID co
 		excluded = append(excluded, item)
 	}
 	return selected, candidates, excluded
+}
+
+func memorySelectionCandidatePreferred(candidate *memorymodel.MemoryItem, existing *memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState) bool {
+	if candidate == nil {
+		return false
+	}
+	if existing == nil {
+		return true
+	}
+	candidateExcluded := shouldExcludeStepInputMemoryItem(candidate)
+	existingExcluded := shouldExcludeStepInputMemoryItem(existing)
+	if candidateExcluded != existingExcluded {
+		return !candidateExcluded
+	}
+	candidateScore := stepInputMemoryScore(candidate, currentRunID, runStates)
+	existingScore := stepInputMemoryScore(existing, currentRunID, runStates)
+	if candidateScore != existingScore {
+		return candidateScore > existingScore
+	}
+	return string(candidate.ID) > string(existing.ID)
 }
 
 func selectStepInputMemoryItemsForStep(items []*memorymodel.MemoryItem, currentRunID common.RunID, runStates map[common.RunID]common.RunState, step *runModel.Step, limit int) ([]*memorymodel.MemoryItem, []*memorymodel.MemoryItem, []*memorymodel.MemoryItem) {
@@ -1092,6 +1116,9 @@ func shouldExcludeStepInputMemoryItem(item *memorymodel.MemoryItem) bool {
 	}
 	memoryType := strings.TrimSpace(item.MemoryType)
 	if memoryType == memorycommon.MemoryTypeDoDFeedback {
+		return runtimeMemoryTextHasTransientSignal(item.Summary + "\n" + item.Content)
+	}
+	if memoryType == memorycommon.MemoryTypeExecutionLesson {
 		return runtimeMemoryTextHasTransientSignal(item.Summary + "\n" + item.Content)
 	}
 	if memoryType == memorycommon.MemoryTypeToolFeedback {

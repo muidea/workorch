@@ -213,8 +213,15 @@ func runtimeMemoryTextHasTransientSignal(text string) bool {
 		"coveragetargets",
 		"coverage-bound",
 		"invalid_unified_diff",
+		"oldtext not found",
+		"old text not found",
+		"contenttruncatedforprompt",
+		"content truncated for prompt",
+		"snapshot truncated",
 		"non-substantive",
 		"schema 错误",
+		"快照被截断",
+		"快照在提示中被截断",
 		"补丁尝试",
 		"修复失败",
 		"无法通过进一步补丁",
@@ -289,10 +296,8 @@ func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runM
 			lines = append(lines, fmt.Sprintf("%s: %s", key, value))
 		}
 	}
-	for _, key := range []string{"stage", "status", "summary", "nextStep", "nextKind"} {
-		if key == "summary" && shouldOmitRejectedRepairOutputSummary(output) {
-			continue
-		}
+	lines = append(lines, "evidenceRef: "+string(step.ID))
+	for _, key := range []string{"stage", "status", "nextStep", "nextKind"} {
 		if value := strings.TrimSpace(stringFromMap(output, key)); value != "" {
 			lines = append(lines, fmt.Sprintf("output.%s: %s", key, value))
 		}
@@ -356,7 +361,12 @@ func repairLessonContentHint(step *runModel.Step, output map[string]any) string 
 		stringFromMap(output, "summary"),
 		stringFromMap(output, "error"),
 	}, "\n"))
-	if failedKind == "file/read" || strings.Contains(stage, "file_read") || strings.Contains(failureText, "no such file") || strings.Contains(failureText, "not found") {
+	if failedKind == "file/read" ||
+		strings.Contains(stage, "file_read") ||
+		strings.Contains(failureText, "no such file") ||
+		strings.Contains(failureText, "file does not exist") ||
+		strings.Contains(failureText, "cannot find file") ||
+		strings.Contains(failureText, "open ") && strings.Contains(failureText, ": no such file") {
 		return "Missing file reads require optional probes or listing before repair"
 	}
 	return ""

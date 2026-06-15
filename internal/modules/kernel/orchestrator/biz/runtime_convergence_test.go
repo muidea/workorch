@@ -543,6 +543,46 @@ func TestBuildConvergenceContractUsesUnfocusedCoverageWorkItemStateChange(t *tes
 	}
 }
 
+func TestStateChangingRepairActionPackageForConvergencePersistsStrategyReassessmentContract(t *testing.T) {
+	reassessment := map[string]any{
+		"required": true,
+		"requiredDecisionFields": []string{
+			"failedSurface",
+			"rootCauseTarget",
+			"repairTargetDecision",
+			"repairMode",
+			"forbiddenRepair",
+			"verificationPlan",
+		},
+	}
+	input := map[string]any{
+		"repairActionPackage": map[string]any{
+			"strategyReassessment": reassessment,
+			"requiredOutput":       stateChangingRepairRequiredOutput(),
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"content":          "before\n",
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+
+	pkg := stateChangingRepairActionPackageForConvergence(input, nil)
+	gotRequired := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(gotRequired["mustDeclareStrategyReassessmentFields"]) {
+		t.Fatalf("requiredOutput = %+v, want strategy reassessment declaration persisted", gotRequired)
+	}
+	if !stringSliceContains(stringSliceFromValue(gotRequired["strategyReassessmentRepairModes"]), "continue_same_target_repair") ||
+		!stringSliceContains(stringSliceFromValue(gotRequired["strategyReassessmentRepairModes"]), "shift_root_cause_target") {
+		t.Fatalf("strategyReassessmentRepairModes = %+v, want repair mode enum contract", gotRequired["strategyReassessmentRepairModes"])
+	}
+	if fields := stringSliceFromValue(gotRequired["strategyReassessmentRequiredFields"]); !stringSliceContains(fields, "repairMode") {
+		t.Fatalf("strategyReassessmentRequiredFields = %+v, want repairMode required", fields)
+	}
+}
+
 func TestBuildConvergenceContractKeepsProfileWriteEvidenceAfterGitWriteFailure(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-git-write-failure",

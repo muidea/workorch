@@ -34,6 +34,12 @@ var promptDividerPattern = regexp.MustCompile(`(?m)^[-=]{3,}\s*$`)
 var promptHeadingPattern = regexp.MustCompile(`(?m)^\s{0,3}#{2,}\s*`)
 var promptBoldPattern = regexp.MustCompile(`\*\*([^\*]+)\*\*`)
 
+const (
+	repairSnapshotPromptContentLimit     = 8192
+	validationSnapshotPromptContentLimit = 4096
+	repairSnapshotPromptItemLimit        = 2
+)
+
 func buildProviderPromptMessages(request llmmodels.ProviderRequest) providerPromptMessageBuildResult {
 	if turns := requestPromptContextTurns(request); len(turns) > 0 {
 		ret := providerPromptMessageBuildResult{
@@ -495,7 +501,9 @@ func stageContractPromptSection(input map[string]any) string {
 	}
 	copyMapValue(section, "definitionChangeImpact", definitionChangeImpactPayload(input))
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
-		copyMapValue(section, "requiredOutput", pkg["requiredOutput"])
+		if required := promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit); required != nil {
+			section["requiredOutput"] = required
+		}
 		copyMapValue(section, "forbiddenActions", pkg["forbiddenActions"])
 		copyMapValue(section, "exitCriteria", pkg["exitCriteria"])
 	}
@@ -536,7 +544,6 @@ func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any 
 	for _, key := range []string{
 		"currentFailure",
 		"lastFailureDiagnostics",
-		"requiredOutput",
 		"outputDecisionContract",
 		"structuredFailureSignals",
 		"recentRepairAttempts",
@@ -558,7 +565,10 @@ func compactRepairActionPackagePromptPayload(pkg map[string]any) map[string]any 
 		section["coverageTargetSet"] = targets
 	}
 	if targetSnapshots := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targetSnapshots) > 0 {
-		section["targetSnapshots"] = compactRepairSnapshotsForPrompt(targetSnapshots, 2, 8192)
+		section["targetSnapshots"] = compactRepairSnapshotsForPrompt(targetSnapshots, repairSnapshotPromptItemLimit, repairSnapshotPromptContentLimit)
+	}
+	if required := promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit); required != nil {
+		section["requiredOutput"] = required
 	}
 	if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
 		section["workspaceFileManifestSummary"] = manifest
@@ -1007,8 +1017,8 @@ func currentProgressSignalPayload(input map[string]any) map[string]any {
 		if targets := compactCoverageTargetSetForPrompt(mapSliceFromAny(repairPkg["coverageTargetSet"]), 6); len(targets) > 0 {
 			payload["coverageTargetSet"] = targets
 		}
-		if value, ok := repairPkg["requiredOutput"]; ok {
-			payload["requiredOutput"] = budgetProviderValue(value, 0, 1024, 6, 12, 3)
+		if required := promptRequiredOutputForRepairPackage(repairPkg, repairSnapshotPromptContentLimit); required != nil {
+			payload["requiredOutput"] = budgetProviderValue(required, 0, 1024, 6, 12, 3)
 		}
 		if value, ok := repairPkg["exitCriteria"]; ok {
 			payload["exitCriteria"] = budgetProviderValue(value, 0, 768, 6, 12, 2)
@@ -1143,6 +1153,11 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 			if contentLimit > 0 && len(content) > contentLimit {
 				out["content"] = content[:contentLimit] + "\n[TRUNCATED]"
 				out["contentTruncatedForPrompt"] = true
+				out["contentComplete"] = false
+				out["safeForFileWrite"] = false
+				out["promptContentComplete"] = false
+				out["promptSafeForFileWrite"] = false
+				out["promptSafetyNote"] = "content truncated for provider prompt; do not use as a complete file_write snapshot"
 			} else {
 				out["content"] = content
 			}
@@ -1152,6 +1167,62 @@ func compactRepairSnapshotsForPrompt(items []any, limit int, contentLimit int) [
 		}
 	}
 	return ret
+}
+
+func promptRequiredOutputForRepairPackage(pkg map[string]any, contentLimit int) any {
+	if len(pkg) == 0 {
+		return nil
+	}
+	required, ok := cloneAny(pkg["requiredOutput"])
+	if !ok || required == nil {
+		return nil
+	}
+	requiredMap := recordFromAny(required)
+	if len(requiredMap) == 0 {
+		return required
+	}
+	if !repairPackageTargetSnapshotsIncompleteForPrompt(pkg, repairSnapshotPromptItemLimit, contentLimit) {
+		return requiredMap
+	}
+	requiredMap["promptSnapshotContentIncomplete"] = true
+	requiredMap["mustNotUsePromptSnapshotForCompleteFileWrite"] = true
+	requiredMap["mustAcquireCompleteTargetSnapshotBeforeFullFileWrite"] = true
+	requiredMap["directCompleteFileWriteFromPromptSnapshotAllowed"] = false
+	if boolValue(requiredMap["mustPatchDirectlyFromProvidedSnapshot"]) {
+		requiredMap["mustPatchDirectlyFromProvidedSnapshot"] = false
+	}
+	if boolValue(requiredMap["mustUseCurrentTargetSnapshot"]) {
+		requiredMap["mustUseCurrentTargetSnapshot"] = false
+	}
+	if boolValue(requiredMap["directCompleteFileWriteFromPromptSnapshot"]) {
+		requiredMap["directCompleteFileWriteFromPromptSnapshot"] = false
+	}
+	return requiredMap
+}
+
+func repairPackageTargetSnapshotsIncompleteForPrompt(pkg map[string]any, limit int, contentLimit int) bool {
+	allItems := mapSliceFromAny(pkg["targetSnapshots"])
+	items := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"])
+	if len(allItems) == 0 && len(items) == 0 {
+		return false
+	}
+	if len(items) == 0 || len(items) < len(allItems) {
+		return true
+	}
+	if limit > 0 && len(items) > limit {
+		return true
+	}
+	for idx, raw := range items {
+		if limit > 0 && idx >= limit {
+			break
+		}
+		item := recordFromAny(raw)
+		content, ok := item["content"].(string)
+		if ok && contentLimit > 0 && len(content) > contentLimit {
+			return true
+		}
+	}
+	return false
 }
 
 func compactWorkspaceFileManifestSignal(value any) map[string]any {
@@ -1660,7 +1731,7 @@ func validationSignalPayload(input map[string]any) map[string]any {
 	}
 	if pkg := recordFromAny(input["repairActionPackage"]); len(pkg) > 0 {
 		if targets := providerSafeRepairSnapshotsFromValue(pkg["targetSnapshots"]); len(targets) > 0 {
-			payload["targetSnapshots"] = compactRepairSnapshotsForPrompt(targets, 2, 4096)
+			payload["targetSnapshots"] = compactRepairSnapshotsForPrompt(targets, repairSnapshotPromptItemLimit, validationSnapshotPromptContentLimit)
 		}
 		if manifest := compactWorkspaceFileManifestSignal(pkg["workspaceFileManifest"]); len(manifest) > 0 {
 			payload["workspaceFileManifestSummary"] = manifest
@@ -2039,7 +2110,7 @@ func concreteValidationDecisionRequest(input map[string]any) bool {
 
 func concreteValidationDecisionRequiredOutput(input map[string]any) map[string]any {
 	pkg := recordFromAny(input["repairActionPackage"])
-	required := recordFromAny(pkg["requiredOutput"])
+	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, validationSnapshotPromptContentLimit))
 	if len(required) > 0 {
 		return required
 	}
@@ -2070,7 +2141,7 @@ func stateChangingDecisionRequest(input map[string]any) bool {
 
 func stateChangingDecisionRequiredOutput(input map[string]any) map[string]any {
 	pkg := recordFromAny(input["repairActionPackage"])
-	required := recordFromAny(pkg["requiredOutput"])
+	required := recordFromAny(promptRequiredOutputForRepairPackage(pkg, repairSnapshotPromptContentLimit))
 	if len(required) > 0 {
 		return required
 	}

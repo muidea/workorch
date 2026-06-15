@@ -409,8 +409,35 @@ func TestRuntimeOrchestrator_RepairOutputMemoryWritesDistillMissingFileLesson(t 
 	if len(requests) != 1 ||
 		requests[0].MemoryType != memorycommon.MemoryTypeExecutionLesson ||
 		requests[0].Summary != "Missing file reads require optional probes or listing before repair" ||
-		!strings.Contains(requests[0].Content, "lesson: Missing file reads require optional probes or listing before repair") {
+		!strings.Contains(requests[0].Content, "lesson: Missing file reads require optional probes or listing before repair") ||
+		!strings.Contains(requests[0].Content, "evidenceRef: "+string(step.ID)) {
 		t.Fatalf("repair memory requests = %+v, want distilled missing-file lesson", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_RepairOutputMemoryDoesNotTreatPatchTextMismatchAsMissingFile(t *testing.T) {
+	runID := common.RunID("run-repair-oldtext-not-found")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-oldtext"),
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  1,
+			"failedStepId":                    string(runID) + "/block/patch",
+			"failedStepKind":                  "patch/apply",
+			"failureReason":                   "conflict: patch text_replace oldText not found",
+			failureOutputKeySignature:         "kind=patch/apply|error=oldText not found",
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "patch_apply",
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-repair-oldtext-not-found"}, step, output)
+	if len(requests) != 0 {
+		t.Fatalf("repair memory requests = %+v, want patch text mismatch kept out of missing-file lesson memory", requests)
 	}
 }
 

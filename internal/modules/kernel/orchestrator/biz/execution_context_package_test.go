@@ -1069,6 +1069,53 @@ func TestRemoveExcludedSelectedContextMemoriesDropsStaleStableMemories(t *testin
 	}
 }
 
+func TestStepInputMemorySelectionExcludesTransientExecutionLesson(t *testing.T) {
+	currentRunID := common.RunID("run-memory-current")
+	selected, candidates, excluded := selectStepInputMemoryItemsForStep([]*memorymodel.MemoryItem{
+		{
+			ID:         "memory-truncated-snapshot-lesson",
+			RunID:      currentRunID,
+			MemoryType: memorycommon.MemoryTypeExecutionLesson,
+			Summary:    "Missing file reads require optional probes or listing before repair",
+			Content:    "scope: runtime repair reusable lesson\noutput.summary: contentTruncatedForPrompt=true; snapshot truncated before patch",
+			Tags:       []string{"repair_loop", "necessary_output", "reference_value"},
+			Importance: 100,
+			Confidence: 100,
+		},
+		{
+			ID:         "memory-reference-lesson",
+			RunID:      currentRunID,
+			MemoryType: memorycommon.MemoryTypeExecutionLesson,
+			Summary:    "Missing file reads require optional probes or listing before repair",
+			Content:    "scope: runtime repair reusable lesson\nprecondition: file/read target missing\nappliesTo: missing resource recovery\nevidenceRef: run/block/read",
+			Tags:       []string{"reference_value"},
+			Importance: 90,
+			Confidence: 90,
+		},
+	}, currentRunID, nil, nil, stepInputMemoryLimit)
+
+	if memoryItemsContainID(selected, "memory-truncated-snapshot-lesson") {
+		t.Fatalf("selected = %+v, want transient truncated-snapshot execution lesson excluded", selected)
+	}
+	if !memoryItemsContainID(selected, "memory-reference-lesson") {
+		t.Fatalf("selected = %+v, want stable reference lesson retained", selected)
+	}
+	if memoryItemsContainID(candidates, "memory-truncated-snapshot-lesson") ||
+		memoryItemsContainID(excluded, "memory-truncated-snapshot-lesson") {
+		t.Fatalf("candidates=%+v excluded=%+v, want duplicate transient lesson replaced before scoring trace", candidates, excluded)
+	}
+	reason := stepInputMemoryScoreReason(&memorymodel.MemoryItem{
+		ID:         "memory-truncated-snapshot-lesson",
+		RunID:      currentRunID,
+		MemoryType: memorycommon.MemoryTypeExecutionLesson,
+		Summary:    "contentTruncatedForPrompt=true",
+		Content:    "snapshot truncated",
+	}, currentRunID, nil)
+	if !strings.Contains(reason, "excluded_low_value_process_memory") {
+		t.Fatalf("score reason = %q, want low-value process exclusion", reason)
+	}
+}
+
 func memoryItemsContainID(items []*memorymodel.MemoryItem, id common.MemoryID) bool {
 	for _, item := range items {
 		if item != nil && item.ID == id {
