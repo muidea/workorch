@@ -1006,14 +1006,14 @@ func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testi
 
 	// First, accept a validation evidence via a successful shell step — moves cwi to evidence_ready.
 	acceptStep := &runmodel.Step{
-		ID:     "run-cwi-accepted-then-rejected/graph-001/001-go-build-verify",
-		RunID:  run.ID,
-		Kind:   "shell/command",
-		State:  common.StepStateCompleted,
+		ID:    "run-cwi-accepted-then-rejected/graph-001/001-go-build-verify",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
 		Output: map[string]any{
-			"exitCode":         0,
-			"command":          "go",
-			"coverageTargets":  []string{"go-build-verify"},
+			"exitCode":        0,
+			"command":         "go",
+			"coverageTargets": []string{"go-build-verify"},
 		},
 	}
 	if !c.updateFromCompletedStep(run, acceptStep) {
@@ -1029,10 +1029,10 @@ func TestCoverageWorkItemsRejectionDoesNotDemoteCwiWithAcceptedEvidence(t *testi
 	// cwi already has accepted validation covering all required kinds, so the
 	// status must NOT be demoted to "failed".
 	rejectStep := &runmodel.Step{
-		ID:     "run-cwi-accepted-then-rejected/graph-001/002-go-build-verify",
-		RunID:  run.ID,
-		Kind:   "shell/command",
-		State:  common.StepStateFailed,
+		ID:    "run-cwi-accepted-then-rejected/graph-001/002-go-build-verify",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
 		Output: map[string]any{
 			"exitCode":        1,
 			"command":         "curl",
@@ -1121,10 +1121,10 @@ func TestCoverageWorkItemsRejectionWithPartialAcceptedSetsInProgress(t *testing.
 	// (e.g. destructive shell). Since state_change is already bound, the cwi is
 	// in progress, not failed. The rejection is recorded but does not demote.
 	failedStep := &runmodel.Step{
-		ID:     "run-cwi-partial-accepted/graph-001/002-source-change-verify",
-		RunID:  run.ID,
-		Kind:   "shell/command",
-		State:  common.StepStateFailed,
+		ID:    "run-cwi-partial-accepted/graph-001/002-source-change-verify",
+		RunID: run.ID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
 		Output: map[string]any{
 			"exitCode":        1,
 			"command":         "curl",

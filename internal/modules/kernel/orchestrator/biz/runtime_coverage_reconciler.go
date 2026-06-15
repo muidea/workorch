@@ -91,8 +91,8 @@ func (c *coverageSubsystem) reconcileValidationEvidence(
 				continue
 			}
 			update := coverageWorkItemUpdate{
-				TargetTokens: tokens,
-				EvidenceRefs: []string{string(validation.EvidenceRef)},
+				TargetTokens:  tokens,
+				EvidenceRefs:  []string{string(validation.EvidenceRef)},
 				EvidenceKinds: []string{"validation"},
 			}
 			if !coverageWorkItemMatchesUpdate(item, update) {
