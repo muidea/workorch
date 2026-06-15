@@ -18,6 +18,9 @@ func stateChangingRepairRequired(run *runModel.Run, failedStep *runModel.Step, e
 	if runtimeContextIntegrityGateFailure(failedStep) {
 		return false
 	}
+	if doDEvidenceQualityGapRequiresStateChange(failedStep) {
+		return true
+	}
 	if doDVerificationEvidenceRepairRequired(failedStep) {
 		return false
 	}
@@ -279,7 +282,8 @@ func coverageRepairInputRequiresStateChange(input map[string]any) bool {
 	if coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["coverageTargetSet"]), "state_change") ||
 		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["unresolvedCoverageWorkItems"]), "state_change") ||
 		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingDoDItems"]), "state_change") ||
-		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingGoalCoverage"]), "state_change") {
+		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingGoalCoverage"]), "state_change") ||
+		coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["missingDeliverableCoverage"]), "state_change") {
 		return true
 	}
 	for _, key := range []string{"coverageWorkItemContext", "runtimeDiagnostics"} {

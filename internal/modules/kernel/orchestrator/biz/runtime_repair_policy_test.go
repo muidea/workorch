@@ -28,6 +28,53 @@ func TestMaxRuntimeRepairAttemptsUsesConfiguredPolicy(t *testing.T) {
 	}
 }
 
+func TestRuntimeFailureOutputPreservesEvidenceQualityCoverageDiagnostics(t *testing.T) {
+	err := evidenceKindRequirementError(profileEvidenceKindRequirement{
+		Scope:             "deliverable",
+		AcceptedStepKinds: []string{"patch/apply"},
+	}, "stateful-output", "run/graph/001-read", "", "requires evidence from step kinds: patch/apply")
+
+	output := runtimeFailureOutput(map[string]any{
+		"runtimeDiagnostics": map[string]any{
+			"stage": "llm_dod_assessment",
+		},
+	}, err)
+
+	diagnostics := mapFromValue(output["runtimeDiagnostics"])
+	if diagnostics["kind"] != "dod_evidence_quality_gap" || diagnostics["stage"] != "llm_dod_assessment" {
+		t.Fatalf("runtimeDiagnostics = %+v, want merged evidence-quality diagnostics", diagnostics)
+	}
+	missing := mapSliceFromValue(diagnostics["missingDeliverableCoverage"])
+	if len(missing) != 1 || stringFromMap(missing[0], "item") != "stateful-output" {
+		t.Fatalf("runtimeDiagnostics.missingDeliverableCoverage = %+v, want failed deliverable item", missing)
+	}
+	topLevelMissing := mapSliceFromValue(output["missingDeliverableCoverage"])
+	if len(topLevelMissing) != 1 || stringFromMap(topLevelMissing[0], "item") != "stateful-output" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want promoted diagnostics gap", topLevelMissing)
+	}
+}
+
+func TestStateChangingRepairRequiredForEvidenceQualityStateChangeGap(t *testing.T) {
+	err := evidenceKindRequirementError(profileEvidenceKindRequirement{
+		Scope:             "deliverable",
+		AcceptedStepKinds: []string{"patch/apply"},
+	}, "stateful-output", "run/graph/001-read", "", "requires evidence from step kinds: patch/apply")
+	step := &runmodel.Step{
+		ID:   "run-evidence-quality-gap/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage: runtimeStageVerification,
+		},
+		Output: runtimeFailureOutput(map[string]any{
+			"stage": "llm_dod_assessment",
+		}, err),
+	}
+
+	if !stateChangingRepairRequired(nil, step, err) {
+		t.Fatalf("stateChangingRepairRequired = false, want state-changing repair for profile evidence-quality gap")
+	}
+}
+
 func TestShouldNotBlockOnDuplicateRuntimeFailureBeforeScopedBudget(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-duplicate-shell")

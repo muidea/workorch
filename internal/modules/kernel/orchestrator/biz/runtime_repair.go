@@ -73,11 +73,32 @@ func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
 		var diagnosticErr runtimeFailureDiagnosticError
 		if errors.As(execErr, &diagnosticErr) {
 			if diagnostics := diagnosticErr.RuntimeFailureDiagnostics(); len(diagnostics) > 0 {
-				ret["runtimeDiagnostics"] = diagnostics
+				mergeRuntimeFailureDiagnostics(ret, diagnostics)
 			}
 		}
 	}
 	return ret
+}
+
+func mergeRuntimeFailureDiagnostics(output map[string]any, diagnostics map[string]any) {
+	if output == nil || len(diagnostics) == 0 {
+		return
+	}
+	merged := cloneStepPayload(mapFromValue(output["runtimeDiagnostics"]))
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	for key, value := range diagnostics {
+		merged[key] = cloneStepInputValue(value)
+	}
+	output["runtimeDiagnostics"] = merged
+	for _, key := range []string{"missingDoDItems", "missingGoalCoverage", "missingDeliverableCoverage", "evidenceQualityGapItems"} {
+		items := mapSliceFromValue(merged[key])
+		if len(items) == 0 || len(mapSliceFromValue(output[key])) > 0 {
+			continue
+		}
+		output[key] = cloneStepInputValue(items)
+	}
 }
 
 func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
