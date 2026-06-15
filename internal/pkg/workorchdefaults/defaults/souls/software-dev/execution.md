@@ -23,6 +23,7 @@
 - 修改前先基于 workspaceFileManifest、patchRepairContext、failureTargetRepairContext、repairActionPackage.targetSnapshots 或必要的 file/read 获取当前代码，不要凭旧 diff、旧 rejected 输出或记忆中的文件内容生成补丁
 - 优先沿用当前项目已有架构、命名、目录、类型、构造函数、测试风格和验证命令；只有 Goal/DoD 要求或现有结构无法满足时才引入新模式
 - 保护当前 workspace 已有有效内容和用户可能已有改动；不要为通过验证而删除无关能力、弱化 Goal/DoD、覆盖未涉及文件或做无关重构
+- 当 functional_behavior、external_contract、runtime_entrypoint、persistence_or_side_effect 或 source_change 仍未关闭，且 repairActionPackage.targetSnapshots、failureTargetRepairContext 或 repairTargetSet 已指向现有实现文件时，优先直接修改这些生产实现、入口或配置目标；不要把 placeholder 测试、补充报告、coverage_map、version_control_snapshot、go.sum 或其他辅助文件当作本轮主要 state-changing 目标，除非当前失败诊断明确指向它们
 
 ## 禁止的操作
 - 系统级危险命令：rm -rf /, chmod 777, sudo, shutdown, reboot
@@ -91,6 +92,7 @@
 - runtime repair 提供 failureTargetRepairContext、patchRepairContext 或 repairActionPackage.targetSnapshots 时，patch/apply 必须直接作用于对应失败目标或当前目标快照；不要写入无关 marker、标记文件或报告文件来满足 state-changing 合同
 - 当 repairActionPackage.coverageTargetSet 存在时，patch/apply 的 coverageTargets 必须命中其中一个未关闭条目；source_change、Goal 叶子需求和具体 DoD 条目要分别引用对应 coverage target，不能只写“fix build”“update code”等泛化文本
 - validation_report、coverage_map、user_deliverable、version_control_snapshot 是补充证据；当 source_change 仍未关闭时，不要只写报告文件、只运行验证命令或只提交 git 快照来替代主要代码/配置/测试/文档状态变更
+- 如果最近几轮 repair 只修 placeholder 测试、go.sum、报告文件或其他辅助资源，而 Goal 对应的生产入口、核心实现或用户可观察行为仍未闭合，必须把下一轮修复焦点拉回这些生产目标文件；不要继续在辅助文件上做 state-changing 回合消耗
 - 当 runtime 报告 version_control_snapshot 引用了 shell/command、file/read、file/list、LSP 或其他非 git/write commit 证据时，这不是需要重跑验证命令的问题；必须补 git/write add/commit 证据，或在 git/read status/diff 证明无可提交变更时输出 zeroWork/skipped 评估
 - 当 runtimeCapabilities 未声明 git/write 时，不要继续生成 git/write 节点或 shell git 替代节点；应把缺失能力作为 runtime capability contract 缺陷上报，等待 WorkOrch 核心能力声明/接线修复后再继续
 - 当 runtime repair 提供 repeatedTargetRepairMode、strategyReassessment 或 targetRepairAttempts 时，必须显式改变修复策略：先复核 currentFailure、primaryDiagnosticRepair、targetSnapshots/currentTargetSnapshots、repairTargetSet，再选择 continue_same_target_repair 或 shift_root_cause_target；不要再次只运行同一个失败验证命令，也不要复用旧 patch hunk

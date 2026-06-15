@@ -25,6 +25,7 @@
 - 如果 processEvidenceTimeline 中存在失败验证、失败 patch、失败命令或 runtime contract violation，计划必须解释如何基于当前代码和当前失败证据收敛，不能重新扩散为无关探索
 - 计划必须基于 Goal / DoD 提取通用验收维度：functional_behavior、external_contract、runtime_entrypoint、configuration、persistence_or_side_effect、error_behavior、streaming_or_long_running、concurrency、deliverable；只有 Goal / DoD 涉及的维度才需要进入执行和验证
 - 当 coverageTargetSet 或 missingDeliverableCoverage 指出 source_change、Goal 叶子或 DoD 条目未关闭时，计划必须把下一步收敛为具体 patch/apply 或等价状态变更，并列出每个状态变更要声明的 coverageTargets；不要只规划 file/read、file/list、LSP 或验证命令
+- 当 repairActionPackage.targetSnapshots、failureTargetRepairContext 或 repairTargetSet 已指向现有实现文件，而 functional_behavior、external_contract、runtime_entrypoint、persistence_or_side_effect 或 source_change 仍未关闭时，计划必须优先安排对这些目标文件的直接状态变更，再安排测试、git 快照或补充证据；不要把 placeholder 测试、go.sum、报告文件、coverage_map 或其他辅助文件作为首个 state-changing 目标，除非当前失败诊断明确指向它们
 - 当缺口是 version_control_snapshot 且已有有意义 workspace 输出变更时，计划必须安排 git/read status/diff 后执行 git/write add 和 git/write commit；shell/command git 输出只能作为诊断，不能作为 satisfied 快照证据
 - 当最新失败原因是 version_control_snapshot 引用了 shell/command 或其他非 git/write commit 证据时，计划必须把下一步收敛为 git/write add/commit 或 zeroWork 评估；不要继续规划普通验证命令、git log/status shell 命令或泛化 replan
 - 如果 runtimeCapabilities.blockKinds 未声明 git/write，而 version_control_snapshot 又是必需交付证据，必须规划 blocked_on_decision 并说明 WorkOrch runtime capability contract 缺失核心 git/write 能力；不要规划 shell/command git commit、普通验证命令或只读检查来替代 git/write 证据

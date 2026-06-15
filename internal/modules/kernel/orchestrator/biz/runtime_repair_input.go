@@ -534,6 +534,14 @@ func applyRuntimeRepairStateChangingActionPackageProjection(
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 		"Use repairActionPackage as the primary actionable repair contract; it contains the required output kind, rejected output summary, and current target snapshots.",
 	)
+	if len(mapSliceFromValue(input["failureTargetRepairContext"])) > 0 ||
+		len(mapSliceFromValue(mapFromValue(input["repairActionPackage"])["targetSnapshots"])) > 0 ||
+		len(stringSliceFromValue(mapFromValue(input["repairActionPackage"])["repairTargetSet"])) > 0 {
+		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
+			"When current failure targets, target snapshots, or repairTargetSet already identify concrete repair resources, prioritize direct state-changing edits to those targets before modifying auxiliary validation scaffolding, supplemental evidence resources, or unrelated supporting files.",
+			"If the current diagnostics do not explicitly identify an auxiliary file as the failed surface, treat that auxiliary file as supporting context only, not the primary state-changing target.",
+		)
+	}
 	if !boolValue(input["concreteFailureEvidenceRequired"]) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
 			"When repairActionPackage.requiredOutput.mustIncludeStateChangingNode is true, the next output must include an accepted state-changing operation before verification, or return a real governance blocker.",
