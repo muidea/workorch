@@ -79,6 +79,6 @@ Last Updated: 2026-06-15
 
 对应审核 skill：
 
-- `.agents/skills/workorch-core-template-boundary/SKILL.md`
+- `/home/rangh/aispace/.agents/skills/workorch-core-template-boundary/SKILL.md`
 
 后续涉及 WorkOrch core/template 边界、runtime repair、projection/TUI、LLM context/cache、CPU/IO 或 live workspace 收口时，必须先使用该 skill。

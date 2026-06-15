@@ -55,6 +55,62 @@ func TestValidateDoDAssessmentCoversRunDoD_LeafOnlyCoverageAndDiagnostics(t *tes
 	}
 }
 
+func TestValidatedCompletionDoDAssessmentUnsatisfiedCarriesStructuredDiagnostics(t *testing.T) {
+	run := &runModel.Run{
+		DoDID:           "dod-unsatisfied-diagnostics",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "coverage still has precise gaps",
+			"items": []map[string]any{{
+				"item":  "bounded validation closes the behavior",
+				"state": "failed",
+			}},
+			"goalCoverage": map[string]any{
+				"items": []map[string]any{{
+					"goalRequirementId": "goal-req-001",
+					"goal":              "goal leaf remains uncovered",
+					"state":             "failed",
+				}},
+			},
+			"deliverableCoverage": map[string]any{
+				"items": []map[string]any{{
+					"id":    "coverage_map",
+					"item":  "coverage_map",
+					"state": "failed",
+				}},
+			},
+		},
+	}
+
+	_, _, err := validatedCompletionDoDAssessment(run, output)
+	if err == nil {
+		t.Fatal("validatedCompletionDoDAssessment = nil, want unsatisfied diagnostic error")
+	}
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("errors.Is(err, ErrInvalidArgument) = false, err=%v", err)
+	}
+	var diagnostic runtimeFailureDiagnosticError
+	if !errors.As(err, &diagnostic) {
+		t.Fatalf("errors.As(err, runtimeFailureDiagnosticError) = false, err=%v", err)
+	}
+	diagnostics := diagnostic.RuntimeFailureDiagnostics()
+	if diagnostics["kind"] != failureClassDoDCoverageMissing {
+		t.Fatalf("runtimeDiagnostics.kind = %v, want %s", diagnostics["kind"], failureClassDoDCoverageMissing)
+	}
+	if len(mapSliceFromValue(diagnostics["missingDoDItems"])) != 1 {
+		t.Fatalf("missingDoDItems = %+v, want one item", diagnostics["missingDoDItems"])
+	}
+	if len(mapSliceFromValue(diagnostics["missingGoalCoverage"])) != 1 {
+		t.Fatalf("missingGoalCoverage = %+v, want one item", diagnostics["missingGoalCoverage"])
+	}
+	if missing := mapSliceFromValue(diagnostics["missingDeliverableCoverage"]); len(missing) != 1 || missing[0]["item"] != "coverage_map" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want coverage_map", diagnostics["missingDeliverableCoverage"])
+	}
+}
+
 func TestDoDRequiredEvidenceHintStaysProfileNeutral(t *testing.T) {
 	cases := []string{
 		"配置文件必须被代码真实加载并有测试断言",

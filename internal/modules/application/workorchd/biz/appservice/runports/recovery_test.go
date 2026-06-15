@@ -552,14 +552,14 @@ func TestBlockedRunResumeCompressedContextUsesResolvedDecision(t *testing.T) {
 	}
 }
 
-func TestBlockedRunResumeCompressedContextSkipsUnsupportedDecisionResolution(t *testing.T) {
+func TestBlockedRunResumeCompressedContextUsesResolvedReplanDecision(t *testing.T) {
 	t.Parallel()
 
 	run := &runmodel.Run{
-		ID:               "run-blocked-decision-skip",
-		WorkspaceID:      "ws-blocked-decision-skip",
+		ID:               "run-blocked-decision-replan",
+		WorkspaceID:      "ws-blocked-decision-replan",
 		State:            common.RunStateBlockedOnDecision,
-		BlockingTicketID: "ticket-blocked-decision-skip",
+		BlockingTicketID: "ticket-blocked-decision-replan",
 	}
 	compressed, err := BlockedRunResumeCompressedContext(
 		context.Background(),
@@ -576,8 +576,12 @@ func TestBlockedRunResumeCompressedContextSkipsUnsupportedDecisionResolution(t *
 	if err != nil {
 		t.Fatalf("BlockedRunResumeCompressedContext: %v", err)
 	}
-	if compressed != nil {
-		t.Fatalf("compressed = %+v, want nil for unsupported resolution", compressed)
+	if compressed == nil || compressed["runId"] != string(run.ID) {
+		t.Fatalf("compressed = %+v, want run identity for resolved replan", compressed)
+	}
+	recovery, _ := compressed["recovery"].(map[string]any)
+	if recovery["blockingTicketId"] != string(run.BlockingTicketID) || recovery["nextAction"] != "continue_run" {
+		t.Fatalf("recovery = %+v, want resolved replan continuation", recovery)
 	}
 }
 

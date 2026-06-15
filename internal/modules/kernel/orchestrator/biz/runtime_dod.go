@@ -30,7 +30,7 @@ func validatedCompletionDoDAssessment(run *runModel.Run, output map[string]any) 
 		return nil, "", fmt.Errorf("%w: dodAssessment.satisfied is required", common.ErrInvalidArgument)
 	}
 	if !satisfied {
-		return nil, "", fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument)
+		return nil, "", newDoDAssessmentUnsatisfiedError(assessment)
 	}
 	summary, _ := assessment["summary"].(string)
 	summary = strings.TrimSpace(summary)
@@ -730,9 +730,11 @@ func outputWithDoDAssessmentDiagnostics(output map[string]any) map[string]any {
 	if len(output) == 0 {
 		return output
 	}
-	missing := missingDoDItemsFromDoDAssessment(doDAssessmentFromOutput(output))
-	missingGoalCoverage := missingGoalCoverageFromDoDAssessment(doDAssessmentFromOutput(output))
-	if len(missing) == 0 && len(missingGoalCoverage) == 0 {
+	assessment := doDAssessmentFromOutput(output)
+	missing := missingDoDItemsFromDoDAssessment(assessment)
+	missingGoalCoverage := missingGoalCoverageFromDoDAssessment(assessment)
+	missingDeliverableCoverage := missingDeliverableCoverageFromDoDAssessment(assessment)
+	if len(missing) == 0 && len(missingGoalCoverage) == 0 && len(missingDeliverableCoverage) == 0 {
 		return output
 	}
 	ret := cloneStepPayload(output)
@@ -748,6 +750,10 @@ func outputWithDoDAssessmentDiagnostics(output map[string]any) map[string]any {
 	if len(missingGoalCoverage) > 0 {
 		diagnostics["missingGoalCoverage"] = missingGoalCoverage
 		ret["missingGoalCoverage"] = missingGoalCoverage
+	}
+	if len(missingDeliverableCoverage) > 0 {
+		diagnostics["missingDeliverableCoverage"] = missingDeliverableCoverage
+		ret["missingDeliverableCoverage"] = missingDeliverableCoverage
 	}
 	ret["runtimeDiagnostics"] = diagnostics
 	return ret
@@ -1416,6 +1422,13 @@ type doDCoverageMissingError struct {
 	missing []normalizedDoDItem
 }
 
+type doDAssessmentUnsatisfiedError struct {
+	cause                      error
+	missingDoDItems            []map[string]any
+	missingGoalCoverage        []map[string]any
+	missingDeliverableCoverage []map[string]any
+}
+
 type goalCoverageMissingError struct {
 	cause   error
 	missing []normalizedDoDItem
@@ -1424,6 +1437,49 @@ type goalCoverageMissingError struct {
 type deliverableCoverageMissingError struct {
 	cause   error
 	missing []string
+}
+
+func newDoDAssessmentUnsatisfiedError(assessment map[string]any) error {
+	return &doDAssessmentUnsatisfiedError{
+		cause:                      fmt.Errorf("%w: dodAssessment is not satisfied", common.ErrInvalidArgument),
+		missingDoDItems:            missingDoDItemsFromDoDAssessment(assessment),
+		missingGoalCoverage:        missingGoalCoverageFromDoDAssessment(assessment),
+		missingDeliverableCoverage: missingDeliverableCoverageFromDoDAssessment(assessment),
+	}
+}
+
+func (e *doDAssessmentUnsatisfiedError) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *doDAssessmentUnsatisfiedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func (e *doDAssessmentUnsatisfiedError) RuntimeFailureDiagnostics() map[string]any {
+	if e == nil {
+		return nil
+	}
+	ret := map[string]any{
+		"kind":                failureClassDoDCoverageMissing,
+		"assessmentSatisfied": false,
+	}
+	if len(e.missingDoDItems) > 0 {
+		ret["missingDoDItems"] = cloneMapSlice(e.missingDoDItems)
+	}
+	if len(e.missingGoalCoverage) > 0 {
+		ret["missingGoalCoverage"] = cloneMapSlice(e.missingGoalCoverage)
+	}
+	if len(e.missingDeliverableCoverage) > 0 {
+		ret["missingDeliverableCoverage"] = cloneMapSlice(e.missingDeliverableCoverage)
+	}
+	return ret
 }
 
 func newGoalCoverageContractError(cause error, missing []normalizedDoDItem) error {

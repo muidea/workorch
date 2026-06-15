@@ -186,7 +186,7 @@ func BuildConvergenceContract(
 		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 		return contract
 	}
-	if populateCoverageWorkItemConvergenceContract(run, input, &contract) {
+	if populateCoverageWorkItemConvergenceContract(run, input, failedStep, &contract) {
 		return contract
 	}
 	if convergenceTargetEvidenceReadyForStateChange(run, input, failedStep) {
@@ -291,13 +291,14 @@ func populateProfileStateChangingEvidenceConvergenceContract(input map[string]an
 	contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
 }
 
-func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[string]any, contract *ConvergenceContract) bool {
+func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[string]any, failedStep *runModel.Step, contract *ConvergenceContract) bool {
 	if contract == nil {
 		return false
 	}
 	if boolValue(input["assessmentOnlyContractCorrection"]) ||
 		(strings.TrimSpace(stringFromMap(input, "repairObjective")) == "complete_dod_goal_coverage_assessment" &&
-			!coverageWorkItemContextHasActionableFailure(coverageWorkItemContextFromInput(input))) {
+			!coverageWorkItemContextHasActionableFailure(coverageWorkItemContextFromInput(input)) &&
+			!explicitCoverageGapShouldPreemptAssessment(input, failedStep)) {
 		return false
 	}
 	if !coverageWorkItemConvergenceEligible(input) {
@@ -405,6 +406,26 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
 		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
 		required["mustReferenceCoverageWorkItem"] = true
+		contract.RepairActionPackage["requiredOutput"] = required
+		return true
+	}
+	if explicitCoverageGapShouldPreemptAssessment(input, failedStep) {
+		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+			populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
+			return true
+		}
+		contract.State = convergenceStateNeedValidation
+		contract.RuntimeStage = runtimeStageVerification
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = repairObjectiveConcreteValidationEvidence
+		required := concreteValidationEvidenceRequiredOutput(mapFromValue(contract.RepairActionPackage["requiredOutput"]))
+		required["mustReferenceCoverageWorkItem"] = true
+		if targets := coverageTargetSetFromRepairInput(input); len(targets) > 0 {
+			contract.RepairActionPackage["coverageRepairRequired"] = true
+			contract.RepairActionPackage["coverageTargetSet"] = targets
+			required["mustDeclareCoverageTargets"] = true
+			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+		}
 		contract.RepairActionPackage["requiredOutput"] = required
 		return true
 	}
@@ -1524,6 +1545,37 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 		return boolValue(required["mustProduceConcreteValidationEvidence"])
 	}
 	return false
+}
+
+func explicitCoverageGapPresent(input map[string]any, failedStep *runModel.Step) bool {
+	if len(mapSliceFromValue(input["missingDoDItems"])) > 0 ||
+		len(missingGoalCoverageFromInput(input)) > 0 ||
+		len(mapSliceFromValue(input["missingDeliverableCoverage"])) > 0 {
+		return true
+	}
+	if failedStep == nil {
+		return false
+	}
+	return len(missingDoDItemsFromFailureOutput(failedStep.Output)) > 0 ||
+		len(missingGoalCoverageFromStep(failedStep)) > 0 ||
+		len(missingDeliverableCoverageFromStep(failedStep)) > 0
+}
+
+func explicitCoverageGapShouldPreemptAssessment(input map[string]any, failedStep *runModel.Step) bool {
+	if !explicitCoverageGapPresent(input, failedStep) {
+		return false
+	}
+	if failedStep == nil {
+		return true
+	}
+	if assessmentOutputContractRepairRequired(failedStep) {
+		return false
+	}
+	assessment := doDAssessmentFromOutput(failedStep.Output)
+	if satisfied, ok := assessment["satisfied"].(bool); ok && satisfied {
+		return false
+	}
+	return true
 }
 
 func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, input map[string]any) map[string]any {

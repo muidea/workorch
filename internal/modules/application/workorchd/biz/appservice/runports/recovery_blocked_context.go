@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -29,7 +30,9 @@ func BlockedRunResumeCompressedContext(ctx context.Context, tickets readmodelcor
 		if err != nil {
 			return nil, err
 		}
-		if resolution.Type != "provide_missing_info" {
+		switch resolution.Type {
+		case decisioncommon.ResolutionTypeProvideMissingInfo, decisioncommon.ResolutionTypeReplan:
+		default:
 			return nil, nil
 		}
 		blocker, recovery, summary := runtimecore.ResolvedDecisionBlockerContext(item, language)
