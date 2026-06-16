@@ -279,9 +279,12 @@ func missingDeliverableCoverageFromStep(step *runModel.Step) []map[string]any {
 		return nil
 	}
 	if missing := missingDeliverableCoverageFromFailureOutput(step.Output); len(missing) > 0 {
-		return missing
+		return mergeMissingDeliverableCoverageInputCandidates(missing, step.Input)
 	}
-	return missingDeliverableCoverageFromDoDAssessment(doDAssessmentFromOutput(step.Output))
+	if missing := missingDeliverableCoverageFromDoDAssessment(doDAssessmentFromOutput(step.Output)); len(missing) > 0 {
+		return mergeMissingDeliverableCoverageInputCandidates(missing, step.Input)
+	}
+	return mergeMissingDeliverableCoverageInputCandidates(missingDeliverableCoverageFromInput(step.Input), step.Input)
 }
 
 func missingGoalCoverageFromStep(step *runModel.Step) []map[string]any {
@@ -307,6 +310,98 @@ func missingGoalCoverageFromInput(input map[string]any) []map[string]any {
 		ret = append(ret, cloneStepPayload(item))
 	}
 	return ret
+}
+
+func missingDeliverableCoverageFromInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	return mergeMissingDeliverableCoverageInputCandidates(mapSliceFromValue(input["missingDeliverableCoverage"]), input)
+}
+
+func mergeMissingDeliverableCoverageInputCandidates(missing []map[string]any, input map[string]any) []map[string]any {
+	if len(missing) == 0 {
+		return nil
+	}
+	candidates := deliverableCoverageCandidatesFromInput(input)
+	ret := make([]map[string]any, 0, len(missing))
+	for _, item := range missing {
+		next := cloneStepPayload(item)
+		if len(candidates) > 0 {
+			if candidate := matchingDeliverableCoverageCandidate(next, candidates); len(candidate) > 0 {
+				for _, key := range []string{
+					"evidenceRole",
+					"requiredEvidenceKinds",
+					"missingEvidenceKinds",
+					"requiredEvidenceCounts",
+					"source",
+					"sourceScope",
+					"sourceRequirementId",
+					"sourcePath",
+					"targetText",
+					"coverageWorkItemId",
+					"coverageTargetToken",
+				} {
+					if _, exists := next[key]; exists {
+						continue
+					}
+					if value, ok := candidate[key]; ok && value != nil {
+						next[key] = compactLLMContextValue(value, 1)
+					}
+				}
+			}
+		}
+		ret = append(ret, next)
+	}
+	return ret
+}
+
+func deliverableCoverageCandidatesFromInput(input map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0)
+	for _, item := range coverageWorkItemCandidateItemsFromContext(coverageWorkItemContextFromInput(input)) {
+		if strings.TrimSpace(stringFromMap(item, "sourceScope")) == "deliverable" ||
+			strings.TrimSpace(stringFromMap(item, "kind")) == "deliverable" {
+			ret = append(ret, item)
+		}
+	}
+	for _, item := range mapSliceFromValue(input["coverageTargetSet"]) {
+		if strings.TrimSpace(stringFromMap(item, "sourceScope")) == "deliverable" ||
+			strings.TrimSpace(stringFromMap(item, "kind")) == "deliverable" {
+			ret = append(ret, item)
+		}
+	}
+	return ret
+}
+
+func matchingDeliverableCoverageCandidate(item map[string]any, candidates []map[string]any) map[string]any {
+	token := normalizeCoverageGapRepairToken(firstNonEmptyString(
+		stringFromMap(item, "sourceRequirementId"),
+		stringFromMap(item, "id"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "expectationId"),
+		stringFromMap(item, "requirement"),
+		stringFromMap(item, "targetText"),
+	))
+	if token == "" {
+		return nil
+	}
+	for _, candidate := range candidates {
+		for _, candidateText := range []string{
+			stringFromMap(candidate, "sourceRequirementId"),
+			stringFromMap(candidate, "id"),
+			stringFromMap(candidate, "item"),
+			stringFromMap(candidate, "coverageTargetToken"),
+			stringFromMap(candidate, "targetText"),
+		} {
+			if normalizeCoverageGapRepairToken(candidateText) == token {
+				return candidate
+			}
+		}
+	}
+	return nil
 }
 
 func assessmentOnlyGoalCoverageContradictionRepairRequired(step *runModel.Step) bool {

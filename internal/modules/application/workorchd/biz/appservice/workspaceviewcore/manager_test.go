@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +24,28 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 		{ID: "ws-b", Title: "B", State: "active"},
 		{ID: "ws-a", Title: "A", State: "active"},
 	}, map[string]readmodelcore.WorkspaceSnapshot{
-		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", Title: "A+", State: "running"}},
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{
+				ID:               "ws-a",
+				Title:            "A+",
+				State:            "running",
+				ContextHints:     map[string]any{"large": "profile"},
+				EvidencePolicies: []map[string]any{{"large": "policy"}},
+			},
+			Runs: []readmodelcore.Run{{
+				ID:               "run-a",
+				WorkspaceID:      "ws-a",
+				State:            "running",
+				ExecutionContext: map[string]any{"coverageWorkItems": []any{map[string]any{"large": strings.Repeat("x", 2048)}}},
+			}},
+			LLMUsageTraces: []readmodelcore.LLMUsageTrace{{
+				ID:    "usage-a",
+				RunID: "run-a",
+				ContextBudget: map[string]any{
+					"failureSignature": strings.Repeat("x", 2048),
+				},
+			}},
+		},
 	}, nil)
 
 	items, status, err := store.List()
@@ -43,6 +65,15 @@ func TestStoreReplaceAllListSnapshotAndDelete(t *testing.T) {
 	}
 	if snapshotStatus.GlobalRevision != status.GlobalRevision || snapshot.Workspace.State != "running" {
 		t.Fatalf("snapshot/status = %+v/%+v, want running snapshot at same revision", snapshot, snapshotStatus)
+	}
+	if snapshot.Workspace.ContextHints != nil || snapshot.Workspace.EvidencePolicies != nil {
+		t.Fatalf("snapshot workspace = %+v, want detail projection stored", snapshot.Workspace)
+	}
+	if len(snapshot.Runs) != 1 || snapshot.Runs[0].ExecutionContext != nil {
+		t.Fatalf("snapshot runs = %+v, want compact detail run stored", snapshot.Runs)
+	}
+	if signature := snapshot.LLMUsageTraces[0].ContextBudget["failureSignature"].(string); len(signature) > 1024+len("...[truncated]") {
+		t.Fatalf("stored LLM trace signature length = %d, want bounded detail projection", len(signature))
 	}
 
 	store.DeleteWorkspace("ws-a")

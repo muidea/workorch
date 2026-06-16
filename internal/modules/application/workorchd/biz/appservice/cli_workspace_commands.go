@@ -27,6 +27,10 @@ func (d *CLICommandDispatcher) handleWorkspaceCommand(ctx context.Context, cmd e
 			return nil, nil, common.ErrInvalidArgument
 		}
 		item, err := d.viewReader.ReadWorkspaceViewSnapshot(ctx, cmd.SubjectID)
+		if err != nil {
+			return nil, nil, err
+		}
+		item = ProjectWorkspaceSnapshotDetail(item)
 		return clicore.ResourceMap(item), nil, err
 	case events.CommandWorkspaceDelete:
 		err := DeleteWorkspaceWithSession(ctx, d.borrow(), cmd.SubjectID, DeleteWorkspaceCommand{Purge: clicore.BoolValue(cmd.Payload, "purge")})

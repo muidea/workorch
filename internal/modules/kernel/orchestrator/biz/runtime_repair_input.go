@@ -402,8 +402,8 @@ func applyRuntimeRepairEmptyWorkspaceStateChangingProjection(input map[string]an
 	delete(input, "evidenceRepairRequired")
 	delete(input, "evidenceRepairSource")
 	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
-		"Concrete evidence shows the workspace has no Go module or implementation files; stop collecting more empty-workspace evidence.",
-		"Initialize the requested project through auditable state-changing output, such as patch/apply file_write nodes for go.mod, source, tests, and README when required by Goal/DoD.",
+		"Concrete evidence shows the workspace has no deliverable resources for the active Goal/DoD; stop collecting more empty-workspace evidence.",
+		"Initialize the requested workspace deliverables through auditable state-changing output, such as patch/apply file_write nodes for the smallest cohesive resources required by Goal/DoD.",
 	)
 }
 

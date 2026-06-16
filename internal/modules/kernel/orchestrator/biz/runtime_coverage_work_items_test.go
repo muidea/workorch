@@ -833,6 +833,78 @@ func TestCoverageWorkItemsAdvanceFromStepAndAssessmentEvidence(t *testing.T) {
 	}
 }
 
+func TestCoverageTargetSetPreservesStateChangingWorkItemContract(t *testing.T) {
+	context := map[string]any{
+		"currentFocus": map[string]any{
+			"id":                    "cwi-primary",
+			"source":                "deliverableCoverage",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "primary-output",
+			"sourcePath":            "profileContracts.neutral.deliverableExpectations[0]",
+			"targetText":            "primary-output",
+			"evidenceRole":          "primary_state_change",
+			"requiredEvidenceKinds": []string{"state_change", "validation"},
+			"missingEvidenceKinds":  []string{"state_change"},
+			"status":                "open",
+		},
+	}
+
+	targets := coverageTargetSetFromWorkItemContext(context)
+
+	if len(targets) != 1 {
+		t.Fatalf("coverageTargetSet = %+v, want one target", targets)
+	}
+	target := targets[0]
+	if target["evidenceRole"] != "primary_state_change" ||
+		!stringSliceContains(stringSliceFromValue(target["requiredEvidenceKinds"]), "state_change") ||
+		!stringSliceContains(stringSliceFromValue(target["missingEvidenceKinds"]), "state_change") {
+		t.Fatalf("coverage target = %+v, want preserved state-changing contract fields", target)
+	}
+}
+
+func TestMissingDeliverableCoverageFromStepEnrichesFromCoverageWorkItemContext(t *testing.T) {
+	step := &runmodel.Step{
+		ID: "run-cwi-missing-deliverable/step-001",
+		Input: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "cwi-primary",
+					"source":                "deliverableCoverage",
+					"sourceScope":           "deliverable",
+					"sourceRequirementId":   "primary-output",
+					"sourcePath":            "profileContracts.neutral.deliverableExpectations[0]",
+					"targetText":            "primary-output",
+					"evidenceRole":          "primary_state_change",
+					"requiredEvidenceKinds": []string{"state_change", "validation"},
+					"missingEvidenceKinds":  []string{"state_change"},
+					"status":                "open",
+				},
+			},
+		},
+		Output: map[string]any{
+			"runtimeDiagnostics": map[string]any{
+				"missingDeliverableCoverage": []map[string]any{{
+					"id":    "primary-output",
+					"kind":  "deliverableExpectation",
+					"state": "missing",
+				}},
+			},
+		},
+	}
+
+	missing := missingDeliverableCoverageFromStep(step)
+
+	if len(missing) != 1 {
+		t.Fatalf("missingDeliverableCoverage = %+v, want one enriched item", missing)
+	}
+	item := missing[0]
+	if item["evidenceRole"] != "primary_state_change" ||
+		!stringSliceContains(stringSliceFromValue(item["requiredEvidenceKinds"]), "state_change") ||
+		item["sourceRequirementId"] != "primary-output" {
+		t.Fatalf("missingDeliverableCoverage = %+v, want enriched state-changing contract fields", missing)
+	}
+}
+
 func TestCoverageWorkItemsMatchStructuredSourceRequirementID(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-cwi-source-requirement-id",

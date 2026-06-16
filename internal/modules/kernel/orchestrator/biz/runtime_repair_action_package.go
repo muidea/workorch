@@ -1262,7 +1262,21 @@ func coverageTargetSetFromRepairInput(input map[string]any) []map[string]any {
 		} else {
 			next["coverageTargetToken"] = targetText
 		}
-		for _, key := range []string{"item", "raw", "requirement", "source", "sourceRequirementId", "sourceScope", "sourcePath"} {
+		for _, key := range []string{
+			"item",
+			"raw",
+			"requirement",
+			"source",
+			"sourceRequirementId",
+			"sourceScope",
+			"sourcePath",
+			"evidenceRole",
+			"requiredEvidenceKinds",
+			"missingEvidenceKinds",
+			"requiredEvidenceCounts",
+			"acceptedEvidenceByKind",
+			"rejectedEvidenceByKind",
+		} {
 			if value, ok := item[key]; ok && value != nil {
 				next[key] = compactLLMContextValue(value, 1)
 			}

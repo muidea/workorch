@@ -280,6 +280,18 @@ func coverageTargetSetFromWorkItemContext(context map[string]any) []map[string]a
 			"coverageWorkItemId":  stringFromMap(item, "id"),
 			"coverageTargetToken": firstNonEmptyString(sourceRequirementID, targetText),
 		}
+		for _, key := range []string{
+			"evidenceRole",
+			"requiredEvidenceKinds",
+			"missingEvidenceKinds",
+			"requiredEvidenceCounts",
+			"acceptedEvidenceByKind",
+			"rejectedEvidenceByKind",
+		} {
+			if value, ok := item[key]; ok && value != nil {
+				target[key] = compactLLMContextValue(value, 1)
+			}
+		}
 		ret = append(ret, target)
 	}
 	if focus := mapFromValue(context["currentFocus"]); len(focus) > 0 {

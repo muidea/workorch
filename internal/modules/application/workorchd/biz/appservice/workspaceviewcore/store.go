@@ -9,6 +9,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -204,6 +205,7 @@ func (s *Store) ReplaceAll(workspaces []appmodelcore.Workspace, snapshots map[st
 		}
 		entry := s.cloneEntryForReplace(item.ID)
 		if snapshot, ok := snapshots[item.ID]; ok && strings.TrimSpace(snapshot.Workspace.ID) != "" {
+			snapshot = readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
 			item = snapshot.Workspace
 			entry.Snapshot = cloneWorkspaceSnapshot(snapshot)
 			entry.HasSnapshot = true
@@ -299,6 +301,7 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	if s == nil || strings.TrimSpace(snapshot.Workspace.ID) == "" {
 		return
 	}
+	snapshot = readmodelprojection.ProjectWorkspaceSnapshotDetail(snapshot)
 	workspaceID := snapshot.Workspace.ID
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -2,6 +2,7 @@ package readmodelprojection
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
@@ -21,7 +22,14 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 	traces := make([]readmodelcore.LLMUsageTrace, 0, workspaceSnapshotDetailLLMTraceLimit+3)
 	for idx := 0; idx < workspaceSnapshotDetailLLMTraceLimit+3; idx++ {
-		traces = append(traces, readmodelcore.LLMUsageTrace{ID: "usage-" + strconv.Itoa(idx), RunID: "run-11"})
+		traces = append(traces, readmodelcore.LLMUsageTrace{
+			ID:    "usage-" + strconv.Itoa(idx),
+			RunID: "run-11",
+			ContextBudget: map[string]any{
+				"failureSignature": "prefix-" + strconv.Itoa(idx) + "-" + strings.Repeat("x", workspaceSnapshotTraceStringLimit+200),
+				"recentFailures":   []any{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen"},
+			},
+		})
 	}
 
 	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
@@ -59,6 +67,12 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 	if got.LLMUsageTraces[0].ID != "usage-3" {
 		t.Fatalf("first trace = %q, want latest traces retained", got.LLMUsageTraces[0].ID)
+	}
+	if signature := got.LLMUsageTraces[0].ContextBudget["failureSignature"].(string); len(signature) > workspaceSnapshotTraceStringLimit+len("...[truncated]") {
+		t.Fatalf("context budget failureSignature length = %d, want bounded", len(signature))
+	}
+	if recent := got.LLMUsageTraces[0].ContextBudget["recentFailures"].([]any); len(recent) != workspaceSnapshotTraceSliceLimit {
+		t.Fatalf("context budget recentFailures = %d, want %d", len(recent), workspaceSnapshotTraceSliceLimit)
 	}
 	if got.LLMUsageSummary.EntryTotal != len(traces) {
 		t.Fatalf("summary entry total = %d, want full total %d", got.LLMUsageSummary.EntryTotal, len(traces))
