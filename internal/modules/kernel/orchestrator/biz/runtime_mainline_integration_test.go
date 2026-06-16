@@ -1082,10 +1082,11 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 							"id":   "write-result",
 							"kind": llmcommon.RuntimeBlockKindPatchApply,
 							"input": map[string]any{
-								"patchType": "file_write",
-								"targetRef": "docs/result.txt",
-								"content":   "graph patch applied\n",
-								"summary":   "write graph result",
+								"patchType":       "file_write",
+								"targetRef":       "docs/result.txt",
+								"content":         "graph patch applied\n",
+								"summary":         "write graph result",
+								"coverageTargets": []string{"goal-alpha", "deliverable-alpha"},
 							},
 						},
 						{
@@ -1192,5 +1193,9 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 	}
 	if len(patches) != 1 || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" {
 		t.Fatalf("patches = %+v, want applied graph patch", patches)
+	}
+	targets := stringSliceFromValue(patches[0].CoverageTargets)
+	if len(targets) != 2 || targets[0] != "goal-alpha" || targets[1] != "deliverable-alpha" {
+		t.Fatalf("patch coverageTargets = %+v, want graph patch metadata preserved", patches[0].CoverageTargets)
 	}
 }

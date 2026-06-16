@@ -77,24 +77,26 @@ func (a *PatchRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, request runt
 				},
 			}, err
 		}
+		patchOutput := map[string]any{
+			"patchType":  patch.PatchType,
+			"targetRef":  patch.TargetRef,
+			"content":    patch.Content,
+			"diff":       patch.Diff,
+			"oldText":    patch.OldText,
+			"newText":    patch.NewText,
+			"summary":    patch.Summary,
+			"baseHash":   patch.BaseHash,
+			"occurrence": patch.Occurrence,
+			"approvalId": string(patch.ApprovalID),
+		}
+		if patch.CoverageTargets != nil {
+			patchOutput["coverageTargets"] = patch.CoverageTargets
+		}
 		return runtimemodel.StepExecutionResult{
 			Output: map[string]any{
-				"status": "completed",
-				"stage":  "patch_apply",
-				"patches": []map[string]any{
-					{
-						"patchType":  patch.PatchType,
-						"targetRef":  patch.TargetRef,
-						"content":    patch.Content,
-						"diff":       patch.Diff,
-						"oldText":    patch.OldText,
-						"newText":    patch.NewText,
-						"summary":    patch.Summary,
-						"baseHash":   patch.BaseHash,
-						"occurrence": patch.Occurrence,
-						"approvalId": string(patch.ApprovalID),
-					},
-				},
+				"status":  "completed",
+				"stage":   "patch_apply",
+				"patches": []map[string]any{patchOutput},
 			},
 		}, nil
 	default:

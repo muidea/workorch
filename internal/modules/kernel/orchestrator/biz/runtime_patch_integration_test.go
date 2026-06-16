@@ -207,6 +207,30 @@ func TestPatchPreviewDoesNotWriteFile(t *testing.T) {
 	}
 }
 
+func TestPatchRuntimeAdapterPreservesCoverageTargets(t *testing.T) {
+	result, err := NewPatchRuntimeAdapter().ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          llmcommon.RuntimeBlockKindPatchApply,
+		Input: map[string]any{
+			"patchType":       "file_write",
+			"targetRef":       "result.txt",
+			"content":         "ok\n",
+			"coverageTargets": []string{"goal-alpha", "deliverable-alpha"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("patch apply: %v", err)
+	}
+	patches, ok := result.Output["patches"].([]map[string]any)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("patch apply output = %+v, want one patch", result.Output)
+	}
+	targets := stringSliceFromValue(patches[0]["coverageTargets"])
+	if len(targets) != 2 || targets[0] != "goal-alpha" || targets[1] != "deliverable-alpha" {
+		t.Fatalf("coverageTargets = %+v, want preserved target metadata", patches[0]["coverageTargets"])
+	}
+}
+
 func TestRuntimeOrchestratorPublishesPatchPreviewEvent(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()
