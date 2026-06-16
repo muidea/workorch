@@ -18,6 +18,57 @@ import (
 
 const maxProviderErrorBodyBytes = 4096
 const maxProviderStreamLineBytes = 16 * 1024 * 1024
+const maxProviderStreamContentBytes = 8 * 1024 * 1024
+const maxProviderStreamDataEvents = 32768
+
+type providerStreamLimits struct {
+	MaxContentBytes int
+	MaxDataEvents   int
+}
+
+var defaultProviderStreamLimits = providerStreamLimits{
+	MaxContentBytes: maxProviderStreamContentBytes,
+	MaxDataEvents:   maxProviderStreamDataEvents,
+}
+
+type providerStreamGuard struct {
+	limits       providerStreamLimits
+	contentBytes int
+	dataEvents   int
+}
+
+func newProviderStreamGuard(limits providerStreamLimits) *providerStreamGuard {
+	if limits.MaxContentBytes <= 0 {
+		limits.MaxContentBytes = maxProviderStreamContentBytes
+	}
+	if limits.MaxDataEvents <= 0 {
+		limits.MaxDataEvents = maxProviderStreamDataEvents
+	}
+	return &providerStreamGuard{limits: limits}
+}
+
+func (g *providerStreamGuard) observeDataEvent() error {
+	if g == nil {
+		return nil
+	}
+	g.dataEvents++
+	if g.dataEvents > g.limits.MaxDataEvents {
+		return fmt.Errorf("%w: llm provider stream incomplete: streamed response exceeded data event limit %d", common.ErrInvalidArgument, g.limits.MaxDataEvents)
+	}
+	return nil
+}
+
+func (g *providerStreamGuard) observeDelta(delta string) error {
+	if g == nil || delta == "" {
+		return nil
+	}
+	next := g.contentBytes + len(delta)
+	if next > g.limits.MaxContentBytes {
+		return fmt.Errorf("%w: llm provider stream incomplete: streamed response exceeded content byte limit %d", common.ErrInvalidArgument, g.limits.MaxContentBytes)
+	}
+	g.contentBytes = next
+	return nil
+}
 
 type HTTPProvider struct {
 	config llmmodels.ProviderConfig
@@ -545,10 +596,15 @@ func firstAnthropicHTTPText(content []anthropicResponseContentBlock) string {
 }
 
 func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
+	return readAnthropicHTTPStreamWithLimits(reader, emit, defaultProviderStreamLimits)
+}
+
+func readAnthropicHTTPStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmmodels.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
 	var builder strings.Builder
 	var usage *llmmodels.ProviderUsage
+	guard := newProviderStreamGuard(limits)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") {
@@ -566,6 +622,9 @@ func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStrea
 			}
 			return builder.String(), usage, nil
 		}
+		if err := guard.observeDataEvent(); err != nil {
+			return "", nil, err
+		}
 		var chunk anthropicStreamEvent
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			if providerStreamChunkJSONTruncated(err) {
@@ -582,6 +641,9 @@ func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStrea
 		switch strings.TrimSpace(chunk.Type) {
 		case "content_block_delta":
 			if delta := strings.TrimSpace(chunk.Delta.Text); delta != "" {
+				if err := guard.observeDelta(delta); err != nil {
+					return "", nil, err
+				}
 				builder.WriteString(delta)
 				if emit != nil {
 					if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
@@ -596,6 +658,9 @@ func readAnthropicHTTPStream(reader io.Reader, emit func(llmmodels.ProviderStrea
 		case "message_stop", "content_block_stop":
 		default:
 			if delta := strings.TrimSpace(chunk.Delta.Text); delta != "" {
+				if err := guard.observeDelta(delta); err != nil {
+					return "", nil, err
+				}
 				builder.WriteString(delta)
 				if emit != nil {
 					if err := emit(llmmodels.ProviderStreamEvent{Type: "delta", Delta: delta}); err != nil {
@@ -759,10 +824,15 @@ func chatCompletionsURL(baseURL string) (string, error) {
 }
 
 func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error) (string, *llmmodels.ProviderUsage, error) {
+	return readChatCompletionStreamWithLimits(reader, emit, defaultProviderStreamLimits)
+}
+
+func readChatCompletionStreamWithLimits(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmmodels.ProviderUsage, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxProviderStreamLineBytes)
 	var builder strings.Builder
 	var usage *llmmodels.ProviderUsage
+	guard := newProviderStreamGuard(limits)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") {
@@ -779,6 +849,9 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 				}
 			}
 			return builder.String(), usage, nil
+		}
+		if err := guard.observeDataEvent(); err != nil {
+			return "", nil, err
 		}
 		var chunk chatCompletionStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -800,6 +873,9 @@ func readChatCompletionStream(reader io.Reader, emit func(llmmodels.ProviderStre
 			}
 			if delta == "" {
 				continue
+			}
+			if err := guard.observeDelta(delta); err != nil {
+				return "", nil, err
 			}
 			builder.WriteString(delta)
 			if emit != nil {

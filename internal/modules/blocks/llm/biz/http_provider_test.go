@@ -704,6 +704,56 @@ func TestHTTPProviderStreamCompleteRejectsEOFBeforeDone(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderStreamCompleteRejectsContentBeyondLimit(t *testing.T) {
+	stream := strings.NewReader(
+		"data: {\"choices\":[{\"delta\":{\"content\":\"12345\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"content\":\"67890\"}}]}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	events := []llmmodels.ProviderStreamEvent{}
+	_, _, err := readChatCompletionStreamWithLimits(stream, func(event llmmodels.ProviderStreamEvent) error {
+		events = append(events, event)
+		return nil
+	}, providerStreamLimits{MaxContentBytes: 8, MaxDataEvents: 16})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "stream incomplete") ||
+		!strings.Contains(err.Error(), "content byte limit") {
+		t.Fatalf("stream err = %v, want content byte limit stream incomplete", err)
+	}
+	if len(events) != 1 || events[0].Delta != "12345" {
+		t.Fatalf("events = %+v, want only emitted content before limit breach", events)
+	}
+}
+
+func TestHTTPProviderStreamCompleteRejectsDataEventsBeyondLimit(t *testing.T) {
+	stream := strings.NewReader(
+		"data: {\"choices\":[]}\n\n" +
+			"data: {\"choices\":[]}\n\n" +
+			"data: {\"choices\":[]}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	_, _, err := readChatCompletionStreamWithLimits(stream, nil, providerStreamLimits{MaxContentBytes: 1024, MaxDataEvents: 2})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "stream incomplete") ||
+		!strings.Contains(err.Error(), "data event limit") {
+		t.Fatalf("stream err = %v, want data event limit stream incomplete", err)
+	}
+}
+
+func TestHTTPProviderAnthropicStreamRejectsContentBeyondLimit(t *testing.T) {
+	stream := strings.NewReader(
+		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"12345\"}}\n\n" +
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"67890\"}}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	_, _, err := readAnthropicHTTPStreamWithLimits(stream, nil, providerStreamLimits{MaxContentBytes: 8, MaxDataEvents: 16})
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "stream incomplete") ||
+		!strings.Contains(err.Error(), "content byte limit") {
+		t.Fatalf("stream err = %v, want content byte limit stream incomplete", err)
+	}
+}
+
 func TestHTTPProviderStreamCompleteTreatsTruncatedChunkAsIncomplete(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

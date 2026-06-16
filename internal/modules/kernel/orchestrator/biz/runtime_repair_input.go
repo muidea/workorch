@@ -836,6 +836,29 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairFailureProjection(input, failedStep)
 	assessmentOnlyCoverageRepair := doDCoverageContractCorrectionRequired(failedStep)
 	applyRuntimeRepairMissingCoverageProjection(ctx, o.steps, input, run, failedStep, assessmentOnlyCoverageRepair)
+	patchContext := o.repairManager().runtimeRepairPatchContext(ctx, run, failedStep)
+	if len(patchContext) > 0 {
+		applyRuntimeRepairPatchContextProjection(
+			input,
+			patchContext,
+			o.repairManager().runtimeRepairPatchSuggestions(ctx, run, failedStep),
+			o.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep),
+		)
+	}
+	targetContext := o.repairManager().runtimeRepairFailureTargetContext(ctx, run, failedStep)
+	if len(targetContext) > 0 {
+		applyRuntimeRepairFailureTargetContextProjection(input, targetContext)
+	}
+	if shapeContext := o.repairManager().runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
+		applyRuntimeRepairResourceShapeProjection(input, shapeContext)
+	}
+	rootCauseCandidates := o.repairManager().runtimeRepairRootCauseCandidateContext(ctx, run, failedStep)
+	if len(rootCauseCandidates) > 0 {
+		applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
+	}
+	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
+		applyRuntimeRepairReadableResourceProjection(input, context)
+	}
 	assessmentOnlyFailedCoverageRepair := assessmentOnlyCoverageCorrectionFailedWithActionableGaps(failedStep)
 	coverageNeedsConcreteEvidence := assessmentOnlyCoverageRepair && (coverageCorrectionNeedsConcreteEvidence(&runModel.Step{
 		Input:  input,
@@ -865,7 +888,8 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if !assessmentOnlyCoverageRepair && !concreteEvidenceRepair && stateChangingRepairRequired(run, failedStep, execErr) {
 		input["repairObjective"] = repairObjectiveStateChangingOutput
 		input["stateChangingOutputRequired"] = true
-		input["repairGuidance"] = stateChangingRepairGuidance()
+		guidance := appendRepairGuidance(nil, stateChangingRepairGuidance()...)
+		input["repairGuidance"] = appendRepairGuidance(guidance, stringSliceFromValue(input["repairGuidance"])...)
 	}
 	applyRuntimeRepairCapabilityPolicyProjection(input, capabilityPolicyRepairContractFromFailure(run, failedStep, execErr))
 	applyRuntimeRepairStateChangingCoverageTargetGuidance(input)
@@ -897,29 +921,6 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairGraphEvidenceProjection(ctx, o.graphManager(), input, run, failedStep)
 	if progress := runtimeRepairCurrentExecutionProgress(ctx, o.steps, o.repairManager(), run, failedStep, input); len(progress) > 0 {
 		input["currentExecutionProgress"] = progress
-	}
-	patchContext := o.repairManager().runtimeRepairPatchContext(ctx, run, failedStep)
-	if len(patchContext) > 0 {
-		applyRuntimeRepairPatchContextProjection(
-			input,
-			patchContext,
-			o.repairManager().runtimeRepairPatchSuggestions(ctx, run, failedStep),
-			o.repairManager().runtimeRepairPatchAlreadySatisfiedSignals(ctx, run, failedStep),
-		)
-	}
-	targetContext := o.repairManager().runtimeRepairFailureTargetContext(ctx, run, failedStep)
-	if len(targetContext) > 0 {
-		applyRuntimeRepairFailureTargetContextProjection(input, targetContext)
-	}
-	if shapeContext := o.repairManager().runtimeRepairResourceShapeAlignmentContext(ctx, run, failedStep); len(shapeContext) > 0 {
-		applyRuntimeRepairResourceShapeProjection(input, shapeContext)
-	}
-	rootCauseCandidates := o.repairManager().runtimeRepairRootCauseCandidateContext(ctx, run, failedStep)
-	if len(rootCauseCandidates) > 0 {
-		applyRuntimeRepairRootCauseCandidateProjection(input, rootCauseCandidates)
-	}
-	if context := convertedDecisionReadableResourceContext(ctx, o.workspaces, run, failedStep); len(context) > 0 {
-		applyRuntimeRepairReadableResourceProjection(input, context)
 	}
 	if shouldIncludeWorkspaceManifestInRuntimeRepair(failedStep) || len(targetContext) > 0 || len(patchContext) > 0 || len(rootCauseCandidates) > 0 {
 		manifest := o.repairManager().workspaceFileManifest(ctx, run)
