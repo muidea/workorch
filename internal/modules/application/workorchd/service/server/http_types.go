@@ -13,6 +13,8 @@ import (
 	"time"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
@@ -1116,7 +1118,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 	state.configureApplicationRuntimeSession()
 	state.configureSharedMemorySession()
 	state.registerEventReplayRecorder()
-	state.registerAutoGovernanceResumeWatcher()
+	state.registerGovernanceResolvedResumeWatcher()
 	state.registerWorkorchDSchedulerCommandWatcher()
 	return state
 }
@@ -1885,23 +1887,36 @@ func (s *serverState) registerEventReplayRecorder() {
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribers...)
 }
 
-func (s *serverState) registerAutoGovernanceResumeWatcher() {
+func (s *serverState) registerGovernanceResolvedResumeWatcher() {
 	if s == nil || s.eventHub == nil {
 		return
 	}
-	unsubscribe := s.eventHub.Subscribe(governanceevents.TopicGovernanceAutoResolved, func(_ context.Context, envelope events.Envelope) error {
-		if strings.TrimSpace(envelope.RunID) == "" {
+	for _, topic := range []string{
+		governanceevents.TopicGovernanceAutoResolved,
+		decisionevents.TopicTicketResolved,
+		approvalevents.TopicApprovalResolved,
+	} {
+		topic := topic
+		unsubscribe := s.eventHub.Subscribe(topic, func(_ context.Context, envelope events.Envelope) error {
+			s.publishGovernanceContinuationFromResolvedEvent(envelope)
 			return nil
-		}
-		if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
-			WorkspaceID: envelope.WorkspaceID,
-			RunID:       envelope.RunID,
-		}}, 0); err != nil {
-			slog.Warn("workorch auto governance continuation command publish failed", "workspaceID", envelope.WorkspaceID, "runID", envelope.RunID, "err", err)
-		}
-		return nil
-	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+		})
+		s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
+	}
+}
+
+func (s *serverState) publishGovernanceContinuationFromResolvedEvent(envelope events.Envelope) {
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
+	runID := strings.TrimSpace(envelope.RunID)
+	if workspaceID == "" || runID == "" {
+		return
+	}
+	if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	}}, 0); err != nil {
+		slog.Warn("workorch governance continuation command publish failed", "topic", envelope.Topic, "workspaceID", workspaceID, "runID", runID, "err", err)
+	}
 }
 
 func isMemoryBackend(backend string) bool {

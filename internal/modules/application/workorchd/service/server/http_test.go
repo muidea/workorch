@@ -4550,6 +4550,47 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 	}
 }
 
+func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		topic string
+	}{
+		{name: "decision ticket resolved", topic: decisionevents.TopicTicketResolved},
+		{name: "approval resolved", topic: approvalevents.TopicApprovalResolved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+			if state.eventHub == nil {
+				t.Fatalf("server state eventHub is nil, want shared session event hub")
+			}
+			resumed := make(chan string, 1)
+			state.resumeRun = func(_ context.Context, _, _, runID string, _ ...map[string]any) (appservice.Run, error) {
+				if runID != "run-owner-resolved" {
+					t.Fatalf("runID = %q, want run-owner-resolved", runID)
+				}
+				resumed <- runID
+				return appservice.Run{ID: runID, WorkspaceID: "ws-owner-resolved", State: string(common.RunStateRunning)}, nil
+			}
+
+			if err := state.eventHub.Publish(context.Background(), events.Envelope{
+				Topic:       tc.topic,
+				WorkspaceID: "ws-owner-resolved",
+				RunID:       "run-owner-resolved",
+				SubjectID:   "governance-owner-resolved",
+				Payload:     map[string]any{"status": "resolved"},
+			}); err != nil {
+				t.Fatalf("publish owner resolved event: %v", err)
+			}
+
+			select {
+			case <-resumed:
+			case <-time.After(time.Second):
+				t.Fatalf("%s event did not schedule run resume", tc.topic)
+			}
+		})
+	}
+}
+
 func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
