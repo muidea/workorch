@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -21,6 +22,30 @@ func TestClassifyRuntimeFailureProviderContextTooLarge(t *testing.T) {
 	classification := classifyRuntimeFailure(step, step.Output, "runtime step failed", errors.New("maximum context length exceeded for this model"))
 	if classification.Class != failureClassContextTooLarge {
 		t.Fatalf("classification = %+v, want %s", classification, failureClassContextTooLarge)
+	}
+}
+
+func TestDoDCoverageMissingFailureSignatureUsesStableStructuralFields(t *testing.T) {
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-coverage"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+	}
+	left := map[string]any{
+		"stage": "llm_dod_assessment",
+		"error": "invalid argument: dodAssessment is not satisfied: missing evidence for a very long goal narrative and evidence ref A",
+	}
+	right := map[string]any{
+		"stage": "llm_dod_assessment",
+		"error": "invalid argument: dodAssessment is not satisfied: missing evidence for a different goal narrative and evidence ref B",
+	}
+	leftSig := runtimeFailureSignature(failureClassDoDCoverageMissing, step, left, errors.New(stringFromMap(left, "error")))
+	rightSig := runtimeFailureSignature(failureClassDoDCoverageMissing, step, right, errors.New(stringFromMap(right, "error")))
+	if leftSig != rightSig {
+		t.Fatalf("coverage failure signatures differ:\nleft=%s\nright=%s", leftSig, rightSig)
+	}
+	if strings.Contains(leftSig, "goal narrative") || strings.Contains(leftSig, "evidence ref") || strings.Contains(leftSig, "error=") {
+		t.Fatalf("coverage failure signature retained volatile natural language: %s", leftSig)
 	}
 }
 

@@ -66,18 +66,21 @@ type runtimeIneffectiveConvergenceStats struct {
 	TotalSteps        int
 	RecoverySteps     int
 	ContractFailures  int
+	CoverageFailures  int
 	ProviderFailures  int
 	FailedLLMSteps    int
 	CurrentIsContract bool
+	CurrentIsCoverage bool
 	RecentFailures    []map[string]any
 }
 
 func (s runtimeIneffectiveConvergenceStats) exceeded() bool {
-	if !s.CurrentIsContract {
+	if !s.CurrentIsContract && !s.CurrentIsCoverage {
 		return false
 	}
+	convergenceFailures := s.ContractFailures + s.CoverageFailures
 	return s.RecoverySteps >= minIneffectiveConvergenceRecoverySteps &&
-		s.ContractFailures >= minIneffectiveConvergenceContractFailures
+		convergenceFailures >= minIneffectiveConvergenceContractFailures
 }
 
 func (r *repairSubsystem) runLevelIneffectiveConvergenceStats(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) runtimeIneffectiveConvergenceStats {
@@ -111,9 +114,24 @@ func (r *repairSubsystem) runLevelIneffectiveConvergenceStats(ctx context.Contex
 				stats.CurrentIsContract = true
 			}
 			stats.RecentFailures = appendRecentIneffectiveConvergenceFailure(stats.RecentFailures, step)
+			continue
+		}
+		if runtimeRepairStepIsCoverageConvergenceFailure(step) {
+			stats.CoverageFailures++
+			if step.ID == failedStep.ID {
+				stats.CurrentIsCoverage = true
+			}
+			stats.RecentFailures = appendRecentIneffectiveConvergenceFailure(stats.RecentFailures, step)
 		}
 	}
 	return stats
+}
+
+func runtimeRepairStepIsCoverageConvergenceFailure(step *runModel.Step) bool {
+	if step == nil || step.State != common.StepStateFailed || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	return strings.TrimSpace(stringFromMap(step.Output, failureOutputKeyClass)) == failureClassDoDCoverageMissing
 }
 
 func appendFailedStepSummaryIfMissing(steps []*runModel.Step, failedStep *runModel.Step) []*runModel.Step {

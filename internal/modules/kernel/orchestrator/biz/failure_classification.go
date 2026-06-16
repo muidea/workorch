@@ -349,25 +349,43 @@ func runtimeFailureSignature(class string, step *runModel.Step, output map[strin
 			}
 		}
 	}
-	if targets := failureTargetsForSignature(output); len(targets) > 0 {
+	if targets := failureTargetsForSignatureForClass(class, output); len(targets) > 0 {
 		parts = append(parts, "failureTargets="+strings.Join(targets, ","))
 	}
 	if exitCode, ok := normalizedSignatureNumber(output["exitCode"]); ok {
 		parts = append(parts, "exitCode="+exitCode)
 	}
-	errText := firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(output, "reason"), errorString(execErr), stringFromMap(output, "stderr"))
-	if value := normalizedSignatureText(errText); value != "" {
-		parts = append(parts, "error="+value)
+	if !failureClassUsesStructuralSignature(class) {
+		errText := firstNonEmptyString(stringFromMap(output, "error"), stringFromMap(output, "reason"), errorString(execErr), stringFromMap(output, "stderr"))
+		if value := normalizedSignatureText(errText); value != "" {
+			parts = append(parts, "error="+value)
+		}
 	}
 	return strings.Join(parts, "|")
 }
 
+func failureClassUsesStructuralSignature(class string) bool {
+	switch strings.TrimSpace(class) {
+	case failureClassDoDCoverageMissing:
+		return true
+	default:
+		return false
+	}
+}
+
 func failureTargetsForSignature(output map[string]any) []string {
+	return failureTargetsForSignatureForClass(stringFromMap(output, failureOutputKeyClass), output)
+}
+
+func failureTargetsForSignatureForClass(class string, output map[string]any) []string {
 	if len(output) == 0 {
 		return nil
 	}
 	if targets := explicitFailureTargetsForSignature(output); len(targets) > 0 {
 		return targets
+	}
+	if failureClassUsesStructuralSignature(class) {
+		return nil
 	}
 	if externalCapabilityFailureHasCallIdentity(output) {
 		return nil

@@ -352,6 +352,47 @@ func TestStepRepositoryListByRunPreservesCreationOrderWhenStepIDSortWouldDiffer(
 	}
 }
 
+func TestStepRepositoryListByRunCacheReturnsClonesAndInvalidatesOnUpdate(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "step.json")
+	repo := NewStepRepository(root)
+	step := &runmodel.Step{
+		ID:     "run-cache/step-1",
+		RunID:  "run-cache",
+		Kind:   "llm/workspace_execution",
+		State:  common.StepStateDispatched,
+		Input:  map[string]any{"workspaceId": "ws-cache"},
+		Output: map[string]any{"status": "running"},
+	}
+	if err := repo.Create(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	items, err := repo.ListByRun(ctx, step.RunID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	items[0].Output["status"] = "mutated-by-caller"
+	cached, err := repo.ListByRun(ctx, step.RunID)
+	if err != nil {
+		t.Fatalf("list cached steps: %v", err)
+	}
+	if cached[0].Output["status"] != "running" {
+		t.Fatalf("cached step output = %v, want clone isolated from caller mutation", cached[0].Output)
+	}
+	step.State = common.StepStateCompleted
+	step.Output = map[string]any{"status": "completed"}
+	if err := repo.Update(ctx, step); err != nil {
+		t.Fatalf("update step: %v", err)
+	}
+	updated, err := repo.ListByRun(ctx, step.RunID)
+	if err != nil {
+		t.Fatalf("list updated steps: %v", err)
+	}
+	if updated[0].State != common.StepStateCompleted || updated[0].Output["status"] != "completed" {
+		t.Fatalf("updated step = state %s output %+v, want completed from invalidated cache", updated[0].State, updated[0].Output)
+	}
+}
+
 func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "step.json")

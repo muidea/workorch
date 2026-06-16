@@ -1903,12 +1903,19 @@ func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
 }
 
 type StepRepository struct {
-	mu   sync.RWMutex
-	path string
+	mu                sync.RWMutex
+	path              string
+	fullRunCache      map[common.RunID][]*run.Step
+	fullRunCacheOrder []common.RunID
 }
 
+const maxCachedFullStepRuns = 8
+
 func NewStepRepository(path string) *StepRepository {
-	return &StepRepository{path: path}
+	return &StepRepository{
+		path:         path,
+		fullRunCache: map[common.RunID][]*run.Step{},
+	}
 }
 
 func (r *StepRepository) Create(_ context.Context, item *run.Step) error {
@@ -1924,7 +1931,11 @@ func (r *StepRepository) Create(_ context.Context, item *run.Step) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return r.saveStep(item)
+	if err := r.saveStep(item); err != nil {
+		return err
+	}
+	r.invalidateStepRunCache(item.RunID)
+	return nil
 }
 
 func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, error) {
@@ -1935,8 +1946,12 @@ func (r *StepRepository) Get(_ context.Context, id common.StepID) (*run.Step, er
 }
 
 func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*run.Step, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if cached := r.cloneCachedStepsByRun(runID); cached != nil {
+		return cached, nil
+	}
 
 	root := r.stepRoot()
 	dirs, err := repositoryMetadataDirs(repositorySequenceScopeRoot(root, string(runID)))
@@ -1962,7 +1977,8 @@ func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*ru
 	if len(ret) == 0 {
 		return nil, nil
 	}
-	return ret, nil
+	r.cacheStepsByRun(runID, ret)
+	return cloneStepSlice(ret), nil
 }
 
 func (r *StepRepository) ListByRunSummary(_ context.Context, runID common.RunID) ([]*run.Step, error) {
@@ -2008,19 +2024,79 @@ func (r *StepRepository) Update(_ context.Context, item *run.Step) error {
 	} else if err != nil {
 		return err
 	}
-	return r.saveStep(item)
+	if err := r.saveStep(item); err != nil {
+		return err
+	}
+	r.invalidateStepRunCache(item.RunID)
+	return nil
 }
 
 func (r *StepRepository) Delete(_ context.Context, id common.StepID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	runID := stepRunIDFromStepID(id)
+	if existing, err := r.loadStep(id); err == nil && existing != nil && existing.RunID != "" {
+		runID = existing.RunID
+	}
 	dir := r.stepDir(id)
 	if _, err := os.Stat(filepath.Join(dir, "metadata.json")); os.IsNotExist(err) {
 		return common.ErrNotFound
 	} else if err != nil {
 		return err
 	}
-	return os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	r.invalidateStepRunCache(runID)
+	return nil
+}
+
+func (r *StepRepository) cloneCachedStepsByRun(runID common.RunID) []*run.Step {
+	if r == nil || r.fullRunCache == nil {
+		return nil
+	}
+	cached, ok := r.fullRunCache[runID]
+	if !ok {
+		return nil
+	}
+	return cloneStepSlice(cached)
+}
+
+func (r *StepRepository) cacheStepsByRun(runID common.RunID, steps []*run.Step) {
+	if r == nil || runID == "" {
+		return
+	}
+	if r.fullRunCache == nil {
+		r.fullRunCache = map[common.RunID][]*run.Step{}
+	}
+	if _, exists := r.fullRunCache[runID]; !exists {
+		r.fullRunCacheOrder = append(r.fullRunCacheOrder, runID)
+	}
+	r.fullRunCache[runID] = cloneStepSlice(steps)
+	for len(r.fullRunCacheOrder) > maxCachedFullStepRuns {
+		evict := r.fullRunCacheOrder[0]
+		r.fullRunCacheOrder = append([]common.RunID(nil), r.fullRunCacheOrder[1:]...)
+		delete(r.fullRunCache, evict)
+	}
+}
+
+func (r *StepRepository) invalidateStepRunCache(runID common.RunID) {
+	if r == nil || r.fullRunCache == nil || runID == "" {
+		return
+	}
+	delete(r.fullRunCache, runID)
+	for idx, cachedRunID := range r.fullRunCacheOrder {
+		if cachedRunID != runID {
+			continue
+		}
+		r.fullRunCacheOrder = append(r.fullRunCacheOrder[:idx], r.fullRunCacheOrder[idx+1:]...)
+		return
+	}
+}
+
+func stepRunIDFromStepID(id common.StepID) common.RunID {
+	runID, _, _ := strings.Cut(string(id), "/")
+	return common.RunID(runID)
 }
 
 func (r *StepRepository) stepRoot() string {
@@ -3222,6 +3298,21 @@ func cloneStep(item *run.Step) *run.Step {
 		cloned.Output = cloneMap(item.Output)
 	}
 	return &cloned
+}
+
+func cloneStepSlice(items []*run.Step) []*run.Step {
+	if items == nil {
+		return nil
+	}
+	cloned := make([]*run.Step, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, cloneStep(item))
+	}
+	return cloned
 }
 
 func compactStepSummary(item *run.Step) *run.Step {

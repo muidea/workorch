@@ -548,6 +548,53 @@ func TestRunLevelIneffectiveConvergenceEscalatesRuntimeRepair(t *testing.T) {
 	}
 }
 
+func TestRunLevelIneffectiveConvergenceEscalatesRepeatedCoverageFailures(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-ineffective-coverage")
+	repo := memory.NewStepRepository()
+	var current *runmodel.Step
+	for idx := 1; idx <= minIneffectiveConvergenceRecoverySteps; idx++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/repair-coverage-%03d", runID, idx)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRuntimeRepairFollowUp: true,
+				stepInputKeyRepairOfFailureClass:  failureClassDoDCoverageMissing,
+				stepInputKeyRepairOfFailureSig:    "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+				"stage":                   "llm_dod_assessment",
+				"reason":                  "invalid argument: dodAssessment is not satisfied",
+			},
+		}
+		current = step
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   repo,
+		tickets: memory.NewDecisionTicketRepository(),
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 20}),
+	}
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	stats := orch.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, current)
+	if !stats.exceeded() {
+		t.Fatalf("run-level coverage convergence stats = %+v, want exceeded", stats)
+	}
+	if stats.CoverageFailures == 0 || !stats.CurrentIsCoverage {
+		t.Fatalf("coverage convergence stats = %+v, want coverage failure counters", stats)
+	}
+	if action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, current); action != runtimeRecoveryActionRuntimeRepairExhausted {
+		t.Fatalf("recoveryActionForFailedStep = %s, want runtime_repair_exhausted", action)
+	}
+}
+
 func TestRunLevelIneffectiveConvergenceIgnoresProviderOnlyFailures(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-provider-only-convergence")
