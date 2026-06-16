@@ -189,6 +189,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		{
 			ID:          "evt-run-a-001",
 			Topic:       "/run/state/changed",
+			OccurredAt:  "2026-06-16T00:01:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
 			Payload:     map[string]any{"state": "running"},
@@ -196,6 +197,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		{
 			ID:          "evt-run-a-002",
 			Topic:       "/step/state/changed",
+			OccurredAt:  "2026-06-16T00:02:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-a",
 			Payload:     map[string]any{"state": "completed"},
@@ -203,6 +205,7 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 		{
 			ID:          "evt-run-b-001",
 			Topic:       "/run/state/changed",
+			OccurredAt:  "2026-06-16T00:03:00Z",
 			WorkspaceID: workspaceID,
 			RunID:       "run-b",
 			Payload:     map[string]any{"state": "running"},
@@ -222,8 +225,8 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 	if err != nil {
 		t.Fatalf("list first run page: %v", err)
 	}
-	if len(firstPage) != 1 || firstPage[0].ID != "evt-run-a-001" {
-		t.Fatalf("first run page = %+v, want only evt-run-a-001", firstPage)
+	if len(firstPage) != 1 || firstPage[0].ID != "evt-run-a-002" {
+		t.Fatalf("first run page = %+v, want latest evt-run-a-002", firstPage)
 	}
 	nextPage, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
 		WorkspaceID:   workspaceID,
@@ -236,5 +239,15 @@ func TestWorkspaceScopedEventRecordListHonorsRunScopeCursorAndLimit(t *testing.T
 	}
 	if len(nextPage) != 1 || nextPage[0].ID != "evt-run-a-002" {
 		t.Fatalf("next run page = %+v, want only evt-run-a-002", nextPage)
+	}
+	workspaceLatest, err := repos.EventRecords.List(scoped, repository.EventRecordQuery{
+		WorkspaceID: workspaceID,
+		Limit:       2,
+	})
+	if err != nil {
+		t.Fatalf("list workspace latest: %v", err)
+	}
+	if len(workspaceLatest) != 2 || workspaceLatest[0].ID != "evt-run-a-002" || workspaceLatest[1].ID != "evt-run-b-001" {
+		t.Fatalf("workspace latest = %+v, want newest two in chronological order", workspaceLatest)
 	}
 }

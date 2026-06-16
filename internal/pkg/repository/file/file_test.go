@@ -316,6 +316,42 @@ func TestStepRepositoryListByRunUsesSequenceScope(t *testing.T) {
 	}
 }
 
+func TestStepRepositoryListByRunPreservesCreationOrderWhenStepIDSortWouldDiffer(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "step.json")
+	repo := NewStepRepository(root)
+	runID := common.RunID("run-sequence-order")
+	created := []common.StepID{
+		common.StepID(runID + "/repair-010-of-graph-015-014-verify"),
+		common.StepID(runID + "/repair-001-of-graph-016-001-fix-timeout"),
+	}
+	for _, stepID := range created {
+		if err := repo.Create(ctx, &runmodel.Step{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateCompleted,
+		}); err != nil {
+			t.Fatalf("create step %s: %v", stepID, err)
+		}
+	}
+
+	items, err := repo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(items) != len(created) || items[0].ID != created[0] || items[1].ID != created[1] {
+		t.Fatalf("steps = %+v, want creation order %v", items, created)
+	}
+	summaries, err := repo.ListByRunSummary(ctx, runID)
+	if err != nil {
+		t.Fatalf("list step summaries: %v", err)
+	}
+	if len(summaries) != len(created) || summaries[0].ID != created[0] || summaries[1].ID != created[1] {
+		t.Fatalf("step summaries = %+v, want creation order %v", summaries, created)
+	}
+}
+
 func TestStepRepositoryListByRunSummaryRebuildsLegacySummary(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "step.json")

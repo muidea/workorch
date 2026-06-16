@@ -354,7 +354,7 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 			ID:          common.EventRecordID("event-bounded-" + strconv.Itoa(i)),
 			Version:     "v1",
 			Topic:       topic,
-			OccurredAt:  fmt.Sprintf("2026-05-16T10:%02d:00Z", i%60),
+			OccurredAt:  fmt.Sprintf("2026-05-16T%02d:%02d:00Z", 10+i/60, i%60),
 			WorkspaceID: workspaceID,
 			RunID:       runID,
 			Payload:     payload,
@@ -369,6 +369,9 @@ func TestReadRunSnapshotUsesBoundedProjectedEventRecords(t *testing.T) {
 	}
 	if len(snapshot.EventRecords) != readModelEventRecordLimit {
 		t.Fatalf("event record count = %d, want %d", len(snapshot.EventRecords), readModelEventRecordLimit)
+	}
+	if snapshot.EventRecords[0].ID != "event-bounded-25" || snapshot.EventRecords[len(snapshot.EventRecords)-1].ID != "event-bounded-124" {
+		t.Fatalf("bounded event window = first %q last %q, want latest 100 records", snapshot.EventRecords[0].ID, snapshot.EventRecords[len(snapshot.EventRecords)-1].ID)
 	}
 	for _, item := range snapshot.EventRecords {
 		if _, ok := item.Payload[events.PayloadKeyOutput]; ok {

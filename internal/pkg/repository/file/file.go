@@ -1959,9 +1959,6 @@ func (r *StepRepository) ListByRun(_ context.Context, runID common.RunID) ([]*ru
 			ret = append(ret, item)
 		}
 	}
-	sort.Slice(ret, func(i, j int) bool {
-		return string(ret[i].ID) < string(ret[j].ID)
-	})
 	if len(ret) == 0 {
 		return nil, nil
 	}
@@ -1993,9 +1990,6 @@ func (r *StepRepository) ListByRunSummary(_ context.Context, runID common.RunID)
 			ret = append(ret, item)
 		}
 	}
-	sort.Slice(ret, func(i, j int) bool {
-		return string(ret[i].ID) < string(ret[j].ID)
-	})
 	if len(ret) == 0 {
 		return nil, nil
 	}
@@ -3555,7 +3549,11 @@ func listEventRecords(items map[common.EventRecordID]eventstream.EventRecord, qu
 		ret = filtered
 	}
 	if query.Limit > 0 && len(ret) > query.Limit {
-		ret = ret[:query.Limit]
+		if query.CursorAfterID == "" {
+			ret = ret[len(ret)-query.Limit:]
+		} else {
+			ret = ret[:query.Limit]
+		}
 	}
 	if len(ret) == 0 {
 		return nil

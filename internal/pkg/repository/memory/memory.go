@@ -2585,7 +2585,11 @@ func listEventRecords(items map[string]*eventstream.EventRecord, query repositor
 		ret = filtered
 	}
 	if query.Limit > 0 && len(ret) > query.Limit {
-		ret = ret[:query.Limit]
+		if query.CursorAfterID == "" {
+			ret = ret[len(ret)-query.Limit:]
+		} else {
+			ret = ret[:query.Limit]
+		}
 	}
 	if len(ret) == 0 {
 		return nil

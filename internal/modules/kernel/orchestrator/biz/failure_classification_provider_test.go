@@ -170,3 +170,23 @@ func TestClassifyRuntimeFailureDoDCoverageMissingHasPriorityOverAuthKeywords(t *
 		t.Fatalf("classification = %+v, want %s", classification, failureClassDoDCoverageMissing)
 	}
 }
+
+func TestClassifyRuntimeFailureDoDEvidenceRefsWithTimeoutTextAreNotProviderTimeout(t *testing.T) {
+	err := errors.New(`invalid argument: satisfied dodAssessment deliverable item "source_change" references insufficient evidence "run-x/graph-016/001-fix-init-timeout": requires evidence from step kinds: patch/apply`)
+	step := &runModel.Step{
+		ID:    common.StepID("run-x/step-1"),
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage": "llm_dod_assessment",
+			"error": err.Error(),
+		},
+	}
+	classification := classifyRuntimeFailure(step, step.Output, "runtime completion gate failed", err)
+	if classification.Class != failureClassDoDCoverageMissing {
+		t.Fatalf("classification = %+v, want %s", classification, failureClassDoDCoverageMissing)
+	}
+	if isProviderFailureClass(classification.Class) {
+		t.Fatalf("DoD evidence gap classified as provider failure: classification=%+v", classification)
+	}
+}

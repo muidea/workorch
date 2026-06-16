@@ -111,7 +111,15 @@ func isLLMProviderTimeoutFailure(lowerStage string, execErr error, output map[st
 		return true
 	}
 	errText := providerFailureErrorText(execErr, output)
-	return strings.Contains(errText, "deadline exceeded") || strings.Contains(errText, "timeout")
+	return strings.Contains(errText, "deadline exceeded") ||
+		strings.Contains(errText, "client.timeout") ||
+		strings.Contains(errText, "context deadline") ||
+		strings.Contains(errText, "i/o timeout") ||
+		strings.Contains(errText, "net/http: timeout") ||
+		strings.Contains(errText, "provider timeout") ||
+		strings.Contains(errText, "request timed out") ||
+		strings.Contains(errText, "timeout awaiting response headers") ||
+		strings.Contains(errText, "upstream timeout")
 }
 
 func isLLMContextTooLargeFailure(lowerStage string, execErr error, output map[string]any) bool {
@@ -173,6 +181,9 @@ func isDoDCoverageMissingFailure(lowerStage string, execErr error, output map[st
 		strings.Contains(errText, "dodassessment.goalcoverage.items are required") ||
 		strings.Contains(errText, "dodassessment.goalcoverage.satisfied is required") ||
 		strings.Contains(errText, "satisfied dodassessment.goalcoverage item requires evidencerefs") ||
+		strings.Contains(errText, "satisfied dodassessment deliverable item") ||
+		strings.Contains(errText, "references insufficient evidence") ||
+		strings.Contains(errText, "requires evidence from step kinds") ||
 		strings.Contains(errText, "dodassessment.deliverablecoverage missing required deliverables") ||
 		strings.Contains(errText, "acceptancedimensions missing required dimensions")
 }

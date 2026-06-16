@@ -776,6 +776,19 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 		StepID:       common.StepID("step-contract"),
 		Payload:      map[string]any{"state": "completed"},
 	}
+	third := &eventstreammodel.EventRecord{
+		ID:           common.EventRecordID("event-record-3"),
+		Version:      "workorch.event.v1",
+		Topic:        "/step/state/changed",
+		OccurredAt:   "2026-04-28T00:02:00Z",
+		SourceModule: "kernel/orchestrator",
+		SubjectType:  "step",
+		SubjectID:    "step-contract-2",
+		WorkspaceID:  common.WorkspaceID("ws-contract"),
+		RunID:        common.RunID("run-contract"),
+		StepID:       common.StepID("step-contract-2"),
+		Payload:      map[string]any{"state": "failed"},
+	}
 	if err := repo.Append(ctx, first); err != nil {
 		t.Fatalf("append first event record: %v", err)
 	}
@@ -784,6 +797,9 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	if err := repo.Append(ctx, second); err != nil {
 		t.Fatalf("append second event record: %v", err)
+	}
+	if err := repo.Append(ctx, third); err != nil {
+		t.Fatalf("append third event record: %v", err)
 	}
 	got, err := repo.Get(ctx, first.ID)
 	if err != nil {
@@ -804,8 +820,8 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if err != nil {
 		t.Fatalf("list events by run: %v", err)
 	}
-	if len(byRun) != 2 || byRun[0].ID != first.ID || byRun[1].ID != second.ID {
-		t.Fatalf("run events = %+v, want ordered first and second", byRun)
+	if len(byRun) != 3 || byRun[0].ID != first.ID || byRun[1].ID != second.ID || byRun[2].ID != third.ID {
+		t.Fatalf("run events = %+v, want ordered first, second, and third", byRun)
 	}
 	if len(byRun[0].Payload) != 0 {
 		t.Fatalf("run events payload = %+v, want lightweight list result without payload", byRun[0].Payload)
@@ -814,15 +830,15 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	if err != nil {
 		t.Fatalf("list events by run with payload: %v", err)
 	}
-	if len(byRunWithPayload) != 2 || byRunWithPayload[0].Payload["state"] != "running" {
+	if len(byRunWithPayload) != 3 || byRunWithPayload[0].Payload["state"] != "running" {
 		t.Fatalf("run events with payload = %+v, want hydrated payload", byRunWithPayload)
 	}
 	byTopic, err := repo.List(ctx, repository.EventRecordQuery{Topic: second.Topic})
 	if err != nil {
 		t.Fatalf("list events by topic: %v", err)
 	}
-	if len(byTopic) != 1 || byTopic[0].ID != second.ID {
-		t.Fatalf("topic events = %+v, want second", byTopic)
+	if len(byTopic) != 2 || byTopic[0].ID != second.ID || byTopic[1].ID != third.ID {
+		t.Fatalf("topic events = %+v, want second and third", byTopic)
 	}
 	afterCursor, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, CursorAfterID: first.ID, Limit: 1})
 	if err != nil {
@@ -830,6 +846,13 @@ func testEventRecordRepositoryContract(t *testing.T, factory func() repository.E
 	}
 	if len(afterCursor) != 1 || afterCursor[0].ID != second.ID {
 		t.Fatalf("cursor events = %+v, want second", afterCursor)
+	}
+	latest, err := repo.List(ctx, repository.EventRecordQuery{RunID: first.RunID, Limit: 2})
+	if err != nil {
+		t.Fatalf("list latest events: %v", err)
+	}
+	if len(latest) != 2 || latest[0].ID != second.ID || latest[1].ID != third.ID {
+		t.Fatalf("latest events = %+v, want newest two in chronological order", latest)
 	}
 	if _, err := repo.Get(ctx, common.EventRecordID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing event record err = %v, want not found", err)

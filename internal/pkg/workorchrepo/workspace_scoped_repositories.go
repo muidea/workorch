@@ -2446,7 +2446,11 @@ func applyEventRecordCursorAndLimit(items []*eventstreammodel.EventRecord, query
 		items = filtered
 	}
 	if query.Limit > 0 && len(items) > query.Limit {
-		items = items[:query.Limit]
+		if query.CursorAfterID == "" {
+			items = items[len(items)-query.Limit:]
+		} else {
+			items = items[:query.Limit]
+		}
 	}
 	return items
 }
