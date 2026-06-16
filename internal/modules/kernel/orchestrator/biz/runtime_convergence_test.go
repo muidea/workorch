@@ -2119,6 +2119,82 @@ func TestBuildConvergenceContractExplicitDeliverableGapPreemptsAssessmentReadyFo
 	}
 }
 
+func TestBuildConvergenceContractIgnoresExplicitDeliverableGapClosedByCoverageWorkItem(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageVerification,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		stepInputKeyAssessmentOnly:   true,
+		"repairObjective":            "complete_dod_goal_coverage_assessment",
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-source-change",
+				"sourceScope":           "deliverable",
+				"sourceRequirementId":   "source_change",
+				"targetText":            "source_change",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation", "state_change"},
+				"acceptedEvidenceByKind": map[string][]string{
+					"validation":   {"run/graph/001-validate"},
+					"state_change": {"run/graph/001-patch"},
+				},
+				"acceptedEvidenceRefs": []string{"run/graph/001-patch", "run/graph/001-validate"},
+			},
+			"ledgerSummary": []map[string]any{{
+				"id":                      "cwi-source-change",
+				"sourceScope":             "deliverable",
+				"sourceRequirementId":     "source_change",
+				"status":                  "evidence_ready",
+				"missingEvidenceKinds":    nil,
+				"acceptedEvidenceRefs":    []string{"run/graph/001-patch", "run/graph/001-validate"},
+				"omittedFromCurrentFocus": false,
+			}},
+			"summary": map[string]any{"total": 1, "evidence_ready": 1},
+		},
+		"missingDeliverableCoverage": []map[string]any{{
+			"id":         "source_change",
+			"item":       "source_change",
+			"kind":       "deliverable",
+			"source":     "deliverableCoverage",
+			"targetText": "source_change",
+			"state":      "missing",
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-convergence/assessment-closed-gap",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: cloneStepPayload(input),
+		Output: map[string]any{
+			"stage":                   "llm_dod_assessment",
+			failureOutputKeyClass:     failureClassDoDCoverageMissing,
+			failureOutputKeySignature: "class=dod_coverage_missing|stage=llm_dod_assessment",
+			"runtimeDiagnostics": map[string]any{
+				"kind": failureClassDoDCoverageMissing,
+				"missingDeliverableCoverage": []map[string]any{{
+					"id":     "source_change",
+					"item":   "source_change",
+					"kind":   "deliverable",
+					"source": "deliverableCoverage",
+					"state":  "missing",
+				}},
+			},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+	if contract.State != convergenceStateNeedAssessment {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedAssessment, contract)
+	}
+	if contract.RepairObjective != "complete_dod_goal_coverage_assessment" {
+		t.Fatalf("repairObjective = %q, want assessment correction", contract.RepairObjective)
+	}
+	if explicitCoverageGapShouldPreemptAssessment(input, failed) {
+		t.Fatalf("explicit coverage gap should not preempt assessment when CWI already closed it")
+	}
+	if open := filterCoverageGapsOpenByWorkItems(input, mapSliceFromValue(input["missingDeliverableCoverage"])); len(open) != 0 {
+		t.Fatalf("open coverage gaps = %+v, want stale gap filtered", open)
+	}
+}
+
 func TestBuildConvergenceContractPromotesConcreteValidationTargetEvidenceToStateChange(t *testing.T) {
 	input := map[string]any{
 		stepInputKeyRuntimeStage:    runtimeStageVerification,

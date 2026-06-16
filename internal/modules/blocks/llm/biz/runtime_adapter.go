@@ -3577,6 +3577,16 @@ func currentActionPromptContent(context *llmmodels.PromptContext) string {
 		return ""
 	}
 	for _, turn := range context.Turns {
+		if turn.SectionID == "C4.current-action" && strings.TrimSpace(turn.Content) != "" {
+			return turn.Content
+		}
+	}
+	for _, section := range context.Sections {
+		if section.ID == "C4.current-action" && strings.TrimSpace(section.Content) != "" {
+			return section.Content
+		}
+	}
+	for _, turn := range context.Turns {
 		if strings.Contains(turn.Content, "Current Requested Action") {
 			return turn.Content
 		}

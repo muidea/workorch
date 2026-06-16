@@ -359,6 +359,46 @@ func TestApplyProviderPromptContractGateRejectsStateChangingPlanAction(t *testin
 	}
 }
 
+func TestApplyProviderPromptContractGateUsesCurrentActionSectionID(t *testing.T) {
+	request := llmmodels.ProviderRequest{
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds": []string{"patch/apply", "git/write"},
+				},
+			},
+		},
+		ContextBudget: &llmmodels.ProviderContextBudget{ContextGateAction: providerContextGatePass},
+		PromptContext: &llmmodels.PromptContext{
+			Turns: []llmmodels.PromptTurn{
+				{
+					Role:    "user",
+					Content: `Current Requested Action {"type":"plan_next_step","requirements":["stale action"]}`,
+				},
+				{
+					Role:      "user",
+					SectionID: "C4.current-action",
+					Content:   `{"type":"produce_state_changing_repair_or_failed_assessment","requiredOutput":{"acceptedKinds":["patch/apply","git/write"],"mustIncludeStateChangingNode":true}}`,
+				},
+			},
+			Sections: []llmmodels.PromptSection{{
+				ID:      "C4.current-action",
+				Content: `{"type":"produce_state_changing_repair_or_failed_assessment","requiredOutput":{"acceptedKinds":["patch/apply","git/write"]}}`,
+			}},
+		},
+	}
+
+	got := applyProviderPromptContractGate(request)
+
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast ||
+		got.ContextBudget.ContextGateReason != "" ||
+		len(got.ContextBudget.IntegrityWarnings) != 0 {
+		t.Fatalf("contextBudget = %+v, want current-action section id to satisfy state-changing gate", got.ContextBudget)
+	}
+}
+
 func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 	provider := &staticProvider{
 		payload: []byte(`{

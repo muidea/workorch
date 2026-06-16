@@ -197,15 +197,21 @@ func applyRuntimeRepairMissingCoverageProjection(
 	}
 	if assessmentOnlyCoverageRepair {
 		if missingGoalCoverage := missingGoalCoverageFromStep(failedStep); len(missingGoalCoverage) > 0 {
-			input["missingGoalCoverage"] = missingGoalCoverageWithEvidenceCandidates(ctx, steps, run, failedStep, missingGoalCoverage)
+			if open := filterCoverageGapsOpenByWorkItems(input, missingGoalCoverage); len(open) > 0 {
+				input["missingGoalCoverage"] = missingGoalCoverageWithEvidenceCandidates(ctx, steps, run, failedStep, open)
+			}
 		}
 	}
 	if missingDoD := missingDoDItemsFromStep(failedStep); len(missingDoD) > 0 {
-		input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, steps, run, failedStep, missingDoD)
+		if open := filterCoverageGapsOpenByWorkItems(input, missingDoD); len(open) > 0 {
+			input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, steps, run, failedStep, open)
+		}
 	}
 	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
 		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
-		input["missingDeliverableCoverage"] = missingDeliverableCoverage
+		if open := filterCoverageGapsOpenByWorkItems(input, missingDeliverableCoverage); len(open) > 0 {
+			input["missingDeliverableCoverage"] = open
+		}
 	}
 	if inheritCoverageRepairContext(input, failedStep) {
 		input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"],
@@ -261,7 +267,9 @@ func applyRuntimeRepairAssessmentOnlyCoverageProjection(
 		}
 	}
 	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 {
-		input["missingDeliverableCoverage"] = missingDeliverableCoverage
+		if open := filterCoverageGapsOpenByWorkItems(input, missingDeliverableCoverage); len(open) > 0 {
+			input["missingDeliverableCoverage"] = open
+		}
 	}
 	if requiredDeliverables := requiredProfileDeliverableExpectations(run); len(requiredDeliverables) > 0 {
 		input["requiredDeliverableCoverage"] = requiredDeliverables

@@ -1609,6 +1609,9 @@ func explicitCoverageGapShouldPreemptAssessment(input map[string]any, failedStep
 	if !explicitCoverageGapPresent(input, failedStep) {
 		return false
 	}
+	if explicitCoverageGapsClosedByWorkItems(input, failedStep) {
+		return false
+	}
 	if failedStep == nil {
 		return true
 	}
@@ -1620,6 +1623,119 @@ func explicitCoverageGapShouldPreemptAssessment(input map[string]any, failedStep
 		return false
 	}
 	return true
+}
+
+func explicitCoverageGapsClosedByWorkItems(input map[string]any, failedStep *runModel.Step) bool {
+	gaps := explicitCoverageGapItems(input, failedStep)
+	if len(gaps) == 0 {
+		return false
+	}
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 {
+		return false
+	}
+	for _, gap := range gaps {
+		if !coverageGapClosedByWorkItemContext(context, gap) {
+			return false
+		}
+	}
+	return true
+}
+
+func explicitCoverageGapItems(input map[string]any, failedStep *runModel.Step) []map[string]any {
+	ret := make([]map[string]any, 0)
+	ret = append(ret, mapSliceFromValue(input["missingDoDItems"])...)
+	ret = append(ret, missingGoalCoverageFromInput(input)...)
+	ret = append(ret, mapSliceFromValue(input["missingDeliverableCoverage"])...)
+	if failedStep != nil {
+		ret = append(ret, missingDoDItemsFromStep(failedStep)...)
+		ret = append(ret, missingGoalCoverageFromStep(failedStep)...)
+		ret = append(ret, missingDeliverableCoverageFromStep(failedStep)...)
+	}
+	return ret
+}
+
+func filterCoverageGapsOpenByWorkItems(input map[string]any, gaps []map[string]any) []map[string]any {
+	if len(gaps) == 0 {
+		return nil
+	}
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 {
+		return cloneMapSlice(gaps)
+	}
+	ret := make([]map[string]any, 0, len(gaps))
+	for _, gap := range gaps {
+		if coverageGapClosedByWorkItemContext(context, gap) {
+			continue
+		}
+		ret = append(ret, cloneStepPayload(gap))
+	}
+	return ret
+}
+
+func coverageGapClosedByWorkItemContext(context map[string]any, gap map[string]any) bool {
+	if len(context) == 0 || len(gap) == 0 {
+		return false
+	}
+	for _, item := range coverageWorkItemContextItems(context) {
+		if coverageWorkItemResolvedForExplicitGap(item) && coverageGapMatchesWorkItem(gap, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageWorkItemContextItems(context map[string]any) []map[string]any {
+	ret := make([]map[string]any, 0)
+	if item := mapFromValue(context["currentFocus"]); len(item) > 0 {
+		ret = append(ret, item)
+	}
+	for _, key := range []string{"currentFocusItems", "unresolvedItems", "ledgerSummary", "historicalItems"} {
+		ret = append(ret, mapSliceFromValue(context[key])...)
+	}
+	return ret
+}
+
+func coverageWorkItemResolvedForExplicitGap(item map[string]any) bool {
+	if len(item) == 0 || len(coverageMissingEvidenceKinds(item)) > 0 {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(item, "status")) {
+	case "satisfied":
+		return true
+	case "evidence_ready":
+		return coverageWorkItemFocusReadyForAssessment(item) ||
+			len(stringSliceFromValue(item["acceptedEvidenceRefs"])) > 0
+	default:
+		return false
+	}
+}
+
+func coverageGapMatchesWorkItem(gap map[string]any, item map[string]any) bool {
+	gapScope := coverageGapScope(gap)
+	itemScope := coverageGapScope(item)
+	if knownEvidenceKindRequirementScope(gapScope) && knownEvidenceKindRequirementScope(itemScope) && gapScope != itemScope {
+		return false
+	}
+	gapAliases := evidenceKindRequirementItemAliases(gap)
+	itemAliases := evidenceKindRequirementItemAliases(item)
+	for _, gapAlias := range gapAliases {
+		for _, itemAlias := range itemAliases {
+			if strings.EqualFold(strings.TrimSpace(gapAlias), strings.TrimSpace(itemAlias)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageGapScope(item map[string]any) string {
+	for _, key := range []string{"sourceScope", "kind", "source"} {
+		if scope := normalizeEvidenceKindRequirementScope(stringFromMap(item, key)); knownEvidenceKindRequirementScope(scope) {
+			return scope
+		}
+	}
+	return ""
 }
 
 func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, input map[string]any) map[string]any {
