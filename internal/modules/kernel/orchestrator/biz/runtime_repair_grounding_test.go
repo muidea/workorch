@@ -1272,6 +1272,97 @@ func TestRuntimeRepairActionPackageMarksRepeatedTargetRepairMode(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairActionPackageRequiresShapeEvidenceForRepeatedShapeFailure(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"targetRepairAttempts":        3,
+		"failureTargetScope":          "targetRef=target.go",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":       "target.go",
+			"exists":          true,
+			"contentHash":     "hash-1",
+			"content":         "current content",
+			"contentComplete": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs":  []string{"target.go"},
+			"identifiers": []string{"ToolInputSchema"},
+			"messages":    []string{"cannot use value as contract shape"},
+			"lineRefs":    []map[string]any{{"targetRef": "target.go", "line": 42}},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stderr":                  "target.go:42: cannot use value as contract shape",
+		failureOutputKeyClass:     failureClassShellCommand,
+		failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.go|exitCode=1",
+	})
+
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if actionPackage["evidenceAcquisitionRequired"] != true ||
+		actionPackage["evidenceAcquisitionReason"] != "repeated_shape_or_contract_diagnostic_without_independent_shape_evidence" {
+		t.Fatalf("actionPackage = %#v, want shape evidence acquisition required", actionPackage)
+	}
+	shape := mapFromValue(actionPackage["shapeContractEvidenceRequired"])
+	if shape["required"] != true || shape["patchForbiddenUntilRead"] != true {
+		t.Fatalf("shapeContractEvidenceRequired = %#v, want patch forbidden until read", shape)
+	}
+	if required["mustAcquireShapeContractEvidence"] != true ||
+		required["patchForbiddenUntilConcreteTargetEvidence"] != true ||
+		required["mustIncludeStateChangingNode"] != false {
+		t.Fatalf("requiredOutput = %#v, want bounded evidence acquisition contract", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["forbiddenKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.forbiddenKinds = %#v, want patch/apply forbidden", required["forbiddenKinds"])
+	}
+}
+
+func TestRuntimeRepairActionPackageAllowsRepeatedShapePatchWithIndependentShapeEvidence(t *testing.T) {
+	input := map[string]any{
+		"stateChangingOutputRequired": true,
+		"targetRepairAttempts":        3,
+		"failureTargetScope":          "targetRef=target.go",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":       "target.go",
+			"exists":          true,
+			"contentHash":     "hash-1",
+			"content":         "current content",
+			"contentComplete": true,
+		}},
+		"resourceShapeAlignmentContext": []map[string]any{{
+			"targetRef":       "contract.go",
+			"exists":          true,
+			"contentHash":     "hash-2",
+			"content":         "contract shape",
+			"contentComplete": true,
+		}},
+		"structuredFailureSignals": map[string]any{
+			"targetRefs": []string{"target.go"},
+			"messages":   []string{"unknown field in contract literal"},
+			"lineRefs":   []map[string]any{{"targetRef": "target.go", "line": 42}},
+		},
+	}
+
+	actionPackage := repairActionPackageFromRepairInput(input, map[string]any{
+		"stderr":                  "target.go:42: unknown field in contract literal",
+		failureOutputKeyClass:     failureClassShellCommand,
+		failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.go|exitCode=1",
+	})
+
+	if actionPackage["evidenceAcquisitionRequired"] == true {
+		t.Fatalf("actionPackage = %#v, did not expect evidence acquisition with resource shape evidence", actionPackage)
+	}
+	if len(mapSliceFromValue(actionPackage["resourceShapeAlignmentContext"])) == 0 {
+		t.Fatalf("resourceShapeAlignmentContext = %#v, want carried into action package", actionPackage["resourceShapeAlignmentContext"])
+	}
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true || required["mustUseCurrentTargetSnapshot"] != true {
+		t.Fatalf("requiredOutput = %#v, want current snapshot patch contract", required)
+	}
+}
+
 func TestRuntimeRepairActionPackageRefreshesStrategySurfaceFromConcreteTargets(t *testing.T) {
 	input := map[string]any{
 		"stateChangingOutputRequired": true,

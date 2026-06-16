@@ -93,6 +93,10 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			}
 		}
 	}
+	if shapeContext := mapSliceFromValue(input["resourceShapeAlignmentContext"]); len(shapeContext) > 0 {
+		pkg["resourceShapeAlignmentContext"] = compactLLMContextValue(shapeContext, 1)
+		requiredOutput["resourceShapeAlignmentRule"] = "resourceShapeAlignmentContext is concrete current evidence for resource or contract shape; patch decisions must reconcile target snapshots with this evidence instead of inventing names, attributes, or contract entries"
+	}
 	if targetSet := repairActionTargetSet(input, pkg, rawFailedOutput...); len(targetSet) > 0 {
 		pkg["repairTargetSet"] = targetSet
 		requiredOutput["mustTargetRepairTargetSet"] = true
@@ -197,6 +201,26 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 			if reassessment := repairStrategyReassessmentFromInput(input); len(reassessment) > 0 {
 				pkg["strategyReassessment"] = reassessment
 			}
+		}
+	}
+	if shapeContract := repeatedShapeContractEvidenceRequirement(input, pkg); len(shapeContract) > 0 {
+		pkg["shapeContractEvidenceRequired"] = shapeContract
+		pkg["evidenceAcquisitionRequired"] = true
+		pkg["evidenceAcquisitionReason"] = "repeated_shape_or_contract_diagnostic_without_independent_shape_evidence"
+		next := evidenceAcquisitionRequiredOutput(requiredOutput)
+		next["mustAcquireShapeContractEvidence"] = true
+		next["mustNotGuessContractShape"] = true
+		next["shapeContractEvidenceRule"] = "before any next patch, acquire bounded evidence for the current resource or dependency contract shape using acceptedKinds; do not invent fields, methods, schemas, constructors, or callable signatures from diagnostics alone"
+		next["patchForbiddenUntilShapeEvidence"] = true
+		for key := range requiredOutput {
+			delete(requiredOutput, key)
+		}
+		for key, value := range next {
+			requiredOutput[key] = value
+		}
+		pkg["exitCriteria"] = []string{
+			"shape_contract_evidence_acquired_then_target_scoped_repair",
+			"failed_assessment_or_blocker_when_shape_contract_cannot_be_acquired",
 		}
 	}
 	applyConcreteRepairEvidenceOutputContract(input, pkg, requiredOutput)
@@ -878,6 +902,69 @@ func structuredFailureSignalsHaveConcreteTargetEvidence(signals map[string]any) 
 
 func repairActionPackageRequiresEvidenceAcquisition(pkg map[string]any) bool {
 	return len(pkg) > 0 && boolValue(pkg["evidenceAcquisitionRequired"])
+}
+
+func repeatedShapeContractEvidenceRequirement(input map[string]any, pkg map[string]any) map[string]any {
+	if len(input) == 0 || len(pkg) == 0 || int64FromValue(input["targetRepairAttempts"]) < 2 {
+		return nil
+	}
+	signals := mapFromValue(pkg["structuredFailureSignals"])
+	if len(signals) == 0 {
+		signals = mapFromValue(input["structuredFailureSignals"])
+	}
+	if !structuredFailureSignalsContainShapeConflict(signals) {
+		primary := mapFromValue(pkg["primaryDiagnosticRepair"])
+		if len(primary) == 0 {
+			primary = mapFromValue(input["primaryDiagnosticRepair"])
+		}
+		if !structuredFailureSignalsContainShapeConflict(primary) {
+			return nil
+		}
+		signals = primary
+	}
+	if repeatedShapeContractHasIndependentEvidence(input, pkg) {
+		return nil
+	}
+	targets := filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(signals["targetRefs"]))
+	for _, lineRef := range mapSliceFromValue(signals["lineRefs"]) {
+		if ref := strings.TrimSpace(stringFromMap(lineRef, "targetRef")); ref != "" {
+			targets = append(targets, ref)
+		}
+	}
+	targets = filterAdmissibleRuntimeRepairTargetRefs(compactUniqueStrings(targets))
+	requirement := map[string]any{
+		"required":                 true,
+		"reason":                   "same target repeatedly failed with resource or contract shape diagnostics",
+		"acceptedKinds":            evidenceAcquisitionAcceptedKinds(),
+		"patchForbiddenUntilRead":  true,
+		"mustAcquireBeforePatch":   true,
+		"targetRepairAttempts":     int64FromValue(input["targetRepairAttempts"]),
+		"failureTargetScope":       stringFromMap(input, "failureTargetScope"),
+		"requiredEvidenceExamples": []string{"current target declaration", "related contract/resource definition", "available dependency or capability schema", "bounded diagnostic command output"},
+	}
+	if len(targets) > 0 {
+		requirement["targetRefs"] = targets
+	}
+	if identifiers := stringSliceFromValue(signals["identifiers"]); len(identifiers) > 0 {
+		requirement["identifiers"] = limitedStrings(identifiers, maxLLMContextSliceItems)
+	}
+	if messages := stringSliceFromValue(signals["messages"]); len(messages) > 0 {
+		requirement["messages"] = limitedStrings(messages, maxLLMContextSliceItems)
+	}
+	return requirement
+}
+
+func repeatedShapeContractHasIndependentEvidence(input map[string]any, pkg map[string]any) bool {
+	for _, key := range []string{
+		"resourceShapeAlignmentContext",
+		"rootCauseCandidateContext",
+		"readableResourceRepairContext",
+	} {
+		if len(mapSliceFromValue(input[key])) > 0 || len(mapSliceFromValue(pkg[key])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func repairActionPackageRequiresStateChangingOutput(pkg map[string]any) bool {

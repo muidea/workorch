@@ -72,6 +72,7 @@
 - 当 build/test 失败直接报告 undefined、unknown field、cannot use、missing method、constructor/schema/interface mismatch、入口函数缺失或其他 API 形状不匹配时，必须先修复这些首要阻塞，再处理断言增强、格式整理或其他次要改进
 - undefined、missing type、missing method、unknown field 等首要诊断必须优先对齐当前代码的真实 API：要么补齐生产代码缺失的类型/字段/方法，要么把测试改为调用已存在的公开形状；不要在首要编译阻塞未解除前转向无关重构、测试包装或验证文案
 - 为新增测试、入口或配置补代码时，优先对齐当前项目已经存在的类型、构造函数、字段名、路由入口、配置结构和返回值形状；不要凭空发明新名字、新入口或新字段
+- 当 runtime 提供 repairActionPackage.shapeContractEvidenceRequired 时，说明同一目标已经多次因 API / schema / constructor / method / field / capability 形状不匹配失败；下一步必须先用 file/read、shell/command、mcp/tool_call 或 git/read 获取真实契约形状证据，再基于证据 patch，不要继续猜测 SDK、依赖或能力接口
 - 如果 runtime repair 已提供 failureTargetRepairContext、patchRepairContext、repairActionPackage.targetSnapshots 或 workspaceFileManifest，先基于这些当前快照和可见资源对齐目标文件，再决定是否需要读取额外定义文件
 - 当失败定位已经指向具体目标文件和行号时，优先在该目标文件完成最小修复；只有首要编译阻塞排除后，才继续补断言强度、测试覆盖或其他质量改进
 
