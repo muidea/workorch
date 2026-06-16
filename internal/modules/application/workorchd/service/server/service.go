@@ -75,6 +75,7 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
+	s.http.state.scheduleStartupRecovery()
 	if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
 		s.runStarted.Store(false)
 		return cd.NewError(cd.Unexpected, err.Error())

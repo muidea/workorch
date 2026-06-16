@@ -67,8 +67,11 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	if !routine.asyncFunctionCalled {
 		t.Fatal("Run did not submit HTTP server through BackgroundRoutine.AsyncFunction")
 	}
-	if routine.asyncFunctionCalls != 2 {
-		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 3 {
+		t.Fatalf("Run submitted %d background functions, want projection baseline, startup recovery, and HTTP server", routine.asyncFunctionCalls)
+	}
+	if routine.timerCalls != 1 {
+		t.Fatalf("Run submitted %d timers, want startup recovery watchdog timer", routine.timerCalls)
 	}
 	if routine.function == nil {
 		t.Fatal("Run submitted a nil background function")

@@ -677,6 +677,45 @@ func TestResumeRunWithBackendReturnsBlockedWhenDependencyPending(t *testing.T) {
 	}
 }
 
+func TestResumeRunWithBackendResolvedReplanCreatesObservableSuccessor(t *testing.T) {
+	dataRoot := t.TempDir()
+	runID := "run-decision-replan-resume"
+	workspaceID := "ws-run-decision-replan-resume"
+	started := prepareDecisionRun(t, dataRoot, workspaceID, runID)
+	if started.State != "blocked_on_decision" || started.BlockingTicketID == "" {
+		t.Fatalf("started run = %+v, want blocked decision with ticket", started)
+	}
+	if _, err := ResolveDecisionWithBackend(context.Background(), "file", dataRoot, started.BlockingTicketID, ResolveDecisionCommand{
+		ResolutionType:    decisioncommon.ResolutionTypeReplan,
+		ResolutionPayload: map[string]any{"operator": "tester", "recoveryAction": "replan"},
+	}); err != nil {
+		t.Fatalf("ResolveDecisionWithBackend: %v", err)
+	}
+
+	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ResumeRunWithBackend: %v", err)
+	}
+	if item.State == "blocked_on_decision" || item.BlockingTicketID != "" {
+		t.Fatalf("run = %+v, want resolved replan resume to clear blocking decision", item)
+	}
+	runs, err := ListRunsWithBackend(context.Background(), "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ListRunsWithBackend: %v", err)
+	}
+	var successor Run
+	for _, candidate := range runs {
+		replan := contextMapFromValue(t, candidate.ExecutionContext["replanContinuation"])
+		if replan["predecessorRunId"] == runID {
+			successor = candidate
+			break
+		}
+	}
+	if successor.ID == "" {
+		t.Fatalf("runs = %+v, want observable replan successor for %s", runs, runID)
+	}
+}
+
 func TestResumeRunWithBackendReturnsConflictForCreatedRun(t *testing.T) {
 	dataRoot := t.TempDir()
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-resume-conflict", "run resume conflict workspace", "", "workspaces/run resume conflict workspace"); err != nil {
