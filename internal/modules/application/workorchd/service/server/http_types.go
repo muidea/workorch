@@ -409,6 +409,7 @@ type activateWorkspaceExecutionRequest struct {
 	MemoryIDs             []string          `json:"memoryIds,omitempty"`
 	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
 	Priority              int               `json:"priority,omitempty"`
+	Restart               bool              `json:"restart,omitempty"`
 	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }
 
@@ -564,6 +565,7 @@ type updateWebSearchConfigurationFunc func(appservice.UpdateWebSearchConfigurati
 type serverState struct {
 	config                       Config
 	eventHub                     events.Hub
+	schedulerHub                 events.Hub
 	eventReplay                  *sseReplayBuffer
 	metrics                      *serverMetrics
 	validate                     validateFunc
@@ -1006,10 +1008,15 @@ func newServerState(config Config, eventHub events.Hub) *serverState {
 }
 
 func newServerStateWithBackground(config Config, eventHub events.Hub, backgroundRoutine task.BackgroundRoutine) *serverState {
+	schedulerHub := eventHub
+	if schedulerHub == nil {
+		schedulerHub = events.NewMemoryHub()
+	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	state := &serverState{
 		config:                       config,
 		eventHub:                     eventHub,
+		schedulerHub:                 schedulerHub,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
 		metrics:                      &serverMetrics{},
 		validate:                     defaultValidate,
@@ -1110,7 +1117,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 	state.configureSharedMemorySession()
 	state.registerEventReplayRecorder()
 	state.registerAutoGovernanceResumeWatcher()
-	state.registerReplanContinuationWatcher()
+	state.registerWorkorchDSchedulerCommandWatcher()
 	return state
 }
 
@@ -1867,16 +1874,6 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 	}
 }
 
-func (s *serverState) registerReplanContinuationWatcher() {
-	if s == nil || s.eventHub == nil {
-		return
-	}
-	unsubscribe := s.eventHub.Subscribe(runevents.TopicRunStateChanged, func(context.Context, events.Envelope) error {
-		return nil
-	})
-	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)
-}
-
 func (s *serverState) registerEventReplayRecorder() {
 	if s == nil || s.eventHub == nil || s.eventReplay == nil {
 		return
@@ -1896,10 +1893,12 @@ func (s *serverState) registerAutoGovernanceResumeWatcher() {
 		if strings.TrimSpace(envelope.RunID) == "" {
 			return nil
 		}
-		s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
 			WorkspaceID: envelope.WorkspaceID,
 			RunID:       envelope.RunID,
-		}}, 0)
+		}}, 0); err != nil {
+			slog.Warn("workorch auto governance continuation command publish failed", "workspaceID", envelope.WorkspaceID, "runID", envelope.RunID, "err", err)
+		}
 		return nil
 	})
 	s.eventUnsubscribes = append(s.eventUnsubscribes, unsubscribe)

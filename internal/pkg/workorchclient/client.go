@@ -100,6 +100,15 @@ func decodeEnvelope[T any](resp *http.Response, key string) (*T, error) {
 	return &result, nil
 }
 
+func drainAccepted(resp *http.Response) (bool, error) {
+	if resp == nil || resp.StatusCode != http.StatusAccepted {
+		return false, nil
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return true, nil
+}
+
 func decodeEnvelopeSlice[T any](resp *http.Response, key string) ([]T, error) {
 	defer resp.Body.Close()
 

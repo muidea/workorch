@@ -52,6 +52,16 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
 					return readmodelcore.WorkspaceExecutionActivation{}, replaceErr
 				}
+			} else if cmd.Restart && run.State != common.RunStateCreated {
+				runID, err := createReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run.ID)
+				if err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				startedRun, err := ownerreadports.ReadRunByOwnerCommand(ctx, request.Hub, runID)
+				if err != nil {
+					return readmodelcore.WorkspaceExecutionActivation{}, err
+				}
+				return WorkspaceExecutionActivationSnapshot(workspace, startedRun, goal, dod), nil
 			} else if ActiveRunDefinitionStale(ctx, request.Hub, workspace.ID, run, goal, dod) {
 				runID, err := createReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run.ID)
 				if err != nil {

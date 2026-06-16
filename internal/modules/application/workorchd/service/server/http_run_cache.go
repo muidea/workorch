@@ -508,7 +508,7 @@ func runIsReplanSuccessorOf(item appservice.Run, predecessorRunID string) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(item.ID, predecessorRunID+"-replan-")
+	return false
 }
 
 func (s *serverState) runHasResolvedReplanDecision(ctx context.Context, workspaceID string, runID string) bool {
@@ -574,7 +574,7 @@ func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceR
 	for _, item := range items {
 		item.WorkspaceID = strings.TrimSpace(item.WorkspaceID)
 		item.RunID = strings.TrimSpace(item.RunID)
-		if item.RunID == "" {
+		if item.WorkspaceID == "" || item.RunID == "" {
 			continue
 		}
 		key := governanceRunResumeKey(item)

@@ -131,6 +131,9 @@ type agentCommandRunBackend struct{}
 func (agentCommandRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return nil, common.ErrInvalidArgument
 }
+func (agentCommandRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return nil, common.ErrInvalidArgument
+}
 func (agentCommandRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
 	return nil, common.ErrInvalidArgument
 }

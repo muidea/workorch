@@ -48,6 +48,7 @@ type RunStatusInfo struct {
 
 type RunBackend interface {
 	Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error)
+	Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error)
 	Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error)
 	Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error)

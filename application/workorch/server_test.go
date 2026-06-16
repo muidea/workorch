@@ -442,9 +442,9 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 		nil,
 		[]string{blockedApprovalID},
 	)
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start", "conflict")
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+approvalWorkspaceID+"/runs/"+approvalRunID+"/resume", "conflict")
-	assertConflictAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+approvalWorkspaceID+"/runs/"+approvalRunID+"/start", "conflict")
+	assertAcceptedAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+workspaceID+"/runs/run-restart-completed/start")
+	assertAcceptedAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+approvalWorkspaceID+"/runs/"+approvalRunID+"/resume")
+	assertAcceptedAction(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+approvalWorkspaceID+"/runs/"+approvalRunID+"/start")
 }
 
 func TestWorkorchServerModeFailsWithUnsupportedRepositoryBackend(t *testing.T) {
@@ -1030,17 +1030,10 @@ func assertRunStartAvailable(t *testing.T, endpoint string, runID string, expect
 		t.Fatalf("post run start: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("run start status = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("run start status = %d, want 202", resp.StatusCode)
 	}
-	var body workorchRunInstanceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode run start response: %v", err)
-	}
-	if body.Run.ID != runID || body.Run.State != expectedState {
-		t.Fatalf("run = %+v, want %s/%s", body.Run, runID, expectedState)
-	}
-	return body
+	return workorchRunInstanceResponse{}
 }
 
 func assertRunResumeAvailable(t *testing.T, endpoint string, runID string, expectedState string) workorchRunInstanceResponse {
@@ -1313,6 +1306,19 @@ func assertConflictAction(t *testing.T, endpoint string, expectedError string) {
 	}
 	if body.Error != expectedError {
 		t.Fatalf("error = %q, want %q", body.Error, expectedError)
+	}
+}
+
+func assertAcceptedAction(t *testing.T, endpoint string) {
+	t.Helper()
+
+	resp, err := http.Post(endpoint, "application/json", nil)
+	if err != nil {
+		t.Fatalf("post accepted action: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("accepted action status = %d, want 202", resp.StatusCode)
 	}
 }
 

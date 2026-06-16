@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 )
 
@@ -183,7 +184,22 @@ func (c *Client) ActivateWorkspaceExecution(ctx context.Context, workspaceID str
 	if err != nil {
 		return nil, err
 	}
+	if accepted, err := drainAccepted(resp); accepted || err != nil {
+		return nil, err
+	}
 	return decodeEnvelope[Activation](resp, "activation")
+}
+
+// RestartWorkspaceExecution requests a replacement execution for a workspace.
+func (c *Client) RestartWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) error {
+	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-restarts", escapePath(workspaceID))
+	resp, err := c.do(ctx, "POST", path, req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 // ActivationRequest is the request body for activating workspace execution.
@@ -199,5 +215,6 @@ type ActivationRequest struct {
 	MemoryIDs             []string          `json:"memoryIds,omitempty"`
 	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
 	Priority              int               `json:"priority,omitempty"`
+	Restart               bool              `json:"restart,omitempty"`
 	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }

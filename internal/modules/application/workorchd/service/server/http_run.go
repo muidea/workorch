@@ -7,7 +7,9 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func registerRunReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -270,26 +272,26 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
 	switch action {
 	case "start":
-		s.metrics.runStartRequests.Add(1)
-		release, err := s.acquireRunSlotWithPriority(ctx, runPriorityFromRequest(r, 0))
-		if err != nil {
-			s.metrics.runCanceled.Add(1)
-			writeRunQueueError(w, err)
-			return
-		}
-		defer release()
-		item, err := s.startRun(ctx, s.config.Backend, s.config.DataRoot, runID)
-		if err != nil {
+		priority := runPriorityFromRequest(r, 0)
+		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyAction:      "start",
+			events.PayloadKeyPriority:    priority,
+		}); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		s.metrics.observeRunOutcome(item)
-		if item.State == string(common.RunStateSuperseded) {
-			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
-		}
-		s.notifyRunStatusChangedForRun(item)
-		s.rebuildProjectedWorkspace(ctx, item.WorkspaceID)
-		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+		s.rebuildProjectedWorkspace(ctx, workspaceID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"service":     "workorch",
+			"backend":     s.config.Backend,
+			"dataRoot":    s.config.DataRoot,
+			"accepted":    true,
+			"workspaceId": workspaceID,
+			"runId":       runID,
+			"action":      "start",
+		})
 	case "resume":
 		var req struct {
 			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
@@ -298,26 +300,27 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 			writeBusinessError(w, err)
 			return
 		}
-		s.metrics.runResumeRequests.Add(1)
-		release, err := s.acquireRunSlotWithPriority(ctx, runPriorityFromRequest(r, 0))
-		if err != nil {
-			s.metrics.runCanceled.Add(1)
-			writeRunQueueError(w, err)
-			return
-		}
-		defer release()
-		item, err := s.resumeRun(ctx, s.config.Backend, s.config.DataRoot, runID, req.ExecutionContextPatch)
-		if err != nil {
+		priority := runPriorityFromRequest(r, 0)
+		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
+			events.PayloadKeyWorkspaceID:           workspaceID,
+			events.PayloadKeyRunID:                 runID,
+			events.PayloadKeyAction:                "resume",
+			events.PayloadKeyPriority:              priority,
+			events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
+		}); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		s.metrics.observeRunOutcome(item)
-		if item.State == string(common.RunStateSuperseded) {
-			s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, runPriorityFromRequest(r, 0))
-		}
-		s.notifyRunStatusChangedForRun(item)
-		s.rebuildProjectedWorkspace(ctx, item.WorkspaceID)
-		writeJSON(w, http.StatusOK, runInstanceResponse{Service: "workorch", Backend: s.config.Backend, DataRoot: s.config.DataRoot, Run: item})
+		s.rebuildProjectedWorkspace(ctx, workspaceID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"service":     "workorch",
+			"backend":     s.config.Backend,
+			"dataRoot":    s.config.DataRoot,
+			"accepted":    true,
+			"workspaceId": workspaceID,
+			"runId":       runID,
+			"action":      "resume",
+		})
 	default:
 		http.NotFound(w, r)
 	}

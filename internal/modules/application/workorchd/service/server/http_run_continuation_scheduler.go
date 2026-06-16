@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -25,15 +26,29 @@ type runContinuationScheduler struct {
 	replanMu      sync.Mutex
 	replanStarted map[string]struct{}
 
+	restartMu      sync.Mutex
+	restartStarted map[string]struct{}
+	restartPending map[string]workspaceRestartRequest
+
+	runMu      sync.Mutex
+	runStarted map[string]struct{}
+	runPending map[string]runContinuationRequest
+
 	governanceMu      sync.Mutex
 	governanceStarted map[string]struct{}
+	governancePending map[string]governanceRunResumeRef
 }
 
 func newRunContinuationScheduler(state *serverState) *runContinuationScheduler {
 	return &runContinuationScheduler{
 		state:             state,
 		replanStarted:     map[string]struct{}{},
+		restartStarted:    map[string]struct{}{},
+		restartPending:    map[string]workspaceRestartRequest{},
+		runStarted:        map[string]struct{}{},
+		runPending:        map[string]runContinuationRequest{},
 		governanceStarted: map[string]struct{}{},
+		governancePending: map[string]governanceRunResumeRef{},
 	}
 }
 
@@ -52,6 +67,9 @@ func (s *runContinuationScheduler) scheduleStartupRecovery() {
 		case <-timer.C:
 		case <-ctx.Done():
 			return
+		}
+		if err := s.recoverResolvedGovernanceBlockedRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
+			slog.Warn("workorch resolved governance blocked run startup recovery failed", "err", err)
 		}
 		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
 			slog.Warn("workorch startup run recovery failed", "err", err)
@@ -72,11 +90,11 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 		state.backgroundContext(),
 		backgroundFuncTask{fn: func() {
 			ctx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
-			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
-				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
-			}
 			if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
 				slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
+			}
+			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
+				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
 			}
 		}},
 		runWatchdogInterval,
@@ -389,17 +407,51 @@ func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []govern
 	if s == nil || s.state == nil {
 		return
 	}
-	state := s.state
 	refs = uniqueGovernanceRunResumeRefs(refs)
+	if len(refs) == 0 {
+		return
+	}
+	s.enqueueGovernanceResumeRefs(refs)
+	s.drainGovernanceResumeQueue(priority)
+}
+
+func (s *runContinuationScheduler) enqueueGovernanceResumeRefs(refs []governanceRunResumeRef) {
+	if s == nil {
+		return
+	}
+	s.governanceMu.Lock()
+	defer s.governanceMu.Unlock()
+	if s.governancePending == nil {
+		s.governancePending = map[string]governanceRunResumeRef{}
+	}
 	for _, ref := range refs {
-		ref := ref
 		key := governanceRunResumeKey(ref)
-		if !s.markGovernanceResumeStarted(key) {
-			slog.Debug("workorch governance resume already scheduled", "workspaceID", ref.WorkspaceID, "runID", ref.RunID)
+		if key == "" {
 			continue
 		}
+		s.governancePending[key] = ref
+	}
+}
+
+func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) {
+	if s == nil || s.state == nil {
+		return
+	}
+	state := s.state
+	for {
+		key, ref, ok := s.nextPendingGovernanceResume()
+		if !ok {
+			return
+		}
+		resumeKey, resumeRef := key, ref
 		if !state.scheduleBackground("governance_run_resume", func(context.Context) {
-			defer s.clearGovernanceResumeStarted(key)
+			completePending := false
+			defer func() {
+				if completePending {
+					s.clearGovernanceResumePending(resumeKey)
+				}
+				s.clearGovernanceResumeStarted(resumeKey)
+			}()
 			var resumedRun appservice.Run
 			defer func() {
 				if resumedRun.ID != "" {
@@ -413,47 +465,51 @@ func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []govern
 			release, err := state.acquireRunSlotWithPriority(ctx, priority)
 			if err != nil {
 				state.metrics.runCanceled.Add(1)
-				slog.Warn("workorch governance resume queue failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
+				slog.Warn("workorch governance resume queue failed", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "err", err)
 				return
 			}
 			defer release()
-			if ref.WorkspaceID != "" {
-				ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(ref.WorkspaceID))
+			if resumeRef.WorkspaceID != "" {
+				ctx = common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(resumeRef.WorkspaceID))
 			}
-			item, err := state.resumeRun(ctx, state.config.Backend, state.config.DataRoot, ref.RunID)
+			item, err := state.resumeRun(ctx, state.config.Backend, state.config.DataRoot, resumeRef.RunID)
 			if err != nil {
-				slog.Warn("workorch governance resume failed", "workspaceID", ref.WorkspaceID, "runID", ref.RunID, "err", err)
+				if !s.governanceResumeRefStillNeedsWork(ctx, resumeRef) {
+					completePending = true
+				}
+				slog.Warn("workorch governance resume failed", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "err", err)
 				return
 			}
+			completePending = true
 			state.metrics.observeRunOutcome(item)
 			if item.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
 			}
 			resumedRun = item
 		}) {
-			s.clearGovernanceResumeStarted(key)
+			s.clearGovernanceResumeStarted(resumeKey)
+			return
 		}
 	}
 }
 
-func (s *runContinuationScheduler) markGovernanceResumeStarted(key string) bool {
+func (s *runContinuationScheduler) nextPendingGovernanceResume() (string, governanceRunResumeRef, bool) {
 	if s == nil {
-		return false
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return false
+		return "", governanceRunResumeRef{}, false
 	}
 	s.governanceMu.Lock()
 	defer s.governanceMu.Unlock()
 	if s.governanceStarted == nil {
 		s.governanceStarted = map[string]struct{}{}
 	}
-	if _, ok := s.governanceStarted[key]; ok {
-		return false
+	for key, ref := range s.governancePending {
+		if _, ok := s.governanceStarted[key]; ok {
+			continue
+		}
+		s.governanceStarted[key] = struct{}{}
+		return key, ref, true
 	}
-	s.governanceStarted[key] = struct{}{}
-	return true
+	return "", governanceRunResumeRef{}, false
 }
 
 func (s *runContinuationScheduler) clearGovernanceResumeStarted(key string) {
@@ -467,6 +523,42 @@ func (s *runContinuationScheduler) clearGovernanceResumeStarted(key string) {
 	s.governanceMu.Lock()
 	defer s.governanceMu.Unlock()
 	delete(s.governanceStarted, key)
+}
+
+func (s *runContinuationScheduler) clearGovernanceResumePending(key string) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.governanceMu.Lock()
+	defer s.governanceMu.Unlock()
+	delete(s.governancePending, key)
+}
+
+func (s *runContinuationScheduler) governanceResumeRefStillNeedsWork(ctx context.Context, ref governanceRunResumeRef) bool {
+	if s == nil || s.state == nil || s.state.listRuns == nil {
+		return true
+	}
+	workspaceID := strings.TrimSpace(ref.WorkspaceID)
+	runID := strings.TrimSpace(ref.RunID)
+	if workspaceID == "" || runID == "" {
+		return false
+	}
+	runs, err := s.state.listRuns(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID)), s.state.config.Backend, s.state.config.DataRoot, workspaceID)
+	if err != nil {
+		slog.Warn("workorch governance resume pending run scan failed", "workspaceID", workspaceID, "runID", runID, "err", err)
+		return true
+	}
+	for _, run := range runs {
+		if run.WorkspaceID == workspaceID && run.ID == runID {
+			_, ok := s.resolvedGovernanceResumeRefForRun(ctx, workspaceID, run)
+			return ok
+		}
+	}
+	return false
 }
 
 func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {
@@ -554,6 +646,335 @@ func (s *runContinuationScheduler) workspaceHasReplanSuccessor(ctx context.Conte
 		}
 		if runIsReplanSuccessorOf(item, runID) {
 			return true
+		}
+	}
+	return false
+}
+
+func (s *runContinuationScheduler) scheduleWorkspaceRestart(req workspaceRestartRequest) bool {
+	req.Command.Restart = true
+	return s.scheduleWorkspaceExecution("workspace_restart", req)
+}
+
+func (s *runContinuationScheduler) scheduleWorkspaceActivation(req workspaceRestartRequest) bool {
+	req.Command.Restart = false
+	return s.scheduleWorkspaceExecution("workspace_activation", req)
+}
+
+func (s *runContinuationScheduler) scheduleWorkspaceExecution(taskName string, req workspaceRestartRequest) bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	if req.WorkspaceID == "" {
+		return false
+	}
+	req.Command.Priority = req.Priority
+	key := strings.TrimSpace(taskName) + "/" + req.WorkspaceID
+	s.enqueueWorkspaceExecution(key, req)
+	return s.drainWorkspaceExecutionQueue()
+}
+
+func (s *runContinuationScheduler) enqueueWorkspaceExecution(key string, req workspaceRestartRequest) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+	if s.restartPending == nil {
+		s.restartPending = map[string]workspaceRestartRequest{}
+	}
+	s.restartPending[key] = req
+}
+
+func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	state := s.state
+	for {
+		key, req, ok := s.nextPendingWorkspaceExecution()
+		if !ok {
+			return true
+		}
+		taskName := workspaceExecutionTaskNameFromKey(key)
+		if taskName == "" {
+			taskName = "workspace_execution"
+		}
+		queued := state.scheduleBackground(taskName, func(context.Context) {
+			defer s.clearWorkspaceRestartStarted(key)
+			runCtx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
+			runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(req.WorkspaceID))
+			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
+			if err != nil {
+				state.metrics.runCanceled.Add(1)
+				slog.Warn("workorch workspace execution queue failed", "task", taskName, "workspaceID", req.WorkspaceID, "err", err)
+				return
+			}
+			defer release()
+			activation, err := state.activateWorkspace(runCtx, state.config.Backend, state.config.DataRoot, req.WorkspaceID, req.Command)
+			if err != nil {
+				slog.Warn("workorch workspace execution activation failed", "task", taskName, "workspaceID", req.WorkspaceID, "err", err)
+				state.notifyRunStatusChanged()
+				if !s.workspaceExecutionStillNeedsWork(runCtx, req) {
+					s.clearWorkspaceExecutionPending(key)
+				}
+				return
+			}
+			s.clearWorkspaceExecutionPending(key)
+			state.metrics.observeRunOutcome(activation.Run)
+			if activation.Run.State == string(common.RunStateSuperseded) {
+				s.scheduleReplanContinuationIfNeeded(runCtx, activation.Run.WorkspaceID, activation.Run.ID, req.Priority)
+			}
+			state.notifyRunStatusChangedForRun(activation.Run)
+		})
+		if !queued {
+			s.clearWorkspaceRestartStarted(key)
+			return false
+		}
+	}
+}
+
+func workspaceExecutionTaskNameFromKey(key string) string {
+	key = strings.TrimSpace(key)
+	idx := strings.Index(key, "/")
+	if idx <= 0 {
+		return key
+	}
+	return key[:idx]
+}
+
+func (s *runContinuationScheduler) nextPendingWorkspaceExecution() (string, workspaceRestartRequest, bool) {
+	if s == nil {
+		return "", workspaceRestartRequest{}, false
+	}
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+	if s.restartStarted == nil {
+		s.restartStarted = map[string]struct{}{}
+	}
+	for key, req := range s.restartPending {
+		if _, ok := s.restartStarted[key]; ok {
+			continue
+		}
+		s.restartStarted[key] = struct{}{}
+		return key, req, true
+	}
+	return "", workspaceRestartRequest{}, false
+}
+
+func (s *runContinuationScheduler) clearWorkspaceRestartStarted(key string) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+	delete(s.restartStarted, key)
+}
+
+func (s *runContinuationScheduler) clearWorkspaceExecutionPending(key string) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+	delete(s.restartPending, key)
+}
+
+func (s *runContinuationScheduler) workspaceExecutionStillNeedsWork(ctx context.Context, req workspaceRestartRequest) bool {
+	if s == nil || s.state == nil || s.state.readWorkspace == nil {
+		return true
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		return false
+	}
+	workspace, err := s.state.readWorkspace(ctx, s.state.config.Backend, s.state.config.DataRoot, workspaceID)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return false
+		}
+		slog.Warn("workorch workspace execution pending workspace lookup failed", "workspaceID", workspaceID, "err", err)
+		return true
+	}
+	if req.Command.Restart {
+		return true
+	}
+	return strings.TrimSpace(workspace.ActiveRunID) == ""
+}
+
+func (s *runContinuationScheduler) scheduleRunContinuation(req runContinuationRequest) bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.RunID = strings.TrimSpace(req.RunID)
+	req.Action = strings.TrimSpace(req.Action)
+	if req.WorkspaceID == "" || req.RunID == "" || req.Action == "" {
+		return false
+	}
+	key := req.WorkspaceID + "/" + req.RunID + "/" + req.Action
+	s.enqueueRunContinuation(key, req)
+	return s.drainRunContinuationQueue()
+}
+
+func (s *runContinuationScheduler) enqueueRunContinuation(key string, req runContinuationRequest) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.runPending == nil {
+		s.runPending = map[string]runContinuationRequest{}
+	}
+	s.runPending[key] = req
+}
+
+func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
+	if s == nil || s.state == nil {
+		return false
+	}
+	state := s.state
+	for {
+		key, req, ok := s.nextPendingRunContinuation()
+		if !ok {
+			return true
+		}
+		queued := state.scheduleBackground("run_continuation", func(context.Context) {
+			defer s.clearRunContinuationStarted(key)
+			runCtx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
+			runCtx = common.ContextWithRuntimeWorkspaceID(runCtx, common.WorkspaceID(req.WorkspaceID))
+			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
+			if err != nil {
+				state.metrics.runCanceled.Add(1)
+				slog.Warn("workorch run continuation queue failed", "workspaceID", req.WorkspaceID, "runID", req.RunID, "action", req.Action, "err", err)
+				return
+			}
+			defer release()
+			var item appservice.Run
+			switch req.Action {
+			case "start":
+				state.metrics.runStartRequests.Add(1)
+				item, err = state.startRun(runCtx, state.config.Backend, state.config.DataRoot, req.RunID)
+			case "resume":
+				state.metrics.runResumeRequests.Add(1)
+				item, err = state.resumeRun(runCtx, state.config.Backend, state.config.DataRoot, req.RunID, req.ExecutionContextPatch)
+			default:
+				err = common.ErrInvalidArgument
+			}
+			if err != nil {
+				slog.Warn("workorch run continuation failed", "workspaceID", req.WorkspaceID, "runID", req.RunID, "action", req.Action, "err", err)
+				state.notifyRunStatusChanged()
+				if !s.runContinuationStillNeedsWork(runCtx, req) {
+					s.clearRunContinuationPending(key)
+				}
+				return
+			}
+			s.clearRunContinuationPending(key)
+			state.metrics.observeRunOutcome(item)
+			if item.State == string(common.RunStateSuperseded) {
+				s.scheduleReplanContinuationIfNeeded(runCtx, item.WorkspaceID, item.ID, req.Priority)
+			}
+			state.notifyRunStatusChangedForRun(item)
+		})
+		if !queued {
+			s.clearRunContinuationStarted(key)
+			return false
+		}
+	}
+}
+
+func (s *runContinuationScheduler) nextPendingRunContinuation() (string, runContinuationRequest, bool) {
+	if s == nil {
+		return "", runContinuationRequest{}, false
+	}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.runStarted == nil {
+		s.runStarted = map[string]struct{}{}
+	}
+	for key, req := range s.runPending {
+		if _, ok := s.runStarted[key]; ok {
+			continue
+		}
+		s.runStarted[key] = struct{}{}
+		return key, req, true
+	}
+	return "", runContinuationRequest{}, false
+}
+
+func (s *runContinuationScheduler) clearRunContinuationStarted(key string) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	delete(s.runStarted, key)
+}
+
+func (s *runContinuationScheduler) clearRunContinuationPending(key string) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	delete(s.runPending, key)
+}
+
+func (s *runContinuationScheduler) runContinuationStillNeedsWork(ctx context.Context, req runContinuationRequest) bool {
+	if s == nil || s.state == nil || s.state.listRuns == nil {
+		return true
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	runID := strings.TrimSpace(req.RunID)
+	if workspaceID == "" || runID == "" {
+		return false
+	}
+	runs, err := s.state.listRuns(common.ContextWithRuntimeWorkspaceID(ctx, common.WorkspaceID(workspaceID)), s.state.config.Backend, s.state.config.DataRoot, workspaceID)
+	if err != nil {
+		slog.Warn("workorch run continuation pending run scan failed", "workspaceID", workspaceID, "runID", runID, "action", req.Action, "err", err)
+		return true
+	}
+	for _, run := range runs {
+		if run.WorkspaceID != workspaceID || run.ID != runID {
+			continue
+		}
+		switch strings.TrimSpace(req.Action) {
+		case "start":
+			return common.RunState(run.State) == common.RunStateCreated
+		case "resume":
+			switch common.RunState(run.State) {
+			case common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval:
+				return true
+			default:
+				return false
+			}
+		default:
+			return false
 		}
 	}
 	return false

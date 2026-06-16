@@ -37,6 +37,7 @@ type ActivateWorkspaceExecutionCommand struct {
 	MemoryIDs             []string          `json:"memoryIds,omitempty"`
 	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
 	Priority              int               `json:"priority,omitempty"`
+	Restart               bool              `json:"restart,omitempty"`
 	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }
 

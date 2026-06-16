@@ -9,7 +9,9 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
@@ -304,42 +306,48 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 		}
 		state.metrics.workspaceActivationRequests.Add(1)
 		priority := runPriorityFromRequest(r, req.Priority)
-		release, err := state.acquireRunSlotWithPriority(r.Context(), priority)
-		if err != nil {
-			state.metrics.runCanceled.Add(1)
-			writeRunQueueError(w, err)
-			return
+		topic := workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested
+		if req.Restart {
+			topic = workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested
 		}
-		defer release()
-		item, err := state.activateWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{
-			GoalID:                req.GoalID,
-			DoDID:                 req.DoDID,
-			LLMProviderID:         req.LLMProviderID,
-			SoulID:                req.SoulID,
-			SoulBindings:          req.SoulBindings,
-			SkillIDs:              req.SkillIDs,
-			MCPServerIDs:          req.MCPServerIDs,
-			CapabilityIDs:         req.CapabilityIDs,
-			MemoryIDs:             req.MemoryIDs,
-			DialogLanguage:        req.DialogLanguage,
-			Priority:              priority,
-			ExecutionContextPatch: req.ExecutionContextPatch,
-		})
-		if err != nil {
+		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, workspaceID, "", activationRequestSchedulerPayload(workspaceID, req, priority)); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
-		state.metrics.observeRunOutcome(item.Run)
-		if item.Run.State == string(common.RunStateSuperseded) {
-			state.scheduleReplanContinuationIfNeeded(r.Context(), item.Run.WorkspaceID, item.Run.ID, priority)
-		}
-		state.notifyRunStatusChangedForRun(item.Run)
 		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusOK, workspaceExecutionActivationResponse{
-			Service:    "workorch",
-			Backend:    state.config.Backend,
-			DataRoot:   state.config.DataRoot,
-			Activation: item,
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"service":     "workorch",
+			"backend":     state.config.Backend,
+			"dataRoot":    state.config.DataRoot,
+			"accepted":    true,
+			"workspaceId": workspaceID,
+		})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-restarts", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
+		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
+		if !ok || action != "execution-restarts" {
+			http.NotFound(w, r)
+			return
+		}
+		var req activateWorkspaceExecutionRequest
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		priority := runPriorityFromRequest(r, req.Priority)
+		req.Restart = true
+		if err := state.publishWorkorchDSchedulerCommand(r.Context(), workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested, workspaceID, "", activationRequestSchedulerPayload(workspaceID, req, priority)); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"service":     "workorch",
+			"backend":     state.config.Backend,
+			"dataRoot":    state.config.DataRoot,
+			"accepted":    true,
+			"workspaceId": workspaceID,
 		})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -542,4 +550,22 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			QualityCheck: item,
 		})
 	})
+}
+
+func activationRequestSchedulerPayload(workspaceID string, req activateWorkspaceExecutionRequest, priority int) map[string]any {
+	return map[string]any{
+		events.PayloadKeyWorkspaceID:           workspaceID,
+		events.PayloadKeyGoalID:                req.GoalID,
+		events.PayloadKeyDoDID:                 req.DoDID,
+		events.PayloadKeyLLMProviderID:         req.LLMProviderID,
+		events.PayloadKeySoulID:                req.SoulID,
+		"soulBindings":                         req.SoulBindings,
+		"skillIds":                             req.SkillIDs,
+		"mcpServerIds":                         req.MCPServerIDs,
+		"capabilityIds":                        req.CapabilityIDs,
+		"memoryIds":                            req.MemoryIDs,
+		"dialogLanguage":                       req.DialogLanguage,
+		events.PayloadKeyPriority:              priority,
+		events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
+	}
 }

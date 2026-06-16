@@ -273,6 +273,9 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 	if err != nil {
 		return nil, err
 	}
+	if act == nil {
+		return nil, nil
+	}
 	return &RunInfo{
 		ID: common.RunID(act.Run.ID), WorkspaceID: common.WorkspaceID(act.Run.WorkspaceID),
 		GoalID: common.GoalID(act.Run.GoalID), DoDID: common.DoDID(act.Run.DoDID),
@@ -283,6 +286,27 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 		FailureReason:      act.Run.FailureReason,
 	}, nil
 }
+
+func (b *remoteRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
+	if wsID == "" {
+		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	err := b.cl.RestartWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
+		GoalID:                string(req.GoalID),
+		DoDID:                 string(req.DoDID),
+		LLMProviderID:         req.LLMProviderID,
+		DialogLanguage:        req.DialogLanguage,
+		SoulID:                string(req.SoulID),
+		Priority:              req.Priority,
+		Restart:               true,
+		ExecutionContextPatch: req.ExecutionContextPatch,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
 	if wsID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
@@ -290,6 +314,9 @@ func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, 
 	r, err := b.cl.ResumeRun(ctx, string(wsID), string(id), executionContextPatch...)
 	if err != nil {
 		return nil, err
+	}
+	if r == nil {
+		return nil, nil
 	}
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),

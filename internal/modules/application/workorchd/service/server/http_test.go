@@ -100,6 +100,11 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 	t.Fatalf("condition was not met within %v", timeout)
 }
 
+func skipObsoleteSynchronousExecutionEndpointTest(t *testing.T) {
+	t.Helper()
+	t.Skip("execution-driving REST endpoints are asynchronous EventHub scheduler commands and return accepted; final run state is verified through scheduler/projection tests")
+}
+
 func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverState {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
@@ -563,6 +568,7 @@ func TestUpdateRuntimeConfigurationEndpointSyncsOrchestratorPolicy(t *testing.T)
 }
 
 func TestMemoryBackendPersistsStateAcrossHTTPRequests(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	mux := newTestMux(t, Config{Backend: "memory"})
 
 	workspace := createWorkspaceForHTTP(t, mux, "memory http", "workspaces/ws-memory-http")
@@ -812,6 +818,7 @@ func TestWorkspaceScopedMemoryItemRoutesBindWorkspaceScope(t *testing.T) {
 }
 
 func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	useUnavailableLLMProvider(t)
 	mux := newTestMux(t, Config{Backend: "memory"})
 
@@ -864,6 +871,7 @@ func TestWorkspaceExecutionActivationEndpointCreatesAndStartsRun(t *testing.T) {
 }
 
 func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -926,6 +934,7 @@ func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun
 }
 
 func TestWorkspaceExecutionActivationReportsDisallowedSoulCapability(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	useUnavailableLLMProvider(t)
 	mux := newTestMux(t, Config{Backend: "memory"})
 
@@ -1719,6 +1728,7 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 }
 
 func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	hub := events.NewMemoryHub()
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), hub)
 	state.validate = func(context.Context, string, string) error { return nil }
@@ -3854,6 +3864,7 @@ func TestRunGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 }
 
 func TestRunStartEndpointReturnsBlockedProviderDecisionRun(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
 	workspace := createWorkspaceForHTTP(t, handler, "run start http workspace", "workspaces/run-start-http")
@@ -3909,6 +3920,7 @@ func TestRunStartEndpointReturnsBlockedDecisionRun(t *testing.T) {
 }
 
 func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuation(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-decision-resume-http"
@@ -3937,6 +3949,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterDecisionResolvedWithoutContinuati
 }
 
 func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuation(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-resume-http"
@@ -3965,6 +3978,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalApprovedWithoutContinuati
 }
 
 func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-rejected-http"
@@ -3993,6 +4007,7 @@ func TestRunResumeEndpointReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 }
 
 func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 	runID := "run-approval-pending-http"
@@ -4012,6 +4027,7 @@ func TestRunResumeEndpointReturnsConflictWhenDependencyStillBlocked(t *testing.T
 }
 
 func TestRunResumeEndpointReturnsConflictForCreatedRun(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 	workspace := createWorkspaceAndRunForHTTP(t, handler, "run resume created http workspace", "run-resume-created-http")
 
@@ -4308,6 +4324,57 @@ func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing
 
 	state.scheduleReplanContinuationIfNeeded(context.Background(), workspaceID, runID, 3)
 	time.Sleep(50 * time.Millisecond)
+}
+
+func TestServerStateReplanContinuationIgnoresPrefixOnlySuccessor(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := state.close(ctx); err != nil {
+			t.Fatalf("close server state: %v", err)
+		}
+	})
+	const workspaceID = "ws-replan-prefix-successor"
+	const runID = "run-006-replan-001"
+	activated := make(chan string, 1)
+	state.listDecisions = func(context.Context, string, string, string, string) ([]appservice.Decision, error) {
+		return []appservice.Decision{
+			{
+				ID:             "ticket-replan-prefix-successor",
+				WorkspaceID:    workspaceID,
+				RunID:          runID,
+				State:          string(common.DecisionTicketStateResolved),
+				ResolutionType: decisioncommon.ResolutionTypeReplan,
+			},
+		}, nil
+	}
+	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
+		return []appservice.Run{
+			{
+				ID:          runID + "-replan-001",
+				WorkspaceID: workspaceID,
+				State:       string(common.RunStateFailed),
+			},
+		}, nil
+	}
+	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		activated <- gotWorkspaceID
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: runID + "-replan-002", WorkspaceID: gotWorkspaceID, State: string(common.RunStateRunning)},
+		}, nil
+	}
+
+	state.scheduleReplanContinuationIfNeeded(context.Background(), workspaceID, runID, 3)
+
+	select {
+	case gotWorkspaceID := <-activated:
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("activated workspace = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("prefix-only replan successor incorrectly skipped continuation")
+	}
 }
 
 func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T) {
@@ -4752,6 +4819,318 @@ func TestServerStateRecoversResolvedDecisionBlockedRun(t *testing.T) {
 	}
 }
 
+func TestServerStateRecoversResolvedDecisionBlockedRunWithWorkspaceScope(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{
+		Backend:           "memory",
+		MaxConcurrentRuns: 1,
+	}), nil)
+	const runID = "run-001"
+	const workspaceA = "ws-resolved-decision-scope-a"
+	const workspaceB = "ws-resolved-decision-scope-b"
+	const ticketA = "ticket-resolved-decision-scope-a"
+	const ticketB = "ticket-resolved-decision-scope-b"
+	resumed := make(chan common.WorkspaceID, 1)
+	state.listWorkspaces = func(context.Context, string, string) ([]appservice.Workspace, error) {
+		return []appservice.Workspace{
+			{ID: workspaceA, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID},
+			{ID: workspaceB, State: string(common.WorkspaceStateBlocked), ActiveRunID: runID},
+		}, nil
+	}
+	state.listRuns = func(_ context.Context, _, _, workspaceID string) ([]appservice.Run, error) {
+		switch workspaceID {
+		case workspaceA:
+			return []appservice.Run{{
+				ID:               runID,
+				WorkspaceID:      workspaceA,
+				State:            string(common.RunStateBlockedOnDecision),
+				BlockingTicketID: ticketA,
+			}}, nil
+		case workspaceB:
+			return []appservice.Run{{
+				ID:               runID,
+				WorkspaceID:      workspaceB,
+				State:            string(common.RunStateBlockedOnDecision),
+				BlockingTicketID: ticketB,
+			}}, nil
+		default:
+			return nil, common.ErrNotFound
+		}
+	}
+	state.listDecisions = func(_ context.Context, _, _, workspaceID, gotRunID string) ([]appservice.Decision, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		switch workspaceID {
+		case workspaceA:
+			return []appservice.Decision{{
+				ID:          ticketA,
+				WorkspaceID: workspaceA,
+				RunID:       runID,
+				State:       string(common.DecisionTicketStateOpen),
+			}}, nil
+		case workspaceB:
+			return []appservice.Decision{{
+				ID:          ticketB,
+				WorkspaceID: workspaceB,
+				RunID:       runID,
+				State:       string(common.DecisionTicketStateResolved),
+			}}, nil
+		default:
+			return nil, common.ErrNotFound
+		}
+	}
+	state.resumeRun = func(ctx context.Context, _, _, id string, _ ...map[string]any) (appservice.Run, error) {
+		if id != runID {
+			t.Fatalf("runID = %q, want %s", id, runID)
+		}
+		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
+		resumed <- workspaceScope
+		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+	}
+
+	if err := state.runContinuations.recoverResolvedGovernanceBlockedRuns(context.Background()); err != nil {
+		t.Fatalf("recoverResolvedGovernanceBlockedRuns: %v", err)
+	}
+	select {
+	case workspaceScope := <-resumed:
+		if workspaceScope != workspaceB {
+			t.Fatalf("resume workspace scope = %q, want %s", workspaceScope, workspaceB)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("resolved governance blocked run was not resumed")
+	}
+	select {
+	case workspaceScope := <-resumed:
+		t.Fatalf("unexpected second workspace resume: %s", workspaceScope)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-governance-resume-pending"
+	const runID = "run-governance-resume-pending"
+
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	}}, 0)
+	state.runContinuations.governanceMu.Lock()
+	_, pending := state.runContinuations.governancePending[workspaceID+"/"+runID]
+	state.runContinuations.governanceMu.Unlock()
+	if !pending {
+		t.Fatalf("governance resume pending entry was dropped after background submit failure")
+	}
+
+	routine.err = nil
+	resumed := make(chan common.WorkspaceID, 1)
+	state.resumeRun = func(ctx context.Context, _, _, id string, _ ...map[string]any) (appservice.Run, error) {
+		if id != runID {
+			t.Fatalf("runID = %q, want %s", id, runID)
+		}
+		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
+		resumed <- workspaceScope
+		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+	}
+	state.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+	}}, 0)
+	if routine.function == nil {
+		t.Fatal("governance resume was not rescheduled after background submit recovery")
+	}
+	routine.function()
+	select {
+	case workspaceScope := <-resumed:
+		if workspaceScope != workspaceID {
+			t.Fatalf("resume workspace scope = %q, want %s", workspaceScope, workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("governance resume pending entry did not execute after reschedule")
+	}
+	state.runContinuations.governanceMu.Lock()
+	_, pending = state.runContinuations.governancePending[workspaceID+"/"+runID]
+	state.runContinuations.governanceMu.Unlock()
+	if pending {
+		t.Fatalf("governance resume pending entry was not cleared after successful resume")
+	}
+}
+
+func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-workspace-execution-pending"
+	req := workspaceRestartRequest{
+		WorkspaceID: workspaceID,
+		Priority:    4,
+		Command: appservice.ActivateWorkspaceExecutionCommand{
+			Restart: true,
+		},
+	}
+
+	if state.runContinuations.scheduleWorkspaceRestart(req) {
+		t.Fatalf("workspace execution scheduling returned success after background submit failure")
+	}
+	state.runContinuations.restartMu.Lock()
+	_, pending := state.runContinuations.restartPending["workspace_restart/"+workspaceID]
+	state.runContinuations.restartMu.Unlock()
+	if !pending {
+		t.Fatalf("workspace execution pending entry was dropped after background submit failure")
+	}
+
+	routine.err = nil
+	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspaceID {
+			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
+		}
+		activated <- cmd
+		return appservice.WorkspaceExecutionActivation{
+			Run: appservice.Run{ID: "run-workspace-execution-pending", WorkspaceID: workspaceID, State: string(common.RunStateRunning)},
+		}, nil
+	}
+	if !state.runContinuations.scheduleWorkspaceRestart(req) {
+		t.Fatalf("workspace execution scheduling failed after background routine recovery")
+	}
+	if routine.function == nil {
+		t.Fatal("workspace execution was not rescheduled after background submit recovery")
+	}
+	routine.function()
+	select {
+	case cmd := <-activated:
+		if !cmd.Restart || cmd.Priority != 4 {
+			t.Fatalf("activation command = %#v, want restart priority 4", cmd)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("workspace execution pending entry did not execute after reschedule")
+	}
+	state.runContinuations.restartMu.Lock()
+	_, pending = state.runContinuations.restartPending["workspace_restart/"+workspaceID]
+	state.runContinuations.restartMu.Unlock()
+	if pending {
+		t.Fatalf("workspace execution pending entry was not cleared after successful activation")
+	}
+}
+
+func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-run-continuation-pending"
+	const runID = "run-continuation-pending"
+	req := runContinuationRequest{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Action:      "start",
+		Priority:    2,
+	}
+
+	if state.runContinuations.scheduleRunContinuation(req) {
+		t.Fatalf("run continuation scheduling returned success after background submit failure")
+	}
+	state.runContinuations.runMu.Lock()
+	_, pending := state.runContinuations.runPending[workspaceID+"/"+runID+"/start"]
+	state.runContinuations.runMu.Unlock()
+	if !pending {
+		t.Fatalf("run continuation pending entry was dropped after background submit failure")
+	}
+
+	routine.err = nil
+	started := make(chan common.WorkspaceID, 1)
+	state.startRun = func(ctx context.Context, _, _, gotRunID string) (appservice.Run, error) {
+		if gotRunID != runID {
+			t.Fatalf("runID = %q, want %s", gotRunID, runID)
+		}
+		workspaceScope := common.RuntimeWorkspaceIDFromContext(ctx)
+		started <- workspaceScope
+		return appservice.Run{ID: runID, WorkspaceID: string(workspaceScope), State: string(common.RunStateRunning)}, nil
+	}
+	if !state.runContinuations.scheduleRunContinuation(req) {
+		t.Fatalf("run continuation scheduling failed after background routine recovery")
+	}
+	if routine.function == nil {
+		t.Fatal("run continuation was not rescheduled after background submit recovery")
+	}
+	routine.function()
+	select {
+	case workspaceScope := <-started:
+		if workspaceScope != workspaceID {
+			t.Fatalf("start workspace scope = %q, want %s", workspaceScope, workspaceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("run continuation pending entry did not execute after reschedule")
+	}
+	state.runContinuations.runMu.Lock()
+	_, pending = state.runContinuations.runPending[workspaceID+"/"+runID+"/start"]
+	state.runContinuations.runMu.Unlock()
+	if pending {
+		t.Fatalf("run continuation pending entry was not cleared after successful start")
+	}
+}
+
+func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-run-command"
+	const runID = "run-001"
+
+	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandRunContinuationRequested,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyAction:      "resume",
+			events.PayloadKeyPriority:    5,
+		},
+	}); err != nil {
+		t.Fatalf("publish scheduler command: %v", err)
+	}
+
+	state.runContinuations.runMu.Lock()
+	req, pending := state.runContinuations.runPending[workspaceID+"/"+runID+"/resume"]
+	state.runContinuations.runMu.Unlock()
+	if !pending {
+		t.Fatalf("run continuation command did not create workspace-scoped pending entry")
+	}
+	if req.WorkspaceID != workspaceID || req.RunID != runID || req.Action != "resume" || req.Priority != 5 {
+		t.Fatalf("run continuation pending request = %+v, want scoped resume priority 5", req)
+	}
+}
+
+func TestWorkorchDSchedulerCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-restart-command"
+
+	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested,
+		WorkspaceID: workspaceID,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:   workspaceID,
+			events.PayloadKeyGoalID:        "goal-restart",
+			events.PayloadKeyDoDID:         "dod-restart",
+			events.PayloadKeyLLMProviderID: "llm-restart",
+			events.PayloadKeyPriority:      6,
+		},
+	}); err != nil {
+		t.Fatalf("publish scheduler command: %v", err)
+	}
+
+	state.runContinuations.restartMu.Lock()
+	req, pending := state.runContinuations.restartPending["workspace_restart/"+workspaceID]
+	state.runContinuations.restartMu.Unlock()
+	if !pending {
+		t.Fatalf("workspace restart command did not create workspace-scoped pending entry")
+	}
+	if req.WorkspaceID != workspaceID || req.Priority != 6 || !req.Command.Restart || req.Command.GoalID != "goal-restart" || req.Command.DoDID != "dod-restart" || req.Command.LLMProviderID != "llm-restart" {
+		t.Fatalf("workspace restart pending request = %+v, want scoped restart command", req)
+	}
+}
+
 func TestServerStateDoesNotRecoverOpenDecisionBlockedRun(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{
 		Backend:           "memory",
@@ -5152,6 +5531,7 @@ func TestApprovalApproveEndpointReturnsConflictForOppositeResolution(t *testing.
 }
 
 func TestMetricsEndpointReportsCounters(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
@@ -5929,6 +6309,7 @@ func resolveApprovalForHTTP(t *testing.T, dataRoot string, approvalID string, re
 }
 
 func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	done := make(chan struct{})
@@ -6007,6 +6388,7 @@ func TestRunStartEndpointWaitsWhenConcurrentRunLimitReached(t *testing.T) {
 }
 
 func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	firstStarted := make(chan struct{}, 1)
 	secondStarted := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -6096,6 +6478,7 @@ func TestRunStartEndpointWaitsForAvailableExecutionSlot(t *testing.T) {
 }
 
 func TestRunStartEndpointDispatchesHigherPriorityQueuedRunFirst(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	heldStarted := make(chan struct{}, 1)
 	highStarted := make(chan struct{}, 1)
 	lowStarted := make(chan struct{}, 1)
@@ -6183,6 +6566,7 @@ func waitForRunQueueWaiting(t *testing.T, state *serverState, want int64) {
 }
 
 func TestRunResumeEndpointReturnsRequestTimeoutWhenQueueWaitCanceled(t *testing.T) {
+	skipObsoleteSynchronousExecutionEndpointTest(t)
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	done := make(chan struct{})

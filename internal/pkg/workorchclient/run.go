@@ -59,6 +59,9 @@ func (c *Client) StartRun(ctx context.Context, workspaceID, runID string) (*Run,
 	if err != nil {
 		return nil, err
 	}
+	if accepted, err := drainAccepted(resp); accepted || err != nil {
+		return nil, err
+	}
 	return decodeEnvelope[Run](resp, "run")
 }
 
@@ -79,6 +82,9 @@ func (c *Client) resumeRun(ctx context.Context, path string, executionContextPat
 	}
 	resp, err := c.do(ctx, "POST", path, body)
 	if err != nil {
+		return nil, err
+	}
+	if accepted, err := drainAccepted(resp); accepted || err != nil {
 		return nil, err
 	}
 	return decodeEnvelope[Run](resp, "run")

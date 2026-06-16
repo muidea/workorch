@@ -358,6 +358,37 @@ func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.Workspace
 	})
 	return decodeResultResource[RunInfo](result, err)
 }
+
+func (b *eventHubRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
+	if b == nil || b.parent == nil || b.parent.eventHub == nil || wsID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	envelope := events.Envelope{
+		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested,
+		SourceModule: "workorch-cli",
+		SubjectType:  "workspace-restart",
+		SubjectID:    string(wsID),
+		WorkspaceID:  string(wsID),
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:           string(wsID),
+			events.PayloadKeyGoalID:                string(req.GoalID),
+			events.PayloadKeyDoDID:                 string(req.DoDID),
+			events.PayloadKeyLLMProviderID:         req.LLMProviderID,
+			events.PayloadKeySoulID:                string(req.SoulID),
+			"dialogLanguage":                       req.DialogLanguage,
+			events.PayloadKeyPriority:              req.Priority,
+			events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
+		},
+	}
+	if err := b.parent.eventHub.Publish(ctx, envelope); err != nil {
+		if _, ok := events.ResponseEnvelope(err); ok {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (b *eventHubRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
 	var payload map[string]any
 	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {

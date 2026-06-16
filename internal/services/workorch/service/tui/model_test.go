@@ -624,12 +624,15 @@ func TestModelRunRestartCommandRestartsWorkspaceWithOperatorInput(t *testing.T) 
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want terminal run to activate a new run", be.resumes)
 	}
-	if len(be.activations) != 1 {
-		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	if len(be.activations) != 0 {
+		t.Fatalf("activations = %d, want no activation for restart command", len(be.activations))
 	}
-	queue, ok := be.activations[0].ExecutionContextPatch["operatorInputQueue"].([]map[string]any)
+	if len(be.restarts) != 1 {
+		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
+	}
+	queue, ok := be.restarts[0].ExecutionContextPatch["operatorInputQueue"].([]map[string]any)
 	if !ok || len(queue) != 1 || queue[0]["content"] != "补充信息：继续基于现有目标修复" {
-		t.Fatalf("operatorInputQueue = %#v, want queued restart input", be.activations[0].ExecutionContextPatch["operatorInputQueue"])
+		t.Fatalf("operatorInputQueue = %#v, want queued restart input", be.restarts[0].ExecutionContextPatch["operatorInputQueue"])
 	}
 	if m.activeRunID != "run-new" || !m.running {
 		t.Fatalf("run state = %q/%v, want restarted run-new/running", m.activeRunID, m.running)
@@ -659,12 +662,15 @@ func TestModelRunRestartSlashCommandActivatesWorkspaceWithoutCreatingGoal(t *tes
 	if len(be.resumes) != 0 {
 		t.Fatalf("resumes = %v, want /run restart to activate directly", be.resumes)
 	}
-	if len(be.activations) != 1 {
-		t.Fatalf("activations = %d, want one activation", len(be.activations))
+	if len(be.activations) != 0 {
+		t.Fatalf("activations = %d, want no activation for /run restart", len(be.activations))
 	}
-	latest, ok := be.activations[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
+	if len(be.restarts) != 1 {
+		t.Fatalf("restarts = %d, want one restart", len(be.restarts))
+	}
+	latest, ok := be.restarts[0].ExecutionContextPatch["latestOperatorInput"].(map[string]any)
 	if !ok || latest["content"] != "重新执行并纳入刚补充的信息" {
-		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.activations[0].ExecutionContextPatch["latestOperatorInput"])
+		t.Fatalf("latestOperatorInput = %#v, want restart dialog input", be.restarts[0].ExecutionContextPatch["latestOperatorInput"])
 	}
 }
 
@@ -4775,6 +4781,7 @@ type recordingBE struct {
 	snapshot              *backend.WorkspaceSnapshotInfo
 	goals                 []string
 	activations           []backend.ActivateRunRequest
+	restarts              []backend.ActivateRunRequest
 	resumes               []common.RunID
 	resumePatches         []map[string]any
 	lastGetWorkspace      common.WorkspaceID
@@ -4870,6 +4877,10 @@ type recordingRun struct{ parent *recordingBE }
 
 func (f *recordingRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	f.parent.activations = append(f.parent.activations, req)
+	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
+}
+func (f *recordingRun) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	f.parent.restarts = append(f.parent.restarts, req)
 	return &backend.RunInfo{ID: "run-new", WorkspaceID: wsID, GoalID: req.GoalID, DoDID: req.DoDID, State: common.RunStateRunning}, nil
 }
 func (f *recordingRun) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*backend.RunInfo, error) {
@@ -4972,6 +4983,9 @@ type conflictRunBackend struct{ parent *conflictApprovalBE }
 func (f *conflictRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
 }
+func (f *conflictRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: common.RunStateRunning}, nil
+}
 func (f *conflictRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	f.parent.resumed = true
 	return &backend.RunInfo{ID: id, WorkspaceID: wsID, State: common.RunStateRunning}, nil
@@ -5065,6 +5079,9 @@ type fakeR struct{}
 
 func (f *fakeR) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: "run-1", State: "running"}, nil
+}
+func (f *fakeR) Restart(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: wsID, State: "running"}, nil
 }
 func (f *fakeR) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, _ ...map[string]any) (*backend.RunInfo, error) {
 	return &backend.RunInfo{ID: id, WorkspaceID: wsID}, nil

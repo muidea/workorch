@@ -489,8 +489,18 @@ func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput s
 		if strings.TrimSpace(workspaceID) == "" {
 			return RunControlMsg{Message: "No active workspace. Create or select a workspace first."}
 		}
-		return activateWorkspaceRun(ctx, be, common.WorkspaceID(workspaceID), nil, operatorInput)
+		return restartWorkspaceRun(ctx, be, common.WorkspaceID(workspaceID), operatorInput)
 	}
+}
+
+func restartWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, operatorInput string) tea.Msg {
+	run, err := be.Run().Restart(ctx, workspaceID, backend.ActivateRunRequest{
+		ExecutionContextPatch: operatorInputPatch(nil, operatorInput),
+	})
+	if err != nil {
+		return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Error: err}
+	}
+	return RunControlMsg{Run: run, WorkspaceID: string(workspaceID), Message: "Restart requested"}
 }
 
 func activateWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string) tea.Msg {
