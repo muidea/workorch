@@ -3598,6 +3598,9 @@ func isAssessmentOnlyDecisionRequest(request llmmodels.ProviderRequest) bool {
 	if !isDecisionSchemaRequest(request) {
 		return false
 	}
+	if concreteValidationDecisionRequest(request.Input) || stateChangingDecisionRequest(request.Input) {
+		return false
+	}
 	return boolFromProviderInput(request.Input, "assessmentOnly") ||
 		boolFromProviderInput(request.Input, "graphExpansionLimitFollowUp") ||
 		boolFromProviderInput(request.Input, "providerRetryAssessmentOnly") ||

@@ -1097,6 +1097,56 @@ func TestBuildProviderPromptMessagesUsesStateChangingRepairAction(t *testing.T) 
 	}
 }
 
+func TestBuildProviderPromptMessagesPrioritizesStateChangingOverAssessmentOnly(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-provider-retry-state-change",
+		RunID:          "run-provider-retry-state-change",
+		StepID:         "step-provider-retry-state-change",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"providerRetryAssessmentOnly": true,
+			"providerRetryFollowUp":       true,
+			"completionFollowUp":          true,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply", "git/write"},
+					"forbiddenKinds":               []string{"read_only_graph", "shell_only_graph"},
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+			"executionContextPackage": map[string]any{
+				"goal": map[string]any{"text": "produce the requested artifact"},
+				"dod":  map[string]any{"items": []any{"artifact has accepted evidence"}},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	currentAction, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"produce_state_changing_repair_or_failed_assessment",
+		"patch/apply",
+		"git/write",
+		"mustIncludeStateChangingNode",
+	} {
+		if !strings.Contains(currentAction.Content, want) {
+			t.Fatalf("current action missing %q: %s", want, currentAction.Content)
+		}
+	}
+	if strings.Contains(currentAction.Content, `"type":"assess_only"`) ||
+		strings.Contains(currentAction.Content, `"type": "assess_only"`) {
+		t.Fatalf("state-changing provider retry rendered assess_only current action: %s", currentAction.Content)
+	}
+}
+
 func TestBuildProviderPromptMessagesMarksTruncatedRepairSnapshotUnsafe(t *testing.T) {
 	longContent := "package main\n" + strings.Repeat("x", repairSnapshotPromptContentLimit+64)
 	req := llmmodels.ProviderRequest{

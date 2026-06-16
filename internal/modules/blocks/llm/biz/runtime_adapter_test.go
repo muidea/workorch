@@ -399,6 +399,46 @@ func TestApplyProviderPromptContractGateUsesCurrentActionSectionID(t *testing.T)
 	}
 }
 
+func TestApplyProviderPromptContractGateAcceptsStateChangingProviderRetryFollowUp(t *testing.T) {
+	request := llmmodels.ProviderRequest{
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		Schema: decisionSchemaName,
+		Input: map[string]any{
+			"providerRetryAssessmentOnly": true,
+			"providerRetryFollowUp":       true,
+			"completionFollowUp":          true,
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                []string{"patch/apply", "git/write"},
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+		ContextBudget: &llmmodels.ProviderContextBudget{ContextGateAction: providerContextGatePass},
+	}
+	request.PromptContext = buildPromptContextFromRequest(request)
+
+	got := applyProviderPromptContractGate(request)
+
+	if got.ContextBudget.ContextGateAction == providerContextGateFailFast ||
+		got.ContextBudget.ContextGateReason != "" ||
+		len(got.ContextBudget.IntegrityWarnings) != 0 {
+		t.Fatalf("contextBudget = %+v, want mixed provider retry/state-changing contract to pass", got.ContextBudget)
+	}
+	currentAction := currentActionPromptContent(got.PromptContext)
+	if !strings.Contains(currentAction, "produce_state_changing_repair_or_failed_assessment") ||
+		!strings.Contains(currentAction, "patch/apply") ||
+		!strings.Contains(currentAction, "git/write") {
+		t.Fatalf("current action = %s, want state-changing acceptedKinds", currentAction)
+	}
+	if strings.Contains(currentAction, `"type":"assess_only"`) ||
+		strings.Contains(currentAction, `"type": "assess_only"`) {
+		t.Fatalf("current action rendered assess_only: %s", currentAction)
+	}
+}
+
 func TestRuntimeAdapterUsesNativeProviderUsageWhenAvailable(t *testing.T) {
 	provider := &staticProvider{
 		payload: []byte(`{
