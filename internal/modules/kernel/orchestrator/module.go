@@ -212,21 +212,7 @@ func (m *Module) handleCommand(ctx context.Context, envelope events.Envelope) er
 		}
 		err = m.servicePtr.BlockOnApproval(ctx, cmd.RunID, cmd.ApprovalID)
 	case orchestratorevents.TopicOrchestratorCommandResumeRun:
-		cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
-		var patch map[string]any
-		if ok {
-			if cmd.RunID != "" {
-				runID = cmd.RunID
-			}
-			patch = cmd.ExecutionContextPatch
-		} else {
-			patch, _ = payload[events.PayloadKeyExecutionContextPatch].(map[string]any)
-		}
-		if len(patch) > 0 {
-			err = m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
-		} else {
-			err = m.servicePtr.ResumeRun(ctx, runID)
-		}
+		err = m.handleResumeRunCommand(ctx, envelope, runID)
 	case orchestratorevents.TopicOrchestratorCommandValidateRun:
 		err = m.servicePtr.ValidateRun(ctx, runID)
 	case orchestratorevents.TopicOrchestratorCommandCompleteRun:
@@ -278,6 +264,63 @@ func (m *Module) handleStartRunCommand(ctx context.Context, envelope events.Enve
 		return err
 	}
 	return nil
+}
+
+func (m *Module) handleResumeRunCommand(ctx context.Context, envelope events.Envelope, runID common.RunID) error {
+	if m == nil || m.bizPtr == nil || m.servicePtr == nil {
+		return common.ErrInvalidArgument
+	}
+	payload := envelope.Payload
+	cmd, ok := payload[events.PayloadKeyCommand].(runcontracts.ResumeRunCommand)
+	var patch map[string]any
+	if ok {
+		if cmd.RunID != "" {
+			runID = cmd.RunID
+		}
+		patch = cloneCommandPatch(cmd.ExecutionContextPatch)
+	} else {
+		rawPatch, _ := payload[events.PayloadKeyExecutionContextPatch].(map[string]any)
+		patch = cloneCommandPatch(rawPatch)
+	}
+	if runID == "" {
+		return common.ErrInvalidArgument
+	}
+	if m.backgroundRoutine == nil {
+		if len(patch) > 0 {
+			return m.servicePtr.ResumeRunWithExecutionContextPatch(ctx, runID, patch)
+		}
+		return m.servicePtr.ResumeRun(ctx, runID)
+	}
+	if err := m.bizPtr.CanResumeRun(ctx, runID); err != nil {
+		return err
+	}
+	bgCtx := orchestratorBackgroundContext(ctx, envelope)
+	if err := m.backgroundRoutine.AsyncFunction(func() {
+		var err error
+		if len(patch) > 0 {
+			err = m.servicePtr.ResumeRunWithExecutionContextPatch(bgCtx, runID, patch)
+		} else {
+			err = m.servicePtr.ResumeRun(bgCtx, runID)
+		}
+		if err == nil || errors.Is(err, context.Canceled) {
+			return
+		}
+		slog.Warn("workorch orchestrator background resume failed", "workspaceID", envelope.WorkspaceID, "runID", runID, "err", err)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func cloneCommandPatch(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 func orchestratorBackgroundContext(ctx context.Context, envelope events.Envelope) context.Context {

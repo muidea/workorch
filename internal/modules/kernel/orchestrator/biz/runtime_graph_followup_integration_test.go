@@ -78,6 +78,105 @@ func TestGraphReadNodeInputDoesNotRequireStateChangeWhenRunContractRequiresIt(t 
 	}
 }
 
+func TestNextGraphStepInputPropagatesRepairBudgetToLLMGraphNode(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-graph-repair-budget")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-graph-repair-budget",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "repair_target", Kind: llmWorkspaceExecutionStepKind},
+	}}
+	last := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  3,
+			stepInputKeyRepairOfStepID:        string(runID) + "/graph-001/001-verify",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/graph-001/001-verify",
+			stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=target.txt|exitCode=1",
+			"failureTargetScope":              "failureTargets=target.txt",
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+
+	input := nextGraphStepInput(run, last, graph, graph.Nodes[0], nil, "", []*runmodel.Step{last}, last.ID)
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair || input[stepInputKeyRuntimeRepairFollowUp] != true {
+		t.Fatalf("graph repair input stage/followUp = %v/%v, want repair budget contract", input[stepInputKeyRuntimeStage], input[stepInputKeyRuntimeRepairFollowUp])
+	}
+	if input[stepInputKeyRuntimeRepairAttempt] != 3 || input["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("graph repair input attempt/scope = %v/%v, want inherited repair attempt and target scope", input[stepInputKeyRuntimeRepairAttempt], input["failureTargetScope"])
+	}
+
+	stepRepo := memory.NewStepRepository()
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:     common.StepID(string(runID) + "/graph-002/001-repair-target"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateFailed,
+		Input:  input,
+		Output: map[string]any{"status": "failed"},
+	}); err != nil {
+		t.Fatalf("seed graph repair node: %v", err)
+	}
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-002/002-verify"),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=target.txt|exitCode=1",
+		},
+	}
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	if got := orch.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, runID, failed); got != 1 {
+		t.Fatalf("effective graph repair attempts = %d, want LLM graph repair node counted", got)
+	}
+}
+
+func TestNextGraphStepInputPreservesRepairLineageForNonLLMGraphNodeWithoutBudget(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-graph-repair-block-lineage",
+		WorkspaceID:     "ws-graph-repair-block-lineage",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "verify_target", Kind: shellcommon.StepKindCommand},
+	}}
+	last := &runmodel.Step{
+		ID:    common.StepID(string(run.ID) + "/repair-001"),
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeRepairAttempt:  2,
+			stepInputKeyRepairOfRootStepID:    string(run.ID) + "/graph-001/001-verify",
+			stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|node=verify|failureTargets=target.txt|exitCode=1",
+			"failureTargetScope":              "failureTargets=target.txt",
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+
+	input := nextGraphStepInput(run, last, graph, graph.Nodes[0], nil, "", []*runmodel.Step{last}, last.ID)
+
+	if input[stepInputKeyRuntimeStage] != runtimeStageRepair || input["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("graph block input stage/scope = %v/%v, want inherited repair lineage", input[stepInputKeyRuntimeStage], input["failureTargetScope"])
+	}
+	if input[stepInputKeyRuntimeRepairFollowUp] != nil || input[stepInputKeyRuntimeRepairAttempt] != nil {
+		t.Fatalf("graph block input repair budget = %v/%v, want non-LLM block excluded from repair attempt budget", input[stepInputKeyRuntimeRepairFollowUp], input[stepInputKeyRuntimeRepairAttempt])
+	}
+}
+
 func TestGraphLLMNodeInputIncludesDependencyOutput(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-graph-dependency-output",

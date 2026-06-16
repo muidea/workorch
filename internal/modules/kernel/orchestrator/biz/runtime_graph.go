@@ -491,6 +491,7 @@ func nextGraphStepInput(
 	}
 	input[stepInputKeySoulStage] = soulStageExecution
 	setRuntimeStage(input, runtimeStageExecution)
+	inheritRuntimeRepairGraphContract(input, last, node.Kind)
 	if graphLLMNodeRequiresStateChangingOutput(run, node) {
 		input["stateChangingOutputRequired"] = true
 		input["repairObjective"] = repairObjectiveStateChangingOutput

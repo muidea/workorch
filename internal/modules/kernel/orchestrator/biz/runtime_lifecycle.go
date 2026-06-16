@@ -157,6 +157,46 @@ func (o *RuntimeOrchestrator) ResumeRun(ctx context.Context, runID common.RunID)
 	return o.ResumeRunWithExecutionContextPatch(ctx, runID, nil)
 }
 
+func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.RunID) error {
+	if runID == "" {
+		return common.ErrInvalidArgument
+	}
+	r, err := o.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	switch r.State {
+	case common.RunStateRunning, common.RunStateValidating:
+		return nil
+	case common.RunStateBlockedOnDecision:
+		if r.BlockingTicketID == "" || o.tickets == nil {
+			return common.ErrConflict
+		}
+		ticket, err := o.tickets.Get(ctx, r.BlockingTicketID)
+		if err != nil {
+			return err
+		}
+		if ticket.State == common.DecisionTicketStateOpen {
+			return common.ErrBlocked
+		}
+		return nil
+	case common.RunStateBlockedOnApproval:
+		if r.BlockingApprovalID == "" || o.approvals == nil {
+			return common.ErrConflict
+		}
+		approval, err := o.approvals.Get(ctx, r.BlockingApprovalID)
+		if err != nil {
+			return err
+		}
+		if approval.State == common.ApprovalStatePending {
+			return common.ErrBlocked
+		}
+		return nil
+	default:
+		return common.ErrConflict
+	}
+}
+
 func (o *RuntimeOrchestrator) ResumeRunWithExecutionContextPatch(ctx context.Context, runID common.RunID, executionContextPatch map[string]any) error {
 	if runID == "" {
 		return common.ErrInvalidArgument

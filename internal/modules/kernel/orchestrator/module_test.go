@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	orchestratorservice "github.com/muidea/workorch/internal/modules/kernel/orchestrator/service"
+	runcontracts "github.com/muidea/workorch/internal/modules/kernel/run/pkg/contracts"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -77,6 +79,107 @@ func TestModuleStartRunCommandAcceptsStateAndSchedulesBackgroundDispatch(t *test
 	}
 	if workspace.State != common.WorkspaceStateRunning || workspace.ActiveRunID != runID {
 		t.Fatalf("workspace = %+v, want running active run", workspace)
+	}
+}
+
+func TestModuleResumeRunCommandSchedulesBackgroundDispatch(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-module-background-resume")
+	workspaceID := common.WorkspaceID("ws-module-background-resume")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		moduleNoopRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	bg := &recordingBackgroundRoutine{}
+	module := &Module{
+		bizPtr:            orch,
+		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
+		backgroundRoutine: bg,
+	}
+
+	err := module.handleCommand(
+		common.ContextWithRuntimeLLMProviderID(ctx, "provider-test"),
+		events.Envelope{
+			Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+			SubjectType: "run",
+			SubjectID:   string(runID),
+			WorkspaceID: string(workspaceID),
+			RunID:       string(runID),
+			Payload: map[string]any{
+				events.PayloadKeyCommand: runcontracts.ResumeRunCommand{
+					WorkspaceID:           workspaceID,
+					RunID:                 runID,
+					ExecutionContextPatch: map[string]any{"decisionResolution": "replan"},
+				},
+			},
+		},
+	)
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("resume command err = %v, want response", err)
+	}
+	if bg.asyncFunctionCalls != 1 || bg.lastAsyncFunction == nil {
+		t.Fatalf("background calls = %d fn=%v, want one scheduled resume", bg.asyncFunctionCalls, bg.lastAsyncFunction != nil)
+	}
+}
+
+func TestModuleResumeRunCommandRejectsTerminalRunBeforeBackgroundDispatch(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-module-background-resume-terminal")
+	workspaceID := common.WorkspaceID("ws-module-background-resume-terminal")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateFailed, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateFailed}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := orchestratorbiz.NewRuntimeOrchestrator(
+		moduleNoopRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+	bg := &recordingBackgroundRoutine{}
+	module := &Module{
+		bizPtr:            orch,
+		servicePtr:        orchestratorservice.New(orchestratorServiceDependencies(orch)),
+		backgroundRoutine: bg,
+	}
+
+	err := module.handleCommand(ctx, events.Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorCommandResumeRun,
+		SubjectType: "run",
+		SubjectID:   string(runID),
+		WorkspaceID: string(workspaceID),
+		RunID:       string(runID),
+		Payload: map[string]any{
+			events.PayloadKeyCommand: runcontracts.ResumeRunCommand{WorkspaceID: workspaceID, RunID: runID},
+		},
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("resume terminal err = %v, want conflict", err)
+	}
+	if bg.asyncFunctionCalls != 0 {
+		t.Fatalf("background calls = %d, want terminal run rejected before scheduling", bg.asyncFunctionCalls)
 	}
 }
 

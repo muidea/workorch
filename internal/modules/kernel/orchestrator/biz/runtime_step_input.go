@@ -500,6 +500,63 @@ func inheritRuntimeRepairLineage(input map[string]any, previousStep *runModel.St
 	}
 }
 
+func inheritRuntimeRepairGraphContract(input map[string]any, previousStep *runModel.Step, nodeKind string) {
+	if input == nil || previousStep == nil || previousStep.Input == nil {
+		return
+	}
+	if !previousStepCarriesRuntimeRepairContract(previousStep) {
+		return
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	for _, key := range []string{
+		stepInputKeyRecoveryAction,
+		stepInputKeyRecoveryRootStepID,
+		stepInputKeyRecoveryLineageType,
+		stepInputKeyRecoveryBudgetScope,
+		failureOutputKeyClass,
+		failureOutputKeySignature,
+		"failureTargetScope",
+		"targetScope",
+		"repairActionPackage",
+		"repairObjective",
+		"stateChangingOutputRequired",
+	} {
+		if value, ok := previousStep.Input[key]; ok && input[key] == nil {
+			input[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if canonicalRuntimeGraphNodeKind(nodeKind) != llmWorkspaceExecutionStepKind {
+		return
+	}
+	input[stepInputKeyRuntimeRepairFollowUp] = true
+	if value, ok := previousStep.Input[stepInputKeyRuntimeRepairAttempt]; ok && input[stepInputKeyRuntimeRepairAttempt] == nil {
+		input[stepInputKeyRuntimeRepairAttempt] = value
+	}
+}
+
+func previousStepCarriesRuntimeRepairContract(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) {
+		return true
+	}
+	if runtimeStageFromStepInput(step.Input) == runtimeStageRepair {
+		return true
+	}
+	for _, key := range []string{
+		stepInputKeyRepairOfStepID,
+		stepInputKeyRepairOfRootStepID,
+		stepInputKeyRepairOfFailureClass,
+		stepInputKeyRepairOfFailureSig,
+	} {
+		if strings.TrimSpace(stringFromMap(step.Input, key)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func inheritWorkspaceFileManifest(input map[string]any, previousStep *runModel.Step) {
 	if input == nil || previousStep == nil {
 		return
