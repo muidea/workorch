@@ -62,6 +62,117 @@ func (r *repairSubsystem) effectiveMaxRuntimeRepairAttempts(ctx context.Context,
 	return maxRepeatedStateChangingContractLoopAttempts
 }
 
+type runtimeIneffectiveConvergenceStats struct {
+	TotalSteps        int
+	RecoverySteps     int
+	ContractFailures  int
+	ProviderFailures  int
+	FailedLLMSteps    int
+	CurrentIsContract bool
+	RecentFailures    []map[string]any
+}
+
+func (s runtimeIneffectiveConvergenceStats) exceeded() bool {
+	if !s.CurrentIsContract {
+		return false
+	}
+	return s.RecoverySteps >= minIneffectiveConvergenceRecoverySteps &&
+		s.ContractFailures >= minIneffectiveConvergenceContractFailures
+}
+
+func (r *repairSubsystem) runLevelIneffectiveConvergenceStats(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) runtimeIneffectiveConvergenceStats {
+	if r == nil || r.steps == nil || run == nil || failedStep == nil {
+		return runtimeIneffectiveConvergenceStats{}
+	}
+	steps, err := r.steps.ListByRunSummary(ctx, run.ID)
+	if err != nil {
+		return runtimeIneffectiveConvergenceStats{}
+	}
+	steps = appendFailedStepSummaryIfMissing(steps, failedStep)
+	stats := runtimeIneffectiveConvergenceStats{TotalSteps: len(steps)}
+	for _, step := range steps {
+		if step == nil || step.RunID != run.ID {
+			continue
+		}
+		if runLevelRecoveryControlStep(step) {
+			stats.RecoverySteps++
+		}
+		if step.State != common.StepStateFailed || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+			continue
+		}
+		stats.FailedLLMSteps++
+		if isProviderFailureClass(stringFromMap(step.Output, failureOutputKeyClass)) || isLLMProviderFailureStage(stringFromMap(step.Output, "stage")) {
+			stats.ProviderFailures++
+			continue
+		}
+		if runtimeRepairStepIsContractCorrectionFailure(step) {
+			stats.ContractFailures++
+			if step.ID == failedStep.ID {
+				stats.CurrentIsContract = true
+			}
+			stats.RecentFailures = appendRecentIneffectiveConvergenceFailure(stats.RecentFailures, step)
+		}
+	}
+	return stats
+}
+
+func appendFailedStepSummaryIfMissing(steps []*runModel.Step, failedStep *runModel.Step) []*runModel.Step {
+	if failedStep == nil {
+		return steps
+	}
+	for _, step := range steps {
+		if step != nil && step.ID == failedStep.ID {
+			return steps
+		}
+	}
+	return append(append([]*runModel.Step(nil), steps...), failedStep)
+}
+
+func runLevelRecoveryControlStep(step *runModel.Step) bool {
+	if step == nil || strings.TrimSpace(step.Kind) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	input := step.Input
+	if boolValue(input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(input[stepInputKeyProviderRetryFollowUp]) ||
+		boolValue(input["graphFollowUp"]) ||
+		boolValue(input["completionFollowUp"]) ||
+		boolValue(input[stepInputKeyNoActionableFollowUp]) ||
+		boolValue(input[stepInputKeyGraphLimitFollowUp]) {
+		return true
+	}
+	return strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryAction)) != "" ||
+		strings.TrimSpace(stringFromMap(input, stepInputKeyRecoveryLineageType)) != ""
+}
+
+func appendRecentIneffectiveConvergenceFailure(items []map[string]any, step *runModel.Step) []map[string]any {
+	if step == nil {
+		return items
+	}
+	item := map[string]any{
+		"stepId":                string(step.ID),
+		"failureClass":          stringFromMap(step.Output, failureOutputKeyClass),
+		"failureSignature":      stringFromMap(step.Output, failureOutputKeySignature),
+		"contractViolationType": stringFromMap(step.Output, outputKeyContractViolationType),
+		"stage":                 stringFromMap(step.Output, "stage"),
+	}
+	items = append(items, item)
+	if len(items) <= 6 {
+		return items
+	}
+	return append([]map[string]any(nil), items[len(items)-6:]...)
+}
+
+func (r *repairSubsystem) runLevelIneffectiveConvergenceExceeded(ctx context.Context, run *runModel.Run, failedStep *runModel.Step) bool {
+	if r == nil || run == nil || failedStep == nil {
+		return false
+	}
+	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
+		return false
+	}
+	return r.runLevelIneffectiveConvergenceStats(ctx, run, failedStep).exceeded()
+}
+
 func (r *repairSubsystem) hasStateChangingAttempt(ctx context.Context, runID common.RunID) bool {
 	if r == nil || r.steps == nil || runID == "" {
 		return false

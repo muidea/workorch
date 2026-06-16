@@ -733,6 +733,9 @@ func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSu
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
+	if repair.runLevelIneffectiveConvergenceExceeded(ctx, run, failedStep) {
+		return true
+	}
 	return repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) >= repair.effectiveMaxRuntimeRepairAttempts(ctx, policy, run, failedStep)
 }
 
@@ -749,6 +752,15 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	maxAttempts := o.repairManager().effectiveMaxRuntimeRepairAttempts(ctx, o.RuntimePolicy(), run, failedStep)
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
+	runLevelStats := o.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, failedStep)
+	blockerKind := "runtime_repair_contract_exhausted"
+	allowedRecoveryActions := []string{"retry_same_step", "replan", "provide_information", "terminate"}
+	preferredRecoveryActions := []string{"retry_same_step", "replan", "terminate"}
+	if runLevelStats.exceeded() {
+		blockerKind = "runtime_ineffective_convergence"
+		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
+		preferredRecoveryActions = []string{"replan", "terminate"}
+	}
 	recommendedNextActions := []string{
 		"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",
 		"Prioritize minimal target changes, then rerun targeted verification.",
@@ -762,23 +774,33 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		decisionContextKeyDependency:     decisionContextDependencyRuntimeContract,
 		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
 		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
-		"allowedRecoveryActions":         []string{"retry_same_step", "replan", "provide_information", "terminate"},
-		"preferredRecoveryActions":       []string{"retry_same_step", "replan", "terminate"},
-		"blockerKind":                    "runtime_repair_contract_exhausted",
+		"allowedRecoveryActions":         allowedRecoveryActions,
+		"preferredRecoveryActions":       preferredRecoveryActions,
+		"blockerKind":                    blockerKind,
 		"attempts":                       o.repairManager().runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep),
 		"maxAttempts":                    maxAttempts,
-		"contractViolationType":          stringFromMap(failedStep.Output, outputKeyContractViolationType),
-		"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
-		"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
-		"failureTargetScope":             runtimeFailureTargetScopeFromStep(failedStep),
-		"failedStepId":                   string(failedStep.ID),
-		"repairOfRootStepId":             string(runtimeRepairRootStepID(failedStep)),
-		"failedStepKind":                 failedStep.Kind,
-		"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
-		"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
-		"missingDoDItems":                missingDoDItemsFromFailureOutput(failedStep.Output),
-		"recentRepairAttempts":           o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
-		"recommendedNextActions":         recommendedNextActions,
+		"runLevelIneffectiveConvergence": map[string]any{
+			"totalSteps":          runLevelStats.TotalSteps,
+			"recoverySteps":       runLevelStats.RecoverySteps,
+			"contractFailures":    runLevelStats.ContractFailures,
+			"providerFailures":    runLevelStats.ProviderFailures,
+			"failedLLMSteps":      runLevelStats.FailedLLMSteps,
+			"minRecoverySteps":    minIneffectiveConvergenceRecoverySteps,
+			"minContractFailures": minIneffectiveConvergenceContractFailures,
+			"recentFailures":      runLevelStats.RecentFailures,
+		},
+		"contractViolationType":  stringFromMap(failedStep.Output, outputKeyContractViolationType),
+		"failureClass":           stringFromMap(failedStep.Output, failureOutputKeyClass),
+		"failureSignature":       stringFromMap(failedStep.Output, failureOutputKeySignature),
+		"failureTargetScope":     runtimeFailureTargetScopeFromStep(failedStep),
+		"failedStepId":           string(failedStep.ID),
+		"repairOfRootStepId":     string(runtimeRepairRootStepID(failedStep)),
+		"failedStepKind":         failedStep.Kind,
+		"failedStepInput":        o.llmContextManager().compactStepInput(failedStep.Input),
+		"failedStepOutput":       o.llmContextManager().compactStepOutput(failedStep.Output),
+		"missingDoDItems":        missingDoDItemsFromFailureOutput(failedStep.Output),
+		"recentRepairAttempts":   o.repairManager().recentRuntimeRepairAttemptSummaries(ctx, run.ID, failedStep, maxAttempts),
+		"recommendedNextActions": recommendedNextActions,
 	}
 	for key, value := range diagnostics {
 		if key == "recommendedNextActions" {

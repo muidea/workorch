@@ -87,6 +87,11 @@ const (
 
 const maxProviderRetryAttemptsBeforeStateChange = 2
 
+const (
+	minIneffectiveConvergenceRecoverySteps    = 18
+	minIneffectiveConvergenceContractFailures = 6
+)
+
 type RuntimePolicy = workorchruntimepolicy.RuntimePolicy
 type LLMOutputRuntimePolicy = workorchruntimepolicy.LLMOutputRuntimePolicy
 

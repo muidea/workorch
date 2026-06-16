@@ -501,6 +501,92 @@ func TestRuntimeContractViolationUsesRuntimeRepairInsteadOfProviderRetry(t *test
 	}
 }
 
+func TestRunLevelIneffectiveConvergenceEscalatesRuntimeRepair(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-ineffective-convergence")
+	repo := memory.NewStepRepository()
+	var current *runmodel.Step
+	for idx := 1; idx <= minIneffectiveConvergenceRecoverySteps; idx++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/recovery-%03d", runID, idx)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"graphFollowUp": true,
+			},
+			Output: map[string]any{"stage": "llm_execution_graph_plan"},
+		}
+		if idx <= minIneffectiveConvergenceContractFailures {
+			step.State = common.StepStateFailed
+			step.Input[stepInputKeyRuntimeRepairFollowUp] = true
+			step.Output = map[string]any{
+				failureOutputKeyClass:          failureClassRuntime,
+				failureOutputKeySignature:      fmt.Sprintf("runtime-contract-%03d", idx),
+				outputKeyContractViolationType: contractViolationValidationEvidenceRequired,
+				"stage":                        "llm_execution_graph_plan",
+				"reason":                       "runtime contract violation",
+			}
+			current = step
+		}
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   repo,
+		tickets: memory.NewDecisionTicketRepository(),
+		policy:  NormalizeRuntimePolicy(RuntimePolicy{MaxRuntimeRepairAttempts: 20}),
+	}
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if stats := orch.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, current); !stats.exceeded() {
+		t.Fatalf("run-level ineffective convergence stats = %+v, want exceeded", stats)
+	}
+	if action := runtimeRecoveryActionForFailedStepForTest(ctx, orch, run, current); action != runtimeRecoveryActionRuntimeRepairExhausted {
+		t.Fatalf("recoveryActionForFailedStep = %s, want runtime_repair_exhausted", action)
+	}
+}
+
+func TestRunLevelIneffectiveConvergenceIgnoresProviderOnlyFailures(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-provider-only-convergence")
+	repo := memory.NewStepRepository()
+	var current *runmodel.Step
+	for idx := 1; idx <= minIneffectiveConvergenceRecoverySteps+2; idx++ {
+		step := &runmodel.Step{
+			ID:    common.StepID(fmt.Sprintf("%s/provider-retry-%03d", runID, idx)),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyProviderRetryFollowUp: true,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassProviderTimeout,
+				failureOutputKeySignature: fmt.Sprintf("provider-timeout-%03d", idx),
+				"stage":                   "llm_provider_timeout",
+			},
+		}
+		current = step
+		if err := repo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+	orch := &RuntimeOrchestrator{
+		runtime: &stubRuntimeAdapter{},
+		steps:   repo,
+		tickets: memory.NewDecisionTicketRepository(),
+	}
+	run := &runmodel.Run{ID: runID, DoDID: common.DoDID("dod"), InitialStepKind: llmWorkspaceExecutionStepKind}
+	if stats := orch.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, current); stats.exceeded() {
+		t.Fatalf("run-level ineffective convergence stats = %+v, want not exceeded for provider-only failures", stats)
+	}
+	if orch.repairManager().runLevelIneffectiveConvergenceExceeded(ctx, run, current) {
+		t.Fatalf("run-level ineffective convergence should ignore provider-only failures")
+	}
+}
+
 func TestProviderRetryBudgetShrinksBeforeStateChange(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-provider-retry-before-state-change")
