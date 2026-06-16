@@ -455,11 +455,15 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 			Metadata:     rawPayload,
 		})
 		snapshot.Decisions = append(snapshot.Decisions, Decision{
-			ID:                "decision-" + suffix,
-			RunID:             "run-large",
-			Reason:            "needs input",
-			State:             "resolved",
-			Context:           rawPayload,
+			ID:     "decision-" + suffix,
+			RunID:  "run-large",
+			Reason: "needs input",
+			State:  "resolved",
+			Context: map[string]any{
+				"allowedRecoveryActions": []string{"replan", "terminate"},
+				"blockerKind":            "runtime_ineffective_convergence",
+				"failedStepInput":        rawPayload,
+			},
 			ResolutionID:      "resolution-" + suffix,
 			ResolutionType:    "continue",
 			ResolutionPayload: rawPayload,
@@ -505,8 +509,13 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 	if projected.Artifacts[0].Metadata != nil {
 		t.Fatalf("artifact projection = %+v, want metadata omitted", projected.Artifacts[0])
 	}
-	if projected.Decisions[0].Context != nil || projected.Decisions[0].ResolutionPayload != nil {
-		t.Fatalf("decision projection = %+v, want context/resolution payload omitted", projected.Decisions[0])
+	if projected.Decisions[0].Context["blockerKind"] != "runtime_ineffective_convergence" ||
+		projected.Decisions[0].Context["failedStepInput"] != nil ||
+		projected.Decisions[0].ResolutionPayload["content"] == nil {
+		t.Fatalf("decision projection = %+v, want bounded context and bounded resolution payload", projected.Decisions[0])
+	}
+	if content, _ := projected.Decisions[0].ResolutionPayload["content"].(string); len(content) > 600 {
+		t.Fatalf("decision resolution payload content length = %d, want bounded", len(content))
 	}
 	if projected.Approvals[0].Context != nil {
 		t.Fatalf("approval projection = %+v, want context omitted", projected.Approvals[0])

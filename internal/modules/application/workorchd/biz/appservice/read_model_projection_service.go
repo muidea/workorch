@@ -9,3 +9,7 @@ func ProjectRunSnapshotDetail(snapshot RunSnapshot) RunSnapshot {
 func ProjectWorkspaceSnapshotDetail(snapshot WorkspaceSnapshot) WorkspaceSnapshot {
 	return readmodelports.ProjectWorkspaceSnapshotDetail(snapshot)
 }
+
+func ProjectDecisionView(item Decision) Decision {
+	return readmodelports.ProjectDecisionView(item)
+}

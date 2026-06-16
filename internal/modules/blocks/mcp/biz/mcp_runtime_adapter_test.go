@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	kernelmcp "github.com/muidea/workorch/internal/modules/kernel/mcp"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -714,6 +715,69 @@ func TestRuntimeAdapterReusesLongLivedStdioSession(t *testing.T) {
 	if got := strings.Count(string(raw), "initialized\n"); got != 1 {
 		t.Fatalf("initialize count = %d, want one long-lived process initialization; raw=%q", got, string(raw))
 	}
+}
+
+func TestRuntimeAdapterEvictsIdleLongLivedStdioSession(t *testing.T) {
+	oldIdleTimeout := longLivedStdioSessionIdleTimeout
+	longLivedStdioSessionIdleTimeout = 20 * time.Millisecond
+	defer func() { longLivedStdioSessionIdleTimeout = oldIdleTimeout }()
+
+	ctx := context.Background()
+	initFile := filepath.Join(t.TempDir(), "mcp-init-count.txt")
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-idle-session"),
+		Name:          "stdio idle session",
+		Transport:     "stdio",
+		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 WORKORCH_MCP_STDIO_INIT_FILE=" + initFile + " " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		SessionPolicy: "long_lived",
+		TimeoutMillis: 1000,
+	})
+	adapter := NewRuntimeAdapter(service)
+	defer adapter.Close()
+
+	for idx := 0; idx < 2; idx++ {
+		result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+			WorkspaceID: common.WorkspaceID("ws-idle"),
+			Kind:        "mcp/tool_call",
+			Input: map[string]any{
+				"serverId": "mcp-stdio-idle-session",
+				"tool":     "repo.summary",
+			},
+		})
+		if err != nil {
+			t.Fatalf("ExecuteRuntimeStep #%d: %v output=%+v", idx+1, err, result.Output)
+		}
+		if idx == 0 {
+			waitForNoStdioSessions(t, adapter, time.Second)
+		}
+	}
+	raw, err := os.ReadFile(initFile)
+	if err != nil {
+		t.Fatalf("read init file: %v", err)
+	}
+	if got := strings.Count(string(raw), "initialized\n"); got != 2 {
+		t.Fatalf("initialize count = %d, want session reinitialized after idle eviction; raw=%q", got, string(raw))
+	}
+}
+
+func waitForNoStdioSessions(t *testing.T, adapter *RuntimeAdapter, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		adapter.sessionMu.Lock()
+		count := len(adapter.sessions)
+		adapter.sessionMu.Unlock()
+		if count == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	adapter.sessionMu.Lock()
+	count := len(adapter.sessions)
+	adapter.sessionMu.Unlock()
+	t.Fatalf("stdio session count = %d after %s, want 0", count, timeout)
 }
 
 func TestRuntimeAdapterLongLivedStdioSessionIsWorkspaceScoped(t *testing.T) {

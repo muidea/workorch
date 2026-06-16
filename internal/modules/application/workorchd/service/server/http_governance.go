@@ -45,7 +45,7 @@ func registerGovernanceReadRoutes(router engine.RouteRegistry, state *serverStat
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Decision: item,
+			Decision: appservice.ProjectDecisionView(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Service:  "workorch",
 			Backend:  state.config.Backend,
 			DataRoot: state.config.DataRoot,
-			Decision: item,
+			Decision: appservice.ProjectDecisionView(item),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/decisions/resolve-batch", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -141,7 +141,7 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Service:   "workorch",
 			Backend:   state.config.Backend,
 			DataRoot:  state.config.DataRoot,
-			Decisions: items,
+			Decisions: projectDecisionViews(items),
 		})
 	})
 	router.AddHandler("/api/v1/workorch/approvals/:approvalId/approve", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
@@ -217,6 +217,17 @@ func registerGovernanceWriteRoutes(router engine.RouteRegistry, state *serverSta
 			Approvals: items,
 		})
 	})
+}
+
+func projectDecisionViews(items []appservice.Decision) []appservice.Decision {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]appservice.Decision, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, appservice.ProjectDecisionView(item))
+	}
+	return ret
 }
 
 func governanceRequestContext(r *http.Request, state *serverState) context.Context {

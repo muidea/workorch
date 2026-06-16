@@ -3410,6 +3410,9 @@ func mergeDecisionInfo(existing backend.DecisionInfo, next backend.DecisionInfo)
 	if next.Question != "" {
 		existing.Question = next.Question
 	}
+	if next.Context != nil {
+		existing.Context = clonePayloadMap(next.Context)
+	}
 	if next.State != "" {
 		existing.State = next.State
 	}

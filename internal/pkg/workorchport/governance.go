@@ -12,6 +12,7 @@ type DecisionInfo struct {
 	RunID          common.RunID
 	Reason         string
 	Question       string
+	Context        map[string]any
 	State          string
 	ResolutionType string
 	AutoGovernance *AutoGovernanceSummaryInfo

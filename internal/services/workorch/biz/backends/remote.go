@@ -368,7 +368,8 @@ func (b *remoteDecisionBackend) Resolve(ctx context.Context, req ResolveDecision
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, ResolutionType: d.ResolutionType, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
+	item := mapRemoteDecisionInfoPtr(d)
+	return &item, nil
 }
 func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID common.WorkspaceID, ticketIDs []common.TicketID, resolutionType string, payload map[string]any) ([]DecisionInfo, error) {
 	ids := make([]string, len(ticketIDs))
@@ -381,7 +382,7 @@ func (b *remoteDecisionBackend) BatchResolve(ctx context.Context, workspaceID co
 	}
 	result := make([]DecisionInfo, 0, len(list))
 	for _, d := range list {
-		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)})
+		result = append(result, mapRemoteDecisionInfo(d))
 	}
 	return result, nil
 }
@@ -392,7 +393,7 @@ func (b *remoteDecisionBackend) List(ctx context.Context, wsID common.WorkspaceI
 	}
 	result := make([]DecisionInfo, 0, len(list))
 	for _, d := range list {
-		result = append(result, DecisionInfo{ID: common.TicketID(d.ID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)})
+		result = append(result, mapRemoteDecisionInfo(d))
 	}
 	return result, nil
 }
@@ -401,7 +402,40 @@ func (b *remoteDecisionBackend) Get(ctx context.Context, wsID common.WorkspaceID
 	if err != nil {
 		return nil, err
 	}
-	return &DecisionInfo{ID: common.TicketID(d.ID), WorkspaceID: common.WorkspaceID(d.WorkspaceID), RunID: common.RunID(d.RunID), Reason: d.Reason, Question: d.Question, State: d.State, AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance)}, nil
+	item := mapRemoteDecisionInfoPtr(d)
+	return &item, nil
+}
+
+func mapRemoteDecisionInfoPtr(d *client.Decision) DecisionInfo {
+	if d == nil {
+		return DecisionInfo{}
+	}
+	return mapRemoteDecisionInfo(*d)
+}
+
+func mapRemoteDecisionInfo(d client.Decision) DecisionInfo {
+	return DecisionInfo{
+		ID:             common.TicketID(d.ID),
+		WorkspaceID:    common.WorkspaceID(d.WorkspaceID),
+		RunID:          common.RunID(d.RunID),
+		Reason:         d.Reason,
+		Question:       d.Question,
+		Context:        clonePayloadMap(d.Context),
+		State:          d.State,
+		ResolutionType: d.ResolutionType,
+		AutoGovernance: mapRemoteAutoGovernanceSummary(d.AutoGovernance),
+	}
+}
+
+func clonePayloadMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	ret := make(map[string]any, len(input))
+	for key, value := range input {
+		ret[key] = value
+	}
+	return ret
 }
 
 // ── Remote Approval ──

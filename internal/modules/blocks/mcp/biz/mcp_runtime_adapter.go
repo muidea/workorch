@@ -45,6 +45,8 @@ const (
 	sessionPolicyLongLived = "long_lived"
 )
 
+var longLivedStdioSessionIdleTimeout = 5 * time.Minute
+
 type operationSpec struct {
 	Operation string
 	ServerID  string
@@ -79,6 +81,7 @@ type stdioSession struct {
 	reader    *bufio.Reader
 	stderr    *limitedBuffer
 	done      chan error
+	lastUsed  time.Time
 	mu        sync.Mutex
 	closeOnce sync.Once
 }
@@ -332,15 +335,52 @@ func (a *RuntimeAdapter) getOrCreateStdioSession(ctx context.Context, request ru
 	}
 	a.sessions[serverID] = session
 	a.sessionMu.Unlock()
+	a.scheduleStdioSessionIdleEviction(serverID, session)
 	return session, nil
 }
 
-func (a *RuntimeAdapter) evictStdioSession(serverID string, target *stdioSession) {
+func (a *RuntimeAdapter) evictStdioSession(serverID string, target *stdioSession) bool {
 	a.sessionMu.Lock()
 	if a.sessions[serverID] == target {
 		delete(a.sessions, serverID)
+		a.sessionMu.Unlock()
+		return true
 	}
 	a.sessionMu.Unlock()
+	return false
+}
+
+func (a *RuntimeAdapter) scheduleStdioSessionIdleEviction(serverID string, session *stdioSession) {
+	if a == nil || session == nil || longLivedStdioSessionIdleTimeout <= 0 {
+		return
+	}
+	time.AfterFunc(longLivedStdioSessionIdleTimeout, func() {
+		a.evictIdleStdioSession(serverID, session)
+	})
+}
+
+func (a *RuntimeAdapter) evictIdleStdioSession(serverID string, session *stdioSession) {
+	if a == nil || session == nil {
+		return
+	}
+	ttl := longLivedStdioSessionIdleTimeout
+	if ttl <= 0 {
+		return
+	}
+	session.mu.Lock()
+	idleFor := time.Since(session.lastUsed)
+	if idleFor < ttl {
+		delay := ttl - idleFor
+		session.mu.Unlock()
+		time.AfterFunc(delay, func() {
+			a.evictIdleStdioSession(serverID, session)
+		})
+		return
+	}
+	session.mu.Unlock()
+	if a.evictStdioSession(serverID, session) {
+		session.Close()
+	}
 }
 
 func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepExecutionRequest, server *mcpmodel.Server, serverID string) (*stdioSession, error) {
@@ -380,6 +420,7 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 		reader:   bufio.NewReader(stdout),
 		stderr:   &limitedBuffer{limit: 64 << 10},
 		done:     make(chan error, 1),
+		lastUsed: time.Now().UTC(),
 	}
 	go func() {
 		_, _ = io.Copy(session.stderr, stderr)
@@ -453,7 +494,9 @@ func (s *stdioSession) Execute(ctx context.Context, spec operationSpec, id int) 
 	if err := writeJSONRPCLine(s.stdin, request); err != nil {
 		return jsonRPCResponse{}, nil, err
 	}
-	return readJSONRPCResponseWithContext(ctx, s.reader, id, s)
+	response, streamEvents, err := readJSONRPCResponseWithContext(ctx, s.reader, id, s)
+	s.lastUsed = time.Now().UTC()
+	return response, streamEvents, err
 }
 
 func (s *stdioSession) Close() string {

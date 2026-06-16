@@ -222,7 +222,7 @@ func TestListDecisionPageWithBackendProjectsAuditPayloads(t *testing.T) {
 		t.Fatalf("page cursor = %+v, want hasMore with second cursor", page)
 	}
 	if page.Decisions[0].Context != nil || page.Decisions[0].ResolutionPayload != nil {
-		t.Fatalf("projected decision carries large payloads: %+v", page.Decisions[0])
+		t.Fatalf("projected decision carries unexpected payloads: %+v", page.Decisions[0])
 	}
 
 	next, err := ListDecisionPageWithBackend(context.Background(), "file", dataRoot, DecisionQuery{
