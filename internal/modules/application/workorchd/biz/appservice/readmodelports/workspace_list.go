@@ -53,7 +53,7 @@ func ListProjectedWorkspaces(
 		},
 		func() error {
 			var err error
-			eventRecordItems, err = eventRecords.List(ctx, repository.EventRecordQuery{})
+			eventRecordItems, err = eventRecords.List(ctx, repository.EventRecordQuery{Limit: readmodelcore.DefaultEventRecordLimit})
 			return err
 		},
 	); err != nil {

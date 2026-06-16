@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
@@ -69,7 +70,10 @@ func TestListProjectedWorkspacesUsesLatestRunProjection(t *testing.T) {
 		workspaceListResultReaderFunc(func(context.Context, common.WorkspaceID) ([]*resultmodel.Result, error) {
 			return nil, nil
 		}),
-		workspaceListEventRecordReaderFunc(func(context.Context, repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+		workspaceListEventRecordReaderFunc(func(_ context.Context, query repository.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {
+			if query.Limit != readmodelcore.DefaultEventRecordLimit {
+				t.Fatalf("event query limit = %d, want %d", query.Limit, readmodelcore.DefaultEventRecordLimit)
+			}
 			return []*eventstreammodel.EventRecord{{
 				WorkspaceID: workspaceID,
 				RunID:       common.RunID("run-002"),

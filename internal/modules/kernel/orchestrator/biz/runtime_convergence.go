@@ -338,6 +338,15 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.GovernanceReason = firstNonEmptyString(stringFromMap(focus, "currentGap"), "coverage work item requires governance evidence")
 		return true
 	}
+	if coverageWorkItemFocusReadyForAssessment(focus) &&
+		(!coverageFailureStepHasExplicitCoverageGap(failedStep) ||
+			!explicitCoverageGapShouldPreemptAssessment(input, failedStep)) {
+		contract.State = convergenceStateNeedAssessment
+		contract.RuntimeStage = runtimeStageVerification
+		contract.RuntimeStageMode = "strict_convergence"
+		contract.RepairObjective = "complete_dod_goal_coverage_assessment"
+		return true
+	}
 	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -458,13 +467,6 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			required["coverageTargetMatchRule"] = "validation evidence must map to one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 		}
 		contract.RepairActionPackage["requiredOutput"] = required
-		return true
-	}
-	if coverageWorkItemFocusReadyForAssessment(focus) {
-		contract.State = convergenceStateNeedAssessment
-		contract.RuntimeStage = runtimeStageVerification
-		contract.RuntimeStageMode = "strict_convergence"
-		contract.RepairObjective = "complete_dod_goal_coverage_assessment"
 		return true
 	}
 	if coverageWorkItemFocusHasActionableFailure(focus) {
@@ -1601,6 +1603,15 @@ func explicitCoverageGapPresent(input map[string]any, failedStep *runModel.Step)
 		return false
 	}
 	return len(missingDoDItemsFromFailureOutput(failedStep.Output)) > 0 ||
+		len(missingGoalCoverageFromStep(failedStep)) > 0 ||
+		len(missingDeliverableCoverageFromStep(failedStep)) > 0
+}
+
+func coverageFailureStepHasExplicitCoverageGap(failedStep *runModel.Step) bool {
+	if failedStep == nil {
+		return false
+	}
+	return len(missingDoDItemsFromStep(failedStep)) > 0 ||
 		len(missingGoalCoverageFromStep(failedStep)) > 0 ||
 		len(missingDeliverableCoverageFromStep(failedStep)) > 0
 }

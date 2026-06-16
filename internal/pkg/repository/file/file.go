@@ -2,6 +2,7 @@ package file
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -977,17 +978,34 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 	if err != nil {
 		return nil, err
 	}
-	items := map[common.EventRecordID]eventstream.EventRecord{}
-	if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
-		if _, ok := deleted[item.ID]; ok {
-			return nil
+	ret := make([]*eventstream.EventRecord, 0)
+	boundedLatest := query.Limit > 0 && query.CursorAfterID == ""
+	if boundedLatest {
+		ret, err = r.listLatestEventRecords(query, deleted)
+		if err != nil {
+			return nil, err
 		}
-		items[item.ID] = *cloneEventRecord(item)
-		return nil
-	}); err != nil {
-		return nil, err
+	} else {
+		if err := r.scanEventRecords(func(item *eventstream.EventRecord) error {
+			if _, ok := deleted[item.ID]; ok {
+				return nil
+			}
+			if !eventRecordMatches(item, query) {
+				return nil
+			}
+			ret = append(ret, item)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
-	ret := listEventRecords(items, query)
+	sortEventRecordPointers(ret)
+	if !boundedLatest {
+		ret = applyEventRecordCursorAndLimit(ret, query)
+	}
+	if len(ret) == 0 {
+		return nil, nil
+	}
 	if query.IncludePayload {
 		for _, item := range ret {
 			if err := r.hydrateEventRecordPayload(item); err != nil {
@@ -998,6 +1016,29 @@ func (r *EventRecordRepository) List(_ context.Context, query repository.EventRe
 		for _, item := range ret {
 			stripEventRecordPayload(item)
 		}
+	}
+	return ret, nil
+}
+
+func (r *EventRecordRepository) listLatestEventRecords(query repository.EventRecordQuery, deleted map[common.EventRecordID]struct{}) ([]*eventstream.EventRecord, error) {
+	if query.Limit <= 0 || query.CursorAfterID != "" {
+		return nil, common.ErrInvalidArgument
+	}
+	ret := make([]*eventstream.EventRecord, 0, query.Limit)
+	if err := r.scanEventRecordsReverse(func(item *eventstream.EventRecord) (bool, error) {
+		if _, ok := deleted[item.ID]; ok {
+			return false, nil
+		}
+		if !eventRecordMatches(item, query) {
+			return false, nil
+		}
+		ret = append(ret, item)
+		return len(ret) >= query.Limit, nil
+	}); err != nil {
+		return nil, err
+	}
+	if len(ret) == 0 {
+		return nil, nil
 	}
 	return ret, nil
 }
@@ -1198,6 +1239,27 @@ func (r *EventRecordRepository) scanEventRecords(fn func(*eventstream.EventRecor
 	return nil
 }
 
+func (r *EventRecordRepository) scanEventRecordsReverse(fn func(*eventstream.EventRecord) (bool, error)) error {
+	if fn == nil {
+		return common.ErrInvalidArgument
+	}
+	matches, err := filepath.Glob(filepath.Join(r.eventSegmentDir(), eventRecordSegmentPrefix+"*"+eventRecordSegmentSuffix))
+	if err != nil {
+		return err
+	}
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		stop, err := r.scanEventRecordSegmentReverse(matches[i], fn)
+		if err != nil {
+			return err
+		}
+		if stop {
+			return nil
+		}
+	}
+	return nil
+}
+
 func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eventstream.EventRecord) error) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -1231,6 +1293,43 @@ func (r *EventRecordRepository) scanEventRecordSegment(path string, fn func(*eve
 		}
 	}
 	return scanner.Err()
+}
+
+func (r *EventRecordRepository) scanEventRecordSegmentReverse(path string, fn func(*eventstream.EventRecord) (bool, error)) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
+		}
+		var recordLine eventRecordLogLine
+		if err := json.Unmarshal(line, &recordLine); err != nil {
+			return false, err
+		}
+		item := cloneEventRecord(&recordLine.Record)
+		if recordLine.PayloadRef != "" {
+			item.PayloadRef = recordLine.PayloadRef
+			if len(item.PayloadSummary) == 0 {
+				item.PayloadSummary = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+			}
+			item.Payload = map[string]any{eventRecordPayloadRefKey: recordLine.PayloadRef}
+		}
+		stop, err := fn(item)
+		if err != nil {
+			return false, err
+		}
+		if stop {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *EventRecordRepository) hydrateEventRecordPayload(item *eventstream.EventRecord) error {
@@ -3611,24 +3710,20 @@ func listArtifacts(items map[common.ArtifactID]resultmodel.Artifact, matches fun
 	return ret
 }
 
-func listEventRecords(items map[common.EventRecordID]eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
-	ret := make([]*eventstream.EventRecord, 0)
-	for _, item := range items {
-		if !eventRecordMatches(&item, query) {
-			continue
+func sortEventRecordPointers(items []*eventstream.EventRecord) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].OccurredAt == items[j].OccurredAt {
+			return string(items[i].ID) < string(items[j].ID)
 		}
-		ret = append(ret, cloneEventRecord(&item))
-	}
-	sort.SliceStable(ret, func(i, j int) bool {
-		if ret[i].OccurredAt == ret[j].OccurredAt {
-			return string(ret[i].ID) < string(ret[j].ID)
-		}
-		return ret[i].OccurredAt < ret[j].OccurredAt
+		return items[i].OccurredAt < items[j].OccurredAt
 	})
+}
+
+func applyEventRecordCursorAndLimit(items []*eventstream.EventRecord, query repository.EventRecordQuery) []*eventstream.EventRecord {
 	if query.CursorAfterID != "" {
 		cursorMatched := false
-		filtered := ret[:0]
-		for _, item := range ret {
+		filtered := items[:0]
+		for _, item := range items {
 			if !cursorMatched {
 				if item.ID == query.CursorAfterID {
 					cursorMatched = true
@@ -3637,19 +3732,19 @@ func listEventRecords(items map[common.EventRecordID]eventstream.EventRecord, qu
 			}
 			filtered = append(filtered, item)
 		}
-		ret = filtered
+		items = filtered
 	}
-	if query.Limit > 0 && len(ret) > query.Limit {
+	if query.Limit > 0 && len(items) > query.Limit {
 		if query.CursorAfterID == "" {
-			ret = ret[len(ret)-query.Limit:]
+			items = items[len(items)-query.Limit:]
 		} else {
-			ret = ret[:query.Limit]
+			items = items[:query.Limit]
 		}
 	}
-	if len(ret) == 0 {
+	if len(items) == 0 {
 		return nil
 	}
-	return ret
+	return items
 }
 
 func eventRecordMatches(item *eventstream.EventRecord, query repository.EventRecordQuery) bool {
