@@ -327,16 +327,12 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 
 	coverageKey, coverage := deliverableCoverageContainerFromAssessment(assessment)
 	items, ok := doDAssessmentItemMaps(coverage["items"])
-	if len(coverage) > 0 {
-		if satisfied, ok := coverage["satisfied"].(bool); ok && !satisfied {
-			return assessment
-		}
-	}
-	if len(coverage) > 0 && (!ok || !deliverableCoverageItemsRecoverable(items)) {
+	if len(coverage) > 0 && (!ok || !deliverableCoverageItemsRecoverableForCompletion(run, items)) {
 		return assessment
 	}
 
 	existing := map[string]bool{}
+	retained := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		id := strings.TrimSpace(firstNonEmptyString(
 			stringFromMap(item, "id"),
@@ -348,7 +344,14 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		if id == "" {
 			continue
 		}
-		existing[id] = true
+		if deliverableCoverageItemSatisfiedWithEvidence(item) {
+			existing[id] = true
+			retained = append(retained, item)
+			continue
+		}
+		if !deliverableCoverageItemAutoCompletableForRun(run, id) {
+			retained = append(retained, item)
+		}
 	}
 	missing := make([]requiredProfileDeliverableExpectation, 0)
 	for _, expectation := range required {
@@ -380,13 +383,11 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		}
 	} else {
 		coverage = cloneStepPayload(coverage)
-		if _, ok := coverage["satisfied"].(bool); !ok {
-			coverage["satisfied"] = true
-		}
+		coverage["satisfied"] = true
 	}
 
-	completed := make([]map[string]any, 0, len(items)+len(autoCompletable))
-	for _, item := range items {
+	completed := make([]map[string]any, 0, len(retained)+len(autoCompletable))
+	for _, item := range retained {
 		completed = append(completed, item)
 	}
 	for _, expectation := range autoCompletable {
@@ -436,10 +437,6 @@ func doDAssessmentStructurallySatisfiedExceptDeliverableCoverage(assessment map[
 	if len(assessment) == 0 {
 		return false
 	}
-	current, ok := assessment["satisfied"].(bool)
-	if ok && !current {
-		return false
-	}
 	if len(mapSliceFromValue(assessment["evidenceGaps"])) > 0 ||
 		len(mapSliceFromValue(assessment["verificationEvidenceGaps"])) > 0 {
 		return false
@@ -461,18 +458,69 @@ func doDAssessmentStructurallySatisfiedExceptDeliverableCoverage(assessment map[
 }
 
 func deliverableCoverageItemsRecoverable(items []map[string]any) bool {
+	return deliverableCoverageItemsRecoverableForCompletion(nil, items)
+}
+
+func deliverableCoverageItemsRecoverableForCompletion(run *runModel.Run, items []map[string]any) bool {
 	for _, item := range items {
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
 		switch state {
 		case "", "satisfied", "available", "produced":
+			if state != "" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
+				return false
+			}
+		case "missing":
+			id := deliverableCoverageItemID(item)
+			if id == "" || !deliverableCoverageItemAutoCompletableForRun(run, id) {
+				return false
+			}
 		default:
-			return false
-		}
-		if state != "" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func deliverableCoverageItemID(item map[string]any) string {
+	if len(item) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(item, "id"),
+		stringFromMap(item, "item"),
+		stringFromMap(item, "deliverable"),
+		stringFromMap(item, "name"),
+		stringFromMap(item, "path"),
+	))
+}
+
+func deliverableCoverageItemSatisfiedWithEvidence(item map[string]any) bool {
+	state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
+	if state != "satisfied" && state != "available" && state != "produced" {
+		return false
+	}
+	return len(evidenceRefsFromValue(item["evidenceRefs"])) > 0 || len(stringSliceFromValue(item["artifactRefs"])) > 0
+}
+
+func deliverableCoverageItemAutoCompletableForRun(run *runModel.Run, id string) bool {
+	id = strings.TrimSpace(id)
+	if run == nil || id == "" {
+		return false
+	}
+	required := requiredProfileDeliverableExpectationItemsForAssessmentCompletion(run, true)
+	for _, expectation := range required {
+		if expectation.ID != id {
+			continue
+		}
+		if normalizedCoverageEvidenceRole(expectation.EvidenceRole) != "supplemental_evidence" {
+			return false
+		}
+		if profileDeliverableExpectationHasEvidenceRequirement(run, id) {
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func deliverableCoverageContainerFromAssessment(assessment map[string]any) (string, map[string]any) {

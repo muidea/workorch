@@ -327,7 +327,7 @@ func strategyPatchUsesCurrentRepairTargetSnapshot(step *runModel.Step, request r
 	}
 	switch strings.TrimSpace(request.PatchType) {
 	case "text_replace":
-		return strings.TrimSpace(request.OldText) != "" && strings.TrimSpace(request.NewText) != ""
+		return request.OldText != "" && request.OldText != request.NewText
 	case "unified_diff":
 		return strings.TrimSpace(request.Diff) != ""
 	case "file_write":

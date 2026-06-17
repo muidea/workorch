@@ -813,6 +813,127 @@ func TestNormalizeCompletionGateDoDAssessmentOutputCompletesRepairFollowUpPrimar
 	}
 }
 
+func TestNormalizeCompletionGateDoDAssessmentOutputRecoversMissingSupplementalDeliverables(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-deliverable-coverage-repair-supplemental-missing-normalize",
+		WorkspaceID:     "ws-deliverable-coverage-repair-supplemental-missing-normalize",
+		DoDID:           "dod-deliverable-coverage-repair-supplemental-missing-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{
+				"items": []string{"build passes"},
+			},
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"software-dev": map[string]any{
+						"deliverableExpectations": []map[string]any{
+							{"id": "source_change", "required": true, "evidenceRole": "primary_state_change"},
+							{"id": "validation_report", "required": true, "evidenceRole": "supplemental_evidence"},
+							{"id": "coverage_map", "required": true, "evidenceRole": "supplemental_evidence"},
+							{"id": "version_control_snapshot", "required": true, "evidenceRole": "supplemental_evidence"},
+							{"id": "user_deliverable", "required": true, "evidenceRole": "supplemental_evidence"},
+						},
+						"evidenceRequirements": []map[string]any{
+							{
+								"id":                "source_change",
+								"scope":             "deliverable",
+								"acceptedStepKinds": []string{"patch/apply"},
+								"requireDirect":     true,
+							},
+							{
+								"id":                "version_control_snapshot",
+								"scope":             "deliverable",
+								"acceptedStepKinds": []string{"git/write"},
+								"acceptedOperations": []string{
+									"commit",
+								},
+								"requireDirect": true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	step := &runmodel.Step{
+		ID:    "run-deliverable-coverage-repair-supplemental-missing-normalize/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageAcceptance,
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "DoD items passed, but supplemental deliverable coverage was reported missing.",
+			"items": []map[string]any{{
+				"item":         "build passes",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-deliverable-coverage-repair-supplemental-missing-normalize/graph-001/test"},
+			}},
+			"deliverableCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{
+					{
+						"id":           "source_change",
+						"item":         "source_change",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-repair-supplemental-missing-normalize/graph-001/patch"},
+					},
+					{
+						"id":           "version_control_snapshot",
+						"item":         "version_control_snapshot",
+						"state":        "satisfied",
+						"evidenceRefs": []string{"run-deliverable-coverage-repair-supplemental-missing-normalize/graph-001/commit"},
+					},
+					{
+						"id":    "validation_report",
+						"item":  "coverage_map",
+						"state": "missing",
+					},
+					{
+						"id":    "coverage_map",
+						"item":  "version_control_snapshot",
+						"state": "missing",
+					},
+					{
+						"id":    "user_deliverable",
+						"item":  "user_deliverable",
+						"state": "missing",
+					},
+				},
+			},
+		},
+	}
+
+	normalized := normalizeCompletionGateDoDAssessmentOutput(run, step, output)
+	assessment, _, err := validatedCompletionDoDAssessment(run, normalized)
+	if err != nil {
+		t.Fatalf("validatedCompletionDoDAssessment: %v", err)
+	}
+	if satisfied := assessment["satisfied"]; satisfied != true {
+		t.Fatalf("dodAssessment.satisfied = %#v, want true", satisfied)
+	}
+	items := deliverableCoverageItemsFromAssessment(assessment)
+	if len(items) != 5 {
+		t.Fatalf("deliverableCoverage.items = %+v, want five required deliverables", items)
+	}
+	wantIDs := []string{"source_change", "version_control_snapshot", "validation_report", "coverage_map", "user_deliverable"}
+	for idx, want := range wantIDs {
+		if got := stringFromMap(items[idx], "id"); got != want {
+			t.Fatalf("deliverableCoverage.items[%d].id = %q, want %q; items=%+v", idx, got, want, items)
+		}
+		if got := stringFromMap(items[idx], "state"); got != "satisfied" {
+			t.Fatalf("deliverableCoverage.items[%d].state = %q, want satisfied", idx, got)
+		}
+		if len(evidenceRefsFromValue(items[idx]["evidenceRefs"])) == 0 && len(stringSliceFromValue(items[idx]["artifactRefs"])) == 0 {
+			t.Fatalf("deliverableCoverage.items[%d] lacks refs: %+v", idx, items[idx])
+		}
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputMapsRepairGoalCoverageByEquivalentText(t *testing.T) {
 	goalText := "针对**非流式响应**，解析返回包中的 `usage` 字段。"
 	requirementID := goalCoverageRequirementID(1, normalizeDoDCoverageText(goalText))

@@ -238,6 +238,70 @@ func TestValidateLLMExecutionOutputContractAllowsStrategyCurrentSnapshotRepairMo
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsStrategyCurrentSnapshotTextDelete(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-current-snapshot-delete",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-current-snapshot-delete/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "runtime contract wrapper failure",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"main.go"},
+				"targetSnapshots": []map[string]any{{
+					"targetRef": "main.go",
+					"content":   "package main\n\nimport \"strings\"\n",
+				}},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main-delete",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main.go",
+						"patchType":            "text_replace",
+						"oldText":              "import \"strings\"\n",
+						"newText":              "",
+						"failedSurface":        "main.go current failure",
+						"rootCauseTarget":      "main.go",
+						"repairTargetDecision": "delete stale text from current snapshot target",
+						"repairMode":           "exact_replacement_against_current_snapshot",
+						"forbiddenRepair":      "do not edit unrelated files",
+						"verificationPlan":     "run bounded verification for targetRef=main.go",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want current snapshot text deletion accepted", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsUndistinguishedStrategyReassessmentRootCause(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-undistinguished-root-cause",

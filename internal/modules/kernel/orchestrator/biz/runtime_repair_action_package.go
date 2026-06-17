@@ -452,7 +452,7 @@ func stateChangingRepairRequiredOutput() map[string]any {
 			},
 		},
 		"toolStateChangingRule":      "when shell/command or mcp/tool_call is the state-changing node, declare input.stateChanging=true, input.targetRef, input.stateChangingReason, and a relation field such as relatedFailureTargets/targetRefs/affectedTargets; a dependent verification shell/tool node must declare verificationScope, targetRef, relatedFailureTargets, or boundedReason",
-		"patchSubstantiveChangeRule": "patch/apply text_replace oldText and newText must be exact non-empty literal strings that describe a substantive change; identical oldText/newText is a no-op and is invalid",
+		"patchSubstantiveChangeRule": "patch/apply text_replace oldText must be an exact non-empty literal string; newText must be an exact literal string, may be empty only to delete oldText, and identical oldText/newText is a no-op and is invalid",
 		"forbiddenKinds": []string{
 			"read_only_graph",
 			"llm_gated_graph",
