@@ -615,6 +615,63 @@ func TestPrimaryDiagnosticRepairRequiresConcreteTargetEvidence(t *testing.T) {
 	}
 }
 
+func TestPrimaryDiagnosticRepairDoesNotPromoteRuntimeContractViolation(t *testing.T) {
+	signals := map[string]any{
+		"identifiers": []string{
+			failureClassRuntime,
+			"workspace_execution",
+			"llm_execution_graph_plan",
+			"executionGraph",
+			"text_replace",
+			"oldText",
+			"newText",
+		},
+		"messages": []string{
+			"invalid argument: primary diagnostic repair requires patch/apply to address line-referenced resource shape blockers before secondary changes",
+			"class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|error=invalid argument: primary diagnostic repair requires patch/apply to address line-referenced resource shape blockers before secondary changes",
+			"invalid argument: executionGraph patch/apply input invalid: invalid argument: patch text_replace oldText/newText must describe a substantive change",
+		},
+		"sources":    []string{"reason", "failureSignature", "failureClass", "error"},
+		"targetRefs": []string{"main.go"},
+	}
+
+	if structuredFailureSignalsContainShapeConflict(signals) {
+		t.Fatalf("structuredFailureSignalsContainShapeConflict = true, want runtime contract violation excluded")
+	}
+	if contract := primaryDiagnosticRepairContractFromSignals(signals); len(contract) != 0 {
+		t.Fatalf("primaryDiagnosticRepair = %#v, want runtime contract violation omitted", contract)
+	}
+}
+
+func TestPrimaryDiagnosticRepairContractForStepIgnoresRuntimeContractViolationSignals(t *testing.T) {
+	step := primaryDiagnosticRepairStep("run-runtime-contract-primary/repair-001")
+	step.Input["structuredFailureSignals"] = map[string]any{
+		"identifiers": []string{
+			failureClassRuntime,
+			"workspace_execution",
+			"llm_execution_graph_plan",
+			"executionGraph",
+		},
+		"messages": []string{
+			"invalid argument: primary diagnostic repair requires patch/apply to address line-referenced resource shape blockers before secondary changes",
+		},
+		"sources":    []string{"reason", "failureSignature", "failureClass", "error"},
+		"targetRefs": []string{"main_test.go"},
+	}
+	step.Input["repairActionPackage"] = map[string]any{
+		"structuredFailureSignals": step.Input["structuredFailureSignals"],
+		"primaryDiagnosticRepair": map[string]any{
+			"required":   true,
+			"targetRefs": []string{"main_test.go"},
+			"lineRefs":   []map[string]any{{"targetRef": "main_test.go", "line": 30}},
+		},
+	}
+
+	if contract := primaryDiagnosticRepairContractForStep(step); len(contract) != 0 {
+		t.Fatalf("primaryDiagnosticRepairContractForStep = %#v, want runtime contract violation ignored", contract)
+	}
+}
+
 func TestStructuredFailureSignalsFilterExecutionLabelsAndDurations(t *testing.T) {
 	output := map[string]any{
 		"stderr": strings.Join([]string{
@@ -1476,6 +1533,11 @@ func TestRuntimeRepairActionPackageRequiresDirectPatchFromCurrentSnapshot(t *tes
 	}
 	if !strings.Contains(stringFromAny(required["sameGraphReadPatchRule"]), "do not put file/read before patch/apply") {
 		t.Fatalf("sameGraphReadPatchRule = %q, want read-before-patch prohibition", required["sameGraphReadPatchRule"])
+	}
+	readBeforePatchRule := stringFromAny(required["readBeforePatchRecoveryRule"])
+	if !strings.Contains(readBeforePatchRule, "do not output file/read-only evidence acquisition") ||
+		strings.Contains(readBeforePatchRule, "output a separate evidence acquisition step") {
+		t.Fatalf("readBeforePatchRecoveryRule = %q, want state-changing contract to forbid read-only acquisition", readBeforePatchRule)
 	}
 	if !strings.Contains(stringFromAny(required["patchApplyFieldRule"]), "text_replace requires") {
 		t.Fatalf("patchApplyFieldRule = %q, want patch field contract", required["patchApplyFieldRule"])

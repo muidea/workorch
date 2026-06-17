@@ -229,18 +229,24 @@ func primaryDiagnosticRepairContractForStep(step *runModel.Step) map[string]any 
 	if !stateChangingRepairContractActive(step) {
 		return nil
 	}
+	inputSignals := mapFromValue(step.Input["structuredFailureSignals"])
+	actionPackage := mapFromValue(step.Input["repairActionPackage"])
+	actionSignals := mapFromValue(actionPackage["structuredFailureSignals"])
+	if structuredFailureSignalsAreRuntimeContractOnly(inputSignals) ||
+		structuredFailureSignalsAreRuntimeContractOnly(actionSignals) {
+		return nil
+	}
 	if contract := mapFromValue(step.Input["primaryDiagnosticRepair"]); len(contract) > 0 {
 		return contract
 	}
-	actionPackage := mapFromValue(step.Input["repairActionPackage"])
 	if contract := mapFromValue(actionPackage["primaryDiagnosticRepair"]); len(contract) > 0 {
 		return contract
 	}
-	if signals := mapFromValue(step.Input["structuredFailureSignals"]); len(signals) > 0 {
-		return primaryDiagnosticRepairContractFromSignals(signals)
+	if len(inputSignals) > 0 {
+		return primaryDiagnosticRepairContractFromSignals(inputSignals)
 	}
-	if signals := mapFromValue(actionPackage["structuredFailureSignals"]); len(signals) > 0 {
-		return primaryDiagnosticRepairContractFromSignals(signals)
+	if len(actionSignals) > 0 {
+		return primaryDiagnosticRepairContractFromSignals(actionSignals)
 	}
 	return nil
 }

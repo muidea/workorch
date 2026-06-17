@@ -498,7 +498,7 @@ func applyCurrentSnapshotDirectPatchContract(requiredOutput map[string]any) {
 	requiredOutput["forbiddenStalePatchReuse"] = true
 	requiredOutput["sameGraphReadPatchRule"] = "when current target snapshots are provided, do not put file/read before patch/apply in the same executionGraph; patch/apply must use provided current snapshot content/hash, or return a real governance blocker if the snapshot is insufficient"
 	requiredOutput["patchApplyFieldRule"] = "patch/apply input must include complete literal fields for its patchType: text_replace requires targetRef, oldText, newText; file_write requires targetRef, non-empty content; unified_diff requires targetRef and a complete diff with explicit hunk ranges"
-	requiredOutput["readBeforePatchRecoveryRule"] = "if additional current content is required, output a separate evidence acquisition step rather than mixing same-turn file/read and patch/apply"
+	requiredOutput["readBeforePatchRecoveryRule"] = "when this state-changing contract already provides current target snapshots, do not output file/read-only evidence acquisition; use the provided snapshot for patch/apply, return a real governance blocker if it is insufficient, or wait for an explicit acquire_concrete_failure_evidence contract"
 	requiredOutput["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["forbiddenKinds"]),
 		"same_graph_file_read_before_patch",
 		"incomplete_patch_apply_input",

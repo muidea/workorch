@@ -445,6 +445,9 @@ func inheritCoverageRepairContext(input map[string]any, failedStep *runModel.Ste
 }
 
 func structuredFailureSignalsContainShapeConflict(signals map[string]any) bool {
+	if structuredFailureSignalsAreRuntimeContractOnly(signals) {
+		return false
+	}
 	for _, key := range []string{"messages", "identifiers"} {
 		for _, value := range stringSliceFromValue(signals[key]) {
 			if textContainsShapeConflictDiagnostic(value) {
@@ -486,6 +489,68 @@ func primaryDiagnosticRepairContractFromSignals(signals map[string]any) map[stri
 	}
 	if len(messages) > 0 {
 		ret["messages"] = limitedStrings(compactUniqueStrings(messages), 5)
+	}
+	return ret
+}
+
+func structuredFailureSignalsAreRuntimeContractOnly(signals map[string]any) bool {
+	if len(signals) == 0 || len(mapSliceFromValue(signals["lineRefs"])) > 0 {
+		return false
+	}
+	identifiers := lowerStringSet(stringSliceFromValue(signals["identifiers"]))
+	for _, externalClass := range []string{
+		failureClassShellCommand,
+		failureClassPatchApply,
+		failureClassMCPCapabilityDenied,
+		failureClassMCPRuntime,
+	} {
+		if identifiers[strings.ToLower(externalClass)] {
+			return false
+		}
+	}
+	messages := strings.ToLower(strings.Join(stringSliceFromValue(signals["messages"]), "\n"))
+	if messages == "" {
+		return false
+	}
+	if !(identifiers[failureClassRuntime] || identifiers[failureClassLLMDecisionInvalid]) {
+		return false
+	}
+	for _, marker := range []string{
+		"state-changing llm repair step returned",
+		"state-changing execution-stage llm graph node returned",
+		"executiongraph patch/apply input invalid",
+		"executiongraph patch/apply must not depend",
+		"patch/apply must not depend on same-graph file/read",
+		"patch text_replace oldtext/newtext must describe",
+		"oldtext/newtext must describe a substantive change",
+		"primary diagnostic repair requires patch/apply",
+		"strategyreassessment.required",
+		"invalid llm decision json",
+		"json: unknown field",
+		"concrete validation nodes must declare",
+		"validationevidence.",
+		"dodcoverage.",
+		"dodassessment.",
+		"repairactionpackage.",
+	} {
+		if strings.Contains(messages, marker) {
+			return true
+		}
+	}
+	if (identifiers["workspace_execution"] || identifiers["executiongraph"]) &&
+		(identifiers["llm_execution_graph_plan"] || identifiers["llm_schema_invalid"]) {
+		return true
+	}
+	return false
+}
+
+func lowerStringSet(values []string) map[string]bool {
+	ret := map[string]bool{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			ret[value] = true
+		}
 	}
 	return ret
 }
