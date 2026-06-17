@@ -338,6 +338,11 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		contract.GovernanceReason = firstNonEmptyString(stringFromMap(focus, "currentGap"), "coverage work item requires governance evidence")
 		return true
 	}
+	if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
+		populateProfileStateChangingEvidenceConvergenceContract(input, contract, pkg)
+		contract.RepairActionPackage[coverageWorkItemContextKey] = context
+		return true
+	}
 	if coverageWorkItemFocusReadyForAssessment(focus) &&
 		(!coverageFailureStepHasExplicitCoverageGap(failedStep) ||
 			!explicitCoverageGapShouldPreemptAssessment(input, failedStep)) {
@@ -886,7 +891,10 @@ func refreshConvergenceCoverageTargets(input map[string]any) {
 	if len(input) == 0 {
 		return
 	}
-	targets := coverageTargetSetFromRepairInput(input)
+	targets := mapSliceFromValue(input["coverageTargetSet"])
+	if len(targets) == 0 {
+		targets = coverageTargetSetFromRepairInput(input)
+	}
 	if len(targets) == 0 {
 		return
 	}
@@ -1757,9 +1765,9 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		return nil
 	}
 	refreshRepairStrategyReassessment(input)
-	targets := coverageTargetSetFromRepairInput(input)
+	targets := mapSliceFromValue(input["coverageTargetSet"])
 	if len(targets) == 0 {
-		targets = mapSliceFromValue(input["coverageTargetSet"])
+		targets = coverageTargetSetFromRepairInput(input)
 	}
 	if len(targets) == 0 {
 		targets = coverageTargetSetFromWorkItemContext(coverageWorkItemContextFromInput(input))
@@ -1863,7 +1871,8 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
 	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
-		primaryFocusCanStartWithoutTarget := coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input)))
+		primaryFocusCanStartWithoutTarget := coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) ||
+			coverageTargetsCanStartPrimaryStateChangeWithoutTargetEvidence(run, targets)
 		if !repairHasImplementationTargetEvidence(input, pkg) && !primaryFocusCanStartWithoutTarget {
 			return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
 		}
@@ -1882,6 +1891,15 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func coverageTargetsCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, targets []map[string]any) bool {
+	for _, target := range targets {
+		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func profileEvidenceRuntimeCapabilityGap(requirements []profileEvidenceKindRequirement) map[string]any {
@@ -2023,10 +2041,16 @@ func coverageTargetsRequirePrimaryStateChangingOutput(targets []map[string]any, 
 		return false
 	}
 	for _, target := range targets {
+		if coverageTargetClosedForPrimaryStateChange(target) {
+			continue
+		}
 		matched := false
 		for _, requirement := range filtered {
 			if evidenceKindRequirementMatchesCoverageTarget(requirement, target) {
 				matched = true
+				if normalizedCoverageEvidenceRole(requirement.EvidenceRole) == "primary_state_change" {
+					return true
+				}
 				break
 			}
 		}
@@ -2035,6 +2059,17 @@ func coverageTargetsRequirePrimaryStateChangingOutput(targets []map[string]any, 
 		}
 	}
 	return false
+}
+
+func coverageTargetClosedForPrimaryStateChange(target map[string]any) bool {
+	if len(target) == 0 {
+		return true
+	}
+	state := strings.TrimSpace(stringFromMap(target, "state"))
+	if state != "satisfied" && state != "evidence_ready" {
+		return false
+	}
+	return !stringSet(coverageMissingEvidenceKinds(target))["state_change"]
 }
 
 func coverageTargetEvidenceKindRequirements(run *runModel.Run, targets []map[string]any) []profileEvidenceKindRequirement {

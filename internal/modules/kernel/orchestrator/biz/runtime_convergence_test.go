@@ -898,6 +898,80 @@ func TestBuildConvergenceContractProfileRequiredEvidencePreemptsAssessmentOnlyCo
 	}
 }
 
+func TestBuildConvergenceContractProfilePrimaryTargetDoesNotDependOnCurrentFocus(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-profile-primary-target",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                "primary_output",
+							"scope":             "deliverable",
+							"evidenceRole":      "primary_state_change",
+							"acceptedStepKinds": []string{"patch/apply"},
+							"requireDirect":     true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveAcquireFailureEvidence,
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-ready-goal",
+				"sourceScope":           "goal_leaf",
+				"sourceRequirementId":   "goal-ready",
+				"targetText":            "already ready goal",
+				"status":                "evidence_ready",
+				"requiredEvidenceKinds": []string{"validation"},
+			},
+		},
+		"coverageTargetSet": []map[string]any{{
+			"kind":                  "deliverable",
+			"source":                "deliverableCoverage",
+			"sourceScope":           "deliverable",
+			"sourceRequirementId":   "primary_output",
+			"item":                  "primary_output",
+			"targetText":            "primary_output",
+			"coverageTargetToken":   "primary_output",
+			"evidenceRole":          "primary_state_change",
+			"requiredEvidenceKinds": []string{"validation", "state_change"},
+			"missingEvidenceKinds":  []string{"state_change"},
+		}},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-profile-primary-target/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid argument: profile primary state-changing evidence missing"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
+	if boolValue(required["stateChangingForbidden"]) {
+		t.Fatalf("requiredOutput = %+v, should allow profile primary state-changing output", required)
+	}
+	if !boolValue(required["mustIncludePrimaryStateChangingNode"]) ||
+		!boolValue(required["mustReferenceCoverageWorkItem"]) {
+		t.Fatalf("requiredOutput = %+v, want primary state-changing coverage contract", required)
+	}
+	if !boolValue(contract.RepairActionPackage["primaryStateChangeWithoutTargetEvidence"]) {
+		t.Fatalf("repairActionPackage = %+v, want primary target to permit state change without stale target snapshot evidence", contract.RepairActionPackage)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want profile accepted kind", required["acceptedKinds"])
+	}
+}
+
 func TestRuntimeRepairFollowUpProfileEvidenceKindFailurePreemptsAssessmentOnly(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-profile-evidence-kind-gap",

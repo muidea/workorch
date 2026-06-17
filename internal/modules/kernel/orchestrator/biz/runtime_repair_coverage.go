@@ -36,6 +36,9 @@ func doDCoverageContractCorrectionRequired(step *runModel.Step) bool {
 	if assessment == nil {
 		return false
 	}
+	if doDEvidenceQualityGapRequiresStateChange(step) {
+		return false
+	}
 	satisfied, ok := assessment["satisfied"].(bool)
 	if ok && satisfied {
 		return true
