@@ -508,6 +508,7 @@ func inheritRuntimeRepairGraphContract(input map[string]any, previousStep *runMo
 		return
 	}
 	setRuntimeStage(input, runtimeStageRepair)
+	preserveRuntimeContract := canonicalRuntimeGraphNodeKind(nodeKind) != llmWorkspaceExecutionStepKind
 	for _, key := range []string{
 		stepInputKeyRecoveryAction,
 		stepInputKeyRecoveryRootStepID,
@@ -518,11 +519,19 @@ func inheritRuntimeRepairGraphContract(input map[string]any, previousStep *runMo
 		"failureTargetScope",
 		"targetScope",
 		"repairActionPackage",
+		"patchRepairContext",
+		"failureTargetRepairContext",
+		"primaryDiagnosticRepair",
+		"structuredFailureSignals",
 		"repairObjective",
 		"stateChangingOutputRequired",
 	} {
 		if value, ok := previousStep.Input[key]; ok && input[key] == nil {
-			input[key] = compactLLMContextValue(value, 1)
+			if preserveRuntimeContract && runtimeGraphNodeRequiresFullRepairContract(key) {
+				input[key] = value
+			} else {
+				input[key] = compactLLMContextValue(value, 1)
+			}
 		}
 	}
 	if canonicalRuntimeGraphNodeKind(nodeKind) != llmWorkspaceExecutionStepKind {
@@ -531,6 +540,19 @@ func inheritRuntimeRepairGraphContract(input map[string]any, previousStep *runMo
 	input[stepInputKeyRuntimeRepairFollowUp] = true
 	if value, ok := previousStep.Input[stepInputKeyRuntimeRepairAttempt]; ok && input[stepInputKeyRuntimeRepairAttempt] == nil {
 		input[stepInputKeyRuntimeRepairAttempt] = value
+	}
+}
+
+func runtimeGraphNodeRequiresFullRepairContract(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "repairActionPackage",
+		"patchRepairContext",
+		"failureTargetRepairContext",
+		"primaryDiagnosticRepair",
+		"structuredFailureSignals":
+		return true
+	default:
+		return false
 	}
 }
 

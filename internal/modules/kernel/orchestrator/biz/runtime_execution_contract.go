@@ -369,9 +369,91 @@ func validateRuntimeRepairFailureDiagnosticsContract(step *runModel.Step) error 
 		stringFromMap(diagnostics, "failureClass"),
 		stringFromMap(diagnostics, "error"),
 	)) == "" {
+		if runtimeRepairFailureDiagnosticsOptionalForCoverageContinuation(step.Input) {
+			return nil
+		}
 		return fmt.Errorf("%w: state-changing runtime repair requires lastFailureDiagnostics or equivalent failedStepOutput diagnostics", common.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func runtimeRepairFailureDiagnosticsOptionalForCoverageContinuation(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if !boolValue(input["coverageRepairRequired"]) && !boolValue(pkg["coverageRepairRequired"]) {
+		return false
+	}
+	if runtimeRepairDiagnosticsHasSignal(mapFromValue(input["currentFailure"])) ||
+		runtimeRepairDiagnosticsHasSignal(mapFromValue(pkg["currentFailure"])) ||
+		runtimeRepairDiagnosticsHasSignal(mapFromValue(mapFromValue(input["currentProgressDigest"])["lastObservedFailure"])) ||
+		runtimeRepairDiagnosticsHasSignal(mapFromValue(mapFromValue(input["currentExecutionProgress"])["lastObservedFailure"])) ||
+		runtimeRepairDiagnosticsHasSignal(mapFromValue(mapFromValue(pkg["currentExecutionProgress"])["lastObservedFailure"])) {
+		return false
+	}
+	if !runtimeRepairProgressHasNoCurrentFailure(input) {
+		return false
+	}
+	return runtimeRepairInputHasUnresolvedCoverageTarget(input)
+}
+
+func runtimeRepairProgressHasNoCurrentFailure(input map[string]any) bool {
+	for _, progress := range []map[string]any{
+		mapFromValue(input["currentProgressDigest"]),
+		mapFromValue(input["currentExecutionProgress"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])["currentExecutionProgress"]),
+	} {
+		if len(progress) == 0 {
+			continue
+		}
+		if strings.TrimSpace(stringFromMap(progress, "currentGap")) == "none_observed_in_recent_process_evidence" &&
+			strings.TrimSpace(stringFromMap(progress, "nextRequiredAction")) == "continue_current_stage_contract" {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeRepairInputHasUnresolvedCoverageTarget(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if coverageTargetSetHasMissingEvidence(mapSliceFromValue(input["coverageTargetSet"])) {
+		return true
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	if coverageTargetSetHasMissingEvidence(mapSliceFromValue(pkg["coverageTargetSet"])) {
+		return true
+	}
+	if coverageWorkItemContextHasMissingEvidence(mapFromValue(input["coverageWorkItemContext"])) {
+		return true
+	}
+	return coverageWorkItemContextHasMissingEvidence(mapFromValue(pkg["coverageWorkItemContext"]))
+}
+
+func coverageTargetSetHasMissingEvidence(targets []map[string]any) bool {
+	for _, target := range targets {
+		if len(stringSliceFromValue(target["missingEvidenceKinds"])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageWorkItemContextHasMissingEvidence(context map[string]any) bool {
+	if len(context) == 0 {
+		return false
+	}
+	if len(stringSliceFromValue(mapFromValue(context["currentFocus"])["missingEvidenceKinds"])) > 0 {
+		return true
+	}
+	for _, item := range mapSliceFromValue(context["currentFocusItems"]) {
+		if len(stringSliceFromValue(item["missingEvidenceKinds"])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeRepairFailureDiagnosticsFromInput(input map[string]any) map[string]any {

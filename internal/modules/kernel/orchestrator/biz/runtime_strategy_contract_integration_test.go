@@ -1533,6 +1533,63 @@ func TestValidateLLMExecutionOutputContractRejectsMissingLastFailureDiagnosticsF
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsCoverageContinuationWithoutFailureDiagnostics(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-coverage-continuation-without-failure-diagnostics",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-coverage-continuation-without-failure-diagnostics/follow-up-repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"repairOfStepId":                  "run-coverage-continuation-without-failure-diagnostics/previous-invalid-graph",
+			"coverageRepairRequired":          true,
+			"coverageTargetSet": []map[string]any{{
+				"sourceRequirementId": "source_change",
+				"missingEvidenceKinds": []string{
+					"state_change",
+					"validation",
+				},
+			}},
+			"currentProgressDigest": map[string]any{
+				"currentGap":         "none_observed_in_recent_process_evidence",
+				"nextRequiredAction": "continue_current_stage_contract",
+			},
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "patch-target",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"targetRef":       "deliverable.txt",
+					"patchType":       "text_replace",
+					"oldText":         "old",
+					"newText":         "new",
+					"coverageTargets": []string{"source_change"},
+				},
+			}},
+		},
+	}
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want coverage continuation accepted without failure diagnostics", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsStateChangingRepairWithLastFailureDiagnostics(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-with-last-failure-diagnostics",

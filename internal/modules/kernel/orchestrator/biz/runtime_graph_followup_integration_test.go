@@ -177,6 +177,73 @@ func TestNextGraphStepInputPreservesRepairLineageForNonLLMGraphNodeWithoutBudget
 	}
 }
 
+func TestNextGraphStepInputPreservesFullRepairContractForPatchNode(t *testing.T) {
+	runID := common.RunID("run-graph-patch-full-repair-contract")
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-graph-patch-full-repair-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{
+		ID:   "fix-primary-diagnostic",
+		Kind: "patch/apply",
+		Input: map[string]any{
+			"patchType": "text_replace",
+			"targetRef": "main.go",
+			"oldText":   "\t\"strings\"\n",
+			"newText":   "",
+		},
+	}}}
+	primary := map[string]any{
+		"required":   true,
+		"targetRefs": []string{"main.go"},
+		"lineRefs": []map[string]any{{
+			"targetRef": "main.go",
+			"line":      11,
+		}},
+		"messages": []string{`./main.go:11:2: "strings" imported and not used`},
+	}
+	last := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRepairOfStepID:        string(runID) + "/graph-001/001-verify",
+			stepInputKeyRepairOfRootStepID:    string(runID) + "/graph-001/001-verify",
+			stepInputKeyRepairOfFailureClass:  failureClassShellCommand,
+			stepInputKeyRepairOfFailureSig:    "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1",
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"repairActionPackage": map[string]any{
+				"primaryDiagnosticRepair": primary,
+				"targetSnapshots": []map[string]any{{
+					"targetRef": "main.go",
+					"content": strings.Join([]string{
+						"package main",
+						"",
+						"import (",
+						"\t\"strings\"",
+						")",
+					}, "\n"),
+				}},
+			},
+		},
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+	}
+
+	input := nextGraphStepInput(run, last, graph, graph.Nodes[0], nil, "", []*runmodel.Step{last}, last.ID)
+	pkg := mapFromValue(input["repairActionPackage"])
+	inheritedPrimary := mapFromValue(pkg["primaryDiagnosticRepair"])
+	if refs := mapSliceFromValue(inheritedPrimary["lineRefs"]); len(refs) != 1 || intFromAny(refs[0]["line"]) != 11 {
+		t.Fatalf("primaryDiagnosticRepair.lineRefs = %+v, want full line refs inherited for patch/apply node", inheritedPrimary["lineRefs"])
+	}
+	if snapshots := mapSliceFromValue(pkg["targetSnapshots"]); len(snapshots) != 1 || stringFromMap(snapshots[0], "content") == "" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want full target snapshot inherited for patch/apply node", pkg["targetSnapshots"])
+	}
+}
+
 func TestGraphLLMNodeInputIncludesDependencyOutput(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-graph-dependency-output",
