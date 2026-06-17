@@ -1467,6 +1467,10 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	if len(snapshots) > 0 {
 		probe["failureTargetRepairContext"] = snapshots
 	}
+	if diagnostics := concreteFailureEvidenceAcquisitionDiagnostics(source.Input, sourcePackage); len(diagnostics) > 0 {
+		probe["lastFailureDiagnostics"] = diagnostics
+		sourcePackage["lastFailureDiagnostics"] = diagnostics
+	}
 	evidenceSignals := structuredFailureSignalsFromConcreteFailureEvidence(evidence)
 	if len(evidenceSignals) > 0 {
 		probe["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(probe["structuredFailureSignals"]), evidenceSignals)
@@ -1489,6 +1493,9 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	)
 	if len(evidence) > 0 {
 		input["concreteFailureEvidence"] = compactLLMContextValue(evidence, 1)
+	}
+	if diagnostics := mapFromValue(actionPackage["lastFailureDiagnostics"]); len(diagnostics) > 0 {
+		input["lastFailureDiagnostics"] = diagnostics
 	}
 	if len(snapshots) > 0 {
 		input["failureTargetRepairContext"] = snapshots
@@ -1515,6 +1522,21 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	contract := BuildConvergenceContract(nil, nil, source, map[string]any{"input": input}, map[string]any{"sourceRef": string(source.ID)})
 	input = ApplyConvergenceContract(input, contract)
 	return input
+}
+
+func concreteFailureEvidenceAcquisitionDiagnostics(input map[string]any, sourcePackage map[string]any) map[string]any {
+	for _, candidate := range []map[string]any{
+		mapFromValue(input["lastFailureDiagnostics"]),
+		mapFromValue(mapFromValue(input["failedStepOutput"])["lastFailureDiagnostics"]),
+		mapFromValue(input["failedStepOutput"]),
+		mapFromValue(sourcePackage["lastFailureDiagnostics"]),
+		mapFromValue(sourcePackage["currentFailure"]),
+	} {
+		if runtimeRepairDiagnosticsHasSignal(candidate) {
+			return compactFailureStepOutputForRuntimeContext(candidate)
+		}
+	}
+	return nil
 }
 
 func stepRequiresConcreteFailureEvidenceAcquisition(step *runModel.Step) bool {

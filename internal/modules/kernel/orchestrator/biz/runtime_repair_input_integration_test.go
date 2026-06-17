@@ -619,6 +619,81 @@ func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedFailedPatc
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairInputDetectsAlreadySatisfiedTextReplacePatch(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	deliverableDirectory := t.TempDir()
+	source := "alpha\nnew value\nomega\n"
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "source.txt"), []byte(source), 0o644); err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+	workspaceID := common.WorkspaceID("ws-text-replace-already-satisfied")
+	runID := common.RunID("run-text-replace-already-satisfied")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	orch := &RuntimeOrchestrator{workspaces: workspaceRepo, steps: memory.NewStepRepository()}
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/graph-003/001-apply-replacement"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "source.txt",
+			"patchType": "text_replace",
+			"oldText":   "old value",
+			"newText":   "new value",
+		},
+		Output: map[string]any{
+			"status":                  "completed",
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch text_replace oldText not found",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|targetRef=source.txt|error=oldText not found",
+			"patches": []map[string]any{{
+				"targetRef": "source.txt",
+				"patchType": "text_replace",
+				"oldText":   "old value",
+				"newText":   "new value",
+			}},
+		},
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+		},
+	}, failedStep, 1, common.ErrConflict)
+
+	signals := mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])
+	if len(signals) != 1 {
+		t.Fatalf("currentTargetAlreadySatisfiesFailedPatch = %#v, want one text_replace signal", input["currentTargetAlreadySatisfiesFailedPatch"])
+	}
+	if signals[0]["targetRef"] != "source.txt" || signals[0]["patchType"] != "text_replace" || signals[0]["safeForValidation"] != true {
+		t.Fatalf("already satisfied text_replace signal = %#v, want neutral validation signal", signals[0])
+	}
+	if input["stateChangeAlreadySatisfiedByCurrentTarget"] != true {
+		t.Fatalf("stateChangeAlreadySatisfiedByCurrentTarget = %#v, want true", input["stateChangeAlreadySatisfiedByCurrentTarget"])
+	}
+	if input["stateChangingOutputRequired"] == true {
+		t.Fatalf("stateChangingOutputRequired = true, want validation path for already-satisfied patch")
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want need_validation for already-satisfied text_replace patch", contract)
+	}
+	actionPackage := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(actionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != false || required["mustProduceConcreteValidationEvidence"] != true {
+		t.Fatalf("repairActionPackage.requiredOutput = %#v, want validation evidence package", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(actionPackage["forbiddenActions"]), "repeat_same_failed_patch") {
+		t.Fatalf("repairActionPackage.forbiddenActions = %#v, want repeat_same_failed_patch", actionPackage["forbiddenActions"])
+	}
+}
+
 func TestRuntimeOrchestrator_RuntimeRepairInputIncludesLineRemovalPatchSuggestion(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

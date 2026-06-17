@@ -68,13 +68,20 @@ func (r *repairSubsystem) runtimeRepairPatchSuggestions(ctx context.Context, run
 		if len(ret) >= 5 {
 			break
 		}
-		if request.PatchType != "unified_diff" || strings.TrimSpace(request.Diff) == "" {
-			continue
-		}
 		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
 			continue
 		}
-		ret = append(ret, patchRepairSuggestionsForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff)...)
+		switch request.PatchType {
+		case "unified_diff":
+			if strings.TrimSpace(request.Diff) == "" {
+				continue
+			}
+			ret = append(ret, patchRepairSuggestionsForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff)...)
+		case "text_replace":
+			if suggestion := patchRepairSuggestionForTextReplace(workspace.DeliverableDirectory, request); len(suggestion) > 0 {
+				ret = append(ret, suggestion)
+			}
+		}
 	}
 	if len(ret) > 5 {
 		return ret[:5]
@@ -107,14 +114,21 @@ func (r *repairSubsystem) runtimeRepairPatchAlreadySatisfiedSignals(ctx context.
 		if len(ret) >= 3 {
 			break
 		}
-		if request.PatchType != "unified_diff" || strings.TrimSpace(request.Diff) == "" {
-			continue
-		}
 		if len(allowedTargets) > 0 && !allowedTargets[request.TargetRef] {
 			continue
 		}
-		if signal := patchRepairAlreadySatisfiedSignalForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff); len(signal) > 0 {
-			ret = append(ret, signal)
+		switch request.PatchType {
+		case "unified_diff":
+			if strings.TrimSpace(request.Diff) == "" {
+				continue
+			}
+			if signal := patchRepairAlreadySatisfiedSignalForDiff(workspace.DeliverableDirectory, request.TargetRef, request.Diff); len(signal) > 0 {
+				ret = append(ret, signal)
+			}
+		case "text_replace":
+			if signal := patchRepairAlreadySatisfiedSignalForTextReplace(workspace.DeliverableDirectory, request); len(signal) > 0 {
+				ret = append(ret, signal)
+			}
 		}
 	}
 	return ret
@@ -1000,6 +1014,7 @@ func patchRepairRequestsFromStep(step *runModel.Step) []runtimePatchRequest {
 		return nil
 	}
 	var ret []runtimePatchRequest
+	seen := map[string]bool{}
 	add := func(value map[string]any) {
 		if len(value) == 0 {
 			return
@@ -1014,6 +1029,11 @@ func patchRepairRequestsFromStep(step *runModel.Step) []runtimePatchRequest {
 		if err != nil {
 			return
 		}
+		key := patchRepairRequestKey(request)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
 		ret = append(ret, request)
 	}
 	add(step.Input)
@@ -1031,6 +1051,17 @@ func patchRepairRequestsFromStep(step *runModel.Step) []runtimePatchRequest {
 		}
 	}
 	return ret
+}
+
+func patchRepairRequestKey(request runtimePatchRequest) string {
+	return strings.Join([]string{
+		normalizeRepairPatchTargetRef(request.TargetRef),
+		strings.TrimSpace(request.PatchType),
+		request.Diff,
+		request.OldText,
+		request.NewText,
+		request.Content,
+	}, "\x00")
 }
 
 func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string, diff string) []map[string]any {
@@ -1084,6 +1115,39 @@ func patchRepairSuggestionsForDiff(deliverableDirectory string, targetRef string
 	return ret
 }
 
+func patchRepairSuggestionForTextReplace(deliverableDirectory string, request runtimePatchRequest) map[string]any {
+	if strings.TrimSpace(request.TargetRef) == "" || request.PatchType != "text_replace" || request.OldText == "" {
+		return nil
+	}
+	if containsRuntimeRedactionMarker(request.OldText) || containsRuntimeRedactionMarker(request.NewText) {
+		return nil
+	}
+	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || patchRepairLooksBinary(data) {
+		return nil
+	}
+	content := string(data)
+	matchCount := strings.Count(content, request.OldText)
+	if matchCount != 1 {
+		return nil
+	}
+	return map[string]any{
+		"targetRef":      request.TargetRef,
+		"patchType":      "text_replace",
+		"oldText":        request.OldText,
+		"newText":        request.NewText,
+		"contentHash":    sha256HexBytes(data),
+		"matchCount":     matchCount,
+		"source":         "current_text_replace_match",
+		"guidance":       "Use this exact current oldText/newText replacement with the current contentHash; do not retry stale baseHash or altered oldText.",
+		"safeForMinimal": true,
+	}
+}
+
 func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targetRef string, diff string) map[string]any {
 	target, err := workspaceTargetPath(deliverableDirectory, targetRef)
 	if err != nil {
@@ -1118,6 +1182,45 @@ func patchRepairAlreadySatisfiedSignalForDiff(deliverableDirectory string, targe
 		}
 	}
 	return nil
+}
+
+func patchRepairAlreadySatisfiedSignalForTextReplace(deliverableDirectory string, request runtimePatchRequest) map[string]any {
+	if strings.TrimSpace(request.TargetRef) == "" || request.PatchType != "text_replace" || request.OldText == "" {
+		return nil
+	}
+	if containsRuntimeRedactionMarker(request.OldText) || containsRuntimeRedactionMarker(request.NewText) {
+		return nil
+	}
+	target, err := workspaceTargetPath(deliverableDirectory, request.TargetRef)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || patchRepairLooksBinary(data) {
+		return nil
+	}
+	content := string(data)
+	if strings.Contains(content, request.OldText) {
+		return nil
+	}
+	newText := request.NewText
+	newTextSatisfied := strings.TrimSpace(newText) == "" || strings.Contains(content, newText)
+	if !newTextSatisfied {
+		return nil
+	}
+	return map[string]any{
+		"targetRef":          request.TargetRef,
+		"patchType":          "text_replace",
+		"contentHash":        sha256HexBytes(data),
+		"oldTextHash":        sha256HexBytes([]byte(request.OldText)),
+		"newTextHash":        sha256HexBytes([]byte(request.NewText)),
+		"safeForValidation":  true,
+		"reason":             "current_target_already_matches_failed_patch_intent",
+		"guidance":           "The current target snapshot already reflects the failed text replacement intent. Do not repeat the stale patch; run bounded concrete validation or return a real governance blocker.",
+		"mechanicalSignal":   true,
+		"businessJudgment":   false,
+		"matchedCurrentFile": true,
+	}
 }
 
 func patchRepairChangedLines(filePatch unifiedDiffFilePatch) (added []string, deleted []string) {

@@ -30,6 +30,9 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 	if graphHasUngatedStateChangingEvidenceNode(graph) {
 		return nil
 	}
+	if allowDeclaredToolStateChangingRepairGraph(step, graph) {
+		return nil
+	}
 	if hasStateChangingLLMExecutionOutput(output) {
 		return nil
 	}

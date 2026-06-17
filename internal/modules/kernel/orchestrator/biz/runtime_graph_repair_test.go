@@ -509,6 +509,68 @@ func TestEvidenceAcquisitionFollowUpCopiesFollowUpProgressIntoRepairActionPackag
 	}
 }
 
+func TestEvidenceAcquisitionFollowUpPreservesLastFailureDiagnostics(t *testing.T) {
+	runID := common.RunID("run-evidence-follow-up-diagnostics")
+	source := &runModel.Step{
+		ID:    common.StepID(runID + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"failedStepOutput": map[string]any{
+				"error":        "exit status 1",
+				"failureClass": failureClassShellCommand,
+				"lastFailureDiagnostics": map[string]any{
+					"failureClass":  failureClassShellCommand,
+					"error":         "exit status 1",
+					"stderrPreview": "target.txt:12:3: expected value",
+					"stdoutPreview": "failed",
+					"stepId":        string(runID) + "/graph-001/002-verify",
+					"stepKind":      "shell/command",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+					"acceptedKinds":                      []string{"file/read"},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		"workspaceId": string(common.WorkspaceID("ws-evidence-follow-up-diagnostics")),
+	}
+	evidence := []map[string]any{{
+		"kind":   "file/read",
+		"stepId": string(runID) + "/graph-001/001-read-target",
+		"output": map[string]any{
+			"stage":       "file_read",
+			"status":      "completed",
+			"path":        "target.txt",
+			"exists":      true,
+			"content":     "current content",
+			"contentHash": "hash-current",
+			"size":        15,
+			"truncated":   false,
+		},
+	}}
+
+	out := restoreRepairContractAfterConcreteEvidenceAcquisition(input, source, evidence)
+	topLevel := mapFromValue(out["lastFailureDiagnostics"])
+	if !strings.Contains(stringFromMap(topLevel, "stderrPreview"), "target.txt:12:3") {
+		t.Fatalf("lastFailureDiagnostics = %+v, want stderr preview preserved", topLevel)
+	}
+	pkg := mapFromValue(out["repairActionPackage"])
+	pkgDiagnostics := mapFromValue(pkg["lastFailureDiagnostics"])
+	if !strings.Contains(stringFromMap(pkgDiagnostics, "stderrPreview"), "target.txt:12:3") {
+		t.Fatalf("repairActionPackage.lastFailureDiagnostics = %+v, want stderr preview preserved", pkgDiagnostics)
+	}
+	if out["repairObjective"] != repairObjectiveStateChangingOutput || out["stateChangingOutputRequired"] != true {
+		t.Fatalf("follow-up contract = %+v, want state-changing repair", out)
+	}
+}
+
 func TestEvidenceAcquisitionFollowUpRestoresCurrentFailureFromRepairOfScope(t *testing.T) {
 	runID := common.RunID("run-evidence-follow-up-repair-of-scope")
 	source := &runModel.Step{

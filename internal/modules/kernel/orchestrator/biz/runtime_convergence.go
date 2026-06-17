@@ -1311,6 +1311,12 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
 			pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
 		}
+		if satisfied := mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"]); len(satisfied) > 0 {
+			pkg["currentTargetAlreadySatisfiesFailedPatch"] = satisfied
+			pkg["stateChangeAlreadySatisfiedByCurrentTarget"] = true
+			required["forbiddenKinds"] = compactUniqueStrings(append(stringSliceFromValue(required["forbiddenKinds"]), "repeat_same_failed_patch"))
+			pkg["forbiddenActions"] = repairActionForbiddenActions(input, pkg)
+		}
 		pkg["requiredOutput"] = required
 		stripRepairActionPackageImplementationTargetEvidence(pkg)
 		input["repairActionPackage"] = pkg

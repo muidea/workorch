@@ -2003,6 +2003,71 @@ func TestValidateLLMFollowUpGraphAllowsConcreteFailureEvidenceAcquisitionGraph(t
 	}
 }
 
+func TestValidateLLMFollowUpGraphAllowsDeclaredToolStateChangingRepairGraph(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-declared-tool-state-change",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:    "run-declared-tool-state-change/follow-up",
+		RunID: "run-declared-tool-state-change",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":               true,
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			"failedStepId":                "run-declared-tool-state-change/graph-001/001-verify",
+			"lastFailureDiagnostics": map[string]any{
+				"failureClass":   failureClassShellCommand,
+				"failureTargets": []string{"target.txt"},
+				"error":          "target state is stale",
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds":                  []string{"shell/command", "mcp/tool_call"},
+					"mustIncludeStateChangingNode":   true,
+					"mustProduceStateChangingOutput": true,
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+			{
+				ID:   "materialize-target-state",
+				Kind: "shell/command",
+				Input: map[string]any{
+					"command":               "sh",
+					"args":                  []string{"-c", "printf '%s\\n' refreshed > target.txt"},
+					"stateChanging":         true,
+					"targetRef":             "target.txt",
+					"stateChangingReason":   "refresh derived workspace state from current inputs",
+					"relatedFailureTargets": []string{"target.txt"},
+				},
+			},
+			{
+				ID:        "verify-target-state",
+				Kind:      "shell/command",
+				DependsOn: []string{"materialize-target-state"},
+				Input: map[string]any{
+					"command":               "sh",
+					"args":                  []string{"-c", "test -s target.txt"},
+					"targetRef":             "target.txt",
+					"verificationScope":     "target.txt",
+					"boundedReason":         "verify the declared state-changing target only",
+					"relatedFailureTargets": []string{"target.txt"},
+				},
+			},
+		}},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validate declared tool state-changing repair graph: %v", err)
+	}
+}
+
 func TestValidateLLMFollowUpGraphRejectsPatchDuringConcreteFailureEvidenceAcquisition(t *testing.T) {
 	step := &runmodel.Step{
 		ID:    "run-evidence/follow-up",
