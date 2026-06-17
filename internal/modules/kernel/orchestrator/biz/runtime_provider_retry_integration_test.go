@@ -17,6 +17,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
 )
 
@@ -2097,7 +2098,7 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 		runRepo,
 		stepRepo,
 		workspaceRepo,
-		ticketRepo,
+		decisionOwnerEventingTicketRepository{delegate: ticketRepo, hub: hub},
 		nil,
 		memory.NewApprovalRepository(),
 		RuntimeEvidenceRepositories{Results: resultRepo},
@@ -2157,4 +2158,56 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionWritesRejectedResultBeforeTi
 	if !resultVisibleAtTicketEvent {
 		t.Fatalf("rejected result was not visible when repair exhausted ticket event was published")
 	}
+}
+
+type decisionOwnerEventingTicketRepository struct {
+	delegate repository.DecisionTicketRepository
+	hub      events.Hub
+}
+
+func (r decisionOwnerEventingTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+	if r.delegate == nil || item == nil {
+		return common.ErrInvalidArgument
+	}
+	if err := r.delegate.Create(ctx, item); err != nil {
+		return err
+	}
+	if r.hub == nil {
+		return nil
+	}
+	return r.hub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        decisionevents.TopicTicketCreated,
+		SourceModule: decisioncommon.ModuleID,
+		SubjectType:  "decision_ticket",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		StepID:       string(item.StepID),
+		Payload:      events.DecisionTicketPayload(item.Reason, item.State),
+	})
+}
+
+func (r decisionOwnerEventingTicketRepository) Get(ctx context.Context, id common.TicketID) (*decisionmodel.Ticket, error) {
+	return r.delegate.Get(ctx, id)
+}
+
+func (r decisionOwnerEventingTicketRepository) List(ctx context.Context) ([]*decisionmodel.Ticket, error) {
+	return r.delegate.List(ctx)
+}
+
+func (r decisionOwnerEventingTicketRepository) ListByRunID(ctx context.Context, runID common.RunID) ([]*decisionmodel.Ticket, error) {
+	return r.delegate.ListByRunID(ctx, runID)
+}
+
+func (r decisionOwnerEventingTicketRepository) ListByWorkspaceID(ctx context.Context, workspaceID common.WorkspaceID) ([]*decisionmodel.Ticket, error) {
+	return r.delegate.ListByWorkspaceID(ctx, workspaceID)
+}
+
+func (r decisionOwnerEventingTicketRepository) Update(ctx context.Context, item *decisionmodel.Ticket) error {
+	return r.delegate.Update(ctx, item)
+}
+
+func (r decisionOwnerEventingTicketRepository) Delete(ctx context.Context, id common.TicketID) error {
+	return r.delegate.Delete(ctx, id)
 }

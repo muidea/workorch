@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
-
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
@@ -340,17 +338,6 @@ func TestRuntimeOrchestrator_StartRunBlocksOnDecisionWhenRuntimeRequestsDecision
 		t.Fatalf("step2 err = %v, want not found", err)
 	}
 
-	published := hub.Published()
-	foundTicketCreated := false
-	for _, envelope := range published {
-		if envelope.Topic == decisionevents.TopicTicketCreated && envelope.SubjectID == "ticket-runtime-block" {
-			foundTicketCreated = true
-			break
-		}
-	}
-	if !foundTicketCreated {
-		t.Fatalf("published events = %#v, want ticket created event", published)
-	}
 }
 
 func TestRuntimeOrchestrator_ResumeRunContinuesFromNextStepAfterRuntimeDecisionResolved(t *testing.T) {

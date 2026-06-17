@@ -125,6 +125,79 @@ func TestDoDRequiredEvidenceHintStaysProfileNeutral(t *testing.T) {
 	}
 }
 
+func TestCompleteDoDAssessmentDeliverableCoverageSkipsProfileEvidenceRequiredDeliverable(t *testing.T) {
+	run := &runModel.Run{
+		ID: "run-deliverable-evidence-required",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":       "source_change",
+							"required": true,
+						}},
+						"evidenceRequirements": []map[string]any{{
+							"id":                "source_change",
+							"scope":             "deliverable",
+							"acceptedStepKinds": []string{"patch/apply"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runModel.Step{ID: "run-deliverable-evidence-required/assessment", RunID: run.ID}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{{
+			"item":         "goal is covered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(step.ID)},
+		}},
+	}
+
+	completed := completeDoDAssessmentDeliverableCoverageForRun(assessment, run, step)
+	if items := deliverableCoverageItemsFromAssessment(completed); len(items) != 0 {
+		t.Fatalf("deliverableCoverage items = %+v, want no auto-derived satisfied item for profile evidence requirement", items)
+	}
+	if err := validateDoDAssessmentCoversRequiredDeliverables(run, completed); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("validateDoDAssessmentCoversRequiredDeliverables err = %v, want missing deliverable gap", err)
+	}
+}
+
+func TestCompleteDoDAssessmentDeliverableCoverageAutoCompletesUnrestrictedDeliverable(t *testing.T) {
+	run := &runModel.Run{
+		ID: "run-deliverable-unrestricted",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":       "summary_artifact",
+							"required": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	step := &runModel.Step{ID: "run-deliverable-unrestricted/assessment", RunID: run.ID}
+	assessment := map[string]any{
+		"satisfied": true,
+		"items": []map[string]any{{
+			"item":         "goal is covered",
+			"state":        "satisfied",
+			"evidenceRefs": []string{string(step.ID)},
+		}},
+	}
+
+	completed := completeDoDAssessmentDeliverableCoverageForRun(assessment, run, step)
+	items := deliverableCoverageItemsFromAssessment(completed)
+	if len(items) != 1 || items[0]["id"] != "summary_artifact" || stringSliceFromValue(items[0]["evidenceRefs"])[0] != string(step.ID) {
+		t.Fatalf("deliverableCoverage items = %+v, want auto-derived unrestricted deliverable", items)
+	}
+}
+
 func TestEvidenceRefsFromValueSplitsCommaSeparatedRefs(t *testing.T) {
 	refs := evidenceRefsFromValue([]any{
 		"run-001/graph-001/verify-binary, run-001/graph-001/verify-tests",

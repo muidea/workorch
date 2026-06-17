@@ -7,7 +7,6 @@ import (
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
-	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -582,20 +581,7 @@ func (o *RuntimeOrchestrator) createDecisionTicket(
 	if err := o.tickets.Create(ctx, ticket); err != nil {
 		return err
 	}
-	if o.eventHub == nil {
-		return nil
-	}
-	return o.eventHub.Publish(ctx, events.Envelope{
-		Version:      events.WorkorchEventVersion,
-		Topic:        decisionevents.TopicTicketCreated,
-		SourceModule: modulecommon.ModuleID,
-		SubjectType:  "decision_ticket",
-		SubjectID:    string(ticket.ID),
-		WorkspaceID:  string(ticket.WorkspaceID),
-		RunID:        string(ticket.RunID),
-		StepID:       string(ticket.StepID),
-		Payload:      events.DecisionTicketPayload(ticket.Reason, ticket.State),
-	})
+	return nil
 }
 
 func (o *RuntimeOrchestrator) createApproval(

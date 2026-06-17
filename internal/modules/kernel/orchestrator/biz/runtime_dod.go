@@ -350,14 +350,24 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		}
 		existing[id] = true
 	}
-	missing := make([]string, 0)
+	missing := make([]requiredProfileDeliverableExpectation, 0)
 	for _, expectation := range required {
 		id := expectation.ID
 		if !existing[id] {
-			missing = append(missing, id)
+			missing = append(missing, expectation)
 		}
 	}
 	if len(missing) == 0 {
+		return assessment
+	}
+	autoCompletable := make([]requiredProfileDeliverableExpectation, 0, len(missing))
+	for _, expectation := range missing {
+		if profileDeliverableExpectationHasEvidenceRequirement(run, expectation.ID) {
+			continue
+		}
+		autoCompletable = append(autoCompletable, expectation)
+	}
+	if len(autoCompletable) == 0 {
 		return assessment
 	}
 	if coverageKey == "" {
@@ -375,11 +385,12 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 		}
 	}
 
-	completed := make([]map[string]any, 0, len(items)+len(missing))
+	completed := make([]map[string]any, 0, len(items)+len(autoCompletable))
 	for _, item := range items {
 		completed = append(completed, item)
 	}
-	for _, id := range missing {
+	for _, expectation := range autoCompletable {
+		id := expectation.ID
 		completed = append(completed, map[string]any{
 			"id":           id,
 			"item":         id,
@@ -394,6 +405,31 @@ func completeDoDAssessmentDeliverableCoverageForRun(assessment map[string]any, r
 	normalizedAssessment := cloneStepPayload(assessment)
 	normalizedAssessment[coverageKey] = coverage
 	return normalizedAssessment
+}
+
+func profileDeliverableExpectationHasEvidenceRequirement(run *runModel.Run, id string) bool {
+	id = strings.TrimSpace(id)
+	if run == nil || id == "" {
+		return false
+	}
+	item := map[string]any{"id": id, "item": id, "deliverable": id}
+	for _, requirement := range profileEvidenceKindRequirements(run) {
+		if normalizeEvidenceKindRequirementScope(requirement.Scope) != "deliverable" {
+			continue
+		}
+		if !evidenceKindRequirementMatchesItem(requirement, item) {
+			continue
+		}
+		if len(requirement.AcceptedStepKinds) > 0 ||
+			len(requirement.AcceptedOperations) > 0 ||
+			len(requirement.RejectedStepKinds) > 0 ||
+			requirement.RequireDirect ||
+			requirement.RequireClaimEvidence ||
+			requirement.RequireExecutableBehaviorEvidence {
+			return true
+		}
+	}
+	return false
 }
 
 func doDAssessmentStructurallySatisfiedExceptDeliverableCoverage(assessment map[string]any) bool {
