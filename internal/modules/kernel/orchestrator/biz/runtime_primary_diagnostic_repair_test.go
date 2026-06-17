@@ -211,6 +211,73 @@ func TestValidateLLMExecutionOutputContractAllowsTextReplacePrimaryDiagnosticPat
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsTextReplaceDeletingPrimaryDiagnosticLine(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-primary-diagnostic-text-replace-delete-line",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := primaryDiagnosticRepairStep("run-primary-diagnostic-text-replace-delete-line/repair-001")
+	step.Input["failureTargetScope"] = "failureTargets=main.go"
+	step.Input[stepInputKeyRepairOfFailureSig] = "class=shell_command_failed|kind=shell/command|failureTargets=main.go|exitCode=1"
+	step.Input["failureTargetRepairContext"] = []map[string]any{{
+		"targetRef":        "main.go",
+		"exists":           true,
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"content": strings.Join([]string{
+			"package main",
+			"",
+			"import (",
+			"\t\"bufio\"",
+			"\t\"context\"",
+			"\t\"encoding/json\"",
+			"\t\"fmt\"",
+			"\t\"log\"",
+			"\t\"os\"",
+			"\t\"os/exec\"",
+			"\t\"strings\"",
+			"\t\"sync\"",
+			"\t\"time\"",
+			")",
+		}, "\n"),
+	}}
+	step.Input["primaryDiagnosticRepair"] = map[string]any{
+		"required":    true,
+		"targetRefs":  []string{"main.go"},
+		"lineRefs":    []map[string]any{{"targetRef": "main.go", "line": 11, "column": 2}},
+		"identifiers": []string{"strings"},
+		"messages":    []string{`./main.go:11:2: "strings" imported and not used`},
+	}
+	step.Input["repairActionPackage"] = map[string]any{
+		"primaryDiagnosticRepair": step.Input["primaryDiagnosticRepair"],
+		"targetSnapshots": []map[string]any{{
+			"targetRef": "main.go",
+			"content":   mapSliceFromValue(step.Input["failureTargetRepairContext"])[0]["content"],
+		}},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "remove-unused-import",
+				"kind": "patch/apply",
+				"input": map[string]any{
+					"patchType": "text_replace",
+					"targetRef": "main.go",
+					"oldText":   "\t\"strings\"\n",
+					"newText":   "",
+					"summary":   `remove unused "strings" import reported by the primary diagnostic`,
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want text_replace deletion on primary diagnostic line allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsImportPatchForLinePayloadShortIdentifier(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-primary-diagnostic-line-payload-import",

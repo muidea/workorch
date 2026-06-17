@@ -266,6 +266,9 @@ func primaryDiagnosticPatchRequestAddressesContract(step *runModel.Step, request
 	if primaryDiagnosticRequestDiffOverlapsLineRefs(request, lineRefs) {
 		return true
 	}
+	if primaryDiagnosticRequestTextReplaceOverlapsLineRefs(step, request, lineRefs) {
+		return true
+	}
 	if primaryDiagnosticRequestFileWriteChangesLineRefs(step, request, lineRefs) {
 		return true
 	}
@@ -490,6 +493,58 @@ func primaryDiagnosticHunkOverlapsLine(hunk unifiedDiffHunk, line int) bool {
 	start := hunk.OldStart - margin
 	end := hunk.OldStart + oldLineCount + margin
 	return line >= start && line <= end
+}
+
+func primaryDiagnosticRequestTextReplaceOverlapsLineRefs(step *runModel.Step, request runtimePatchRequest, lineRefs []map[string]any) bool {
+	if strings.TrimSpace(request.PatchType) != "text_replace" || len(lineRefs) == 0 || request.OldText == "" {
+		return false
+	}
+	for _, ref := range lineRefs {
+		targetRef := stringFromMap(ref, "targetRef")
+		if !repairPatchTargetRefMatches(request.TargetRef, []string{targetRef}) {
+			continue
+		}
+		line := intFromAny(ref["line"])
+		if line <= 0 {
+			continue
+		}
+		content, ok := currentRepairSnapshotContentForTarget(step, targetRef)
+		if !ok {
+			continue
+		}
+		if primaryDiagnosticTextReplaceTouchesLine(content, request.OldText, line) {
+			return true
+		}
+	}
+	return false
+}
+
+func primaryDiagnosticTextReplaceTouchesLine(content string, oldText string, oneBasedLine int) bool {
+	if content == "" || oldText == "" || oneBasedLine <= 0 {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(content[start:], oldText)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		lineStart := 1 + strings.Count(content[:idx], "\n")
+		lineCount := strings.Count(oldText, "\n") + 1
+		if strings.HasSuffix(oldText, "\n") && lineCount > 1 {
+			lineCount--
+		}
+		const margin = 1
+		lineEnd := lineStart + lineCount - 1
+		if oneBasedLine >= lineStart-margin && oneBasedLine <= lineEnd+margin {
+			return true
+		}
+		start = idx + 1
+		if start >= len(content) {
+			return false
+		}
+	}
 }
 
 func primaryDiagnosticRequestFileWriteChangesLineRefs(step *runModel.Step, request runtimePatchRequest, lineRefs []map[string]any) bool {
