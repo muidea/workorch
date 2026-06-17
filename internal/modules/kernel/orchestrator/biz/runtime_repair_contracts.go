@@ -218,6 +218,12 @@ func runtimeRepairShouldReturnToRejectedResultContinuation(run *runModel.Run, fa
 	if len(mapFromValue(run.ExecutionContext["rejectedResultContinuation"])) == 0 {
 		return false
 	}
+	if strings.TrimSpace(string(failedStep.Kind)) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if runtimeRepairInputHasCurrentTargetSnapshotEvidence(failedStep.Input) {
+		return false
+	}
 	failedInputContext := mapFromValue(failedStep.Input["executionContext"])
 	if len(mapFromValue(failedInputContext["rejectedResultContinuation"])) == 0 {
 		return false
@@ -251,6 +257,30 @@ func runtimeRepairShouldReturnToRejectedResultContinuation(run *runModel.Run, fa
 	}
 	for _, target := range failedTargets {
 		if targetSet[normalizeRepairPatchTargetRef(target)] {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeRepairInputHasCurrentTargetSnapshotEvidence(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"failureTargetRepairContext",
+		"patchRepairContext",
+		"readableResourceRepairContext",
+		"rootCauseCandidateContext",
+		"resourceShapeAlignmentContext",
+	} {
+		if repairContextHasAdmissibleTargetEvidence(input[key]) {
+			return true
+		}
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	for _, key := range []string{"targetSnapshots", "currentTargetSnapshots", "rootCauseCandidateContext", "resourceShapeAlignmentContext"} {
+		if repairContextHasAdmissibleTargetEvidence(pkg[key]) {
 			return true
 		}
 	}

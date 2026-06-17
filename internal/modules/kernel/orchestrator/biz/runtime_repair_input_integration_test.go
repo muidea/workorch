@@ -1552,6 +1552,161 @@ func TestRuntimeOrchestrator_RuntimeRepairReturnsToRejectedContinuationAfterHist
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeRepairKeepsCurrentPatchFailureOverRejectedContinuation(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatalf("seed main.go: %v", err)
+	}
+	workspaceRepo := memory.NewWorkspaceRepository()
+	workspaceID := common.WorkspaceID("ws-current-patch-over-rejected")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		DeliverableDirectory: deliverableDirectory,
+		State:                common.WorkspaceStateRunning,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              "run-current-patch-over-rejected",
+		WorkspaceID:     workspaceID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"summary":          "older rejected result still needs evidence",
+				"requiredEvidence": []string{"bounded validation"},
+			},
+		},
+	}
+	failed := &runmodel.Step{
+		ID:    "run-current-patch-over-rejected/graph-001/001-patch-main",
+		RunID: run.ID,
+		Kind:  "patch/apply",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"targetRef": "main.go",
+			"patchType": "text_replace",
+			"oldText":   "package main\n",
+			"newText":   "package main\n\n",
+			"executionContext": map[string]any{
+				"rejectedResultContinuation": run.ExecutionContext["rejectedResultContinuation"],
+				"replanContinuation": map[string]any{
+					"historicalOnly": true,
+					"failureContext": map[string]any{
+						"failureTargetScope": "targetRef=main.go",
+					},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                   "patch_apply",
+			"error":                   "conflict: patch baseHash mismatch",
+			failureOutputKeyClass:     failureClassPatchApply,
+			failureOutputKeySignature: "class=patch_apply_failed|kind=patch/apply|stage=patch_apply|failureTargets=main.go|error=conflict: patch basehash mismatch",
+		},
+	}
+	orch := &RuntimeOrchestrator{
+		steps:      memory.NewStepRepository(),
+		workspaces: workspaceRepo,
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrConflict)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] != nil {
+		t.Fatalf("repair input = %+v, want current patch failure to stay state-changing", input)
+	}
+	if currentFailure := mapFromValue(input["currentFailure"]); currentFailure["source"] == "rejectedResultContinuation" {
+		t.Fatalf("currentFailure = %+v, should not return to rejected result continuation", currentFailure)
+	}
+	if snapshots := mapSliceFromValue(input["patchRepairContext"]); len(snapshots) != 1 || snapshots[0]["targetRef"] != "main.go" {
+		t.Fatalf("patchRepairContext = %+v, want current main.go snapshot", input["patchRepairContext"])
+	}
+	targets := mapSliceFromValue(mapFromValue(input["repairActionPackage"])["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want current main.go snapshot", targets)
+	}
+}
+
+func TestRuntimeOrchestrator_RuntimeRepairKeepsCurrentSnapshotsOverRejectedContinuation(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-current-snapshots-over-rejected",
+		WorkspaceID:     "ws-current-snapshots-over-rejected",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{"stateChangePolicy": "must_produce_state_change"},
+			"rejectedResultContinuation": map[string]any{
+				"summary":          "older rejected result still needs evidence",
+				"requiredEvidence": []string{"bounded validation"},
+			},
+		},
+	}
+	snapshot := map[string]any{
+		"targetRef":        "main.go",
+		"exists":           true,
+		"contentHash":      "hash-main-current",
+		"contentComplete":  true,
+		"safeForFileWrite": true,
+		"content":          "package main\n\nfunc main() {}\n",
+	}
+	failed := &runmodel.Step{
+		ID:    "run-current-snapshots-over-rejected/repair-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"failureTargetRepairContext":      []map[string]any{snapshot},
+			"executionContext": map[string]any{
+				"rejectedResultContinuation": run.ExecutionContext["rejectedResultContinuation"],
+				"replanContinuation": map[string]any{
+					"historicalOnly": true,
+					"failureContext": map[string]any{
+						"failureTargetScope": "targetRef=main.go",
+					},
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"targetSnapshots": []map[string]any{snapshot},
+				"requiredOutput":  stateChangingRepairRequiredOutput(),
+			},
+		},
+		Output: map[string]any{
+			outputKeyContractViolationType: contractViolationPatchContentRequired,
+			"stage":                        "llm_execution_graph_plan",
+			"error":                        "invalid argument: executionGraph patch/apply input invalid: invalid argument: patch text_replace oldText/newText must describe a substantive change",
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|kind=llm/workspace_execution|stage=llm_execution_graph_plan|failureTargets=main.go",
+		},
+	}
+
+	input := (&RuntimeOrchestrator{steps: memory.NewStepRepository()}).runtimeRepairFollowUpStepInput(context.Background(), run, failed, 2, common.ErrInvalidArgument)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["concreteFailureEvidenceRequired"] != nil {
+		t.Fatalf("repair input = %+v, want current snapshot repair to stay state-changing", input)
+	}
+	if currentFailure := mapFromValue(input["currentFailure"]); currentFailure["source"] == "rejectedResultContinuation" {
+		t.Fatalf("currentFailure = %+v, should not return to rejected result continuation", currentFailure)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	targets := mapSliceFromValue(pkg["targetSnapshots"])
+	if len(targets) != 1 || targets[0]["targetRef"] != "main.go" || targets[0]["contentHash"] != "hash-main-current" {
+		t.Fatalf("repairActionPackage.targetSnapshots = %+v, want inherited current main.go snapshot", targets)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustAvoidNoOpPatch"]) || !boolValue(required["mustProduceSubstantivePatch"]) {
+		t.Fatalf("requiredOutput = %+v, want no-op patch repair contract", required)
+	}
+}
+
 func TestRuntimeOrchestrator_InitialReplanStateChangingInputPromotesPatchFailureIntoStrategyReassessment(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-replan-patch-failure-reassessment",
