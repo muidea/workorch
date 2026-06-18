@@ -719,6 +719,7 @@ PY
 activate_workspace_execution() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
@@ -727,6 +728,7 @@ activate_workspace_execution() {
 activate_workspace_execution_without_memory() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
@@ -735,6 +737,7 @@ activate_workspace_execution_without_memory() {
 activate_workspace_execution_with_auto_memory() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
@@ -744,9 +747,16 @@ activate_workspace_execution_with_provider() {
   local output_file="$1"
   local provider_id="$2"
   local activation_dod_id="${3:-$dod_id}"
+  capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+}
+
+capture_runs_before_activation() {
+  local output_file="$1"
+  local before_file="${output_file%.json}-before-runs.json"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$before_file"
 }
 
 wait_activation_run() {
@@ -754,6 +764,7 @@ wait_activation_run() {
   local output_file="$2"
   local snapshot_file="${output_file%.json}-snapshot.json"
   local runs_file="${output_file%.json}-runs.json"
+  local before_runs_file="${activation_file%.json}-before-runs.json"
   local run_id=""
   local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
 
@@ -796,25 +807,31 @@ PY
 
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$snapshot_file"; then
-      run_id="$(python3 - "$snapshot_file" <<'PY'
+      if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$runs_file"; then
+        run_id="$(python3 - "$runs_file" "$before_runs_file" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     data = json.load(handle)
-snapshot = data.get("snapshot") or {}
-run = snapshot.get("run") or {}
-if run.get("id"):
-    print(run["id"])
-    raise SystemExit(0)
-workspace = snapshot.get("workspace") or {}
-if workspace.get("activeRunId"):
-    print(workspace["activeRunId"])
+before = set()
+try:
+    with open(sys.argv[2], "r", encoding="utf-8") as handle:
+        before_data = json.load(handle)
+    before = {str(item.get("id") or "") for item in (before_data.get("runs") or []) if item.get("id")}
+except FileNotFoundError:
+    before = set()
+
+new_runs = [
+    item for item in (data.get("runs") or [])
+    if item.get("id") and str(item.get("id")) not in before
+]
+if new_runs:
+    print(new_runs[-1]["id"])
     raise SystemExit(0)
 raise SystemExit(1)
 PY
 )" && {
-        if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$runs_file"; then
           python3 - "$runs_file" "$run_id" "$output_file" <<'PY'
 import json
 import sys
@@ -828,19 +845,10 @@ with open(sys.argv[3], "w", encoding="utf-8") as handle:
     json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
-        else
-          python3 - "$run_id" "$output_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump({"run": {"id": sys.argv[1]}}, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-PY
-        fi
-        echo "$run_id"
-        return 0
-      }
+          echo "$run_id"
+          return 0
+        }
+      fi
     fi
     sleep 1
   done

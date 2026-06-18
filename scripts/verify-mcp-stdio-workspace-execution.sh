@@ -94,6 +94,23 @@ post_json() {
   esac
 }
 
+post_activation_json() {
+  local url="$1"
+  local body="$2"
+  local output="$3"
+  local status
+  status="$(curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -sS -H "Content-Type: application/json" -X POST "$url" -d "$body" -o "$output" -w "%{http_code}" || true)"
+  case "$status" in
+    200|201|202)
+      ;;
+    *)
+      echo "POST $url failed with HTTP $status" >&2
+      cat "$output" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
 put_json() {
   local url="$1"
   local body="$2"
@@ -172,6 +189,103 @@ state = (data.get("status") or {}).get("state")
 if state != sys.argv[2]:
     raise SystemExit(f"run state is {state!r}, want {sys.argv[2]!r}")
 PY
+}
+
+wait_activation_run() {
+  local workspace_id="$1"
+  local activation_file="$2"
+  local before_runs_file="$3"
+  local runs_file="$4"
+  local output_file="$5"
+  local run_id=""
+  local deadline=$((SECONDS + 120))
+
+  run_id="$(python3 - "$activation_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+for path in [
+    ("activation", "run", "id"),
+    ("run", "id"),
+]:
+    current = data
+    for part in path:
+        if not isinstance(current, dict):
+            current = {}
+            break
+        current = current.get(part)
+    if current:
+        print(current)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+    python3 - "$activation_file" "$output_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+run = ((data.get("activation") or {}).get("run") or data.get("run") or {})
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+    echo "$run_id"
+    return 0
+  }
+
+  while (( SECONDS <= deadline )); do
+    if get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$runs_file"; then
+      run_id="$(python3 - "$runs_file" "$before_runs_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+before = set()
+try:
+    with open(sys.argv[2], "r", encoding="utf-8") as handle:
+        before_data = json.load(handle)
+    before = {str(item.get("id") or "") for item in (before_data.get("runs") or []) if item.get("id")}
+except FileNotFoundError:
+    before = set()
+new_runs = [
+    item for item in (data.get("runs") or [])
+    if item.get("id") and str(item.get("id")) not in before
+]
+if new_runs:
+    print(new_runs[-1]["id"])
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+        python3 - "$runs_file" "$run_id" "$output_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+run_id = sys.argv[2]
+runs = data.get("runs") or []
+run = next((item for item in runs if item.get("id") == run_id), {"id": run_id})
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+        echo "$run_id"
+        return 0
+      }
+    fi
+    sleep 1
+  done
+
+  echo "activation accepted but run did not materialize within 120s for workspace $workspace_id" >&2
+  cat "$activation_file" >&2 || true
+  [[ -f "$runs_file" ]] && cat "$runs_file" >&2
+  return 1
 }
 
 upsert_json() {
@@ -613,10 +727,11 @@ ensure_dod "$workspace_id" "stdio MCP tool call completes"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
-post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$TMP_DIR/activation-before-runs.json"
+post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
   "$TMP_DIR/activation.json"
-run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
+run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]
 
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/run-status.json"
