@@ -314,19 +314,20 @@ type EventRecord struct {
 
 // Snapshot / Status / Observability types.
 type RunStatus struct {
-	ID                 string            `json:"id"`
-	WorkspaceID        string            `json:"workspaceId"`
-	State              string            `json:"state"`
-	CurrentStepID      string            `json:"currentStepId,omitempty"`
-	CurrentStepKind    string            `json:"currentStepKind,omitempty"`
-	CurrentStepState   string            `json:"currentStepState,omitempty"`
-	StepCount          int               `json:"stepCount"`
-	DecisionCount      int               `json:"decisionCount"`
-	ApprovalCount      int               `json:"approvalCount"`
-	BlockingTicketID   string            `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string            `json:"blockingApprovalId,omitempty"`
-	FailureReason      string            `json:"failureReason,omitempty"`
-	RuntimeExecution   *RuntimeExecution `json:"runtimeExecution,omitempty"`
+	ID                   string                `json:"id"`
+	WorkspaceID          string                `json:"workspaceId"`
+	State                string                `json:"state"`
+	CurrentStepID        string                `json:"currentStepId,omitempty"`
+	CurrentStepKind      string                `json:"currentStepKind,omitempty"`
+	CurrentStepState     string                `json:"currentStepState,omitempty"`
+	StepCount            int                   `json:"stepCount"`
+	DecisionCount        int                   `json:"decisionCount"`
+	ApprovalCount        int                   `json:"approvalCount"`
+	BlockingTicketID     string                `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID   string                `json:"blockingApprovalId,omitempty"`
+	FailureReason        string                `json:"failureReason,omitempty"`
+	RuntimeExecution     *RuntimeExecution     `json:"runtimeExecution,omitempty"`
+	SchedulerDiagnostics *SchedulerDiagnostics `json:"schedulerDiagnostics,omitempty"`
 }
 
 type RuntimeExecution struct {
@@ -351,6 +352,43 @@ type RuntimeExecution struct {
 	FinalizeEvent       string `json:"finalizeEvent,omitempty"`
 	Pending             bool   `json:"pending,omitempty"`
 	Gap                 string `json:"gap,omitempty"`
+}
+
+type ContinuationDiagnostic struct {
+	WorkspaceID        string   `json:"workspaceId,omitempty"`
+	RunID              string   `json:"runId,omitempty"`
+	Kind               string   `json:"kind"`
+	State              string   `json:"state"`
+	Reason             string   `json:"reason,omitempty"`
+	Detail             string   `json:"detail,omitempty"`
+	Recoverability     string   `json:"recoverability,omitempty"`
+	RecommendedActions []string `json:"recommendedActions,omitempty"`
+	DedupeKey          string   `json:"dedupeKey,omitempty"`
+	Attempt            int      `json:"attempt,omitempty"`
+	OccurredAt         string   `json:"occurredAt,omitempty"`
+	Source             string   `json:"source,omitempty"`
+}
+
+type ContinuationDiagnosticCount struct {
+	Kind   string `json:"kind,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Count  uint64 `json:"count"`
+}
+
+type WatchdogDiagnostics struct {
+	LatestTickAt      string `json:"latestTickAt,omitempty"`
+	LatestDurationMs  int64  `json:"latestDurationMs,omitempty"`
+	LatestError       string `json:"latestError,omitempty"`
+	StaleRecoveryRuns uint64 `json:"staleRecoveryRuns,omitempty"`
+}
+
+type SchedulerDiagnostics struct {
+	Watchdog                    WatchdogDiagnostics           `json:"watchdog,omitempty"`
+	LatestContinuation          *ContinuationDiagnostic       `json:"latestContinuation,omitempty"`
+	RecentContinuations         []ContinuationDiagnostic      `json:"recentContinuations,omitempty"`
+	ContinuationFailureCounts   []ContinuationDiagnosticCount `json:"continuationFailureCounts,omitempty"`
+	ContinuationNoActionCounts  []ContinuationDiagnosticCount `json:"continuationNoActionCounts,omitempty"`
+	ContinuationCompletedCounts []ContinuationDiagnosticCount `json:"continuationCompletedCounts,omitempty"`
 }
 
 type RecoveryPlan struct {
@@ -579,6 +617,7 @@ type WorkspaceSnapshot struct {
 	TaskProgress          TaskProgress           `json:"taskProgress"`
 	RunHeartbeat          RunHeartbeat           `json:"runHeartbeat,omitempty"`
 	RuntimeExecution      *RuntimeExecution      `json:"runtimeExecution,omitempty"`
+	SchedulerDiagnostics  *SchedulerDiagnostics  `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle         map[string]any         `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
@@ -629,6 +668,7 @@ type RunSnapshot struct {
 	TaskProgress            TaskProgress           `json:"taskProgress"`
 	RepairLoop              RepairLoop             `json:"repairLoop"`
 	RuntimeExecution        *RuntimeExecution      `json:"runtimeExecution,omitempty"`
+	SchedulerDiagnostics    *SchedulerDiagnostics  `json:"schedulerDiagnostics,omitempty"`
 	Steps                   []Step                 `json:"steps,omitempty"`
 	ToolCalls               []ToolCall             `json:"toolCalls,omitempty"`
 	Patches                 []Patch                `json:"patches,omitempty"`

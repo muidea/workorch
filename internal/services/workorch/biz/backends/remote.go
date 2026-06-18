@@ -380,10 +380,11 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 		CurrentStepKind:  canonicalRuntimeStepKind(s.CurrentStepKind),
 		CurrentStepState: common.StepState(s.CurrentStepState),
 		DecisionCount:    s.DecisionCount, ApprovalCount: s.ApprovalCount,
-		BlockingTicketID:   common.TicketID(s.BlockingTicketID),
-		BlockingApprovalID: common.ApprovalID(s.BlockingApprovalID),
-		FailureReason:      s.FailureReason,
-		RuntimeExecution:   runtimeExecutionInfoFromClient(s.RuntimeExecution),
+		BlockingTicketID:     common.TicketID(s.BlockingTicketID),
+		BlockingApprovalID:   common.ApprovalID(s.BlockingApprovalID),
+		FailureReason:        s.FailureReason,
+		RuntimeExecution:     runtimeExecutionInfoFromClient(s.RuntimeExecution),
+		SchedulerDiagnostics: schedulerDiagnosticsInfoFromClient(s.SchedulerDiagnostics),
 	}, nil
 }
 
@@ -414,6 +415,72 @@ func runtimeExecutionInfoFromClient(input *client.RuntimeExecution) *RuntimeExec
 		Pending:             input.Pending,
 		Gap:                 input.Gap,
 	}
+}
+
+func schedulerDiagnosticsInfoFromClient(input *client.SchedulerDiagnostics) *SchedulerDiagnosticsInfo {
+	if input == nil {
+		return nil
+	}
+	ret := &SchedulerDiagnosticsInfo{
+		Watchdog: WatchdogDiagnosticsInfo{
+			LatestTickAt:      input.Watchdog.LatestTickAt,
+			LatestDurationMs:  input.Watchdog.LatestDurationMs,
+			LatestError:       input.Watchdog.LatestError,
+			StaleRecoveryRuns: input.Watchdog.StaleRecoveryRuns,
+		},
+		RecentContinuations:         continuationDiagnosticsFromClient(input.RecentContinuations),
+		ContinuationFailureCounts:   continuationDiagnosticCountsFromClient(input.ContinuationFailureCounts),
+		ContinuationNoActionCounts:  continuationDiagnosticCountsFromClient(input.ContinuationNoActionCounts),
+		ContinuationCompletedCounts: continuationDiagnosticCountsFromClient(input.ContinuationCompletedCounts),
+	}
+	if input.LatestContinuation != nil {
+		latest := continuationDiagnosticFromClient(*input.LatestContinuation)
+		ret.LatestContinuation = &latest
+	}
+	return ret
+}
+
+func continuationDiagnosticsFromClient(input []client.ContinuationDiagnostic) []ContinuationDiagnosticInfo {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]ContinuationDiagnosticInfo, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, continuationDiagnosticFromClient(item))
+	}
+	return ret
+}
+
+func continuationDiagnosticFromClient(input client.ContinuationDiagnostic) ContinuationDiagnosticInfo {
+	return ContinuationDiagnosticInfo{
+		WorkspaceID:        input.WorkspaceID,
+		RunID:              input.RunID,
+		Kind:               input.Kind,
+		State:              input.State,
+		Reason:             input.Reason,
+		Detail:             input.Detail,
+		Recoverability:     input.Recoverability,
+		RecommendedActions: append([]string(nil), input.RecommendedActions...),
+		DedupeKey:          input.DedupeKey,
+		Attempt:            input.Attempt,
+		OccurredAt:         input.OccurredAt,
+		Source:             input.Source,
+	}
+}
+
+func continuationDiagnosticCountsFromClient(input []client.ContinuationDiagnosticCount) []ContinuationDiagnosticCountInfo {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := make([]ContinuationDiagnosticCountInfo, 0, len(input))
+	for _, item := range input {
+		ret = append(ret, ContinuationDiagnosticCountInfo{
+			Kind:   item.Kind,
+			Reason: item.Reason,
+			Count:  item.Count,
+		})
+	}
+	return ret
 }
 
 // ── Remote Decision ──

@@ -640,6 +640,6 @@ func ResolveApproval(be backend.Backend, workspaceID string, approvalID string, 
 				}
 			}
 		}
-		return ApprovalResolvedMsg{Approval: approval, Error: err}
+		return ApprovalResolvedMsg{WorkspaceID: wsID, Approval: approval, Error: err}
 	}
 }

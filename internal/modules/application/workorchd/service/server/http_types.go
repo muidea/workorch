@@ -29,9 +29,10 @@ import (
 )
 
 type statusResponse struct {
-	Service    string                     `json:"service"`
-	Status     string                     `json:"status"`
-	Projection *workspaceProjectionStatus `json:"projection,omitempty"`
+	Service     string                           `json:"service"`
+	Status      string                           `json:"status"`
+	Projection  *workspaceProjectionStatus       `json:"projection,omitempty"`
+	Diagnostics *appservice.SchedulerDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type configurationResponse struct {
@@ -669,6 +670,7 @@ type serverState struct {
 	runStatusNotify              chan struct{}
 	eventUnsubscribes            []func()
 	runContinuations             *runContinuationScheduler
+	schedulerDiagnostics         *schedulerDiagnosticsStore
 	workspaceProjection          *workspaceProjectionManager
 	runSnapshotCacheMu           sync.Mutex
 	runSnapshotEntries           map[string]*runSnapshotCacheEntry
@@ -767,6 +769,7 @@ type serverMetrics struct {
 	runInFlight                  atomic.Int64
 	runQueueWaiting              atomic.Int64
 	runQueuedTotal               atomic.Uint64
+	schedulerDiagnostics         *schedulerDiagnosticsStore
 }
 
 func (m *serverMetrics) observeRunOutcome(run appservice.Run) {
@@ -1015,12 +1018,13 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		schedulerHub = events.NewMemoryHub()
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
 		config:                       config,
 		eventHub:                     eventHub,
 		schedulerHub:                 schedulerHub,
 		eventReplay:                  newSSEReplayBuffer(defaultSSEReplayLimit),
-		metrics:                      &serverMetrics{},
+		metrics:                      &serverMetrics{schedulerDiagnostics: diagnostics},
 		validate:                     defaultValidate,
 		createWorkspace:              defaultCreateWorkspace,
 		deleteWorkspace:              defaultDeleteWorkspace,
@@ -1111,6 +1115,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		backgroundRoutine:            backgroundRoutine,
 		backgroundCtx:                backgroundCtx,
 		backgroundCancel:             backgroundCancel,
+		schedulerDiagnostics:         diagnostics,
 		workspaceSetupDraftSessions:  map[string]*workspaceSetupDraftSession{},
 	}
 	state.runContinuations = newRunContinuationScheduler(state)

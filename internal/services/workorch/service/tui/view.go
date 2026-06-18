@@ -816,41 +816,18 @@ func (m AppModel) renderInput(width int) string {
 	if prompt == "none" {
 		prompt = "workspace"
 	}
-	if m.activeBlockingDecision() != nil {
-		prompt += " decision"
-	} else if m.activeBlockingApproval() != nil {
-		prompt += " approval"
-	} else if ws := m.activeWorkspaceOverview(); ws != nil {
+	if ws := m.activeWorkspaceOverview(); ws != nil {
 		switch ws.State {
 		case common.WorkspaceStateWaitingDecision:
-			if ws.BlockingTicketID != "" && !m.decisionAlreadyResolved(ws.BlockingTicketID) {
+			if ws.BlockingTicketID != "" {
 				prompt += " decision"
-			} else if m.progress == progressRunning {
-				prompt += " running"
-			} else if m.progress == progressSubmitting {
-				prompt += " submitting"
 			}
 		case common.WorkspaceStateBlocked:
-			if ws.BlockingApprovalID != "" && !m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+			if ws.BlockingApprovalID != "" {
 				prompt += " approval"
-			} else if m.progress == progressRunning {
-				prompt += " running"
-			} else if m.progress == progressSubmitting {
-				prompt += " submitting"
 			}
 		case common.WorkspaceStateRunning, common.WorkspaceStateValidating:
 			prompt += " running"
-		}
-	} else {
-		switch m.progress {
-		case progressSubmitting:
-			prompt += " submitting"
-		case progressRunning:
-			prompt += " running"
-		case progressWaitingDecision:
-			prompt += " decision"
-		case progressWaitingApproval:
-			prompt += " approval"
 		}
 	}
 	input := m.renderInputBuffer(prompt, width)

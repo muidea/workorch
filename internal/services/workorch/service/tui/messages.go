@@ -96,8 +96,9 @@ type DecisionResolvedMsg struct {
 }
 
 type ApprovalResolvedMsg struct {
-	Approval *backend.ApprovalInfo
-	Error    error
+	WorkspaceID common.WorkspaceID
+	Approval    *backend.ApprovalInfo
+	Error       error
 }
 
 type ConfigMsg struct {

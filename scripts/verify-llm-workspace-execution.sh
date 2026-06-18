@@ -114,6 +114,22 @@ print(current)
 PY
 }
 
+json_path_equals() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+current = data
+for part in sys.argv[2].split("."):
+    if not isinstance(current, dict) or part not in current:
+        raise SystemExit(1)
+    current = current[part]
+raise SystemExit(0 if str(current) == sys.argv[3] else 1)
+PY
+}
+
 url_encode() {
   python3 - "$1" <<'PY'
 import sys
@@ -888,7 +904,7 @@ wait_run_state() {
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
-    if json_grep_string_value state "$expected_state" "$output_file" >/dev/null; then
+    if json_path_equals "$output_file" "status.state" "$expected_state"; then
       return 0
     fi
     sleep 1
@@ -1241,7 +1257,8 @@ happy_run_id="$(wait_activation_run "$TMP_DIR/happy-activation.json" "$TMP_DIR/h
 wait_run_state "$happy_run_id" "completed" "$TMP_DIR/happy-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | json_grep_string_value id "$happy_run_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id" | json_grep_string_value state completed >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/status" | json_grep_string_value state completed >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/status" >"$TMP_DIR/happy-status-confirm.json"
+json_path_equals "$TMP_DIR/happy-status-confirm.json" "status.state" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id/snapshot" >"$TMP_DIR/happy-snapshot.json"
 grep '"dodAssessment"' "$TMP_DIR/happy-snapshot.json" >/dev/null
 grep '"memoryRefs"' "$TMP_DIR/happy-snapshot.json" >/dev/null
@@ -1310,7 +1327,8 @@ approval_run_id="$(wait_activation_run "$TMP_DIR/approval-activation.json" "$TMP
 wait_run_state "$approval_run_id" "blocked_on_approval" "$TMP_DIR/approval-blocked-status.json"
 approval_id="$(json_path "$TMP_DIR/approval-blocked-status.json" "status.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/status" | json_grep_string_value state blocked_on_approval >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$approval_run_id/status" >"$TMP_DIR/approval-status-confirm.json"
+json_path_equals "$TMP_DIR/approval-status-confirm.json" "status.state" "blocked_on_approval"
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id" | json_grep_string_value id "$approval_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals?workspaceId=$workspace_id&runId=$approval_run_id" | json_grep_string_value id "$approval_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/approvals/$approval_path?workspaceId=$workspace_id" >"$TMP_DIR/approval-detail.json"
@@ -1347,7 +1365,8 @@ curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_r
 json_grep_string_value id "$multi_gate_ticket_id" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 json_grep_string_value id "$multi_gate_approval_id" "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
 grep 'multi gate decision then approval can complete' "$TMP_DIR/multi-gate-snapshot.json" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/status" | json_grep_string_value state completed >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/status" >"$TMP_DIR/multi-gate-status-confirm.json"
+json_path_equals "$TMP_DIR/multi-gate-status-confirm.json" "status.state" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$multi_gate_run_id/observability" >"$TMP_DIR/multi-gate-observability.json"
 json_grep_bool_value terminal true "$TMP_DIR/multi-gate-observability.json" >/dev/null
 assert_run_recovery_read_models "$multi_gate_run_id" "multi-gate" "completed" "provider_native"

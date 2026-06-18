@@ -69,8 +69,13 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 	err := state.backgroundRoutine.Timer(
 		state.backgroundContext(),
 		backgroundFuncTask{fn: func() {
+			started := time.Now().UTC()
 			ctx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
-			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
+			err := s.recoverStaleDispatchedRuns(ctx)
+			if state.schedulerDiagnostics != nil {
+				state.schedulerDiagnostics.recordWatchdogTick(started, time.Since(started), err)
+			}
+			if err != nil {
 				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
 			}
 		}},
@@ -164,6 +169,9 @@ func (s *runContinuationScheduler) recoverStaleDispatchedRuns(ctx context.Contex
 	for _, item := range recovered {
 		runIDs = append(runIDs, item.ID)
 		state.notifyRunStatusChangedForRun(item)
+	}
+	if state.schedulerDiagnostics != nil {
+		state.schedulerDiagnostics.recordStaleRuntimeGapRecovery("stale_dispatched", "runtime_recovery_policy", len(recovered))
 	}
 	slog.Warn("workorch recovered stale dispatched runs", "runIDs", runIDs)
 	return nil
@@ -325,6 +333,83 @@ func (t backgroundFuncTask) Run() {
 	}
 }
 
+func (s *runContinuationScheduler) recordContinuation(input schedulerDiagnosticInput) {
+	if s == nil || s.state == nil || s.state.schedulerDiagnostics == nil {
+		return
+	}
+	s.state.schedulerDiagnostics.recordContinuation(input)
+}
+
+func (s *runContinuationScheduler) recordContinuationFailed(workspaceID, runID, kind, reason string, err error) {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	s.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		Kind:        kind,
+		State:       schedulerDiagnosticStateFailed,
+		Reason:      reason,
+		Detail:      detail,
+		DedupeKey:   schedulerDedupeKey(workspaceID, runID, kind, reason),
+	})
+}
+
+func (s *runContinuationScheduler) recordContinuationNoAction(workspaceID, runID, kind, reason string, detail string) {
+	s.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		Kind:           kind,
+		State:          schedulerDiagnosticStateNoActionNeeded,
+		Reason:         reason,
+		Detail:         detail,
+		Recoverability: schedulerRecoverabilityNoAction,
+		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, reason),
+	})
+}
+
+func (s *runContinuationScheduler) recordContinuationCompleted(workspaceID, runID, kind string) {
+	s.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		Kind:           kind,
+		State:          schedulerDiagnosticStateCompleted,
+		Recoverability: schedulerRecoverabilityNoAction,
+		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, schedulerDiagnosticStateCompleted),
+	})
+}
+
+func (s *runContinuationScheduler) recordSchedulerEnqueueFailure(workspaceID, runID, kind, detail string) {
+	if s == nil || s.state == nil || s.state.schedulerDiagnostics == nil {
+		return
+	}
+	s.state.schedulerDiagnostics.recordCommandEnqueueFailure(kind, schedulerReasonEnqueueFailed)
+	s.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		Kind:           kind,
+		State:          schedulerDiagnosticStateFailed,
+		Reason:         schedulerReasonEnqueueFailed,
+		Detail:         detail,
+		Recoverability: schedulerRecoverabilityManualRetry,
+		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, schedulerReasonEnqueueFailed),
+	})
+}
+
+func schedulerRunSlotFailureReason(ctx context.Context, err error) string {
+	if err == nil {
+		return schedulerReasonRunSlotUnavailable
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return schedulerReasonServiceShuttingDown
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return schedulerReasonServiceShuttingDown
+	}
+	return schedulerReasonRunSlotUnavailable
+}
+
 func (s *runContinuationScheduler) recoverReplanContinuations(ctx context.Context) {
 	if s == nil || s.state == nil || s.state.listWorkspaces == nil || s.state.listRuns == nil {
 		return
@@ -436,6 +521,7 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 			release, err := state.acquireRunSlotWithPriority(ctx, priority)
 			if err != nil {
 				state.metrics.runCanceled.Add(1)
+				s.recordContinuationFailed(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, schedulerRunSlotFailureReason(ctx, err), err)
 				slog.Warn("workorch governance resume queue failed", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "err", err)
 				return
 			}
@@ -447,18 +533,23 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool
 			if err != nil {
 				if !s.governanceResumeRefStillNeedsWork(ctx, resumeRef) {
 					completePending = true
+					s.recordContinuationNoAction(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, schedulerReasonRunNotEligible, "governance continuation no longer needs resume")
+				} else {
+					s.recordContinuationFailed(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, schedulerReasonOwnerCommandFailed, err)
 				}
 				slog.Warn("workorch governance resume failed", "workspaceID", resumeRef.WorkspaceID, "runID", resumeRef.RunID, "err", err)
 				return
 			}
 			completePending = true
 			state.metrics.observeRunOutcome(item)
+			s.recordContinuationCompleted(resumeRef.WorkspaceID, item.ID, schedulerKindGovernanceContinuation)
 			if item.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(ctx, item.WorkspaceID, item.ID, priority)
 			}
 			resumedRun = item
 		}) {
 			s.clearGovernanceResumeStarted(resumeKey)
+			s.recordSchedulerEnqueueFailure(resumeRef.WorkspaceID, resumeRef.RunID, schedulerKindGovernanceContinuation, "governance continuation work item was not queued")
 			return false
 		}
 	}
@@ -541,6 +632,7 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 		return true
 	}
 	if s.workspaceHasReplanSuccessor(ctx, workspaceID, runID) {
+		s.recordContinuationNoAction(workspaceID, runID, schedulerKindReplanContinuation, schedulerReasonReplanSuccessorExists, "replan successor already exists")
 		return true
 	}
 	key := workspaceID + "/" + runID
@@ -554,6 +646,7 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 		if err != nil {
 			s.clearReplanContinuationStarted(key)
 			state.metrics.runCanceled.Add(1)
+			s.recordContinuationFailed(workspaceID, runID, schedulerKindReplanContinuation, schedulerRunSlotFailureReason(runCtx, err), err)
 			slog.Warn("workorch replan continuation queue failed", "workspaceID", workspaceID, "runID", runID, "err", err)
 			return
 		}
@@ -561,14 +654,17 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 		activation, err := state.activateWorkspace(runCtx, state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
 		if err != nil {
 			s.clearReplanContinuationStarted(key)
+			s.recordContinuationFailed(workspaceID, runID, schedulerKindReplanContinuation, schedulerReasonOwnerCommandFailed, err)
 			slog.Warn("workorch replan continuation activation failed", "workspaceID", workspaceID, "runID", runID, "err", err)
 			state.notifyRunStatusChanged()
 			return
 		}
 		state.metrics.observeRunOutcome(activation.Run)
+		s.recordContinuationCompleted(workspaceID, activation.Run.ID, schedulerKindReplanContinuation)
 		state.notifyRunStatusChangedForRun(activation.Run)
 	}) {
 		s.clearReplanContinuationStarted(key)
+		s.recordSchedulerEnqueueFailure(workspaceID, runID, schedulerKindReplanContinuation, "replan continuation work item was not queued")
 		return false
 	}
 	return true
@@ -678,6 +774,10 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 		if taskName == "" {
 			taskName = "workspace_execution"
 		}
+		kind := schedulerKindWorkspaceActivation
+		if taskName == "workspace_restart" {
+			kind = schedulerKindWorkspaceRestart
+		}
 		queued := state.scheduleBackground(taskName, func(context.Context) {
 			defer s.clearWorkspaceRestartStarted(key)
 			runCtx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
@@ -685,6 +785,7 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
 			if err != nil {
 				state.metrics.runCanceled.Add(1)
+				s.recordContinuationFailed(req.WorkspaceID, "", kind, schedulerRunSlotFailureReason(runCtx, err), err)
 				slog.Warn("workorch workspace execution queue failed", "task", taskName, "workspaceID", req.WorkspaceID, "err", err)
 				return
 			}
@@ -694,12 +795,16 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 				slog.Warn("workorch workspace execution activation failed", "task", taskName, "workspaceID", req.WorkspaceID, "err", err)
 				state.notifyRunStatusChanged()
 				if !s.workspaceExecutionStillNeedsWork(runCtx, req) {
+					s.recordContinuationNoAction(req.WorkspaceID, "", kind, schedulerReasonWorkspaceNotEligible, "workspace execution no longer needs activation")
 					s.clearWorkspaceExecutionPending(key)
+				} else {
+					s.recordContinuationFailed(req.WorkspaceID, "", kind, schedulerReasonOwnerCommandFailed, err)
 				}
 				return
 			}
 			s.clearWorkspaceExecutionPending(key)
 			state.metrics.observeRunOutcome(activation.Run)
+			s.recordContinuationCompleted(req.WorkspaceID, activation.Run.ID, kind)
 			if activation.Run.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(runCtx, activation.Run.WorkspaceID, activation.Run.ID, req.Priority)
 			}
@@ -707,6 +812,7 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 		})
 		if !queued {
 			s.clearWorkspaceRestartStarted(key)
+			s.recordSchedulerEnqueueFailure(req.WorkspaceID, "", kind, taskName+" work item was not queued")
 			return false
 		}
 	}
@@ -836,6 +942,7 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 			release, err := state.acquireRunSlotWithPriority(runCtx, req.Priority)
 			if err != nil {
 				state.metrics.runCanceled.Add(1)
+				s.recordContinuationFailed(req.WorkspaceID, req.RunID, schedulerKindRunContinuation, schedulerRunSlotFailureReason(runCtx, err), err)
 				slog.Warn("workorch run continuation queue failed", "workspaceID", req.WorkspaceID, "runID", req.RunID, "action", req.Action, "err", err)
 				return
 			}
@@ -855,12 +962,16 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 				slog.Warn("workorch run continuation failed", "workspaceID", req.WorkspaceID, "runID", req.RunID, "action", req.Action, "err", err)
 				state.notifyRunStatusChanged()
 				if !s.runContinuationStillNeedsWork(runCtx, req) {
+					s.recordContinuationNoAction(req.WorkspaceID, req.RunID, schedulerKindRunContinuation, schedulerReasonRunNotEligible, "run continuation no longer needs work")
 					s.clearRunContinuationPending(key)
+				} else {
+					s.recordContinuationFailed(req.WorkspaceID, req.RunID, schedulerKindRunContinuation, schedulerReasonOwnerCommandFailed, err)
 				}
 				return
 			}
 			s.clearRunContinuationPending(key)
 			state.metrics.observeRunOutcome(item)
+			s.recordContinuationCompleted(req.WorkspaceID, item.ID, schedulerKindRunContinuation)
 			if item.State == string(common.RunStateSuperseded) {
 				s.scheduleReplanContinuationIfNeeded(runCtx, item.WorkspaceID, item.ID, req.Priority)
 			}
@@ -868,6 +979,7 @@ func (s *runContinuationScheduler) drainRunContinuationQueue() bool {
 		})
 		if !queued {
 			s.clearRunContinuationStarted(key)
+			s.recordSchedulerEnqueueFailure(req.WorkspaceID, req.RunID, schedulerKindRunContinuation, "run continuation work item was not queued")
 			return false
 		}
 	}

@@ -116,6 +116,9 @@ func (m *serverMetrics) render(config Config, projection *workspaceProjectionMan
 		config.MaxConcurrentRuns,
 		config.StaleDispatchedStepMinAge.Seconds(),
 	)
+	if m != nil {
+		body += m.schedulerDiagnostics.renderMetrics()
+	}
 	return body + renderWorkspaceProjectionMetrics(projection)
 }
 

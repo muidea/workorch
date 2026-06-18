@@ -32,19 +32,20 @@ type ActivateRunRequest struct {
 }
 
 type RunStatusInfo struct {
-	ID                 common.RunID
-	WorkspaceID        common.WorkspaceID
-	State              common.RunState
-	CurrentStepID      common.StepID
-	CurrentStepKind    string
-	CurrentStepState   common.StepState
-	StepCount          int
-	DecisionCount      int
-	ApprovalCount      int
-	BlockingTicketID   common.TicketID
-	BlockingApprovalID common.ApprovalID
-	FailureReason      string
-	RuntimeExecution   *RuntimeExecutionInfo
+	ID                   common.RunID
+	WorkspaceID          common.WorkspaceID
+	State                common.RunState
+	CurrentStepID        common.StepID
+	CurrentStepKind      string
+	CurrentStepState     common.StepState
+	StepCount            int
+	DecisionCount        int
+	ApprovalCount        int
+	BlockingTicketID     common.TicketID
+	BlockingApprovalID   common.ApprovalID
+	FailureReason        string
+	RuntimeExecution     *RuntimeExecutionInfo
+	SchedulerDiagnostics *SchedulerDiagnosticsInfo
 }
 
 type RuntimeExecutionInfo struct {

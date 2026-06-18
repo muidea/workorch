@@ -377,6 +377,48 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 	}
 }
 
+func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub())
+	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID:    "ws-readyz-diagnostics",
+		RunID:          "run-readyz-diagnostics",
+		Kind:           schedulerKindReplanContinuation,
+		State:          schedulerDiagnosticStateFailed,
+		Reason:         schedulerReasonOwnerCommandFailed,
+		Detail:         "owner command returned an explicit failure",
+		Recoverability: schedulerRecoverabilityManualRetry,
+	})
+	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
+		t.Fatalf("rebuild workspace projection baseline: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body statusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode readyz response: %v", err)
+	}
+	if body.Status != "ready" {
+		t.Fatalf("readyz status = %q, want ready", body.Status)
+	}
+	if body.Diagnostics == nil || body.Diagnostics.LatestContinuation == nil {
+		t.Fatalf("readyz diagnostics = %+v, want latest scheduler continuation", body.Diagnostics)
+	}
+	latest := body.Diagnostics.LatestContinuation
+	if latest.WorkspaceID != "ws-readyz-diagnostics" ||
+		latest.RunID != "run-readyz-diagnostics" ||
+		latest.Kind != schedulerKindReplanContinuation ||
+		latest.State != schedulerDiagnosticStateFailed ||
+		latest.Reason != schedulerReasonOwnerCommandFailed {
+		t.Fatalf("latest diagnostics = %+v, want recorded replan failure", latest)
+	}
+}
+
 func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
 	useWorkorchRuntimeTestConfig(t, "memory", "")
 	hub := magicevent.NewHub(16)
@@ -5784,6 +5826,52 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_workspace_projection_active_run_heartbeat_age_seconds_max`,
 		`workorch_workspace_projection_stalled_runs`,
 		`workorch_workspace_projection_ineffective_retry_runs`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)
+		}
+	}
+}
+
+func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub())
+	state.schedulerDiagnostics.recordCommand(schedulerKindRunContinuation, "accepted")
+	state.schedulerDiagnostics.recordCommandEnqueueFailure(schedulerKindRunContinuation, schedulerReasonEnqueueFailed)
+	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID: "ws-metrics-diagnostics",
+		RunID:       "run-metrics-diagnostics",
+		Kind:        schedulerKindReplanContinuation,
+		State:       schedulerDiagnosticStateFailed,
+		Reason:      schedulerReasonOwnerCommandFailed,
+		Detail:      "owner command failed after accepted scheduler event",
+	})
+	state.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID: "ws-metrics-diagnostics",
+		RunID:       "run-metrics-diagnostics",
+		Kind:        schedulerKindReplanContinuation,
+		State:       schedulerDiagnosticStateNoActionNeeded,
+		Reason:      schedulerReasonReplanSuccessorExists,
+		Detail:      "successor already exists",
+	})
+	state.schedulerDiagnostics.recordWatchdogTick(time.Now().UTC(), 25*time.Millisecond, errors.New("watchdog failed"))
+	state.schedulerDiagnostics.recordStaleRuntimeGapRecovery("stale_dispatched", "runtime_recovery_policy", 2)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	newMuxWithState(state).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`workorch_scheduler_commands_total{kind="run_continuation",result="accepted"} 1`,
+		`workorch_scheduler_command_enqueue_failures_total{kind="run_continuation",reason="scheduler_enqueue_failed"} 1`,
+		`workorch_scheduler_continuation_failures_total{kind="replan_continuation",reason="owner_command_failed"} 1`,
+		`workorch_scheduler_continuation_no_action_total{kind="replan_continuation",reason="replan_successor_exists"} 1`,
+		`workorch_watchdog_ticks_total 1`,
+		`workorch_watchdog_last_error_timestamp_seconds`,
+		`workorch_watchdog_stale_runtime_gap_recoveries_total{gap="stale_dispatched",safety="runtime_recovery_policy"} 2`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)

@@ -62,6 +62,7 @@ type WorkspaceSnapshotInfo struct {
 	TaskProgress          TaskProgressInfo
 	RunHeartbeat          RunHeartbeatInfo
 	RuntimeExecution      *RuntimeExecutionInfo
+	SchedulerDiagnostics  *SchedulerDiagnosticsInfo
 	ContextBundle         map[string]any
 	CoverageSummary       map[string]any
 	TaskDecompositions    []TaskDecompositionInfo

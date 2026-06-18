@@ -29,6 +29,46 @@ func asModel(m tea.Model) AppModel {
 	panic("not AppModel")
 }
 
+func projectWorkspace(m *AppModel, ws backend.WorkspaceInfo) {
+	if m == nil {
+		return
+	}
+	m.upsertWorkspace(ws)
+	if m.activeWorkspaceID == "" {
+		m.activeWorkspaceID = string(ws.ID)
+		m.selectedWorkspaceID = string(ws.ID)
+	}
+	if string(ws.ID) == m.activeWorkspaceID && ws.ActiveRunID != "" {
+		m.activeRunID = string(ws.ActiveRunID)
+	}
+}
+
+func projectDecisionBlocker(m *AppModel, workspaceID, runID, ticketID string) {
+	projectWorkspace(m, backend.WorkspaceInfo{
+		ID:               common.WorkspaceID(workspaceID),
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      common.RunID(runID),
+		BlockingTicketID: common.TicketID(ticketID),
+	})
+}
+
+func projectApprovalBlocker(m *AppModel, workspaceID, runID, approvalID string) {
+	projectWorkspace(m, backend.WorkspaceInfo{
+		ID:                 common.WorkspaceID(workspaceID),
+		State:              common.WorkspaceStateBlocked,
+		ActiveRunID:        common.RunID(runID),
+		BlockingApprovalID: common.ApprovalID(approvalID),
+	})
+}
+
+func projectRunningWorkspace(m *AppModel, workspaceID, runID string) {
+	projectWorkspace(m, backend.WorkspaceInfo{
+		ID:          common.WorkspaceID(workspaceID),
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: common.RunID(runID),
+	})
+}
+
 func TestModelInit(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-default", "")
 	if m.mode != modeAgentSession {
@@ -1330,6 +1370,7 @@ func TestModelRunContinueCommandClearsInputAndReturnsRunningPrompt(t *testing.T)
 	m.activeRunID = "run-continue"
 	m.progress = progressRunning
 	m.running = true
+	projectRunningWorkspace(&m, "ws-97549a108e19d500", "run-continue")
 	m.setInput("/run continue")
 
 	next, cmd := m.submitInput()
@@ -1535,6 +1576,7 @@ func TestModelConfigCommandShowsLLMOutputBudget(t *testing.T) {
 
 func TestModelDecisionSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
 	m.progress = progressWaitingDecision
 	m.input = "/"
@@ -1558,6 +1600,7 @@ func TestModelDecisionSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 
 func TestModelSlashCompletionArrowSelectionControlsCompletedCommand(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
 	m.progress = progressWaitingDecision
 	m.setInput("/decision ")
@@ -1584,6 +1627,7 @@ func TestModelSlashCompletionArrowSelectionControlsCompletedCommand(t *testing.T
 
 func TestModelApprovalSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", State: "pending", Reason: "run shell command"}
 	m.progress = progressWaitingApproval
 	m.input = "/"
@@ -1976,6 +2020,7 @@ func TestModelDecisionUsesBottomInputContext(t *testing.T) {
 		RunID:       "run-1",
 		Payload:     map[string]any{"ticketId": "ticket-1", "question": "缺少必要信息"},
 	})
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
@@ -2019,6 +2064,7 @@ func TestModelRunStartedBlockedOnDecisionCreatesInputContext(t *testing.T) {
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-1" {
 		t.Fatalf("blocking decision = %+v, want ticket-1", m.blockingDecision)
 	}
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
@@ -2033,6 +2079,7 @@ func TestModelRunStartedBlockedOnDecisionCreatesInputContext(t *testing.T) {
 
 func TestModelDecisionListRestoresBlockingInputContext(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	next, _ := m.Update(DecisionListMsg{Decisions: []backend.DecisionInfo{{
 		ID:          "ticket-1",
 		WorkspaceID: "ws-1",
@@ -2064,6 +2111,7 @@ func TestModelDecisionDetailReplacesBlockingTicketPlaceholder(t *testing.T) {
 		BlockingTicketID: "ticket-1",
 	}})
 	m = asModel(next)
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
 	next, _ = m.Update(DecisionDetailMsg{Decision: &backend.DecisionInfo{
 		ID:       "ticket-1",
 		RunID:    "run-1",
@@ -2097,6 +2145,7 @@ func TestModelRunStateEventBlockedOnDecisionCreatesInputContext(t *testing.T) {
 	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-from-run-state" {
 		t.Fatalf("blocking decision = %+v, want ticket-from-run-state", m.blockingDecision)
 	}
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-from-run-state")
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
@@ -2123,6 +2172,7 @@ func TestModelRunStartedBlockedOnApprovalCreatesInputContext(t *testing.T) {
 	if m.blockingApproval == nil || m.blockingApproval.ID != "approval-1" {
 		t.Fatalf("blocking approval = %+v, want approval-1", m.blockingApproval)
 	}
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.width = 80
 	m.height = 16
 	view := stripANSI(m.View())
@@ -2178,6 +2228,7 @@ func TestApprovalInputUsesSemanticIntent(t *testing.T) {
 
 func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
 	m.input = "同意继续调用外部接口"
 	m.inputCursor = len([]rune(m.input))
@@ -2198,6 +2249,7 @@ func TestModelApprovalSemanticApproveSubmitsApprove(t *testing.T) {
 
 func TestModelApprovalAmbiguousInputDoesNotReject(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-1", WorkspaceID: "ws-1", RunID: "run-1", State: "pending"}
 	m.input = "外部上下文"
 	m.inputCursor = len([]rune(m.input))
@@ -2216,6 +2268,7 @@ func TestModelApprovalAmbiguousInputDoesNotReject(t *testing.T) {
 
 func TestModelApprovalContextualParameterInputApproves(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
+	projectApprovalBlocker(&m, "ws-1", "run-1", "approval-1")
 	m.blockingApproval = &backend.ApprovalInfo{
 		ID:          "approval-1",
 		WorkspaceID: "ws-1",
@@ -2317,8 +2370,8 @@ func TestModelDecisionResolvedRefreshesWorkspaceState(t *testing.T) {
 	m.width = 100
 	m.height = 16
 	view := stripANSI(m.View())
-	if strings.Contains(view, "ws-1 decision >") || !strings.Contains(view, "ws-1 submitting >") {
-		t.Fatalf("prompt did not refresh after decision resolve:\n%s", view)
+	if !strings.Contains(view, "ws-1 decision >") || strings.Contains(view, "ws-1 submitting >") {
+		t.Fatalf("prompt should follow server waiting projection until refresh converges:\n%s", view)
 	}
 	if m.decisions[0].State != "resolved" {
 		t.Fatalf("decision state = %q, want resolved", m.decisions[0].State)
@@ -2507,18 +2560,18 @@ func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
 	m.runtimeEvents = []string{"event-b"}
 
 	m.setActiveWorkspace("ws-a")
-	if m.activeWorkspaceID != "ws-a" || m.currentTask != "task-a" || m.result != "result-a" || m.progressText != "progress-a" {
+	if m.activeWorkspaceID != "ws-a" || m.currentTask != "task-a" || m.result != "result-a" || m.progressText != "" {
 		t.Fatalf("switch back did not restore cached display: active=%q task=%q result=%q progress=%q", m.activeWorkspaceID, m.currentTask, m.result, m.progressText)
 	}
 	if len(m.artifacts) != 1 || m.artifacts[0] != "artifact-a" || len(m.runtimeEvents) != 1 || m.runtimeEvents[0] != "event-a" {
 		t.Fatalf("cached artifacts/events = %+v/%+v, want workspace A state", m.artifacts, m.runtimeEvents)
 	}
-	if m.blockingDecision == nil || m.blockingDecision.ID != "ticket-a" || len(m.decisions) != 1 || m.decisions[0].ID != "ticket-a" {
-		t.Fatalf("cached blocker/decisions = %+v/%+v, want workspace A decision", m.blockingDecision, m.decisions)
+	if m.blockingDecision != nil || len(m.decisions) != 0 {
+		t.Fatalf("cached blocker/decisions = %+v/%+v, want no authoritative blocker cache", m.blockingDecision, m.decisions)
 	}
 
 	m.setActiveWorkspace("ws-b")
-	if m.currentTask != "task-b" || m.result != "result-b" || m.progressText != "progress-b" {
+	if m.currentTask != "task-b" || m.result != "result-b" || m.progressText != "" {
 		t.Fatalf("workspace B cache = task:%q result:%q progress:%q, want restored B display", m.currentTask, m.result, m.progressText)
 	}
 }
@@ -4385,7 +4438,7 @@ func TestModelGovernanceResolvedEventRefreshesWorkspaceState(t *testing.T) {
 	}
 }
 
-func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
+func TestModelDecisionResolvedDoesNotHideServerOpenProjection(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
 		ID:               "ws-a",
@@ -4407,8 +4460,8 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 		State:       "resolved",
 	}})
 	m = asModel(next)
-	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a submitting >") {
-		t.Fatalf("resolved prompt/blocker = %q/%+v, want submitting without blocker", stripANSI(m.renderInput(120)), m.blockingDecision)
+	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
+		t.Fatalf("resolved prompt/blocker = %q/%+v, want server-projected decision prompt", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 
 	next, _ = m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
@@ -4419,8 +4472,8 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 		BlockingTicketID: "ticket-1",
 	}}})
 	m = asModel(next)
-	if m.blockingDecision != nil || strings.Contains(stripANSI(m.renderInput(120)), "decision >") {
-		t.Fatalf("stale list restored decision prompt/blocker = %q/%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
+	if !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
+		t.Fatalf("server list blocker should remain visible after local resolved marker: input=%q blocker=%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 
 	next, _ = m.Update(WorkspaceContextMsg{
@@ -4453,8 +4506,8 @@ func TestModelDecisionResolvedIgnoresStaleDecisionProjection(t *testing.T) {
 		WorkspaceHasLive: true,
 	})
 	m = asModel(next)
-	if m.blockingDecision != nil || !strings.Contains(stripANSI(m.renderInput(120)), "ws-a running >") {
-		t.Fatalf("stale snapshot restored decision prompt/blocker = %q/%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
+	if !strings.Contains(stripANSI(m.renderInput(120)), "ws-a decision >") {
+		t.Fatalf("server snapshot blocker should remain visible after local resolved marker: input=%q blocker=%+v", stripANSI(m.renderInput(120)), m.blockingDecision)
 	}
 }
 

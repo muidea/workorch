@@ -150,20 +150,6 @@ func (entry *workspaceRuntimeState) normalizeWorkspaceOverview(ws backend.Worksp
 	if entry == nil {
 		return ws
 	}
-	if _, ok := entry.ResolvedTickets[ws.BlockingTicketID]; ok && ws.BlockingTicketID != "" {
-		if entry.OptimisticRunID != "" {
-			ws.ActiveRunID = entry.OptimisticRunID
-		}
-		ws.BlockingTicketID = ""
-		ws.BlockingApprovalID = ""
-	}
-	if _, ok := entry.ResolvedApprovals[ws.BlockingApprovalID]; ok && ws.BlockingApprovalID != "" {
-		if entry.OptimisticRunID != "" {
-			ws.ActiveRunID = entry.OptimisticRunID
-		}
-		ws.BlockingTicketID = ""
-		ws.BlockingApprovalID = ""
-	}
 	if workspaceStateIsLive(ws.State) {
 		ws.BlockingTicketID = ""
 		ws.BlockingApprovalID = ""
@@ -525,14 +511,13 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 		m.workspaceSelectMode = false
 		return m, nil
 	}
-	_, cached := m.cachedWorkspaceDisplayState(m.selectedWorkspaceID)
 	m.setActiveWorkspace(m.selectedWorkspaceID)
 	m.workspaceSelectMode = false
 	cmds := []tea.Cmd{}
 	if cmd := m.syncActiveWorkspaceOverview(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if !cached && m.progress != progressWaitingDecision && m.progress != progressWaitingApproval {
+	if m.progress != progressWaitingDecision && m.progress != progressWaitingApproval {
 		m.progressText = "Workspace switched; refreshing state"
 	}
 	cmds = append(cmds, m.requestWorkspaceListRefresh(), m.requestWorkspaceContextRefresh(true))
@@ -590,6 +575,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 			m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+			m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		}
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()
@@ -635,6 +621,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
+		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -663,6 +650,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	}
 	if msg.Status != nil {
 		m.applyRuntimeExecution(msg.Status.RuntimeExecution)
+		m.applySchedulerDiagnostics(msg.Status.SchedulerDiagnostics)
 	}
 	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
 		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
@@ -812,6 +800,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.llmContext = nil
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runtimeExecution = nil
+	m.schedulerDiagnostics = nil
 	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -837,7 +826,6 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		return
 	}
 	entry.Display = workspaceDisplayState{
-		ActiveRunID:           m.activeRunID,
 		CurrentTask:           m.currentTask,
 		DoDItems:              append([]string(nil), m.dodItems...),
 		Transcript:            append([]transcriptItem(nil), m.transcript...),
@@ -853,17 +841,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		RunHeartbeat:          m.runHeartbeat,
 		RuntimeExecution:      cloneRuntimeExecutionInfoPtr(m.runtimeExecution),
 		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
-		Progress:              m.progress,
-		ProgressText:          m.progressText,
 		RepairLoop:            m.repairLoop,
-		FailureReason:         m.failureReason,
-		FailureHint:           m.failureHint,
-		Running:               m.running,
-		BlockingDecision:      cloneDecisionPtr(m.blockingDecision),
-		BlockingApproval:      cloneApprovalPtr(m.blockingApproval),
-		Decisions:             append([]backend.DecisionInfo(nil), m.decisions...),
-		Approvals:             append([]backend.ApprovalInfo(nil), m.approvals...),
-		LastError:             m.lastError,
 	}
 	entry.HasDisplay = true
 }
@@ -873,7 +851,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	if !ok {
 		return false
 	}
-	m.activeRunID = cached.ActiveRunID
+	m.activeRunID = ""
 	m.currentTask = cached.CurrentTask
 	m.dodItems = append([]string(nil), cached.DoDItems...)
 	m.transcript = append([]transcriptItem(nil), cached.Transcript...)
@@ -888,18 +866,19 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.llmContext = clonePayloadMap(cached.LLMContext)
 	m.runHeartbeat = cached.RunHeartbeat
 	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(cached.RuntimeExecution)
+	m.schedulerDiagnostics = nil
 	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
-	m.progress = cached.Progress
-	m.progressText = cached.ProgressText
 	m.repairLoop = cached.RepairLoop
-	m.failureReason = cached.FailureReason
-	m.failureHint = cached.FailureHint
-	m.running = cached.Running
-	m.blockingDecision = cloneDecisionPtr(cached.BlockingDecision)
-	m.blockingApproval = cloneApprovalPtr(cached.BlockingApproval)
-	m.decisions = append([]backend.DecisionInfo(nil), cached.Decisions...)
-	m.approvals = append([]backend.ApprovalInfo(nil), cached.Approvals...)
-	m.lastError = cached.LastError
+	m.failureReason = ""
+	m.failureHint = ""
+	m.running = false
+	m.progress = progressIdle
+	m.progressText = ""
+	m.blockingDecision = nil
+	m.blockingApproval = nil
+	m.decisions = nil
+	m.approvals = nil
+	m.lastError = nil
 	m.resetMainViewport()
 	m.clearInput()
 	return true
@@ -938,6 +917,26 @@ func cloneRuntimeExecutionInfoPtr(input *backend.RuntimeExecutionInfo) *backend.
 	return &ret
 }
 
+func cloneSchedulerDiagnosticsInfoPtr(input *backend.SchedulerDiagnosticsInfo) *backend.SchedulerDiagnosticsInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	if input.LatestContinuation != nil {
+		latest := *input.LatestContinuation
+		latest.RecommendedActions = append([]string(nil), input.LatestContinuation.RecommendedActions...)
+		ret.LatestContinuation = &latest
+	}
+	ret.RecentContinuations = append([]backend.ContinuationDiagnosticInfo(nil), input.RecentContinuations...)
+	for idx := range ret.RecentContinuations {
+		ret.RecentContinuations[idx].RecommendedActions = append([]string(nil), input.RecentContinuations[idx].RecommendedActions...)
+	}
+	ret.ContinuationFailureCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationFailureCounts...)
+	ret.ContinuationNoActionCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationNoActionCounts...)
+	ret.ContinuationCompletedCounts = append([]backend.ContinuationDiagnosticCountInfo(nil), input.ContinuationCompletedCounts...)
+	return &ret
+}
+
 func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
 	m.runHeartbeat = item
 	switch item.ActivityState {
@@ -954,6 +953,10 @@ func (m *AppModel) applyRuntimeExecution(item *backend.RuntimeExecutionInfo) {
 		return
 	}
 	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(item)
+}
+
+func (m *AppModel) applySchedulerDiagnostics(item *backend.SchedulerDiagnosticsInfo) {
+	m.schedulerDiagnostics = cloneSchedulerDiagnosticsInfoPtr(item)
 }
 
 func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {
@@ -1027,18 +1030,11 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	} else if !workspaceStateIsLive(ws.State) && ws.State != common.WorkspaceStateWaitingDecision && ws.State != common.WorkspaceStateBlocked {
 		m.activeRunID = ""
 	}
-	if m.workspaceHasResolvedBlocker(ws) && m.progress == progressSubmitting {
-		m.running = false
-		return nil
-	}
 	m.applyWorkspaceProgress(ws.State)
 	switch ws.State {
 	case common.WorkspaceStateWaitingDecision:
 		m.running = false
 		if ws.BlockingTicketID != "" {
-			if m.decisionAlreadyResolved(ws.BlockingTicketID) {
-				return nil
-			}
 			m.progress = progressWaitingDecision
 			m.setBlockingDecision(ws.BlockingTicketID, ws.ID, ws.ActiveRunID, "", "")
 			m.progressText = nonEmpty(blockingDecisionLabel(m.blockingDecision), "Waiting for decision")
@@ -1050,9 +1046,6 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	case common.WorkspaceStateBlocked:
 		m.running = false
 		if ws.BlockingApprovalID != "" {
-			if m.approvalAlreadyResolved(ws.BlockingApprovalID) {
-				return nil
-			}
 			m.progress = progressWaitingApproval
 			m.setBlockingApproval(ws.BlockingApprovalID, ws.ID, ws.ActiveRunID, "", "", nil)
 			m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), "Waiting for approval")
@@ -1068,21 +1061,8 @@ func (m *AppModel) syncActiveWorkspaceOverview() tea.Cmd {
 	return nil
 }
 
-func (m *AppModel) workspaceHasResolvedBlocker(ws *backend.WorkspaceInfo) bool {
-	if ws == nil {
-		return false
-	}
-	if ws.BlockingTicketID != "" && m.decisionAlreadyResolved(ws.BlockingTicketID) {
-		return true
-	}
-	if ws.BlockingApprovalID != "" && m.approvalAlreadyResolved(ws.BlockingApprovalID) {
-		return true
-	}
-	return false
-}
-
-func (m *AppModel) markDecisionResolvedForWorkspace(id common.TicketID, runID common.RunID) {
-	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+func (m *AppModel) markDecisionResolvedForWorkspace(workspaceID common.WorkspaceID, id common.TicketID, runID common.RunID) {
+	entry := m.ensureWorkspaceRuntimeState(string(workspaceID))
 	if entry == nil || id == "" {
 		return
 	}
@@ -1095,8 +1075,8 @@ func (m *AppModel) markDecisionResolvedForWorkspace(id common.TicketID, runID co
 	}
 }
 
-func (m *AppModel) markApprovalResolvedForWorkspace(id common.ApprovalID, runID common.RunID) {
-	entry := m.ensureWorkspaceRuntimeState(m.activeWorkspaceID)
+func (m *AppModel) markApprovalResolvedForWorkspace(workspaceID common.WorkspaceID, id common.ApprovalID, runID common.RunID) {
+	entry := m.ensureWorkspaceRuntimeState(string(workspaceID))
 	if entry == nil || id == "" {
 		return
 	}

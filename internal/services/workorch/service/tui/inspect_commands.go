@@ -57,6 +57,10 @@ func (m AppModel) renderInspectStatus() string {
 			b.WriteString("\n")
 		}
 	}
+	if scheduler := schedulerDiagnosticsStatusText(m.schedulerDiagnostics); scheduler != "" {
+		b.WriteString(scheduler)
+		b.WriteString("\n")
+	}
 	if m.currentTask != "" {
 		b.WriteString("- goal: ")
 		b.WriteString(m.currentTask)
@@ -75,6 +79,44 @@ func (m AppModel) renderInspectStatus() string {
 	if approval := m.activeBlockingApproval(); approval != nil {
 		b.WriteString("- approval: ")
 		b.WriteString(blockingApprovalLabel(approval))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) string {
+	if item == nil {
+		return ""
+	}
+	var b strings.Builder
+	if item.LatestContinuation != nil {
+		latest := item.LatestContinuation
+		b.WriteString("- scheduler: ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{latest.Kind, latest.State, latest.Reason}), " ")))
+		if latest.Detail != "" {
+			b.WriteString(" - ")
+			b.WriteString(latest.Detail)
+		}
+		b.WriteString("\n")
+		if latest.Recoverability != "" || len(latest.RecommendedActions) > 0 {
+			b.WriteString("- scheduler recovery: ")
+			b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+				latest.Recoverability,
+				strings.Join(latest.RecommendedActions, ","),
+			}), " ")))
+			b.WriteString("\n")
+		}
+	}
+	if item.Watchdog.LatestTickAt != "" {
+		b.WriteString("- watchdog: ")
+		b.WriteString(item.Watchdog.LatestTickAt)
+		if item.Watchdog.LatestDurationMs > 0 {
+			b.WriteString(fmt.Sprintf(" %dms", item.Watchdog.LatestDurationMs))
+		}
+		if item.Watchdog.LatestError != "" {
+			b.WriteString(" - ")
+			b.WriteString(item.Watchdog.LatestError)
+		}
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")

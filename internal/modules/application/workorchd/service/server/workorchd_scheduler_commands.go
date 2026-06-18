@@ -54,10 +54,17 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 	}
 	if err := s.schedulerHub.Publish(ctx, envelope); err != nil {
 		if response, ok := events.ResponseEnvelope(err); ok {
-			return validateWorkorchDSchedulerAcceptedResponse(topic, response)
+			if validateErr := validateWorkorchDSchedulerAcceptedResponse(topic, response); validateErr != nil {
+				s.recordSchedulerCommandResult(topic, "not_accepted")
+				return validateErr
+			}
+			s.recordSchedulerCommandResult(topic, "accepted")
+			return nil
 		}
+		s.recordSchedulerCommandResult(topic, "failed")
 		return err
 	}
+	s.recordSchedulerCommandResult(topic, "missing_response")
 	return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
 }
 
@@ -100,6 +107,48 @@ func schedulerSubjectType(topic string) string {
 	default:
 		return "workorchd-scheduler-command"
 	}
+}
+
+func schedulerKindFromTopic(topic string) string {
+	switch topic {
+	case workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested:
+		return schedulerKindWorkspaceActivation
+	case workorchdevents.TopicWorkorchDCommandRunContinuationRequested:
+		return schedulerKindRunContinuation
+	case workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested:
+		return schedulerKindGovernanceContinuation
+	case workorchdevents.TopicWorkorchDCommandReplanContinuationRequested:
+		return schedulerKindReplanContinuation
+	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
+		return schedulerKindWorkspaceRestart
+	default:
+		return "workorchd_scheduler_command"
+	}
+}
+
+func (s *serverState) recordSchedulerCommandResult(topic string, result string) {
+	if s == nil || s.schedulerDiagnostics == nil {
+		return
+	}
+	s.schedulerDiagnostics.recordCommand(schedulerKindFromTopic(topic), result)
+}
+
+func (s *serverState) recordSchedulerCommandEnqueueFailure(topic string, workspaceID string, runID string, detail string) {
+	if s == nil || s.schedulerDiagnostics == nil {
+		return
+	}
+	kind := schedulerKindFromTopic(topic)
+	s.schedulerDiagnostics.recordCommandEnqueueFailure(kind, schedulerReasonEnqueueFailed)
+	s.schedulerDiagnostics.recordContinuation(schedulerDiagnosticInput{
+		WorkspaceID:    workspaceID,
+		RunID:          runID,
+		Kind:           kind,
+		State:          schedulerDiagnosticStateFailed,
+		Reason:         schedulerReasonEnqueueFailed,
+		Detail:         detail,
+		Recoverability: schedulerRecoverabilityManualRetry,
+		DedupeKey:      schedulerDedupeKey(workspaceID, runID, kind, schedulerReasonEnqueueFailed),
+	})
 }
 
 func schedulerSubjectID(topic string, workspaceID string, runID string, payload map[string]any) string {

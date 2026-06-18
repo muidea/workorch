@@ -33,16 +33,18 @@ func registerSystemRoutes(router engine.RouteRegistry, state *serverState) {
 		case workspaceProjectionStateReady, workspaceProjectionStateStale, workspaceProjectionStateDegraded:
 		default:
 			writeJSON(w, http.StatusServiceUnavailable, statusResponse{
-				Service:    "workorch",
-				Status:     "not_ready",
-				Projection: &projection,
+				Service:     "workorch",
+				Status:      "not_ready",
+				Projection:  &projection,
+				Diagnostics: state.schedulerDiagnosticsFor("", ""),
 			})
 			return
 		}
 		writeJSON(w, http.StatusOK, statusResponse{
-			Service:    "workorch",
-			Status:     "ready",
-			Projection: &projection,
+			Service:     "workorch",
+			Status:      "ready",
+			Projection:  &projection,
+			Diagnostics: state.schedulerDiagnosticsFor("", ""),
 		})
 	})
 	router.AddHandler("/metrics", http.MethodGet, func(_ context.Context, w http.ResponseWriter, _ *http.Request) {

@@ -89,6 +89,7 @@ type AppModel struct {
 	llmContext             map[string]any
 	runHeartbeat           backend.RunHeartbeatInfo
 	runtimeExecution       *backend.RuntimeExecutionInfo
+	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
 	runtimeEvents          []string
 	progress               progressState
 	progressText           string
@@ -483,16 +484,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if refreshWorkspaceID == "" {
 				refreshWorkspaceID = msg.Decision.WorkspaceID
 			}
-			if msg.Decision.RunID != "" {
+			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Decision.RunID != "" {
 				m.activeRunID = string(msg.Decision.RunID)
 			}
-			m.markDecisionResolvedForWorkspace(msg.Decision.ID, msg.Decision.RunID)
+			m.markDecisionResolvedForWorkspace(common.WorkspaceID(refreshWorkspaceID), msg.Decision.ID, msg.Decision.RunID)
 			m.markDecisionResolved(msg.Decision.ID)
 		}
-		m.blockingDecision = nil
-		m.clearInput()
-		m.progress = progressSubmitting
-		m.progressText = "Decision resolved; waiting for server continuation"
+		if string(refreshWorkspaceID) == m.activeWorkspaceID {
+			m.blockingDecision = nil
+			m.clearInput()
+			m.progress = progressSubmitting
+			m.progressText = "Decision resolved; waiting for server continuation"
+		}
 		cmds := []tea.Cmd{m.refreshActiveWorkspaceState()}
 		if refreshWorkspaceID != "" {
 			cmds = append(cmds, FetchWorkspaceContext(m.be, string(refreshWorkspaceID)), FetchDecisions(m.be, string(refreshWorkspaceID)))
@@ -503,17 +506,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setLastError(msg.Error)
 			return m, nil
 		}
+		refreshWorkspaceID := msg.WorkspaceID
 		if msg.Approval != nil {
-			if msg.Approval.RunID != "" {
+			if refreshWorkspaceID == "" {
+				refreshWorkspaceID = msg.Approval.WorkspaceID
+			}
+			if string(refreshWorkspaceID) == m.activeWorkspaceID && msg.Approval.RunID != "" {
 				m.activeRunID = string(msg.Approval.RunID)
 			}
-			m.markApprovalResolvedForWorkspace(msg.Approval.ID, msg.Approval.RunID)
+			m.markApprovalResolvedForWorkspace(refreshWorkspaceID, msg.Approval.ID, msg.Approval.RunID)
 			m.markApprovalResolved(msg.Approval.ID)
 		}
-		m.blockingApproval = nil
-		m.clearInput()
-		m.progress = progressSubmitting
-		m.progressText = "Approval resolved; waiting for server continuation"
+		if string(refreshWorkspaceID) == m.activeWorkspaceID {
+			m.blockingApproval = nil
+			m.clearInput()
+			m.progress = progressSubmitting
+			m.progressText = "Approval resolved; waiting for server continuation"
+		}
 		return m, m.refreshActiveWorkspaceState()
 	case ConfigMsg:
 		if msg.Error != nil {
@@ -1713,9 +1722,6 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 	if m.blockingDecision != nil {
 		matched := false
 		for _, item := range m.decisions {
-			if m.decisionAlreadyResolved(item.ID) {
-				continue
-			}
 			if item.ID == m.blockingDecision.ID {
 				matched = true
 				merged := mergeDecisionInfo(*m.blockingDecision, item)
@@ -1746,9 +1752,6 @@ func (m *AppModel) syncBlockingDecisionFromList() {
 		}
 	}
 	for _, item := range filterOpenDecisions(m.decisions) {
-		if m.decisionAlreadyResolved(item.ID) {
-			continue
-		}
 		if m.decisionMatchesActiveScope(item) {
 			m.blockingDecision = &item
 			if m.progress == progressWaitingDecision {
@@ -1764,9 +1767,6 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 	if m.blockingApproval != nil {
 		matched := false
 		for _, item := range m.approvals {
-			if m.approvalAlreadyResolved(item.ID) {
-				continue
-			}
 			if item.ID == m.blockingApproval.ID {
 				matched = true
 				merged := mergeApprovalInfo(*m.blockingApproval, item)
@@ -1797,9 +1797,6 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 		}
 	}
 	for _, item := range filterPendingApprovals(m.approvals) {
-		if m.approvalAlreadyResolved(item.ID) {
-			continue
-		}
 		if m.approvalMatchesActiveScope(item) {
 			m.blockingApproval = &item
 			if m.progress == progressWaitingApproval {
@@ -1809,24 +1806,6 @@ func (m *AppModel) syncBlockingApprovalFromList() {
 		}
 	}
 	m.ensureActiveBlockingApprovalFromOverview()
-}
-
-func (m *AppModel) decisionAlreadyResolved(id common.TicketID) bool {
-	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
-	if entry == nil || id == "" {
-		return false
-	}
-	_, ok := entry.ResolvedTickets[id]
-	return ok
-}
-
-func (m *AppModel) approvalAlreadyResolved(id common.ApprovalID) bool {
-	entry := m.workspaceRuntimeState(m.activeWorkspaceID)
-	if entry == nil || id == "" {
-		return false
-	}
-	_, ok := entry.ResolvedApprovals[id]
-	return ok
 }
 
 func (m *AppModel) clearWaitingProgressIfUnblocked() {
@@ -1854,7 +1833,7 @@ func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 			return nil
 		}
 		if ws.State == common.WorkspaceStateWaitingDecision {
-			if ws.BlockingTicketID == "" || m.decisionAlreadyResolved(ws.BlockingTicketID) {
+			if ws.BlockingTicketID == "" {
 				return nil
 			}
 			if m.blockingDecision != nil && m.blockingDecision.ID == ws.BlockingTicketID && m.decisionMatchesActiveScope(*m.blockingDecision) {
@@ -1869,13 +1848,7 @@ func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
 			return &item
 		}
 	}
-	if m.blockingDecision == nil || m.blockingDecision.ID == "" || m.decisionAlreadyResolved(m.blockingDecision.ID) {
-		return nil
-	}
-	if !m.decisionMatchesActiveScope(*m.blockingDecision) {
-		return nil
-	}
-	return m.blockingDecision
+	return nil
 }
 
 func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
@@ -1885,7 +1858,7 @@ func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
 			return nil
 		}
 		if ws.State == common.WorkspaceStateBlocked {
-			if ws.BlockingApprovalID == "" || m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+			if ws.BlockingApprovalID == "" {
 				return nil
 			}
 			if m.blockingApproval != nil && m.blockingApproval.ID == ws.BlockingApprovalID && m.approvalMatchesActiveScope(*m.blockingApproval) {
@@ -1900,13 +1873,7 @@ func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
 			return &item
 		}
 	}
-	if m.blockingApproval == nil || m.blockingApproval.ID == "" || m.approvalAlreadyResolved(m.blockingApproval.ID) {
-		return nil
-	}
-	if !m.approvalMatchesActiveScope(*m.blockingApproval) {
-		return nil
-	}
-	return m.blockingApproval
+	return nil
 }
 
 func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
@@ -2098,20 +2065,24 @@ func (m *AppModel) applyBackendEvent(evt backend.Event) tea.Cmd {
 		m.progressText = nonEmpty(blockingApprovalLabel(m.blockingApproval), string(m.blockingApproval.ID))
 		return m.fetchActiveBlockerDetails()
 	case backend.EventDecisionResolved:
-		m.blockingDecision = nil
-		m.progress = progressSubmitting
-		m.progressText = "Decision resolved; waiting for server continuation"
 		ticketID := common.TicketID(firstPayloadString(evt.Payload, "ticketId", "ID", "id", events.PayloadKeyBlockingTicketID))
-		m.markDecisionResolvedForWorkspace(ticketID, evt.RunID)
+		m.markDecisionResolvedForWorkspace(evt.WorkspaceID, ticketID, evt.RunID)
 		m.markDecisionResolved(ticketID)
+		if string(evt.WorkspaceID) == m.activeWorkspaceID {
+			m.blockingDecision = nil
+			m.progress = progressSubmitting
+			m.progressText = "Decision resolved; waiting for server continuation"
+		}
 		return m.refreshActiveWorkspaceState()
 	case backend.EventApprovalResolved:
-		m.blockingApproval = nil
-		m.progress = progressSubmitting
-		m.progressText = "Approval resolved; waiting for server continuation"
 		approvalID := common.ApprovalID(firstPayloadString(evt.Payload, "approvalId", "ID", "id", events.PayloadKeyBlockingApprovalID))
-		m.markApprovalResolvedForWorkspace(approvalID, evt.RunID)
+		m.markApprovalResolvedForWorkspace(evt.WorkspaceID, approvalID, evt.RunID)
 		m.markApprovalResolved(approvalID)
+		if string(evt.WorkspaceID) == m.activeWorkspaceID {
+			m.blockingApproval = nil
+			m.progress = progressSubmitting
+			m.progressText = "Approval resolved; waiting for server continuation"
+		}
 		return m.refreshActiveWorkspaceState()
 	case backend.EventGovernanceResolved:
 		m.progressText = governanceProgressText("resolved", evt.Payload)
