@@ -628,50 +628,54 @@ WORKORCH_MANAGED_VERIFY_TARGET=loadtest-governed WORKORCH_MANAGED_MAX_CONCURRENT
 
 - 真实终端 TUI renderer smoke 已由 `verify-tui-terminal-render` 覆盖；长 Result 的真实 PTY 渲染 marker、PgDown/PgUp 输入、滚动后右侧 workspace panel 与底部 prompt/help 可见性已由 `verify-tui-long-output-e2e` 覆盖；文本录制式视图快照由 `verify-tui-workspace-switch-visual` 承担，只读运行期观测由 `observe-runtime-closure` 承担。鼠标拖选复制的应用侧风险通过禁用 mouse reporting 和真实 PTY raw 负向断言覆盖。
 
-### P2.4 Run Watchdog / Continuation Recovery
+### P2.4 Run Watchdog / Runtime Gap Recovery
 
-workorchd 的 run watchdog 属于服务端状态循环和 continuation recovery，不属于 Web/TUI 端侧补偿逻辑。它由 `HTTPServer.Start()` 在 workspace projection 启动后调用 `state.scheduleStartupRecovery()` 接线，并通过 framework 注入的 `BackgroundRoutine` 管理后台任务与 timer 生命周期。
+workorchd 的 run watchdog 属于服务端状态循环和 runtime gap recovery，不属于 Web/TUI 端侧补偿逻辑。它由 `HTTPServer.Start()` 在 workspace projection 启动后调用 `state.scheduleWatchdog()` 接线，并通过 framework 注入的 `BackgroundRoutine` 管理后台 timer 生命周期。
+
+watchdog 不是正常调度链路，也不是 event 丢失的兜底替代。TUI/Web/REST 提交的 command、orchestrator 派发的 step、runtime block 的 result/progress 都必须通过 EventHub 主路径可靠投递和处理；如果正常运行中发现 event 异常丢失，应核对 EventHub publish/send、订阅、owner command/result、runtime checkpoint 写入和投影消费链路并修复丢失原因，不能通过 watchdog 静默补偿来掩盖主路径缺陷。
 
 触发时机：
 
-- Startup recovery: 服务启动后延迟约 `500ms` 执行一次，用于重启后恢复历史运行态。
+- Startup scheduling: 服务启动后只注册 periodic watchdog timer，不自动恢复、重派或失败历史运行态 run。服务重启后需要恢复历史运行时，由用户通过 TUI/Web/REST 显式触发 `/run continue`、replan、restart 或后续专用诊断/恢复入口。
 - Periodic watchdog: 服务运行期间每 `30s` 执行一次 timer tick。
 - Stale dispatched 判定不是每 `30s` 直接修改状态；timer 只是检查窗口。真正恢复还需要 dispatched step 年龄超过 `server.staleDispatchedStepMinAge`，默认 `10m`。
 
 当前覆盖范围：
 
 - `recoverStuckRunningRuns`
-  - 仅在 startup recovery 中执行。
-  - 处理服务重启后遗留的 running run。
+  - 不由服务启动或 periodic watchdog 自动执行。
+  - 仅作为显式诊断/手动恢复能力保留，用于 operator 确认历史 running run 已无活动且需要收口的场景。
   - 可恢复 terminal dispatched step 时交回 orchestrator resume。
   - 只有在没有 blocker、没有 continuation checkpoint、也没有可恢复 step 时，才把 stuck running run 收口为 failure。
 - `recoverStaleDispatchedRuns`
   - 在 periodic watchdog 中执行。
   - 受 `MaxConcurrentRuns` run slot 和 `server.staleDispatchedStepMinAge` 控制。
-  - 用于发现长时间停留在 dispatched 且没有后续产出的 orphan/stale step，并通过 appservice / EventHub / orchestrator 恢复。
+  - 用于发现长时间停留在 dispatched 且已有持久 runtime checkpoint 证明存在 runtime gap 的 step，并通过 appservice / EventHub / orchestrator 恢复。
+  - 覆盖范围仅限 `runtime_terminal_not_finalized` 且存在 `runtime_step_result_available`、`worker_lost` 且存在 `runtime_worker_lost`、以及有 worker heartbeat 且超过 stale 阈值的 accepted/in-progress gap；不处理无证据的 event 丢失。
 - `recoverResolvedGovernanceBlockedRuns`
-  - 在 startup recovery 和 periodic watchdog 中执行。
+  - 不由 periodic watchdog 自动执行。
   - 按 workspace 列表逐一扫描 workspace-scoped runs。
   - 只处理 `blocked_on_decision` 且 blocking decision 已 `resolved`，以及 `blocked_on_approval` 且 blocking approval 已 `approved` / `rejected` / `resolved` 的不一致状态。
-  - 不直接改 run/workspace 状态，只重新提交已有 `governance_run_resume`，让正式状态机由 appservice -> EventHub command -> kernel orchestrator 推进。
+  - 仅作为显式诊断/手动恢复能力保留；正常治理恢复必须由 decision/approval resolve 主路径发布 scoped continuation command。
 - `recoverReplanContinuations`
-  - 当前在 startup recovery 中执行。
+  - 不由服务启动自动执行。
   - 用于重启后发现旧 run 已 superseded 且存在 resolved replan decision，但 successor 未创建或未继续推进的场景。
 
 影响范围与边界：
 
 - Watchdog 只负责通用运行时形态恢复，不根据 workspace template、业务目标、文件名、测试框架或具体 capability 做业务分支。
+- Watchdog 不负责补偿正常运行中的 event 丢失。event 丢失必须作为 EventHub / owner command / runtime checkpoint / projection 链路缺陷处理，并通过代码修复保证主路径可靠。
 - 正式状态转换仍由 owner module / orchestrator 完成；watchdog 不绕过 EventHub command/response，不直接写 kernel owner repository。
 - Governance resume 去重键为 `workspaceID/runID`：同一 workspace 的重复 resume 会合并，不同 workspace 即使 run ID 相同也必须独立恢复。
-- Periodic stale dispatched recovery 与 governance resume 都会进入 run slot 队列，受 `MaxConcurrentRuns` 约束，避免 watchdog 抢占正常执行容量。
-- Web/TUI 只消费 projection / SSE / command result；如果端侧已成功提交 decision/approval resolve，但 run 仍处于 waiting decision/approval，服务端 watchdog 应在下一轮恢复中重新提交 continuation。
+- Periodic stale dispatched recovery 会进入 run slot 队列，受 `MaxConcurrentRuns` 约束，避免 watchdog 抢占正常执行容量。
+- Web/TUI 只消费 projection / SSE / command result；如果端侧已成功提交 decision/approval resolve，但 run 仍处于 waiting decision/approval，应核对 resolve handler、scheduler command 发布、EventHub 订阅和 run continuation 主路径，不应等待 watchdog 扫描补偿。
 
 后续特性跟踪项：
 
-- [ ] `/metrics` 增加 watchdog 维度指标：startup recovery count、periodic tick count、resolved governance recovery scheduled count、stale dispatched recovery count、last watchdog error。
+- [ ] `/metrics` 增加 watchdog 维度指标：startup watchdog timer registration count、periodic tick count、stale dispatched recovery count、last watchdog error。
 - [ ] `/readyz` 或 runtime diagnostics 增加最近一次 watchdog 执行时间、执行耗时和恢复摘要，便于区分 provider 卡住、projection stale 和 continuation 未调度。
-- [ ] `observe-runtime-closure` 增加 resolved-governance-blocked 场景观测：模拟 ticket 已 resolved 但 run 仍 blocked，确认 watchdog 在窗口内重新提交 scoped resume。
-- [ ] `verify-real-runtime-closure` 的 preflight 除 stale dispatched 阈值外，补充 watchdog interval、run slot 上限和 governance recovery 指标采样。
+- [ ] `observe-runtime-closure` 增加 resolved-governance-blocked 场景观测：模拟 ticket 已 resolved 后确认 resolve handler / scheduler command / EventHub 主路径提交 scoped resume；若 run 仍 blocked，应暴露为主链路缺陷。
+- [ ] `verify-real-runtime-closure` 的 preflight 除 stale dispatched 阈值外，补充 watchdog interval、run slot 上限和 governance continuation 主路径指标采样。
 - [ ] TUI `/status` 可展示服务端 projection 中的 latest watchdog summary，但不得在 TUI 端主动重放 resume。
 - [ ] 根据真实 provider 长跑结果评估是否把 replan continuation recovery 纳入 periodic watchdog，前提是仍保持 workspace-scoped、幂等和 run-slot 受控。
 

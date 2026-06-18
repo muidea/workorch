@@ -18,10 +18,9 @@ const runWatchdogInterval = 30 * time.Second
 type runContinuationScheduler struct {
 	state *serverState
 
-	recoveryMu             sync.Mutex
-	startupRecoveryStarted bool
-	periodicRecoveryTimer  bool
-	staleRecoveryRunning   bool
+	recoveryMu            sync.Mutex
+	periodicRecoveryTimer bool
+	staleRecoveryRunning  bool
 
 	replanMu      sync.Mutex
 	replanStarted map[string]struct{}
@@ -52,32 +51,10 @@ func newRunContinuationScheduler(state *serverState) *runContinuationScheduler {
 	}
 }
 
-func (s *runContinuationScheduler) scheduleStartupRecovery() {
+func (s *runContinuationScheduler) scheduleWatchdog() {
 	if s == nil || s.state == nil {
 		return
 	}
-	if !s.markStartupRecoveryStarted() {
-		return
-	}
-	state := s.state
-	state.scheduleBackground("startup_recovery", func(ctx context.Context) {
-		timer := time.NewTimer(500 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			return
-		}
-		if err := s.recoverResolvedGovernanceBlockedRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
-			slog.Warn("workorch resolved governance blocked run startup recovery failed", "err", err)
-		}
-		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
-			slog.Warn("workorch startup run recovery failed", "err", err)
-		}
-		if err := s.recoverStaleDispatchedRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
-			slog.Warn("workorch startup stale dispatched run recovery failed", "err", err)
-		}
-	})
 	s.schedulePeriodicStaleDispatchedRecovery()
 }
 
@@ -93,12 +70,6 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 		state.backgroundContext(),
 		backgroundFuncTask{fn: func() {
 			ctx := appservice.ContextWithEventHub(state.backgroundContext(), state.eventHub)
-			if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
-				slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
-			}
-			if err := s.recoverStuckRunningRunsOnly(ctx); err != nil {
-				slog.Warn("workorch periodic stuck running run recovery failed", "err", err)
-			}
 			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
 				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
 			}
@@ -296,19 +267,6 @@ func (s *runContinuationScheduler) runHasResolvedApproval(ctx context.Context, w
 		}
 	}
 	return false
-}
-
-func (s *runContinuationScheduler) markStartupRecoveryStarted() bool {
-	if s == nil {
-		return false
-	}
-	s.recoveryMu.Lock()
-	defer s.recoveryMu.Unlock()
-	if s.startupRecoveryStarted {
-		return false
-	}
-	s.startupRecoveryStarted = true
-	return true
 }
 
 func (s *runContinuationScheduler) markPeriodicRecoveryTimerStarted() bool {

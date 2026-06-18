@@ -52,7 +52,7 @@ Last Updated: 2026-06-12
 - EventRecord 是事实日志，不作为高频实时视图查询表。
 - 大 payload 默认 ref-only，只有显式 raw/detail/replay 路径才读取正文。
 - workspace list/detail、status bar、prompt hint、SSE refresh 都不能触发全局历史扫描。
-- watchdog、startup recovery、projection gap repair 使用轻量索引或 projection，不使用 heavy snapshot。
+- watchdog、manual recovery、projection gap repair 使用轻量索引或 projection，不使用 heavy snapshot。
 - file backend 长期运行时 CPU/IO 不应随历史 event payload 体积线性增长。
 - 设计保持业务中立，不根据 workspace template、目标文件、测试框架或具体业务语义做分支。
 

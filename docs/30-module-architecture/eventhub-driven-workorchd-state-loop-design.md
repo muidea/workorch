@@ -89,7 +89,7 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `workspaceviewcore.Manager` 订阅 WorkOrch owner events，并维护服务端 ViewModel projection。
 - `serverState.registerAutoGovernanceResumeWatcher` 订阅 auto-governance resolved event。
 - `serverState.registerReplanContinuationWatcher` 已存在但当前为空逻辑。
-- `runContinuationScheduler` 管理 startup recovery、stale dispatched recovery、resolved governance recovery、replan continuation。
+- `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/continue/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
 - 当前未提交修改中已给 governance resume 增加了内存 pending map 和重试测试。
 
 缺口是：这些能力仍不是统一的 EventHub command loop。HTTP handler 和 watcher 会直接调 scheduler 函数；scheduler 的 pending 也不是正式事件契约或可审计 command。

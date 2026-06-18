@@ -210,7 +210,7 @@ orchestrator.dispatchStepWithWorkspace
 - runtime executor 已通过 runtime progress 通道补充中立 worker lifecycle evidence：`runtime_worker_started`、`runtime_worker_heartbeat`、`runtime_worker_stopped`、`runtime_worker_lost`。`workorchd` read model 会将其投影为 `workerStartedAt`、`workerHeartbeatAt`、`workerStoppedAt`、`workerLostAt` 和 `worker_lost` gap；stale dispatched watchdog 只有看到明确 `runtime_worker_lost` 证据，或已存在 worker heartbeat 且 heartbeat 本身超过 stale minAge 时，才允许恢复 accepted gap，仍不会对无证据的 `accepted_no_progress` / `accepted_in_progress` 盲目重派 provider。
 - stale dispatched watchdog 已从统一 resume 入口收口为 gap-specific recovery command：`workorchd` 通过 `TopicOrchestratorCommandRecoverRuntimeGap` 提交结构化 `RecoverRuntimeGapCommand`，payload 携带 workspace/run/step/gap/request/queue/latestStepTime/reason；orchestrator owner 将其转换为带 `runtimeGapRecovery` 的 background resume patch。watchdog/appservice 不直接调用 runtime adapter，也不再把不同 gap 混成无上下文 resume。
 - gap-specific recovery command 主路径已补齐订阅：orchestrator module `Start()` 订阅 `TopicOrchestratorCommandRecoverRuntimeGap`，避免 appservice/watchdog 正确发布 recovery command 后因无 owner response 被判定为 `invalid argument`。
-- startup recovery 已纳入一次性 stale dispatched runtime gap 扫描；服务重启后不必等待 watchdog 周期即可基于持久 owner state 发布结构化 recovery command。
+- 服务启动不再自动执行一次性 stale dispatched runtime gap 扫描；重启后历史运行态由用户显式恢复，周期 watchdog 只在服务运行期间基于持久 owner state 发布结构化 stale gap recovery command。
 - 文件后端回归已覆盖 durable terminal result finalize：running run + dispatched step + `runtime_step_result_available` checkpoint 可通过 `RecoverStaleDispatchedRunsWithBackend` 恢复为 terminal，step output 保留 checkpoint marker，证明不重新执行 provider/runtime adapter。
 - runtime executor 并发回归已覆盖：两个不同 workspace 的 runtime block request 在第一个 adapter 未释放时，第二个 adapter 也能进入执行，证明不同 workspace runtime blocks 不被全局串行化。
 - graph 依赖与 evidence 顺序回归已复核：独立 graph nodes 可并发执行，依赖节点在前置节点完成后推进，follow-up 输入保持并行节点 evidence 的稳定顺序。
@@ -773,7 +773,7 @@ orchestrator result subscriber receives completed step
   - `ResumeRun` 在 running recovery 中优先使用 durable terminal result finalize 当前 dispatched terminal step。
   - 仅有 stream done 但没有 durable result 时仍不能伪造 output，watchdog 只展示 gap，不重派 provider。
 - [x] 对 worker lost 或 accepted no progress 执行 retry/requeue。
-- [x] startup recovery 从 persisted owner state 重建 pending。
+- [x] 服务启动不自动从 persisted owner state 重建 pending；历史运行态恢复由显式用户命令或诊断/恢复入口触发。
 - [x] Watchdog 不直接调用 provider 或 runtime adapter；只发布恢复 command/work item。
 
 验收：

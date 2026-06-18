@@ -953,7 +953,7 @@ func (s *HTTPServer) Start() error {
 	if err := s.state.startWorkspaceProjection(s.state.backgroundContext()); err != nil {
 		return err
 	}
-	s.state.scheduleStartupRecovery()
+	s.state.scheduleWatchdog()
 	err := s.http.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -2092,11 +2092,11 @@ func (s *serverState) backgroundContext() context.Context {
 	return context.Background()
 }
 
-func (s *serverState) scheduleStartupRecovery() {
+func (s *serverState) scheduleWatchdog() {
 	if s == nil {
 		return
 	}
-	s.runContinuations.scheduleStartupRecovery()
+	s.runContinuations.scheduleWatchdog()
 }
 
 func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {

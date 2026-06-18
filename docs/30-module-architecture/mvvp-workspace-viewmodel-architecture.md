@@ -111,7 +111,7 @@ Presenter 是适配层。规则：
   decision/approval/result/runtime 等 WorkOrch 业务事件；不依赖通配符订阅。
 - projection rebuild 由 framework 注入的 `BackgroundRoutine` 调度；事件 observer
   只做轻量分类和 rebuild 调度。
-- `workorchd` HTTP server、startup recovery、governance continuation、snapshot cache
+- `workorchd` HTTP server、startup projection scheduling、watchdog timer、governance continuation、snapshot cache
   warmup 与 projection rebuild 都不再提供无 `BackgroundRoutine` 的生产 fallback。
   缺失 framework 注入的 `BackgroundRoutine` 应作为装配错误暴露。
 - `/readyz` 输出 projection state，`ready/stale/degraded` 表示服务端 ViewModel 可服务。

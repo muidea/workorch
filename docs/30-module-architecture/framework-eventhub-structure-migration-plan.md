@@ -581,7 +581,7 @@ Audit classification:
 | `internal/modules/application/workorchd/service/server/service.go` | HTTP server startup submitted to framework `BackgroundRoutine` | acceptable |
 | `internal/modules/application/workorchd/service/server/http_types.go` | server-owned fallback scheduler uses cancellable context and `WaitGroup`; uses framework `BackgroundRoutine` when present | acceptable |
 | `internal/modules/application/workorchd/service/server/http_run_cache.go` | scheduled cache warm task through server background scheduler; local timer observes context | acceptable |
-| `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go` | startup recovery, governance resume, and replan continuation use server background scheduler with cancellation and duplicate guards | acceptable |
+| `internal/modules/application/workorchd/service/server/http_run_continuation_scheduler.go` | periodic stale runtime gap watchdog and manual governance/replan/run continuation use server background scheduler with cancellation and duplicate guards | acceptable |
 | `internal/modules/kernel/governance/biz/service.go` | governance continuation/reconcile submitted to framework `BackgroundRoutine` when available; local timer observes cancellation | acceptable |
 | `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go` | stdio session stderr/cmd wait/read goroutines are tied to process pipes and closed through session `Close` / command exit | acceptable |
 | `internal/modules/blocks/mcp/biz/mcp_runtime_adapter.go` | stdio session stderr drain, process wait, and response reader goroutines are tied to session/context close | acceptable |

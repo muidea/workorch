@@ -5681,7 +5681,7 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 	}
 }
 
-func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testing.T) {
+func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing.T) {
 	dataRoot := t.TempDir()
 	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
 	ctx := context.Background()
@@ -5717,7 +5717,15 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 		t.Fatalf("close seed session: %v", err)
 	}
 
-	second := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
+	routine := &recordingBackgroundRoutine{}
+	second := NewHTTPServerWithEventHubAndBackground(Config{Backend: "file", DataRoot: dataRoot}, nil, routine)
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := second.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("shutdown second server: %v", err)
+		}
+	})
 	if err := second.Validate(ctx); err != nil {
 		t.Fatalf("validate second server: %v", err)
 	}
@@ -5736,43 +5744,14 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 		return body.Run
 	}
 	if run := getRun(); run.State != string(common.RunStateRunning) {
-		t.Fatalf("run state after Validate = %s, want running until startup background recovery", run.State)
+		t.Fatalf("run state after Validate = %s, want running until explicit recovery", run.State)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
+	second.state.scheduleWatchdog()
+	if routine.timerTask == nil {
+		t.Fatal("startup scheduling did not register periodic watchdog timer")
 	}
-	second.http.Addr = ln.Addr().String()
-	done := make(chan error, 1)
-	go func() {
-		done <- second.http.Serve(ln)
-	}()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := second.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("shutdown second server: %v", err)
-		}
-		select {
-		case err := <-done:
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				t.Fatalf("second server stopped: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("second server did not stop")
-		}
-	}()
-	second.state.scheduleStartupRecovery()
+	routine.timerTask.Run()
 
-	var recovered appservice.Run
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		recovered = getRun()
-		if recovered.State == "failed" && recovered.FailureReason != "" {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-stuck-validation", nil)
 	getRec := httptest.NewRecorder()
 	second.http.Handler.ServeHTTP(getRec, getReq)
@@ -5783,8 +5762,8 @@ func TestHTTPServerStartupRecoversFileBackedStuckRunningRunInBackground(t *testi
 	if err := json.Unmarshal(getRec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal run: %v", err)
 	}
-	if body.Run.State != "failed" || body.Run.FailureReason == "" {
-		t.Fatalf("run = %+v, want failed recovered run", body.Run)
+	if body.Run.State != string(common.RunStateRunning) || body.Run.FailureReason != "" {
+		t.Fatalf("run = %+v, want running run preserved for manual recovery", body.Run)
 	}
 }
 

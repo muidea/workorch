@@ -487,11 +487,11 @@ Last Updated: 2026-06-08
 - Code: `internal/modules/application/workorchd/biz/appservice/run_recovery_service.go`
 - Owner layer: Application startup/recovery orchestration
 - Expected responsibility: 启动时识别通用恢复形态，恢复 active workspace pointer，处理 orphan dispatched step；正式 Run 状态转换交给 kernel run service。
-- Current responsibility: 扫描 running run，跳过带 continuation checkpoint 的 run；对无 continuation 的 stuck running run 调用 `RunService.FailRun`，然后只补偿 workspace active pointer。
+- Current responsibility: 保留显式 stuck running run 诊断/手动恢复能力；服务启动和 periodic watchdog 不自动扫描并失败历史 running run。正常运行中的恢复应优先通过 EventHub 主路径、runtime checkpoint 和 stale dispatched gap recovery 完成。
 - Lifecycle check: recovery 不注册 module，不持有后台资源；由 HTTP/server scheduler 触发。
 - EventHub check: failed run 状态事件由 kernel run service 发布；recovery 本身不直接发布 run state event。
 - Background task check: recovery 函数本身同步执行，后台调度由 serverState 通过 `BackgroundRoutine` 管理。
-- State ownership check: 本轮将 stuck running run 的直接 repository 状态写入收口为 `RunService.FailRun`；workspace active pointer 清理保留为 recovery 补偿。
+- State ownership check: stuck running run 的失败收口只能来自显式恢复/诊断入口，并通过 `RunService.FailRun` 处理；workspace active pointer 清理保留为 recovery 补偿。watchdog 不应替代正常 EventHub command/result 投递，也不应掩盖 event 丢失。
 - Workspace scope check: duplicate run ID 恢复和 orphan step 恢复均使用 `ContextWithRuntimeWorkspaceID` 绑定 workspace。
 - Findings: recovery 曾直接修改 Run state / blockers / failureReason，绕过 kernel run facade。
 - Required action: 已改为通过 `RunService.FailRun`，并由现有 recovery 回归测试覆盖。
@@ -551,10 +551,10 @@ Last Updated: 2026-06-08
 - Code: `internal/modules/application/workorchd/service/server`
 - Owner layer: Application HTTP service
 - Expected responsibility: 接收 framework 注入的 `event.Hub` / `BackgroundRoutine`，在 `Startup` 完成接线和校验，在 `Run` 启动 listener，在 `Shutdown` 关闭 listener 并等待退出。
-- Current responsibility: HTTP handler、validation、response、SSE；startup recovery / governance resume / replan continuation 调度已由 `runContinuationScheduler` 收敛，snapshot cache warm 仍作为 read-model cache helper 使用同一 background scheduler。
+- Current responsibility: HTTP handler、validation、response、SSE；periodic stale runtime gap watchdog / manual governance resume / manual replan continuation 调度已由 `runContinuationScheduler` 收敛，snapshot cache warm 仍作为 read-model cache helper 使用同一 background scheduler。
 - Lifecycle check: `Startup` 保存 framework `BackgroundRoutine` 并传入 HTTP server；`Run` 通过 `BackgroundRoutine.AsyncFunction` 启动 listener；`Shutdown` cancel serverState context、unsubscribe event handlers、等待后台任务、关闭 shared session。
 - EventHub check: HTTP service 通过 `workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http")` 复用 framework hub；SSE replay 和 governance watcher 订阅在 `close` 中释放。
-- Background task check: 本轮将 `serverState` 的 startup recovery、governance resume、replan continuation、snapshot cache warm 统一收口到 `scheduleBackground`，框架路径使用 `BackgroundRoutine.AsyncFunction`，仅独立测试/未注入时 fallback 到受 context/WG 管理的 goroutine；governance/replan 去重状态已从 `serverState` 字段迁入 `runContinuationScheduler`。
+- Background task check: 本轮将 `serverState` 的 manual governance resume、manual replan continuation、snapshot cache warm 统一收口到 `scheduleBackground`，框架路径使用 `BackgroundRoutine.AsyncFunction`，仅独立测试/未注入时 fallback 到受 context/WG 管理的 goroutine；watchdog timer 只执行 stale runtime gap recovery 并使用 framework `BackgroundRoutine.Timer`，governance/replan 去重状态已从 `serverState` 字段迁入 `runContinuationScheduler`。
 - State ownership check: HTTP handler 不直接改正式状态；治理 resolve 后只调度 appservice/kernel resume；recovery 状态转换已下沉到 appservice 使用 kernel `RunService.FailRun`。
 - Workspace scope check: governance/read route 将 query workspaceID 绑定到 context；appservice 已补 decision/approval wrong-scope guard；run snapshot cache key 保留 workspace-aware key。
 - Findings: serverState 曾自持服务级后台 goroutine，未接入 framework `BackgroundRoutine`；带 workspaceId 的 governance detail/resolve 曾未被 appservice 实际校验；continuation/recovery 去重状态曾散落在 `serverState`。

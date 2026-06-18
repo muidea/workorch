@@ -14,6 +14,7 @@ type recordingBackgroundRoutine struct {
 	asyncFunctionCalls  int
 	timerCalls          int
 	function            func()
+	timerTask           magictask.Task
 	err                 error
 }
 
@@ -46,6 +47,7 @@ func (r *recordingBackgroundRoutine) SyncFunctionWithTimeOut(function func(), ti
 
 func (r *recordingBackgroundRoutine) Timer(ctx context.Context, task magictask.Task, intervalValue time.Duration, offsetValue time.Duration) error {
 	r.timerCalls++
+	r.timerTask = task
 	return nil
 }
 
@@ -67,11 +69,11 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	if !routine.asyncFunctionCalled {
 		t.Fatal("Run did not submit HTTP server through BackgroundRoutine.AsyncFunction")
 	}
-	if routine.asyncFunctionCalls != 3 {
-		t.Fatalf("Run submitted %d background functions, want projection baseline, startup recovery, and HTTP server", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 2 {
+		t.Fatalf("Run submitted %d background functions, want projection baseline and HTTP server", routine.asyncFunctionCalls)
 	}
 	if routine.timerCalls != 1 {
-		t.Fatalf("Run submitted %d timers, want startup recovery watchdog timer", routine.timerCalls)
+		t.Fatalf("Run submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
 	}
 	if routine.function == nil {
 		t.Fatal("Run submitted a nil background function")
@@ -120,21 +122,21 @@ func TestServiceRunReturnsErrorWhenBackgroundSubmitFails(t *testing.T) {
 	}
 }
 
-func TestHTTPServerStartupRecoveryUsesBackgroundRoutine(t *testing.T) {
+func TestHTTPServerStartupOnlySchedulesWatchdogTimer(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	httpServer := NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "memory"}, nil, routine)
 
-	httpServer.state.scheduleStartupRecovery()
-	httpServer.state.scheduleStartupRecovery()
+	httpServer.state.scheduleWatchdog()
+	httpServer.state.scheduleWatchdog()
 
-	if routine.asyncFunctionCalls != 1 {
-		t.Fatalf("startup recovery submitted %d background functions, want 1", routine.asyncFunctionCalls)
+	if routine.asyncFunctionCalls != 0 {
+		t.Fatalf("startup scheduling submitted %d background functions, want no automatic recovery", routine.asyncFunctionCalls)
 	}
 	if routine.timerCalls != 1 {
-		t.Fatalf("startup recovery submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
+		t.Fatalf("startup scheduling submitted %d timers, want stale dispatched watchdog timer", routine.timerCalls)
 	}
-	if routine.function == nil {
-		t.Fatal("startup recovery submitted a nil background function")
+	if routine.function != nil {
+		t.Fatal("startup scheduling submitted an automatic recovery function")
 	}
 }
 
