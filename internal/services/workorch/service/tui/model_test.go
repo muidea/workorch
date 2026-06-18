@@ -1743,6 +1743,73 @@ func TestModelDecisionReplanAfterWorkspaceSwitchReplacesStaleBlocker(t *testing.
 	}
 }
 
+func TestModelDecisionReplanUsesCurrentOverviewTicketOverStaleLocalBlocker(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-1",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-current",
+		BlockingTicketID: "ticket-current",
+	}}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-1"
+	m.selectedWorkspaceID = "ws-1"
+	m.activeRunID = "run-current"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}
+	m.decisions = []backend.DecisionInfo{{ID: "ticket-stale", WorkspaceID: "ws-1", RunID: "run-stale", State: "open"}}
+	m.setInput("/decision replan")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected decision resolve command")
+	}
+	_ = next
+	_ = cmd()
+	if len(be.decisions) != 1 {
+		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	}
+	req := be.decisions[0]
+	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-current" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision request = %+v, want current server-projected replan ticket", req)
+	}
+}
+
+func TestModelDecisionReplanUsesServerProjectionEvenAfterOptimisticResolvedMark(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-1", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{{
+		ID:               "ws-1",
+		Title:            "A",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
+	}}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-1"
+	m.selectedWorkspaceID = "ws-1"
+	m.activeRunID = "run-1"
+	m.markDecisionResolvedForWorkspace("ws-1", "ticket-1", "run-1")
+	m.markDecisionResolved("ticket-1")
+	m.blockingDecision = nil
+	m.setInput("/decision replan")
+
+	next, cmd := m.submitInput()
+	if cmd == nil {
+		t.Fatal("expected decision resolve command")
+	}
+	_ = next
+	_ = cmd()
+	if len(be.decisions) != 1 {
+		t.Fatalf("resolved decisions = %d, want one", len(be.decisions))
+	}
+	req := be.decisions[0]
+	if req.WorkspaceID != "ws-1" || req.TicketID != "ticket-1" || req.ResolutionType != decisioncommon.ResolutionTypeReplan {
+		t.Fatalf("decision request = %+v, want server-projected ticket despite optimistic resolved mark", req)
+	}
+}
+
 func TestModelCtrlCOnlyInterruptsOrHintsExitCommand(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})

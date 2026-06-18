@@ -78,6 +78,7 @@ export function useSSE(onEvent: (event: SSEEvent) => void, options: UseSSEOption
         stream?.close();
         stream = null;
         if (disposed) return;
+        onReconnectRef.current?.();
         if (retryCountRef.current >= maxRetries) return;
         const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
         retryCountRef.current += 1;
