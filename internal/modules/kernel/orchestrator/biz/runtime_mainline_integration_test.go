@@ -356,6 +356,126 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	}
 }
 
+func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunBlocks(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&requestOnlyRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-late-runtime-result")
+	runID := common.RunID("run-late-runtime-result")
+	stepID := common.StepID("run-late-runtime-result/step-1")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateBlockedOnDecision, BlockingTicketID: "ticket-1"}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "late"}}, nil); err != nil {
+		t.Fatalf("finalize late runtime result: %v", err)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateDispatched || len(step.Output) != 0 {
+		t.Fatalf("late result mutated step = %+v, want dispatched with empty output", step)
+	}
+	validations, err := validationRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list validations: %v", err)
+	}
+	if len(validations) != 0 {
+		t.Fatalf("validations = %+v, want none for late result", validations)
+	}
+
+	progress := orch.runtimeStepProgressRecorder(ctx, run, step)
+	if progress == nil {
+		t.Fatal("progress recorder is nil")
+	}
+	if err := progress(runtimemodel.StepExecutionProgress{Event: "runtime_step_done", Summary: "late progress"}); err != nil {
+		t.Fatalf("record late progress: %v", err)
+	}
+	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if len(checkpoints) != 0 {
+		t.Fatalf("checkpoints = %+v, want none for late progress", checkpoints)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchSkipsDuplicateInFlightRepairScope(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "should-not-run"}}
+	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+
+	workspaceID := common.WorkspaceID("ws-duplicate-repair-scope")
+	runID := common.RunID("run-duplicate-repair-scope")
+	failedStepID := common.StepID("run-duplicate-repair-scope/graph-001/verify")
+	firstRepairID := common.StepID("run-duplicate-repair-scope/repair-001-of-verify")
+	duplicateRepairID := common.StepID("run-duplicate-repair-scope/repair-002-of-verify")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    firstRepairID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+		Input: map[string]any{stepInputKeyRepairOfStepID: string(failedStepID)},
+	}); err != nil {
+		t.Fatalf("seed repair step: %v", err)
+	}
+
+	err := orch.dispatchStepWithWorkspace(ctx, run, duplicateRepairID, "llm/workspace_execution", map[string]any{stepInputKeyRepairOfStepID: string(failedStepID)}, workspace)
+	if err != nil {
+		t.Fatalf("dispatch duplicate repair: %v", err)
+	}
+	if _, err := stepRepo.Get(ctx, duplicateRepairID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("duplicate repair step err = %v, want not found", err)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %#v, want duplicate repair dispatch skipped", runtime.calls)
+	}
+}
+
 func TestRuntimeOrchestrator_EventDrivenDispatchRejectsMissingRequesterWithoutSyncFallback(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

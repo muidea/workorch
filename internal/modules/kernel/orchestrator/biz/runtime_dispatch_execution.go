@@ -37,6 +37,13 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 	}
 	kind = canonicalLLMWorkspaceStepKind(kind)
+	if kind == llmWorkspaceExecutionStepKind {
+		if duplicate, err := o.hasInFlightRuntimeRepairForSameScope(ctx, run.ID, stepID, input); err != nil {
+			return err
+		} else if duplicate {
+			return nil
+		}
+	}
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {
 		if err != common.ErrNotFound {
@@ -174,6 +181,14 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	} else if err != common.ErrNotFound {
 		return err
 	}
+	currentRun, acceptsResult, err := o.currentRunForRuntimeStepResult(ctx, run, step)
+	if err != nil {
+		return err
+	}
+	if !acceptsResult {
+		return nil
+	}
+	run = currentRun
 	if execErr != nil {
 		if degradedOutput, ok := degradedRuntimeFailureOutput(run, step, result.Output, execErr); ok {
 			result.Output = degradedOutput
@@ -406,6 +421,81 @@ func (o *RuntimeOrchestrator) lockRuntimeStepFinalize(stepID common.StepID) func
 	}
 }
 
+func (o *RuntimeOrchestrator) currentRunForRuntimeStepResult(ctx context.Context, run *runModel.Run, step *runModel.Step) (*runModel.Run, bool, error) {
+	if o == nil || o.runs == nil || run == nil || step == nil || run.ID == "" || step.ID == "" {
+		return nil, false, common.ErrInvalidArgument
+	}
+	current, err := o.runs.Get(ctx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if current.WorkspaceID != run.WorkspaceID || step.RunID != current.ID {
+		return nil, false, common.ErrConflict
+	}
+	switch current.State {
+	case common.RunStateRunning, common.RunStateValidating:
+		return current, true, nil
+	default:
+		return current, false, nil
+	}
+}
+
+func (o *RuntimeOrchestrator) currentRunCanRecordRuntimeProgress(ctx context.Context, run *runModel.Run, step *runModel.Step) (bool, error) {
+	_, ok, err := o.currentRunForRuntimeStepResult(ctx, run, step)
+	if err == nil {
+		return ok, nil
+	}
+	if errors.Is(err, common.ErrNotFound) && run != nil {
+		switch run.State {
+		case common.RunStateRunning, common.RunStateValidating:
+			return true, nil
+		}
+		return false, nil
+	}
+	return false, err
+}
+
+func (o *RuntimeOrchestrator) hasInFlightRuntimeRepairForSameScope(ctx context.Context, runID common.RunID, stepID common.StepID, input map[string]any) (bool, error) {
+	if o == nil || o.steps == nil || runID == "" || stepID == "" {
+		return false, common.ErrInvalidArgument
+	}
+	scope := runtimeRepairDispatchScope(input)
+	if scope == "" {
+		return false, nil
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range steps {
+		if item == nil || item.ID == stepID {
+			continue
+		}
+		switch item.State {
+		case common.StepStateCompleted, common.StepStateFailed:
+			continue
+		}
+		if runtimeRepairDispatchScope(item.Input) == scope {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func runtimeRepairDispatchScope(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	repairOf := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(input, stepInputKeyRepairOfStepID),
+		stringFromMap(input, "failedStepId"),
+	))
+	if repairOf == "" {
+		return ""
+	}
+	return "repairOfStepId:" + repairOf
+}
+
 var runtimeStepProgressMinInterval = 5 * time.Second
 
 func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, run *runModel.Run, step *runModel.Step) runtimemodel.StepExecutionProgressFunc {
@@ -446,6 +536,9 @@ func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, r
 		signature := runtimeStepProgressSignature(event, data)
 		if !terminal && signature != "" && signature == lastSignature {
 			return nil
+		}
+		if acceptsProgress, err := o.currentRunCanRecordRuntimeProgress(ctx, run, step); err != nil || !acceptsProgress {
+			return err
 		}
 		last = now
 		lastSignature = signature

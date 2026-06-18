@@ -1632,8 +1632,8 @@ func TestRuntimeOrchestrator_StartRunDispatchReusesLoadedRun(t *testing.T) {
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if got := runRepo.getCount.Load(); got != 1 {
-		t.Fatalf("run Get count = %d, want only initial StartRun read", got)
+	if got := runRepo.getCount.Load(); got != 2 {
+		t.Fatalf("run Get count = %d, want initial StartRun read and finalize state guard read", got)
 	}
 }
 
