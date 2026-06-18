@@ -383,22 +383,7 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 			contract.RepairActionPackage["requiredOutput"] = required
 			return true
 		}
-		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, focus) {
-			contract.State = convergenceStateNeedStateChange
-			contract.RuntimeStage = runtimeStageRepair
-			contract.RuntimeStageMode = "strict_convergence"
-			contract.RepairObjective = repairObjectiveStateChangingOutput
-			contract.StateChangingOutputRequired = true
-			required := enforceStateChangingRequiredOutputForConvergence(contract.RepairActionPackage)
-			required["mustReferenceCoverageWorkItem"] = true
-			required["mustIncludePrimaryStateChangingNode"] = true
-			required["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
-			required["primaryStateChangingRule"] = "when the current focus is a primary deliverable state change, produce the smallest state-changing artifact that directly maps to the focused coverage work item before validation"
-			contract.RepairActionPackage["requiredOutput"] = required
-			contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
-			return true
-		}
-		if repairHasImplementationTargetEvidence(input, contract.RepairActionPackage) ||
+		if stateChangingRepairHasActionableImplementationSurface(input, contract.RepairActionPackage) ||
 			len(mapSliceFromValue(contract.RepairActionPackage["targetSnapshots"])) > 0 ||
 			len(filterAdmissibleRuntimeRepairTargetRefs(stringSliceFromValue(contract.RepairActionPackage["repairTargetSet"]))) > 0 {
 			contract.State = convergenceStateNeedStateChange
@@ -544,28 +529,6 @@ func coverageWorkItemFocusHasActionableFailure(item map[string]any) bool {
 		len(stringSliceFromValue(item["rejectedEvidenceRefs"])) > 0
 }
 
-func coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, focus map[string]any) bool {
-	if len(focus) == 0 {
-		return false
-	}
-	missing := stringSet(stringSliceFromValue(focus["missingEvidenceKinds"]))
-	if len(missing) == 0 {
-		missing = stringSet(coverageMissingEvidenceKinds(focus))
-	}
-	if !missing["state_change"] || strings.TrimSpace(stringFromMap(focus, "sourceScope")) == "" {
-		return false
-	}
-	role := normalizedCoverageEvidenceRole(stringFromMap(focus, "evidenceRole"))
-	if role == "supplemental_evidence" {
-		return false
-	}
-	if role == "primary_state_change" {
-		return true
-	}
-	return len(coverageTargetEvidenceKindRequirements(run, []map[string]any{focus})) == 0 &&
-		normalizeEvidenceKindRequirementScope(stringFromMap(focus, "sourceScope")) != "deliverable"
-}
-
 func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evidenceKind string) bool {
 	evidenceKind = strings.TrimSpace(evidenceKind)
 	if len(context) == 0 || evidenceKind == "" {
@@ -687,6 +650,9 @@ func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any,
 	if len(input) == 0 || failedStep == nil {
 		return false
 	}
+	if convergenceInputHasUnresolvedStateChangeWithoutActionableSurface(input) {
+		return false
+	}
 	if convergenceConcreteValidationCannotAdvanceWithoutTarget(input, failedStep) {
 		return false
 	}
@@ -704,6 +670,18 @@ func convergenceMustPreserveConcreteValidationSchemaRepair(input map[string]any,
 		return true
 	}
 	return false
+}
+
+func convergenceInputHasUnresolvedStateChangeWithoutActionableSurface(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if !inputRequiresStateChangingOutput(input) &&
+		!coverageWorkItemContextHasMissingEvidenceKind(coverageWorkItemContextFromInput(input), "state_change") &&
+		!coverageWorkItemSetRequiresEvidenceKind(mapSliceFromValue(input["coverageTargetSet"]), "state_change") {
+		return false
+	}
+	return !stateChangingRepairHasActionableImplementationSurface(input, mapFromValue(input["repairActionPackage"]))
 }
 
 func convergenceCoverageFocusRequiresValidation(input map[string]any) bool {
@@ -813,9 +791,6 @@ func repeatedValidationRepairEscalationPackage(run *runModel.Run, input map[stri
 }
 
 func stateChangingRepairCanStartWithoutTargetEvidence(input map[string]any, failedStep *runModel.Step) bool {
-	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageRunFromRepairInput(input), coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
-		return true
-	}
 	return repairInputHasEmptyWorkspaceSurfaceEvidence(input) ||
 		runtimeRepairInputHasEmptyWorkspaceSurfaceEvidence(failedStep)
 }
@@ -1881,12 +1856,10 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	required["supportingEvidenceNodeRule"] = "supporting nodes from currently allowed runtime capabilities may prepare or verify the required evidence, but they do not satisfy the requirement unless their kind and operation match acceptedKinds and acceptedOperations"
 	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
-		primaryFocusCanStartWithoutTarget := coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) ||
-			coverageTargetsCanStartPrimaryStateChangeWithoutTargetEvidence(run, targets)
-		if !repairHasImplementationTargetEvidence(input, pkg) && !primaryFocusCanStartWithoutTarget {
+		if !stateChangingRepairHasActionableImplementationSurface(input, pkg) {
 			return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
 		}
-		if primaryFocusCanStartWithoutTarget {
+		if boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) {
 			pkg["primaryStateChangeWithoutTargetEvidence"] = true
 			required["mustReferenceCoverageWorkItem"] = true
 		}
@@ -1926,15 +1899,6 @@ func coverageTargetProfileStateChangeEvidenceSatisfied(target map[string]any) bo
 		return false
 	}
 	return !stringSet(coverageMissingEvidenceKinds(target))["state_change"]
-}
-
-func coverageTargetsCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, targets []map[string]any) bool {
-	for _, target := range targets {
-		if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(run, target) {
-			return true
-		}
-	}
-	return false
 }
 
 func profileEvidenceRuntimeCapabilityGap(requirements []profileEvidenceKindRequirement) map[string]any {

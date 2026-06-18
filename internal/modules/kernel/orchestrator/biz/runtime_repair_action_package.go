@@ -667,14 +667,7 @@ func applyConcreteRepairEvidenceOutputContract(input map[string]any, pkg map[str
 		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), "mcp/tool_call"))
 		return
 	}
-	if coverageFocusCanStartPrimaryStateChangeWithoutTargetEvidence(coverageRunFromRepairInput(input), coverageWorkItemPrimaryFocus(coverageWorkItemContextFromInput(input))) {
-		requiredOutput["mustIncludeStateChangingNode"] = true
-		requiredOutput["mustIncludePrimaryStateChangingNode"] = true
-		requiredOutput["primaryAcceptedKinds"] = stateChangingRepairAcceptedKinds()
-		requiredOutput["acceptedKinds"] = compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
-		return
-	}
-	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
+	if stateChangingRepairHasActionableImplementationSurface(input, pkg) {
 		requiredOutput["mustIncludeStateChangingNode"] = true
 		acceptedKinds := compactUniqueStrings(append(stringSliceFromValue(requiredOutput["acceptedKinds"]), stateChangingRepairAcceptedKinds()...))
 		requiredOutput["acceptedKinds"] = acceptedKinds
@@ -714,6 +707,13 @@ func stateChangingRepairHasConcreteTargetEvidence(input map[string]any, pkg map[
 		return true
 	}
 	return repairHasImplementationTargetEvidence(input, pkg)
+}
+
+func stateChangingRepairHasActionableImplementationSurface(input map[string]any, pkg map[string]any) bool {
+	if stateChangingRepairHasConcreteTargetEvidence(input, pkg) {
+		return true
+	}
+	return boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"])
 }
 
 func repairHasImplementationTargetEvidence(input map[string]any, pkg map[string]any) bool {

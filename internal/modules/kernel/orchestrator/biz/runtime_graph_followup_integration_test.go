@@ -1266,21 +1266,24 @@ func TestCompletionFollowUpRestoresCoverageStateChangeConvergenceContract(t *tes
 		t.Fatalf("input = %+v, want coverage convergence contract to clear assessment-only", input)
 	}
 	if input[stepInputKeyRuntimeStage] != runtimeStageRepair ||
-		input["repairObjective"] != repairObjectiveStateChangingOutput ||
-		input["stateChangingOutputRequired"] != true {
-		t.Fatalf("input = %+v, want state-changing repair convergence contract", input)
+		input["repairObjective"] != repairObjectiveAcquireFailureEvidence ||
+		input["concreteFailureEvidenceRequired"] != true ||
+		input["stateChangingOutputRequired"] != nil {
+		t.Fatalf("input = %+v, want concrete target evidence acquisition before state-changing repair", input)
 	}
 	contract := mapFromValue(input["convergenceContract"])
-	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedEvidence {
+		t.Fatalf("convergenceContract = %+v, want need_evidence", contract)
 	}
 	targets := mapSliceFromValue(input["coverageTargetSet"])
 	if len(targets) == 0 || targets[0]["sourceRequirementId"] != "version_control_snapshot" {
 		t.Fatalf("coverageTargetSet = %+v, want focused coverage work item target", input["coverageTargetSet"])
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if required["mustReferenceCoverageWorkItem"] != true || required["mustDeclareCoverageTargets"] != true {
-		t.Fatalf("requiredOutput = %+v, want coverage-bound state-changing output contract", required)
+	if required["mustProduceConcreteFailureEvidence"] != true ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want bounded evidence acquisition contract", required)
 	}
 }
 

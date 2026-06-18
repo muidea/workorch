@@ -283,6 +283,18 @@ func applyRuntimeRepairConcreteEvidenceProjection(input map[string]any, failedSt
 	if doDEvidenceQualityGapRequiresStateChange(failedStep) {
 		return
 	}
+	if inputRequiresStateChangingOutput(failedStep.Input) &&
+		!stateChangingRepairHasActionableImplementationSurface(input, mapFromValue(input["repairActionPackage"])) &&
+		!stateChangingRepairHasActionableImplementationSurface(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+		input["concreteFailureEvidenceRequired"] = true
+		input["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+		input["repairGuidance"] = concreteFailureEvidenceAcquisitionGuidance()
+		delete(input, "stateChangingOutputRequired")
+		delete(input, "evidenceRepairRequired")
+		delete(input, "boundedValidationRequired")
+		return
+	}
 	claimAlignedEvidenceNeeded := false
 	if diagnostics := mapFromValue(failedStep.Output["runtimeDiagnostics"]); len(diagnostics) > 0 {
 		claimAlignedEvidenceNeeded = boolValue(diagnostics["claimAlignedEvidenceNeeded"])
@@ -935,6 +947,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	if !assessmentOnlySchemaInvalidRepair {
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
+	applyRuntimeRepairStateChangingTargetEvidenceGate(input, failedStep)
 	policy := o.RuntimePolicy()
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
@@ -964,4 +977,31 @@ func refreshRuntimeRepairOutputDecisionContract(input map[string]any, failedStep
 		pkg["outputDecisionContract"] = contract
 		input["repairActionPackage"] = pkg
 	}
+}
+
+func applyRuntimeRepairStateChangingTargetEvidenceGate(input map[string]any, failedStep *runModel.Step) {
+	if input == nil || failedStep == nil || !inputRequiresStateChangingOutput(failedStep.Input) {
+		return
+	}
+	if stateChangingRepairHasActionableImplementationSurface(input, mapFromValue(input["repairActionPackage"])) ||
+		stateChangingRepairHasActionableImplementationSurface(failedStep.Input, mapFromValue(failedStep.Input["repairActionPackage"])) {
+		return
+	}
+	input["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["concreteFailureEvidenceRequired"] = true
+	input["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+	input["repairGuidance"] = appendRepairGuidance(input["repairGuidance"], concreteFailureEvidenceAcquisitionGuidance()...)
+	delete(input, "stateChangingOutputRequired")
+	delete(input, "evidenceRepairRequired")
+	delete(input, "boundedValidationRequired")
+	pkg := mapFromValue(input["repairActionPackage"])
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required := evidenceAcquisitionRequiredOutput(mapFromValue(pkg["requiredOutput"]))
+	pkg["requiredOutput"] = required
+	pkg["evidenceAcquisitionRequired"] = true
+	pkg["evidenceAcquisitionReason"] = "state_changing_repair_target_evidence_missing"
+	pkg["repairObjective"] = repairObjectiveAcquireFailureEvidence
+	input["repairActionPackage"] = pkg
 }

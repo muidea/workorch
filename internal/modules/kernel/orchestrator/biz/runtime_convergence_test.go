@@ -363,23 +363,20 @@ func TestBuildConvergenceContractAllowsPrimaryDeliverableStateChangeWithoutTarge
 
 	contract := BuildConvergenceContract(run, step, step, map[string]any{"input": step.Input}, nil)
 
-	if contract.State != convergenceStateNeedStateChange {
-		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
 	}
-	if !contract.StateChangingOutputRequired || contract.RepairObjective != repairObjectiveStateChangingOutput {
-		t.Fatalf("contract = %+v, want state-changing repair objective", contract)
-	}
-	if !boolValue(contract.RepairActionPackage["primaryStateChangeWithoutTargetEvidence"]) {
-		t.Fatalf("repairActionPackage = %+v, want primary state-change marker", contract.RepairActionPackage)
+	if !contract.ConcreteFailureEvidenceRequired || contract.RepairObjective != repairObjectiveAcquireFailureEvidence || contract.StateChangingOutputRequired {
+		t.Fatalf("contract = %+v, want concrete evidence acquisition before state-changing repair", contract)
 	}
 	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
-	if required["mustIncludePrimaryStateChangingNode"] != true ||
-		required["mustReferenceCoverageWorkItem"] != true ||
-		boolValue(required["profileEvidenceRequirementDeferred"]) {
-		t.Fatalf("requiredOutput = %+v, want primary state-changing output without deferred evidence acquisition", required)
+	if required["mustProduceConcreteFailureEvidence"] != true ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		!boolValue(required["profileEvidenceRequirementDeferred"]) {
+		t.Fatalf("requiredOutput = %+v, want deferred profile state-change until concrete target evidence exists", required)
 	}
-	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput.acceptedKinds = %+v, want patch/apply accepted for initial deliverable creation", required["acceptedKinds"])
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want patch/apply forbidden before target evidence", required["acceptedKinds"])
 	}
 }
 
@@ -953,22 +950,16 @@ func TestBuildConvergenceContractProfilePrimaryTargetDoesNotDependOnCurrentFocus
 
 	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
 
-	if contract.State != convergenceStateNeedStateChange {
-		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedEvidence, contract)
 	}
 	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
-	if boolValue(required["stateChangingForbidden"]) {
-		t.Fatalf("requiredOutput = %+v, should allow profile primary state-changing output", required)
+	if !boolValue(required["stateChangingForbidden"]) ||
+		!boolValue(required["mustProduceConcreteFailureEvidence"]) {
+		t.Fatalf("requiredOutput = %+v, want concrete evidence acquisition before profile primary state change", required)
 	}
-	if !boolValue(required["mustIncludePrimaryStateChangingNode"]) ||
-		!boolValue(required["mustReferenceCoverageWorkItem"]) {
-		t.Fatalf("requiredOutput = %+v, want primary state-changing coverage contract", required)
-	}
-	if !boolValue(contract.RepairActionPackage["primaryStateChangeWithoutTargetEvidence"]) {
-		t.Fatalf("repairActionPackage = %+v, want primary target to permit state change without stale target snapshot evidence", contract.RepairActionPackage)
-	}
-	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput.acceptedKinds = %+v, want profile accepted kind", required["acceptedKinds"])
+	if stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want patch/apply deferred until target evidence exists", required["acceptedKinds"])
 	}
 }
 
@@ -3051,13 +3042,14 @@ func TestBuildConvergenceContractStartsPrimaryDeliverableStateChangeFromCoverage
 
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 
-	if contract.State != convergenceStateNeedStateChange {
-		t.Fatalf("contract = %+v, want primary deliverable state-changing contract", contract)
+	if contract.State != convergenceStateNeedEvidence {
+		t.Fatalf("contract = %+v, want concrete target evidence before primary deliverable state-changing contract", contract)
 	}
 	required := mapFromValue(mapFromValue(contract.RepairActionPackage)["requiredOutput"])
-	if !boolValue(required["mustIncludePrimaryStateChangingNode"]) ||
-		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
-		t.Fatalf("requiredOutput = %+v, want primary patch-capable state-changing output", required)
+	if !boolValue(required["mustProduceConcreteFailureEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want evidence acquisition before primary patch-capable output", required)
 	}
 	targets := mapSliceFromValue(mapFromValue(contract.RepairActionPackage)["coverageTargetSet"])
 	if len(targets) == 0 || stringFromMap(targets[0], "sourceRequirementId") != "source_change" {
@@ -3346,15 +3338,17 @@ func TestRuntimeRepairFollowUpSchemaInvalidWithRejectedContinuationKeepsStateCha
 	input := orch.runtimeRepairFollowUpStepInput(context.Background(), run, failed, 1, nil)
 	contract := mapFromValue(input["convergenceContract"])
 
-	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
-		t.Fatalf("convergenceContract = %+v, want need_state_change even with rejected continuation", contract)
+	if stringFromMap(contract, "state") != convergenceStateNeedValidation {
+		t.Fatalf("convergenceContract = %+v, want validation repair instead of targetless state-changing repair", contract)
 	}
-	if input["stateChangingOutputRequired"] != true || input["repairObjective"] != repairObjectiveStateChangingOutput {
-		t.Fatalf("repair input = %+v, want rejected continuation to preserve state-changing repair contract", input)
+	if input["stateChangingOutputRequired"] != nil || input["repairObjective"] != repairObjectiveConcreteValidationEvidence {
+		t.Fatalf("repair input = %+v, want rejected continuation to avoid targetless state-changing repair", input)
 	}
 	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
-	if !boolValue(required["mustIncludeStateChangingNode"]) {
-		t.Fatalf("requiredOutput = %+v, want state-changing requirement preserved", required)
+	if !boolValue(required["mustProduceConcreteValidationEvidence"]) ||
+		boolValue(required["mustIncludeStateChangingNode"]) ||
+		stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want non-state-changing validation repair contract", required)
 	}
 }
 

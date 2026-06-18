@@ -968,10 +968,10 @@ func TestInitialStepInputReplanUsesEvidenceAcquisitionWithoutConcreteTarget(t *t
 	}
 }
 
-func TestRuntimeRepairEmptyWorkspaceSurfaceEvidenceIncludesGoNoModuleDiagnostic(t *testing.T) {
+func TestRuntimeRepairEmptyWorkspaceSurfaceEvidenceIncludesRootFileList(t *testing.T) {
 	failedStep := &runmodel.Step{
-		ID:    "run-empty-go-module/follow-up",
-		RunID: "run-empty-go-module",
+		ID:    "run-empty-workspace-surface/follow-up",
+		RunID: "run-empty-workspace-surface",
 		Kind:  llmWorkspaceExecutionStepKind,
 		Input: map[string]any{
 			stepInputKeyGraphEvidence: []map[string]any{{
@@ -980,22 +980,14 @@ func TestRuntimeRepairEmptyWorkspaceSurfaceEvidenceIncludesGoNoModuleDiagnostic(
 					"stage":     "file_list",
 					"path":      ".",
 					"truncated": false,
-					"entries": []map[string]any{{
-						"path": ".agents",
-						"kind": "directory",
-					}},
-				},
-			}, {
-				"kind": "shell/command",
-				"output": map[string]any{
-					"stdout": "# ./...\npattern ./...: directory prefix . does not contain main module or its selected dependencies\nFAIL\t./... [setup failed]\nFAIL",
+					"entries":   []map[string]any{},
 				},
 			}},
 		},
 	}
 
 	if !runtimeRepairHasConcreteImplementationTargetEvidence(map[string]any{}, failedStep) {
-		t.Fatalf("runtimeRepairHasConcreteImplementationTargetEvidence = false, want Go no-module diagnostic to count as empty workspace surface evidence")
+		t.Fatalf("runtimeRepairHasConcreteImplementationTargetEvidence = false, want root file/list empty evidence to count as empty workspace surface evidence")
 	}
 }
 
@@ -1030,15 +1022,7 @@ func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *te
 					"stage":     "file_list",
 					"path":      ".",
 					"truncated": false,
-					"entries": []map[string]any{{
-						"path": ".agents",
-						"kind": "directory",
-					}},
-				},
-			}, {
-				"kind": "shell/command",
-				"output": map[string]any{
-					"stdout": "# ./...\npattern ./...: directory prefix . does not contain main module or its selected dependencies\nFAIL\t./... [setup failed]\nFAIL",
+					"entries":   []map[string]any{},
 				},
 			}},
 		},
@@ -1049,9 +1033,9 @@ func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *te
 			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment|error=invalid argument: dodassessment is not satisfied",
 			stepOutputKeyDoDAssessment: map[string]any{
 				"satisfied": false,
-				"summary":   "The workspace is empty and still needs a state-changing project initialization.",
+				"summary":   "The workspace is empty and still needs a state-changing initialization.",
 				"items": []map[string]any{{
-					"item":         "生成最小可运行 Go 项目",
+					"item":         "生成最小可运行交付物",
 					"state":        "failed",
 					"evidenceRefs": []string{"run-empty-workspace-escalation/graph-001/list-empty-workspace"},
 				}},
@@ -1059,7 +1043,7 @@ func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *te
 					"satisfied": false,
 					"items": []map[string]any{{
 						"goalRequirementId": "goal-req-empty-workspace",
-						"goal":              "从空 workspace 初始化一个最小 Go 项目",
+						"goal":              "从空 workspace 初始化一个最小交付物",
 						"state":             "failed",
 						"reason":            "State-changing project initialization has not run.",
 						"evidenceRefs":      []string{"run-empty-workspace-escalation/graph-001/list-empty-workspace"},
@@ -1069,12 +1053,12 @@ func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *te
 			"runtimeDiagnostics": map[string]any{
 				"kind": failureClassDoDCoverageMissing,
 				"missingDoDItems": []map[string]any{{
-					"item":  "生成最小可运行 Go 项目",
+					"item":  "生成最小可运行交付物",
 					"state": "failed",
 				}},
 				"missingGoalCoverage": []map[string]any{{
 					"goalRequirementId": "goal-req-empty-workspace",
-					"item":              "从空 workspace 初始化一个最小 Go 项目",
+					"item":              "从空 workspace 初始化一个最小交付物",
 					"state":             "failed",
 					"reason":            "State-changing project initialization has not run.",
 				}},
