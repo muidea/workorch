@@ -88,6 +88,7 @@ type AppModel struct {
 	llmUsage               backend.LLMUsageSummaryInfo
 	llmContext             map[string]any
 	runHeartbeat           backend.RunHeartbeatInfo
+	runtimeExecution       *backend.RuntimeExecutionInfo
 	runtimeEvents          []string
 	progress               progressState
 	progressText           string
@@ -300,7 +301,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyWorkspaceContext(msg)
 		m.lastError = nil
 		if msg.ResetMainViewport {
-			if m.blockingDecision != nil || m.blockingApproval != nil {
+			if m.activeBlockingDecision() != nil || m.activeBlockingApproval() != nil {
 				m.followMainViewportTail()
 			} else {
 				m.syncMainViewportToCurrentContent()
@@ -672,17 +673,17 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	}
 	m.addInputHistory(text)
 	m.ensureActiveBlockingDecisionFromOverview()
-	if m.blockingDecision != nil {
-		ticketID := string(m.blockingDecision.ID)
+	if decision := m.activeBlockingDecision(); decision != nil {
+		ticketID := string(decision.ID)
 		m.clearInput()
 		m.lastError = nil
 		m.appendTranscript("Decision", text)
 		return m, ResolveDecision(m.be, m.activeWorkspaceID, ticketID, text)
 	}
 	m.ensureActiveBlockingApprovalFromOverview()
-	if m.blockingApproval != nil {
-		approvalID := string(m.blockingApproval.ID)
-		approve, ok := parseApprovalInputWithContext(text, m.blockingApproval.Reason)
+	if approval := m.activeBlockingApproval(); approval != nil {
+		approvalID := string(approval.ID)
+		approve, ok := parseApprovalInputWithContext(text, approval.Reason)
 		if !ok {
 			m.progress = progressWaitingApproval
 			m.progressText = "Approval intent unclear; use a clear approval or rejection"
@@ -1670,11 +1671,11 @@ func (m *AppModel) setBlockingApproval(id common.ApprovalID, workspaceID common.
 
 func (m *AppModel) fetchActiveBlockerDetails() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
-		cmds = append(cmds, FetchDecision(m.be, m.activeWorkspaceID, string(m.blockingDecision.ID)))
+	if decision := m.activeBlockingDecision(); decision != nil && decision.ID != "" {
+		cmds = append(cmds, FetchDecision(m.be, m.activeWorkspaceID, string(decision.ID)))
 	}
-	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
-		cmds = append(cmds, FetchApproval(m.be, m.activeWorkspaceID, string(m.blockingApproval.ID)))
+	if approval := m.activeBlockingApproval(); approval != nil && approval.ID != "" {
+		cmds = append(cmds, FetchApproval(m.be, m.activeWorkspaceID, string(approval.ID)))
 	}
 	if m.activeWorkspaceID != "" {
 		cmds = append(cmds, FetchBlockers(m.be, m.activeWorkspaceID))
@@ -1840,10 +1841,72 @@ func (m *AppModel) clearWaitingProgressIfUnblocked() {
 }
 
 func (m *AppModel) followBlockerTailUnlessUserScrolled() {
-	if m.blockingDecision == nil && m.blockingApproval == nil {
+	if m.activeBlockingDecision() == nil && m.activeBlockingApproval() == nil {
 		return
 	}
 	m.followMainViewportTailUnlessUserScrolled()
+}
+
+func (m *AppModel) activeBlockingDecision() *backend.DecisionInfo {
+	ws := m.activeWorkspaceOverview()
+	if ws != nil {
+		if workspaceStateIsLive(ws.State) || ws.State == common.WorkspaceStateCompleted || ws.State == common.WorkspaceStateFailed {
+			return nil
+		}
+		if ws.State == common.WorkspaceStateWaitingDecision {
+			if ws.BlockingTicketID == "" || m.decisionAlreadyResolved(ws.BlockingTicketID) {
+				return nil
+			}
+			if m.blockingDecision != nil && m.blockingDecision.ID == ws.BlockingTicketID && m.decisionMatchesActiveScope(*m.blockingDecision) {
+				return m.blockingDecision
+			}
+			item := backend.DecisionInfo{
+				ID:          ws.BlockingTicketID,
+				WorkspaceID: ws.ID,
+				RunID:       ws.ActiveRunID,
+				State:       "open",
+			}
+			return &item
+		}
+	}
+	if m.blockingDecision == nil || m.blockingDecision.ID == "" || m.decisionAlreadyResolved(m.blockingDecision.ID) {
+		return nil
+	}
+	if !m.decisionMatchesActiveScope(*m.blockingDecision) {
+		return nil
+	}
+	return m.blockingDecision
+}
+
+func (m *AppModel) activeBlockingApproval() *backend.ApprovalInfo {
+	ws := m.activeWorkspaceOverview()
+	if ws != nil {
+		if workspaceStateIsLive(ws.State) || ws.State == common.WorkspaceStateCompleted || ws.State == common.WorkspaceStateFailed {
+			return nil
+		}
+		if ws.State == common.WorkspaceStateBlocked {
+			if ws.BlockingApprovalID == "" || m.approvalAlreadyResolved(ws.BlockingApprovalID) {
+				return nil
+			}
+			if m.blockingApproval != nil && m.blockingApproval.ID == ws.BlockingApprovalID && m.approvalMatchesActiveScope(*m.blockingApproval) {
+				return m.blockingApproval
+			}
+			item := backend.ApprovalInfo{
+				ID:          ws.BlockingApprovalID,
+				WorkspaceID: ws.ID,
+				RunID:       ws.ActiveRunID,
+				State:       "pending",
+			}
+			return &item
+		}
+	}
+	if m.blockingApproval == nil || m.blockingApproval.ID == "" || m.approvalAlreadyResolved(m.blockingApproval.ID) {
+		return nil
+	}
+	if !m.approvalMatchesActiveScope(*m.blockingApproval) {
+		return nil
+	}
+	return m.blockingApproval
 }
 
 func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {

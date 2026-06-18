@@ -40,7 +40,7 @@ func StartRunWithSession(ctx context.Context, session *RuntimeSession, runID str
 }
 
 func StartRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string) (Run, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Run, error) {
+	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Run, error) {
 		return StartRunWithSession(ctx, session, runID)
 	})
 }
@@ -62,7 +62,7 @@ func ResumeRunWithSession(ctx context.Context, session *RuntimeSession, runID st
 }
 
 func ResumeRunWithBackend(ctx context.Context, backend string, dataRoot string, runID string, executionContextPatch ...map[string]any) (Run, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Run, error) {
+	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (Run, error) {
 		return ResumeRunWithSession(ctx, session, runID, executionContextPatch...)
 	})
 }

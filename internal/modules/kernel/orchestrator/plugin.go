@@ -64,13 +64,13 @@ func (m *Module) Setup(_ context.Context, _ event.Hub, backgroundRoutine task.Ba
 			return cd.NewError(cd.Unexpected, err.Error())
 		}
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, eventAdapter); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, eventAdapter); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, orchestratorbiz.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, eventAdapter); err != nil {
 		return cd.NewError(cd.Unexpected, err.Error())
 	}
 	if err := runtimeRegistry.Register(llmcommon.StepKindWorkspaceExecution, eventAdapter); err != nil {

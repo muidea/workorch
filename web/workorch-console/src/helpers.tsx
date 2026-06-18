@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels } from './utils/constants';
 
@@ -259,6 +259,21 @@ export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
     { key: 'latestArtifact', label: '最近交付物', children: heartbeat.latestArtifactAt || '-' },
     { key: 'latestPatch', label: '最近补丁', children: heartbeat.latestPatchAt || '-' },
     { key: 'evidence', label: '最近证据', children: heartbeat.latestEvidenceRef || '-' }
+  ];
+}
+
+export function runtimeExecutionDescriptions(runtime?: RuntimeExecution) {
+  if (!runtime || (!runtime.stepId && !runtime.requestId && !runtime.gap && !runtime.pending)) {
+    return [{ key: 'runtimeExecution', label: 'Runtime Execution', children: '-' }];
+  }
+  return [
+    { key: 'pending', label: 'Runtime 状态', children: <Space wrap>{runtime.pending ? <Tag color="gold">pending</Tag> : <Tag>finalized</Tag>}{runtime.gap ? <Tag color="red">{runtime.gap}</Tag> : null}</Space> },
+    { key: 'step', label: 'Runtime 步骤', children: [runtime.stepId, runtime.stepKind, runtime.stepState].filter(Boolean).join(' / ') || '-' },
+    { key: 'request', label: '调度请求', children: [runtime.requestId, runtime.queueKey].filter(Boolean).join(' / ') || '-' },
+    { key: 'worker', label: 'Worker', children: [runtime.workerId, runtime.workerHeartbeatAt ? `heartbeat ${runtime.workerHeartbeatAt}` : '', runtime.workerLostAt ? `lost ${runtime.workerLostAt}` : ''].filter(Boolean).join(' / ') || '-' },
+    { key: 'acceptedAt', label: '接收时间', children: runtime.acceptedAt || '-' },
+    { key: 'lastProgress', label: '最近进展', children: [runtime.lastProgressSummary, runtime.lastProgressEvent, runtime.lastProgressStage, runtime.lastProgressAt].filter(Boolean).join(' / ') || '-' },
+    { key: 'terminal', label: '终态事件', children: [runtime.doneAt ? `done ${runtime.doneAt}` : '', runtime.failedAt ? `failed ${runtime.failedAt}` : '', runtime.finalizedAt ? `finalized ${runtime.finalizedAt}` : '', runtime.finalizeEvent].filter(Boolean).join(' / ') || '-' }
   ];
 }
 

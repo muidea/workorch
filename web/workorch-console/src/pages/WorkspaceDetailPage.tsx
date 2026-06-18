@@ -30,7 +30,7 @@ const {
   runtimeEventPageLimit, runtimePatchPageLimit, runtimeRawRefActions, runtimeResultPageLimit,
   runtimeStepPageLimit, runtimeTarget, runtimeToolCallPageLimit, runtimeValidationPageLimit,
   setupDoDItems, skillDisplayLabel, soulBindingStageLabel, splitLines, stageBindings,
-  projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions,
+  projectionStatusDescriptions, projectionStatusSummary, runHeartbeatDescriptions, runtimeExecutionDescriptions,
   stateLabel, stateTag, taskDecompositionCard, taskProgressCard, timelineLabel,
   timelineOccurredAtContent, timelineStreamContent, webSourceCard, webSourceRows,
   workspaceProcessItems, workspaceProjectionRun, workspaceProjectionRunLabel,
@@ -1199,6 +1199,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const summaryLLMUsage = workspaceLLMUsageSummary ?? runLLMUsageSummary;
   const currentArtifactContinuations = runSnapshot?.artifactContinuations ?? snapshot?.artifactContinuations ?? [];
   const currentRunHeartbeat = runSnapshot?.runHeartbeat ?? snapshot?.runHeartbeat;
+  const currentRuntimeExecution = runSnapshot?.runtimeExecution ?? snapshot?.runtimeExecution;
   const dodDefinitionRows = dods.flatMap((dod) => dod.items.map((text, index) => ({
     key: `${dod.id}-${index}`,
     id: dod.id,
@@ -1345,6 +1346,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 column={{ xs: 1, md: 2 }}
                 size="small"
                 items={runHeartbeatDescriptions(currentRunHeartbeat)}
+              />
+              <Descriptions
+                column={{ xs: 1, md: 2 }}
+                size="small"
+                items={runtimeExecutionDescriptions(currentRuntimeExecution)}
               />
             </Space>
           </ProCard>
@@ -1681,6 +1687,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'run', label: '运行', children: `${runSnapshot.run.id} / ${stateLabel(runOutcomeState(runSnapshot, runObservability))}` },
                     { key: 'rawRunState', label: '原始运行状态', children: stateLabel(runRawState(runSnapshot, runObservability)) },
                     { key: 'currentStep', label: '当前步骤', children: runObservability?.progress.currentStepId || runSnapshot.steps?.at(-1)?.id || '-' },
+                    { key: 'runtimeGap', label: 'Runtime Gap', children: runSnapshot.runtimeExecution?.gap || '-' },
+                    { key: 'runtimePending', label: 'Runtime Pending', children: runSnapshot.runtimeExecution?.pending ? '是' : '否' },
                     { key: 'terminal', label: '是否终态', children: runObservability ? (runObservability.progress.terminal ? '是' : '否') : '-' },
                     { key: 'steps', label: '步骤', children: `${runObservability?.progress.stepCompleted ?? 0}/${runObservability?.progress.stepTotal ?? runSnapshot.steps?.length ?? 0} 已完成` },
                     { key: 'toolCalls', label: '工具调用', children: `${runObservability?.evidence.toolCallCompleted ?? 0}/${runObservability?.evidence.toolCallTotal ?? runToolCallRecords.length} 已完成` },

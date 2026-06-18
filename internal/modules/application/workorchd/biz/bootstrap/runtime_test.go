@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	magictask "github.com/muidea/magicCommon/task"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
@@ -28,6 +30,7 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/kernel/eventstream/pkg/models"
 	mcpmodel "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/models"
 	memorymodel "github.com/muidea/workorch/internal/modules/kernel/memory/pkg/models"
+	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	resultcommon "github.com/muidea/workorch/internal/modules/kernel/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/kernel/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -46,6 +49,11 @@ type testLifecycle struct {
 	teardownSeq *[]string
 	runErr      error
 	teardownErr error
+}
+
+type backgroundAwareLifecycle struct {
+	id      string
+	stopped *bool
 }
 
 type echoRuntimeAdapter struct{}
@@ -89,6 +97,17 @@ func (l testLifecycle) Stop(context.Context) error {
 		*l.teardownSeq = append(*l.teardownSeq, l.id)
 	}
 	return l.teardownErr
+}
+
+func (l backgroundAwareLifecycle) ID() string { return l.id }
+
+func (l backgroundAwareLifecycle) Start() error { return nil }
+
+func (l backgroundAwareLifecycle) Stop(context.Context) error {
+	if l.stopped != nil {
+		*l.stopped = true
+	}
+	return nil
 }
 
 func publishTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {
@@ -185,7 +204,9 @@ func TestNewWithBackendMemoryBuildsRuntime(t *testing.T) {
 
 func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T) {
 	hub := events.NewMemoryHub()
-	executor := runtimeevent.NewExecutor("test/block", hub, echoRuntimeAdapter{},
+	background := magictask.NewBackgroundRoutine(32)
+	defer background.Shutdown(context.Background())
+	executor := runtimeevent.NewExecutor("test/block", hub, background, echoRuntimeAdapter{},
 		filemodule.StepKindList,
 		filemodule.StepKindRead,
 		filemodule.StepKindEdit,
@@ -204,6 +225,15 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("run echo executor: %v", err)
 	}
 	defer executor.Teardown()
+	patchExecutor := runtimeevent.NewExecutor("test/patch", hub, background, orchestratormodule.NewPatchRuntimeAdapter(),
+		llmcommon.RuntimeBlockKindPatchApply,
+		llmcommon.RuntimeBlockKindPatchPreview,
+		llmcommon.RuntimeBlockKindPatchRevert,
+	)
+	if err := patchExecutor.Run(); err != nil {
+		t.Fatalf("run patch executor: %v", err)
+	}
+	defer patchExecutor.Teardown()
 	registry, err := buildRuntimeAdapterRegistry(hub)
 	if err != nil {
 		t.Fatalf("build registry: %v", err)
@@ -224,7 +254,12 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		mcpblockmodule.StepKindPromptGet,
 		llmmodule.StepKindWorkspaceExecution,
 	} {
-		result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{Kind: kind})
+		result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+			WorkspaceID: "ws-runtime-test",
+			RunID:       "run-001",
+			StepID:      common.StepID("run-001-step-" + kind),
+			Kind:        kind,
+		})
 		if err != nil {
 			t.Fatalf("execute registered kind %s: %v", kind, err)
 		}
@@ -234,7 +269,10 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 	}
 
 	result, err := registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		Kind: llmcommon.RuntimeBlockKindPatchApply,
+		WorkspaceID: "ws-runtime-test",
+		RunID:       "run-001",
+		StepID:      "run-001-step-patch-apply",
+		Kind:        llmcommon.RuntimeBlockKindPatchApply,
 		Input: map[string]any{
 			"patchType": "file_write",
 			"targetRef": "result.txt",
@@ -248,6 +286,9 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("patch/apply output = %+v, want patch_apply stage", result.Output)
 	}
 	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceID:                   "ws-runtime-test",
+		RunID:                         "run-001",
+		StepID:                        "run-001-step-patch-preview",
 		Kind:                          llmcommon.RuntimeBlockKindPatchPreview,
 		WorkspaceDeliverableDirectory: t.TempDir(),
 		Input: map[string]any{
@@ -263,7 +304,10 @@ func TestBuildRuntimeAdapterRegistryRegistersAllWorkorchBlockKinds(t *testing.T)
 		t.Fatalf("patch/preview output = %+v, want patch_preview stage", result.Output)
 	}
 	result, err = registry.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
-		Kind: llmcommon.RuntimeBlockKindPatchRevert,
+		WorkspaceID: "ws-runtime-test",
+		RunID:       "run-001",
+		StepID:      "run-001-step-patch-revert",
+		Kind:        llmcommon.RuntimeBlockKindPatchRevert,
 		Input: map[string]any{
 			"patchId": "run-1/step-1/patch/1",
 		},
@@ -1068,5 +1112,38 @@ func TestRuntimeShutdownTerminatesHubAfterTeardownError(t *testing.T) {
 	}
 	if !hub.terminated {
 		t.Fatal("runtime shutdown did not terminate event hub after teardown error")
+	}
+}
+
+func TestRuntimeShutdownDrainsBackgroundBeforeModuleTeardown(t *testing.T) {
+	background := magictask.NewBackgroundRoutine(4)
+	stopped := false
+	done := make(chan bool, 1)
+	rt := &Runtime{
+		modules: []lifecycle{
+			backgroundAwareLifecycle{id: "background-aware", stopped: &stopped},
+		},
+		background: background,
+	}
+	if err := background.AsyncFunction(func() {
+		time.Sleep(10 * time.Millisecond)
+		done <- stopped
+	}); err != nil {
+		t.Fatalf("schedule background task: %v", err)
+	}
+
+	if err := rt.Shutdown(context.Background()); err != nil {
+		t.Fatalf("runtime shutdown: %v", err)
+	}
+	select {
+	case sawStopped := <-done:
+		if sawStopped {
+			t.Fatal("background task observed module teardown before background drain")
+		}
+	default:
+		t.Fatal("runtime shutdown returned before background task completed")
+	}
+	if !stopped {
+		t.Fatal("runtime shutdown did not teardown module after background drain")
 	}
 }

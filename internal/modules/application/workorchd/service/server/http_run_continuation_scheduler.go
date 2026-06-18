@@ -74,6 +74,9 @@ func (s *runContinuationScheduler) scheduleStartupRecovery() {
 		if err := s.recoverStuckRunningRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
 			slog.Warn("workorch startup run recovery failed", "err", err)
 		}
+		if err := s.recoverStaleDispatchedRuns(appservice.ContextWithEventHub(ctx, state.eventHub)); err != nil {
+			slog.Warn("workorch startup stale dispatched run recovery failed", "err", err)
+		}
 	})
 	s.schedulePeriodicStaleDispatchedRecovery()
 }

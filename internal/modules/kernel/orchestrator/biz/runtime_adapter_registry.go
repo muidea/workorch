@@ -44,3 +44,19 @@ func (r *RuntimeAdapterRegistry) ExecuteRuntimeStep(ctx context.Context, request
 		},
 	}, common.ErrInvalidArgument
 }
+
+func (r *RuntimeAdapterRegistry) RequestRuntimeStepExecution(ctx context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error) {
+	if r == nil {
+		return runtimemodel.RuntimeStepExecutionAccepted{}, common.ErrInvalidArgument
+	}
+	kind := strings.TrimSpace(request.Kind)
+	adapter := r.adapters[kind]
+	if adapter == nil {
+		return runtimemodel.RuntimeStepExecutionAccepted{}, common.ErrNotFound
+	}
+	requester, ok := adapter.(RuntimeExecutionRequester)
+	if !ok {
+		return runtimemodel.RuntimeStepExecutionAccepted{}, common.ErrNotFound
+	}
+	return requester.RequestRuntimeStepExecution(ctx, request)
+}

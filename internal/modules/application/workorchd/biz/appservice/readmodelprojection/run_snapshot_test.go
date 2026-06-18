@@ -96,3 +96,164 @@ func TestRunRecoverySnapshotFromModelsUsesCheckpointStep(t *testing.T) {
 		t.Fatalf("TaskDecompositions = %+v, want recovery snapshot without full task decomposition projection", got.TaskDecompositions)
 	}
 }
+
+func TestRunSnapshotFromModelsProjectsRuntimeExecutionFinalizeGap(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-runtime-exec-gap")
+	runID := common.RunID("run-runtime-exec-gap")
+	stepID := common.StepID("step-runtime-exec-gap")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime gap workspace", State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		},
+		Checkpoints: []*runmodel.RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-accepted",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:00:00Z",
+				Data: map[string]any{
+					"event":      "runtime_execute_accepted",
+					"requestId":  "request-001",
+					"queueKey":   "queue-001",
+					"acceptedAt": "2026-06-17T01:00:00Z",
+				},
+			},
+			{
+				ID:            "checkpoint-done",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:00:05Z",
+				Data: map[string]any{
+					"event":     "runtime_step_done",
+					"requestId": "request-001",
+					"stage":     "stream_done",
+					"summary":   "runtime completed but finalize has not run",
+				},
+			},
+		},
+	})
+
+	if got.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want projected runtime gap")
+	}
+	if got.RuntimeExecution.RequestID != "request-001" ||
+		got.RuntimeExecution.QueueKey != "queue-001" ||
+		got.RuntimeExecution.DoneAt != "2026-06-17T01:00:05Z" ||
+		got.RuntimeExecution.Pending != true ||
+		got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
+		t.Fatalf("RuntimeExecution = %+v, want done-not-finalized gap", got.RuntimeExecution)
+	}
+}
+
+func TestRunSnapshotFromModelsProjectsRuntimeExecutionResultAvailableGap(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-runtime-result-gap")
+	runID := common.RunID("run-runtime-result-gap")
+	stepID := common.StepID("step-runtime-result-gap")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime result gap workspace", State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		},
+		Checkpoints: []*runmodel.RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-result-available",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:00:05Z",
+				Data: map[string]any{
+					"event":       "runtime_step_result_available",
+					"requestId":   "request-result",
+					"completedAt": "2026-06-17T01:00:04Z",
+					"output":      map[string]any{"status": "ok"},
+				},
+			},
+		},
+	})
+
+	if got.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want projected runtime result gap")
+	}
+	if got.RuntimeExecution.RequestID != "request-result" ||
+		got.RuntimeExecution.DoneAt != "2026-06-17T01:00:04Z" ||
+		got.RuntimeExecution.Pending != true ||
+		got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
+		t.Fatalf("RuntimeExecution = %+v, want result-available finalize gap", got.RuntimeExecution)
+	}
+}
+
+func TestRunSnapshotFromModelsProjectsRuntimeExecutionWorkerLostGap(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-runtime-worker-lost")
+	runID := common.RunID("run-runtime-worker-lost")
+	stepID := common.StepID("step-runtime-worker-lost")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "runtime worker lost workspace", State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{
+			{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+		},
+		Checkpoints: []*runmodel.RuntimeCheckpoint{
+			{
+				ID:            "checkpoint-accepted",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:00:00Z",
+				Data: map[string]any{
+					"event":      "runtime_execute_accepted",
+					"requestId":  "request-worker-lost",
+					"queueKey":   "queue-worker-lost",
+					"acceptedAt": "2026-06-17T01:00:00Z",
+				},
+			},
+			{
+				ID:            "checkpoint-worker-heartbeat",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:04:00Z",
+				Data: map[string]any{
+					"event":       "runtime_worker_heartbeat",
+					"workerId":    "runtimeevent|request-worker-lost",
+					"heartbeatAt": "2026-06-17T01:04:00Z",
+				},
+			},
+			{
+				ID:            "checkpoint-worker-lost",
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-17T01:05:00Z",
+				Data: map[string]any{
+					"event":    "runtime_worker_lost",
+					"workerId": "runtimeevent|request-worker-lost",
+					"lostAt":   "2026-06-17T01:05:00Z",
+				},
+			},
+		},
+	})
+
+	if got.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want projected worker lost gap")
+	}
+	if got.RuntimeExecution.RequestID != "request-worker-lost" ||
+		got.RuntimeExecution.QueueKey != "queue-worker-lost" ||
+		got.RuntimeExecution.WorkerID != "runtimeevent|request-worker-lost" ||
+		got.RuntimeExecution.WorkerHeartbeatAt != "2026-06-17T01:04:00Z" ||
+		got.RuntimeExecution.WorkerLostAt != "2026-06-17T01:05:00Z" ||
+		got.RuntimeExecution.Pending != true ||
+		got.RuntimeExecution.Gap != "worker_lost" {
+		t.Fatalf("RuntimeExecution = %+v, want worker lost gap", got.RuntimeExecution)
+	}
+}

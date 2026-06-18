@@ -173,6 +173,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if section := renderLLMContextCompact(m.llmContext, width-2); section != "" {
 		b.WriteString(section)
 	}
+	if section := renderRuntimeExecutionCompact(m.runtimeExecution, width-2); section != "" {
+		b.WriteString(section)
+	}
 	if section := renderRuntimeEventsCompact(m.runtimeEvents, width-2, 8); section != "" {
 		b.WriteString(section)
 	}
@@ -191,16 +194,16 @@ func (m AppModel) renderMain(width, height int) string {
 
 func (m AppModel) renderMainTail(width int, height int, usedLines int) string {
 	var b strings.Builder
-	if m.blockingDecision != nil {
+	if decision := m.activeBlockingDecision(); decision != nil {
 		b.WriteString(Warning.Render("Decision required"))
 		b.WriteString("\n")
-		b.WriteString(truncateDisplay(blockingDecisionLabel(m.blockingDecision), width-2))
+		b.WriteString(truncateDisplay(blockingDecisionLabel(decision), width-2))
 		b.WriteString("\n\n")
 	}
-	if m.blockingApproval != nil {
+	if approval := m.activeBlockingApproval(); approval != nil {
 		b.WriteString(Alert.Render("Approval required"))
 		b.WriteString("\n")
-		b.WriteString(truncateDisplay(blockingApprovalLabel(m.blockingApproval), width-2))
+		b.WriteString(truncateDisplay(blockingApprovalLabel(approval), width-2))
 		b.WriteString("\n\n")
 	}
 
@@ -474,6 +477,103 @@ func renderRuntimeEventsCompact(items []string, width int, limit int) string {
 	return b.String()
 }
 
+func renderRuntimeExecutionCompact(item *backend.RuntimeExecutionInfo, width int) string {
+	if item == nil || width <= 0 {
+		return ""
+	}
+	parts := compactStrings([]string{
+		runtimeExecutionPendingText(item),
+		runtimeExecutionGapText(item),
+		runtimeExecutionStepText(item),
+		runtimeExecutionRequestText(item),
+		runtimeExecutionProgressText(item),
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(Heading.Render("Runtime Execution"))
+	b.WriteString("\n")
+	b.WriteString(truncateDisplay("- "+strings.Join(parts, " | "), width))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func runtimeExecutionStatusText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil {
+		return ""
+	}
+	parts := compactStrings([]string{
+		runtimeExecutionPendingText(item),
+		runtimeExecutionGapText(item),
+		runtimeExecutionStepText(item),
+	})
+	return strings.Join(parts, " | ")
+}
+
+func runtimeExecutionPendingText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil {
+		return ""
+	}
+	if item.Pending {
+		return "runtime pending"
+	}
+	if item.FinalizedAt != "" || item.DoneAt != "" || item.FailedAt != "" {
+		return "runtime finalized"
+	}
+	return ""
+}
+
+func runtimeExecutionGapText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil || strings.TrimSpace(item.Gap) == "" {
+		return ""
+	}
+	return "gap " + strings.TrimSpace(item.Gap)
+}
+
+func runtimeExecutionStepText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil {
+		return ""
+	}
+	label := strings.TrimSpace(strings.Join(compactStrings([]string{
+		string(item.StepID),
+		item.StepKind,
+		string(item.StepState),
+	}), " "))
+	if label == "" {
+		return ""
+	}
+	return "step " + label
+}
+
+func runtimeExecutionRequestText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil {
+		return ""
+	}
+	label := strings.TrimSpace(strings.Join(compactStrings([]string{
+		item.RequestID,
+		item.QueueKey,
+		item.WorkerID,
+	}), " "))
+	if label == "" {
+		return ""
+	}
+	return "request " + label
+}
+
+func runtimeExecutionProgressText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil {
+		return ""
+	}
+	if strings.TrimSpace(item.LastProgressSummary) != "" {
+		return strings.TrimSpace(item.LastProgressSummary)
+	}
+	if strings.TrimSpace(item.LastProgressEvent) != "" || strings.TrimSpace(item.LastProgressStage) != "" {
+		return strings.TrimSpace(strings.Join(compactStrings([]string{item.LastProgressEvent, item.LastProgressStage, item.LastProgressAt}), " "))
+	}
+	return ""
+}
+
 func llmUsageProgressText(payload map[string]any) string {
 	provider := firstPayloadString(payload, events.PayloadKeyProviderID, "providerId", "ProviderID")
 	model := firstPayloadString(payload, events.PayloadKeyModel, "model", "Model")
@@ -629,11 +729,14 @@ func (m AppModel) renderRuntimeStatusBar(width int) string {
 	if active := m.activeArtifactContinuationStatus(); active != "" {
 		parts = append(parts, active)
 	}
-	if m.blockingDecision != nil && m.blockingDecision.ID != "" {
-		parts = append(parts, "decision "+shortID(string(m.blockingDecision.ID)))
+	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
+		parts = append(parts, status)
 	}
-	if m.blockingApproval != nil && m.blockingApproval.ID != "" {
-		parts = append(parts, "approval "+shortID(string(m.blockingApproval.ID)))
+	if decision := m.activeBlockingDecision(); decision != nil && decision.ID != "" {
+		parts = append(parts, "decision "+shortID(string(decision.ID)))
+	}
+	if approval := m.activeBlockingApproval(); approval != nil && approval.ID != "" {
+		parts = append(parts, "approval "+shortID(string(approval.ID)))
 	}
 	if m.mainViewportPendingUpdate {
 		parts = append(parts, "new updates")
@@ -713,9 +816,9 @@ func (m AppModel) renderInput(width int) string {
 	if prompt == "none" {
 		prompt = "workspace"
 	}
-	if m.blockingDecision != nil {
+	if m.activeBlockingDecision() != nil {
 		prompt += " decision"
-	} else if m.blockingApproval != nil {
+	} else if m.activeBlockingApproval() != nil {
 		prompt += " approval"
 	} else if ws := m.activeWorkspaceOverview(); ws != nil {
 		switch ws.State {

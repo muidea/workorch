@@ -283,3 +283,41 @@ func TestNormalizeWorkorchEnvelopeReturnsSanitizedCopy(t *testing.T) {
 		t.Fatalf("sanitized payload operator = %v, want workorch", payload2["operator"])
 	}
 }
+
+func TestNormalizeWorkorchEnvelopeAcceptsTicketUpdated(t *testing.T) {
+	envelope, ok := NormalizeWorkorchEnvelope(Envelope{
+		Version:     WorkorchEventVersion,
+		Topic:       decisionevents.TopicTicketUpdated,
+		WorkspaceID: "ws-ticket-updated",
+		RunID:       "run-ticket-updated",
+		StepID:      "step-ticket-updated",
+		Payload: map[string]any{
+			PayloadKeyReason: "provider unavailable",
+			PayloadKeyState:  string(common.DecisionTicketStateOpen),
+			"ignored":        "value",
+		},
+	})
+	if !ok {
+		t.Fatal("NormalizeWorkorchEnvelope returned !ok for ticket updated")
+	}
+	if envelope.Topic != decisionevents.TopicTicketUpdated || envelope.Version != WorkorchEventVersion {
+		t.Fatalf("normalized envelope topic/version = %s/%s", envelope.Topic, envelope.Version)
+	}
+	if _, exists := envelope.Payload["ignored"]; exists {
+		t.Fatalf("normalized payload still contains non-contract field: %+v", envelope.Payload)
+	}
+	payload, ok := DecodeDecisionTicketPayload(envelope.Payload)
+	if !ok {
+		t.Fatalf("normalized payload = %+v, want decision ticket payload", envelope.Payload)
+	}
+	if payload.Reason != "provider unavailable" || payload.State != common.DecisionTicketStateOpen {
+		t.Fatalf("payload = %+v, want provider unavailable open ticket", payload)
+	}
+	event, ok := DecodeDecisionTicketEvent(envelope)
+	if !ok {
+		t.Fatal("DecodeDecisionTicketEvent returned !ok for ticket updated")
+	}
+	if event.Topic() != decisionevents.TopicTicketUpdated || event.Data.State != common.DecisionTicketStateOpen {
+		t.Fatalf("event = %+v, want ticket updated with open state", event)
+	}
+}

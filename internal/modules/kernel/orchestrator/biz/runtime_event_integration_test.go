@@ -237,6 +237,13 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidUnifiedDiffPatch(t *testing.T) 
 	if runItem.State != common.RunStateFailed {
 		t.Fatalf("run state = %s, want failed", runItem.State)
 	}
+	step, err := stepRepo.Get(ctx, common.StepID(string(runID)+"/step-1"))
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply_failed" {
+		t.Fatalf("step = %+v, want failed patch_apply_failed step", step)
+	}
 	patches, err := patchRepo.ListByRun(ctx, runID)
 	if err != nil {
 		t.Fatalf("list patches: %v", err)
@@ -306,6 +313,13 @@ func TestRuntimeOrchestrator_StartRunFailsInvalidRuntimePatchTarget(t *testing.T
 	}
 	if runItem.State != common.RunStateFailed {
 		t.Fatalf("run state = %s, want failed", runItem.State)
+	}
+	step, err := stepRepo.Get(ctx, common.StepID(string(runID)+"/step-1"))
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed || stringFromMap(step.Output, "stage") != "patch_apply_failed" {
+		t.Fatalf("step = %+v, want failed patch_apply_failed step", step)
 	}
 	patches, err := patchRepo.ListByRun(ctx, runID)
 	if err != nil {

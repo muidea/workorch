@@ -101,7 +101,7 @@ func (o *RuntimeOrchestrator) createArtifactContinuationsFromPlan(ctx context.Co
 	if len(createdItems) == 0 {
 		return nil
 	}
-	return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, createdItems[0]), initialStepKind(run), artifactContinuationNextStepInput(step, createdItems[0]), workspace)
+	return o.RequestUniqueDispatchStep(ctx, run, artifactContinuationLLMStepID(run.ID, createdItems[0]), initialStepKind(run), artifactContinuationNextStepInput(step, createdItems[0]), workspaceIDForDispatch(run, workspace))
 }
 
 func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any, workspace *workspaceModel.Workspace) error {
@@ -181,9 +181,9 @@ func (o *RuntimeOrchestrator) recordArtifactContinuationChunk(ctx context.Contex
 		return err
 	}
 	if !item.FinalReceived {
-		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), artifactContinuationNextStepInput(step, item), workspace)
+		return o.RequestUniqueDispatchStep(ctx, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), artifactContinuationNextStepInput(step, item), workspaceIDForDispatch(run, workspace))
 	}
-	return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationAssembleStepID(run.ID, item.ID), artifactAssembleStepKind, artifactContinuationInternalStepInput(item), workspace)
+	return o.RequestUniqueDispatchStep(ctx, run, artifactContinuationAssembleStepID(run.ID, item.ID), artifactAssembleStepKind, artifactContinuationInternalStepInput(item), workspaceIDForDispatch(run, workspace))
 }
 
 func (o *RuntimeOrchestrator) recordArtifactContinuationChunkRepair(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
@@ -306,7 +306,7 @@ func (o *RuntimeOrchestrator) resumeArtifactContinuationAfterContextGraph(ctx co
 	}
 	nextInput := artifactContinuationNextStepInput(contextStep, item)
 	nextInput["artifactContextEvidence"] = compactStepOutputForLLMContext(output)
-	return true, dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), nextInput, workspace)
+	return true, o.RequestUniqueDispatchStep(ctx, run, artifactContinuationLLMStepID(run.ID, item), initialStepKind(run), nextInput, workspaceIDForDispatch(run, workspace))
 }
 
 func (o *RuntimeOrchestrator) completeArtifactContinuationLLMStep(ctx context.Context, run *runModel.Run, step *runModel.Step, toolCall *runModel.ToolCall, output map[string]any) error {
@@ -875,14 +875,10 @@ func (o *RuntimeOrchestrator) completeInternalArtifactContinuationStep(
 		return err
 	}
 	if step.Kind == artifactAssembleStepKind {
-		nextID, err := uniqueDispatchStepID(ctx, o.steps, run.ID, artifactContinuationApplyStepID(run.ID, common.ArtifactContinuationID(strings.TrimSpace(stringFromMap(step.Input, "artifactContinuationId")))))
-		if err != nil {
-			return err
-		}
-		return o.dispatchStepWithWorkspace(ctx, run, nextID, artifactApplyStepKind, step.Input, workspace)
+		return o.RequestUniqueDispatchStep(ctx, run, artifactContinuationApplyStepID(run.ID, common.ArtifactContinuationID(strings.TrimSpace(stringFromMap(step.Input, "artifactContinuationId")))), artifactApplyStepKind, step.Input, workspaceIDForDispatch(run, workspace))
 	}
 	if shouldDispatchLLMCompletionFollowUp(run, step, output) {
-		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspace)
+		return o.RequestUniqueDispatchStep(ctx, run, llmCompletionFollowUpStepID(run.ID, step), initialStepKind(run), o.graphManager().llmCompletionFollowUpStepInput(ctx, run, step), workspaceIDForDispatch(run, workspace))
 	}
 	return nil
 }

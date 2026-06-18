@@ -257,3 +257,94 @@ func TestDecisionCreateResolutionCommandAcceptsContractPayload(t *testing.T) {
 		t.Fatalf("resolution = %+v, want command fields", item)
 	}
 }
+
+func TestDecisionUpdateTicketCommandPublishesUpdatedNotification(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	tickets := memory.NewDecisionTicketRepository()
+	resolutions := memory.NewDecisionResolutionRepository()
+	ticketID := common.TicketID("ticket-update-notify")
+	if err := tickets.Create(ctx, &decisionmodel.Ticket{
+		ID:           ticketID,
+		WorkspaceID:  "ws-ticket-update",
+		RunID:        "run-ticket-update",
+		StepID:       "step-ticket-update",
+		State:        common.DecisionTicketStateResolved,
+		Reason:       "provider unavailable",
+		DecisionKind: "operator_input",
+		Question:     "provide runtime config",
+		Context:      map[string]any{"attempt": float64(1)},
+	}); err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+
+	updated := make(chan events.Envelope, 1)
+	unsubscribe := hub.Subscribe(decisionevents.TopicTicketUpdated, func(_ context.Context, envelope events.Envelope) error {
+		updated <- envelope
+		return nil
+	})
+	t.Cleanup(unsubscribe)
+
+	module := New()
+	if err := module.Configure(Dependencies{Tickets: tickets, Resolutions: resolutions, EventHub: hub}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := module.Stop(ctx); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       decisionevents.TopicDecisionCommandUpdateTicket,
+		WorkspaceID: "ws-ticket-update",
+		RunID:       "run-ticket-update",
+		StepID:      "step-ticket-update",
+		Payload: map[string]any{
+			events.PayloadKeyCommand: decisioncontracts.UpdateTicketCommand{
+				TicketID:     ticketID,
+				WorkspaceID:  "ws-ticket-update",
+				RunID:        "run-ticket-update",
+				StepID:       "step-ticket-update",
+				State:        common.DecisionTicketStateOpen,
+				Reason:       "provider unavailable",
+				DecisionKind: "operator_input",
+				Question:     "provide runtime config",
+				Context:      map[string]any{"attempt": float64(2)},
+			},
+		},
+	})
+	if _, ok := events.ResponseEnvelope(err); !ok {
+		t.Fatalf("update ticket err = %v, want response", err)
+	}
+
+	item, err := tickets.Get(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if item.State != common.DecisionTicketStateOpen || item.Context["attempt"] != float64(2) {
+		t.Fatalf("ticket after update = %+v, want reopened ticket with updated context", item)
+	}
+
+	select {
+	case envelope := <-updated:
+		if envelope.Topic != decisionevents.TopicTicketUpdated {
+			t.Fatalf("updated topic = %s, want %s", envelope.Topic, decisionevents.TopicTicketUpdated)
+		}
+		if envelope.WorkspaceID != "ws-ticket-update" || envelope.RunID != "run-ticket-update" || envelope.StepID != "step-ticket-update" {
+			t.Fatalf("updated scope = ws:%s run:%s step:%s", envelope.WorkspaceID, envelope.RunID, envelope.StepID)
+		}
+		payload, ok := events.DecodeDecisionTicketPayload(envelope.Payload)
+		if !ok {
+			t.Fatalf("updated payload = %+v, want decision ticket payload", envelope.Payload)
+		}
+		if payload.State != common.DecisionTicketStateOpen || payload.Reason != "provider unavailable" {
+			t.Fatalf("updated payload = %+v, want reopened provider ticket", payload)
+		}
+	default:
+		t.Fatal("ticket update command did not publish ticket updated notification")
+	}
+}

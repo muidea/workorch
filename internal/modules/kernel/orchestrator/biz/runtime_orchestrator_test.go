@@ -60,6 +60,32 @@ func (a *requestCapturingRuntimeAdapter) ExecuteRuntimeStep(_ context.Context, r
 	return runtimemodel.StepExecutionResult{Output: a.output}, nil
 }
 
+type requestOnlyRuntimeAdapter struct {
+	requests  []runtimemodel.StepExecutionRequest
+	accepted  []runtimemodel.RuntimeStepExecutionAccepted
+	execCalls int
+}
+
+func (a *requestOnlyRuntimeAdapter) RequestRuntimeStepExecution(_ context.Context, request runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error) {
+	a.requests = append(a.requests, request)
+	accepted := runtimemodel.RuntimeStepExecutionAccepted{
+		WorkspaceID: request.WorkspaceID,
+		RunID:       request.RunID,
+		StepID:      request.StepID,
+		StepKind:    request.Kind,
+		RequestID:   "request-only",
+		QueueKey:    "queue-only",
+		AcceptedAt:  "2026-06-17T00:00:00Z",
+	}
+	a.accepted = append(a.accepted, accepted)
+	return accepted, nil
+}
+
+func (a *requestOnlyRuntimeAdapter) ExecuteRuntimeStep(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+	a.execCalls++
+	return runtimemodel.StepExecutionResult{}, common.ErrConflict
+}
+
 type countingStepRepository struct {
 	inner                  *memory.StepRepository
 	getCount               atomic.Int64

@@ -2,16 +2,74 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/events"
+	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeOrchestrator_EventDrivenGraphBatchPublishesDispatchRequests(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-event-driven-graph")
+	workspaceID := common.WorkspaceID("ws-event-driven-graph")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	hub := events.NewMemoryHub()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		hub,
+	)
+	orch.EnableEventDrivenDispatch()
+
+	err := orch.dispatchGraphStepBatchWithWorkspace(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}, []stepDispatchSpec{
+		{ID: common.StepID(runID + "/graph-001/001-a"), Kind: "llm/workspace_execution", Input: map[string]any{"node": "a"}},
+		{ID: common.StepID(runID + "/graph-001/002-b"), Kind: "llm/workspace_execution", Input: map[string]any{"node": "b"}},
+	}, &workspacemodel.Workspace{ID: workspaceID})
+	if err != nil {
+		t.Fatalf("dispatchGraphStepBatchWithWorkspace: %v", err)
+	}
+	published := hub.Published()
+	var dispatches []events.Envelope
+	for _, envelope := range published {
+		if envelope.Topic == orchestratorevents.TopicOrchestratorDispatchStepRequested {
+			dispatches = append(dispatches, envelope)
+		}
+	}
+	if len(dispatches) != 2 {
+		t.Fatalf("dispatch events = %d in %+v, want 2", len(dispatches), published)
+	}
+	if dispatches[0].RunID != string(runID) || dispatches[0].WorkspaceID != string(workspaceID) || dispatches[0].StepID == "" {
+		t.Fatalf("dispatch envelope = %+v, want scoped workspace/run/step", dispatches[0])
+	}
+	if key, _ := dispatches[0].Payload[events.PayloadKeyIdempotencyKey].(string); key == "" {
+		t.Fatalf("dispatch payload = %+v, want idempotency key", dispatches[0].Payload)
+	}
+	if _, err := stepRepo.Get(ctx, common.StepID(runID+"/graph-001/001-a")); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("graph step after dispatch request err = %v, want not found before dispatch handler runs", err)
+	}
+}
 
 func TestRunEvidenceSummaryPrioritizesActionEvidenceWhenLarge(t *testing.T) {
 	runID := common.RunID("run-evidence-priority")

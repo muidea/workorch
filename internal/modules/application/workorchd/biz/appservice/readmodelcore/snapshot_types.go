@@ -18,6 +18,7 @@ type RunSnapshot struct {
 	WebSources              []WebSourceTrace         `json:"webSources,omitempty"`
 	ValidationResults       []ValidationResult       `json:"validationResults,omitempty"`
 	RuntimeCheckpoints      []RuntimeCheckpoint      `json:"runtimeCheckpoints,omitempty"`
+	RuntimeExecution        *RuntimeExecutionState   `json:"runtimeExecution,omitempty"`
 	Results                 []Result                 `json:"results,omitempty"`
 	ClosureTraces           []ClosureTrace           `json:"closureTraces,omitempty"`
 	DoDEvidence             []DoDEvidenceTrace       `json:"doDEvidence,omitempty"`

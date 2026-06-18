@@ -383,7 +383,37 @@ func (b *remoteRunBackend) Status(ctx context.Context, wsID common.WorkspaceID, 
 		BlockingTicketID:   common.TicketID(s.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(s.BlockingApprovalID),
 		FailureReason:      s.FailureReason,
+		RuntimeExecution:   runtimeExecutionInfoFromClient(s.RuntimeExecution),
 	}, nil
+}
+
+func runtimeExecutionInfoFromClient(input *client.RuntimeExecution) *RuntimeExecutionInfo {
+	if input == nil {
+		return nil
+	}
+	return &RuntimeExecutionInfo{
+		StepID:              common.StepID(input.StepID),
+		StepKind:            canonicalRuntimeStepKind(input.StepKind),
+		StepState:           common.StepState(input.StepState),
+		RequestID:           input.RequestID,
+		QueueKey:            input.QueueKey,
+		AcceptedAt:          input.AcceptedAt,
+		LastProgressAt:      input.LastProgressAt,
+		LastProgressEvent:   input.LastProgressEvent,
+		LastProgressStage:   input.LastProgressStage,
+		LastProgressSummary: input.LastProgressSummary,
+		WorkerID:            input.WorkerID,
+		WorkerStartedAt:     input.WorkerStartedAt,
+		WorkerHeartbeatAt:   input.WorkerHeartbeatAt,
+		WorkerStoppedAt:     input.WorkerStoppedAt,
+		WorkerLostAt:        input.WorkerLostAt,
+		DoneAt:              input.DoneAt,
+		FailedAt:            input.FailedAt,
+		FinalizedAt:         input.FinalizedAt,
+		FinalizeEvent:       input.FinalizeEvent,
+		Pending:             input.Pending,
+		Gap:                 input.Gap,
+	}
 }
 
 // ── Remote Decision ──

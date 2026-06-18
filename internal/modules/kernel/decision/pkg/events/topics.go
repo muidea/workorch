@@ -3,6 +3,7 @@ package events
 const (
 	TopicTicketCreated  = "/ticket/created"
 	TopicTicketResolved = "/ticket/resolved"
+	TopicTicketUpdated  = "/ticket/updated"
 
 	TopicDecisionCommandCreateTicket     = "/decision/command/create-ticket"
 	TopicDecisionCommandEnsureTicket     = "/decision/command/ensure-ticket"

@@ -12,6 +12,8 @@ Last Updated: 2026-06-16
 
 当前阶段不考虑兼容性。若现有实现与本文规则冲突，应以本文作为后续代码收口依据。
 
+本文主要覆盖 Web/TUI/REST 用户命令、workorchd scheduler continuation、projection 刷新和 owner state 协同。Runtime block 长耗时执行从同步 `Send` 调用链迁移到事件队列化状态循环的设计与待办，见 [runtime-execution-event-queue-state-loop-design.md](runtime-execution-event-queue-state-loop-design.md)。
+
 ## Design Intent
 
 合理的目标设计是：

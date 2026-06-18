@@ -332,6 +332,36 @@ func TestRuntimeAdapterExecutesAllowedStdioToolCall(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterStdioToolCallHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	service := newMCPService(t, kernelmcp.CreateServerCommand{
+		ServerID:      common.MCPServerID("mcp-stdio-canceled"),
+		Name:          "stdio canceled",
+		Transport:     "stdio",
+		Endpoint:      "env WORKORCH_MCP_STDIO_HELPER=1 " + os.Args[0] + " -test.run=TestMCPStdioHelperProcess",
+		Enabled:       true,
+		AllowedTools:  []string{"repo.summary"},
+		TimeoutMillis: 5000,
+	})
+	adapter := NewRuntimeAdapter(service)
+
+	result, err := adapter.ExecuteRuntimeStep(ctx, runtimemodel.StepExecutionRequest{
+		WorkspaceID: common.WorkspaceID("ws-mcp-canceled"),
+		RunID:       common.RunID("run-mcp-canceled"),
+		StepID:      common.StepID("run-mcp-canceled/mcp-stdio-1"),
+		Kind:        "mcp/tool_call",
+		Input: map[string]any{
+			"serverId": "mcp-stdio-canceled",
+			"tool":     "repo.summary",
+			"input":    map[string]any{"path": "."},
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExecuteRuntimeStep err = %v output=%+v, want context canceled", err, result.Output)
+	}
+}
+
 func TestRuntimeAdapterExecutesStdioCommandArgsEnvWhenEndpointMissing(t *testing.T) {
 	ctx := context.Background()
 	internalDir := filepath.Join(t.TempDir(), "internal")

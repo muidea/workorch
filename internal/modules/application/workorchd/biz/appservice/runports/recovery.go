@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -72,6 +73,15 @@ func RecoverStuckRunningRunViews(ctx context.Context, hub events.Hub, resume Res
 }
 
 func RecoverStaleDispatchedRunViews(ctx context.Context, hub events.Hub, resume ResumeRunFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
+	if resume == nil {
+		return nil, common.ErrInvalidArgument
+	}
+	return RecoverStaleRuntimeGapRunViews(ctx, hub, func(ctx context.Context, current *runmodel.Run, _ RuntimeGapRecovery) error {
+		return resume(ctx, current)
+	}, minAge, now)
+}
+
+func RecoverStaleRuntimeGapRunViews(ctx context.Context, hub events.Hub, recover RecoverRuntimeGapFunc, minAge time.Duration, now time.Time) ([]appmodelcore.Run, error) {
 	if minAge <= 0 {
 		minAge = DefaultStaleDispatchedStepMinAge
 	}
@@ -84,7 +94,7 @@ func RecoverStaleDispatchedRunViews(ctx context.Context, hub events.Hub, resume 
 	}
 	ret := make([]appmodelcore.Run, 0)
 	for _, item := range runs {
-		recoveredStep, changed, err := RecoverStaleOrphanDispatchedStep(ctx, hub, item, MaxOrphanDispatchedStepRecoveryIterations, resume, minAge, now)
+		recoveredStep, changed, err := RecoverStaleRuntimeGapDispatchedStep(ctx, hub, item, MaxOrphanDispatchedStepRecoveryIterations, recover, minAge, now)
 		if err != nil {
 			return nil, err
 		}

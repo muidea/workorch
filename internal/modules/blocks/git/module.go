@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 
+	magictask "github.com/muidea/magicCommon/task"
 	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/git/pkg/common"
 	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
@@ -19,6 +20,7 @@ type Module struct {
 	runtimeAdapter *gitbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
 	eventHub       events.Hub
+	background     magictask.BackgroundRoutine
 }
 
 func New() *Module { return &Module{} }
@@ -26,12 +28,14 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub events.Hub
+	EventHub   events.Hub
+	Background magictask.BackgroundRoutine
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
 		m.eventHub = deps[0].EventHub
+		m.background = deps[0].Background
 	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
@@ -52,13 +56,13 @@ func (m *Module) Start() error {
 	if m == nil || m.runtimeAdapter == nil {
 		return nil
 	}
-	if m.eventHub == nil {
+	if m.eventHub == nil || m.background == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.executor != nil {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.runtimeAdapter, StepKindRead, StepKindWrite)
+	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindRead, StepKindWrite)
 	return m.executor.Run()
 }
 
@@ -70,5 +74,6 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.executor = nil
 	m.runtimeAdapter = nil
 	m.eventHub = nil
+	m.background = nil
 	return nil
 }

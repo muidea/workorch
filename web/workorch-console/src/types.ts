@@ -337,6 +337,30 @@ export type RunHeartbeat = {
   summary?: string;
 };
 
+export type RuntimeExecution = {
+  stepId?: string;
+  stepKind?: string;
+  stepState?: string;
+  requestId?: string;
+  queueKey?: string;
+  acceptedAt?: string;
+  lastProgressAt?: string;
+  lastProgressEvent?: string;
+  lastProgressStage?: string;
+  lastProgressSummary?: string;
+  workerId?: string;
+  workerStartedAt?: string;
+  workerHeartbeatAt?: string;
+  workerStoppedAt?: string;
+  workerLostAt?: string;
+  doneAt?: string;
+  failedAt?: string;
+  finalizedAt?: string;
+  finalizeEvent?: string;
+  pending?: boolean;
+  gap?: string;
+};
+
 export type RunOutcome = {
   runId?: string;
   state: string;
@@ -1220,6 +1244,7 @@ export type RunSnapshot = {
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   repairLoop: RepairLoop;
+  runtimeExecution?: RuntimeExecution;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
@@ -1247,6 +1272,7 @@ export type WorkspaceSnapshot = {
   outcome?: WorkspaceOutcome;
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
+  runtimeExecution?: RuntimeExecution;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
   taskDecompositions?: TaskDecomposition[];

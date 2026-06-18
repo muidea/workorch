@@ -261,6 +261,606 @@ func TestRuntimeAdapterRegistryDoesNotFallbackForUnknownRuntimeKind(t *testing.T
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingForResult(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-request-only")
+	runID := common.RunID("run-runtime-request-only")
+	stepID := common.StepID("run-runtime-request-only/step-1")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "llm/workspace_execution", map[string]any{"seed": "yes"}, workspace); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	if runtime.execCalls != 0 {
+		t.Fatalf("ExecuteRuntimeStep calls = %d, want 0", runtime.execCalls)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("runtime requests = %d, want 1", len(runtime.requests))
+	}
+	if runtime.requests[0].Progress != nil {
+		t.Fatal("async runtime request Progress callback is set, want progress reported via runtime progress event")
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateDispatched {
+		t.Fatalf("step state after request = %s, want dispatched", step.State)
+	}
+	checkpoints, err := checkpointRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	if !hasRuntimeExecuteAcceptedCheckpoint(checkpoints, stepID, "request-only") {
+		t.Fatalf("checkpoints = %+v, want runtime_execute_accepted for request-only", checkpoints)
+	}
+
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "ok"}}, nil); err != nil {
+		t.Fatalf("finalize runtime result: %v", err)
+	}
+	step, err = stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get finalized step: %v", err)
+	}
+	if step.State != common.StepStateCompleted || step.Output["status"] != "ok" {
+		t.Fatalf("step after finalize = %+v, want completed status ok", step)
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "duplicate"}}, nil); err != nil {
+		t.Fatalf("duplicate finalize runtime result: %v", err)
+	}
+	validations, err := validationRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list validations: %v", err)
+	}
+	if len(validations) != 1 {
+		t.Fatalf("validations = %+v, want one validation after duplicate finalize", validations)
+	}
+	step, err = stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get duplicate finalized step: %v", err)
+	}
+	if step.Output["status"] != "ok" {
+		t.Fatalf("step output after duplicate finalize = %+v, want original output preserved", step.Output)
+	}
+}
+
+func TestRuntimeOrchestrator_EventDrivenDispatchRejectsMissingRequesterWithoutSyncFallback(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "should-not-run"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+	orch.EnableEventDrivenDispatch()
+
+	workspaceID := common.WorkspaceID("ws-runtime-missing-requester")
+	runID := common.RunID("run-runtime-missing-requester")
+	stepID := common.StepID("run-runtime-missing-requester/step-1")
+	workspace := &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "llm/workspace_execution", map[string]any{"seed": "yes"}, workspace); err != nil {
+		t.Fatalf("dispatch step: %v", err)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("ExecuteRuntimeStep calls = %d, want 0", len(runtime.calls))
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed {
+		t.Fatalf("step state = %s, want failed", step.State)
+	}
+	if step.Output["stage"] != "runtime_request_unavailable" {
+		t.Fatalf("step output = %+v, want runtime_request_unavailable stage", step.Output)
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateFailedRuntimeResultDoesNotRepeatSideEffects(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-failed-duplicate")
+	runID := common.RunID("run-runtime-failed-duplicate")
+	stepID := common.StepID("run-runtime-failed-duplicate/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
+		t.Fatalf("seed tool call: %v", err)
+	}
+
+	firstErr := errors.New("provider unavailable")
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"partial": "first"}}, firstErr); err != nil {
+		t.Fatalf("finalize failed runtime result: %v", err)
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"partial": "duplicate"}}, errors.New("duplicate failure")); err != nil {
+		t.Fatalf("duplicate failed runtime result: %v", err)
+	}
+	validations, err := validationRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list validations: %v", err)
+	}
+	if len(validations) != 1 {
+		t.Fatalf("validations = %+v, want one failed validation after duplicate finalize", validations)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if step.State != common.StepStateFailed || step.Output["partial"] != "first" {
+		t.Fatalf("step = %+v, want original failed output preserved", step)
+	}
+	toolCalls, err := toolCallRepo.ListByStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list tool calls: %v", err)
+	}
+	if len(toolCalls) != 1 || toolCalls[0].Error != firstErr.Error() {
+		t.Fatalf("tool calls = %+v, want one failed tool call with original error", toolCalls)
+	}
+}
+
+func TestRuntimeOrchestrator_FinalizeFailurePathsDoNotLeaveStepDispatched(t *testing.T) {
+	testCases := []struct {
+		name      string
+		stepInput map[string]any
+		output    map[string]any
+		execErr   error
+		wantStage string
+	}{
+		{
+			name: "output-contract-invalid",
+			stepInput: map[string]any{
+				stepInputKeyRuntimeStage:      runtimeStageRepair,
+				"stateChangingOutputRequired": true,
+				"repairObjective":             repairObjectiveStateChangingOutput,
+			},
+			output: map[string]any{
+				"status":  "completed",
+				"summary": "no state-changing output",
+			},
+			wantStage: "runtime_contract_failed",
+		},
+		{
+			name:      "context-gate-fail-fast",
+			stepInput: map[string]any{},
+			output: map[string]any{
+				"status": "failed",
+				"stage":  "llm_context_integrity_failed",
+				"error":  "invalid argument: llm context gate fail_fast: runtime_repair_current_failure_missing",
+			},
+			execErr:   errors.New("invalid argument: llm context gate fail_fast: runtime_repair_current_failure_missing"),
+			wantStage: "llm_context_integrity_failed",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			workspaceRepo := memory.NewWorkspaceRepository()
+			runRepo := memory.NewRunRepository()
+			stepRepo := memory.NewStepRepository()
+			ticketRepo := memory.NewDecisionTicketRepository()
+			approvalRepo := memory.NewApprovalRepository()
+			toolCallRepo := memory.NewToolCallRepository()
+			validationRepo := memory.NewValidationResultRepository()
+			orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+				&stubRuntimeAdapter{},
+				runRepo,
+				stepRepo,
+				workspaceRepo,
+				ticketRepo,
+				nil,
+				approvalRepo,
+				RuntimeEvidenceRepositories{
+					ToolCalls:         toolCallRepo,
+					ValidationResults: validationRepo,
+				},
+				events.NewMemoryHub(),
+			)
+
+			workspaceID := common.WorkspaceID("ws-" + tc.name)
+			runID := common.RunID("run-" + tc.name)
+			stepID := common.StepID(string(runID) + "/step-1")
+			if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+				t.Fatalf("seed workspace: %v", err)
+			}
+			if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: cloneStepPayload(tc.stepInput)}); err != nil {
+				t.Fatalf("seed step: %v", err)
+			}
+			if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
+				t.Fatalf("seed tool call: %v", err)
+			}
+
+			if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: cloneStepPayload(tc.output)}, tc.execErr); err != nil {
+				t.Fatalf("finalize runtime result: %v", err)
+			}
+			step, err := stepRepo.Get(ctx, stepID)
+			if err != nil {
+				t.Fatalf("get step: %v", err)
+			}
+			if step.State == common.StepStateDispatched {
+				t.Fatalf("step = %+v, want terminal or structured recovery state, not dispatched", step)
+			}
+			if step.State != common.StepStateFailed {
+				t.Fatalf("step state = %s, want failed for %s", step.State, tc.name)
+			}
+			if got := stringFromMap(step.Output, "stage"); got != tc.wantStage {
+				t.Fatalf("failure stage = %q, want %q; output=%+v", got, tc.wantStage, step.Output)
+			}
+		})
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatMemoryWrites(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+			MemoryItems:        memoryRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-runtime-memory-duplicate")
+	runID := common.RunID("run-runtime-memory-duplicate")
+	stepID := common.StepID("run-runtime-memory-duplicate/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: "llm/workspace_execution", State: common.ToolCallStateRunning}); err != nil {
+		t.Fatalf("seed tool call: %v", err)
+	}
+
+	output := map[string]any{
+		"status":  "completed",
+		"summary": "completed with memory write",
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": "project_context",
+				"summary":    "stable workspace convention",
+				"content":    "workspace convention confirmed",
+			},
+		},
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: output}, nil); err != nil {
+		t.Fatalf("finalize runtime result: %v", err)
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status":  "completed",
+		"summary": "duplicate",
+		"memoryWrites": []map[string]any{{
+			"memoryType": "project_context",
+			"summary":    "duplicate workspace convention",
+			"content":    "duplicate content",
+		}},
+	}}, nil); err != nil {
+		t.Fatalf("duplicate finalize runtime result: %v", err)
+	}
+
+	items, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memory items: %v", err)
+	}
+	if len(items) != 1 || !hasMemoryItem(items, runID, "project_context", "stable workspace convention") {
+		t.Fatalf("memory items = %+v, want only original memory write", items)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	refs, ok := step.Output["memoryRefs"].([]string)
+	if !ok || len(refs) != 1 {
+		t.Fatalf("memoryRefs = %+v, want original single memory ref", step.Output["memoryRefs"])
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatResultArtifacts(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	artifactRepo := memory.NewArtifactRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "DoD satisfied",
+			"items": []map[string]any{
+				{
+					"item":         "deliverable accepted",
+					"state":        "satisfied",
+					"evidenceRefs": []string{"run-result-artifact-duplicate/step-1/validation/runtime-step"},
+				},
+			},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			Results:           resultRepo,
+			Artifacts:         artifactRepo,
+			ValidationResults: validationRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-result-artifact-duplicate")
+	runID := common.RunID("run-result-artifact-duplicate")
+	deliverableDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deliverableDirectory, "deliverable.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, DoDID: "dod-result-artifact-duplicate", State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	stepID := common.StepID("run-result-artifact-duplicate/step-1")
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "duplicate DoD satisfied",
+			"items": []map[string]any{{
+				"item":         "duplicate",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-result-artifact-duplicate/step-1/validation/runtime-step"},
+			}},
+		},
+	}}, nil); err != nil {
+		t.Fatalf("duplicate finalize runtime result: %v", err)
+	}
+
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 || results[0].Summary != "DoD satisfied" {
+		t.Fatalf("results = %+v, want only original accepted result", results)
+	}
+	artifacts, err := artifactRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts = %+v, want original summary and manifest artifacts only", artifacts)
+	}
+}
+
+func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatGovernanceTickets(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:         toolCallRepo,
+			ValidationResults: validationRepo,
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-governance-duplicate")
+	runID := common.RunID("run-governance-duplicate")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	decisionStepID := common.StepID("run-governance-duplicate/decision-step")
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: decisionStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed decision step: %v", err)
+	}
+	decisionOutput := map[string]any{
+		"status":                "blocked",
+		stepOutputKeyNextStep:   "after-decision",
+		"blockDecisionReason":   "need operator choice",
+		"blockDecisionKind":     "operator_choice",
+		"blockDecisionQuestion": "choose next action",
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, decisionStepID, runtimemodel.StepExecutionResult{Output: decisionOutput}, nil); err != nil {
+		t.Fatalf("finalize decision runtime result: %v", err)
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, decisionStepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status":              "blocked",
+		stepOutputKeyNextStep: "duplicate-after-decision",
+		"blockDecisionReason": "duplicate decision",
+	}}, nil); err != nil {
+		t.Fatalf("duplicate decision finalize: %v", err)
+	}
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list tickets: %v", err)
+	}
+	if len(tickets) != 1 || tickets[0].Question != "choose next action" {
+		t.Fatalf("tickets = %+v, want only original decision ticket", tickets)
+	}
+
+	if err := runRepo.Update(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("reset run: %v", err)
+	}
+	approvalStepID := common.StepID("run-governance-duplicate/approval-step")
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: approvalStepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed approval step: %v", err)
+	}
+	approvalOutput := map[string]any{
+		"status":              "blocked",
+		stepOutputKeyNextStep: "after-approval",
+		"blockApprovalReason": "requires approval",
+		"blockApprovalAction": "approve next action",
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, approvalStepID, runtimemodel.StepExecutionResult{Output: approvalOutput}, nil); err != nil {
+		t.Fatalf("finalize approval runtime result: %v", err)
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, approvalStepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status":              "blocked",
+		stepOutputKeyNextStep: "duplicate-after-approval",
+		"blockApprovalReason": "duplicate approval",
+		"blockApprovalAction": "duplicate action",
+	}}, nil); err != nil {
+		t.Fatalf("duplicate approval finalize: %v", err)
+	}
+	approvals, err := approvalRepo.ListByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("list approvals: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].Reason != "requires approval" {
+		t.Fatalf("approvals = %+v, want only original approval", approvals)
+	}
+}
+
+func hasRuntimeExecuteAcceptedCheckpoint(items []*runmodel.RuntimeCheckpoint, stepID common.StepID, requestID string) bool {
+	for _, item := range items {
+		if item == nil || item.CurrentStepID != stepID || item.Data == nil {
+			continue
+		}
+		if item.Data["event"] == "runtime_execute_accepted" && item.Data["requestId"] == requestID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -944,6 +1544,56 @@ func TestRuntimeOrchestrator_StartRunAppliesRuntimePatchEvidence(t *testing.T) {
 	if len(patches) != 1 || patches[0].State != common.PatchStateApplied || patches[0].TargetRef != "docs/result.txt" || patches[0].ToolCallID == "" {
 		t.Fatalf("patches = %+v, want one applied patch linked to tool call", patches)
 	}
+	if patches[0].OriginalExists && patches[0].BeforeHash == "" {
+		t.Fatalf("patch evidence = %+v, want before hash for existing target", patches[0])
+	}
+	if patches[0].AfterHash == "" || patches[0].BeforeHash == patches[0].AfterHash || patches[0].ReverseDiff == "" {
+		t.Fatalf("patch evidence = %+v, want before/after hash and reverse diff", patches[0])
+	}
+	completedStep, err := stepRepo.Get(ctx, common.StepID("run-patch/step-1"))
+	if err != nil {
+		t.Fatalf("get completed patch step: %v", err)
+	}
+	outputPatches := mapSliceFromValue(completedStep.Output[stepOutputKeyPatches])
+	if len(outputPatches) != 1 ||
+		outputPatches[0]["patchId"] != string(patches[0].ID) ||
+		outputPatches[0]["evidenceRef"] != string(patches[0].ID) ||
+		outputPatches[0]["toolCallId"] != string(patches[0].ToolCallID) ||
+		outputPatches[0]["state"] != string(common.PatchStateApplied) ||
+		outputPatches[0]["afterHash"] != patches[0].AfterHash {
+		t.Fatalf("step output patches = %+v, want applied patch evidence refs", outputPatches)
+	}
+	if patches[0].BeforeHash != "" && outputPatches[0]["beforeHash"] != patches[0].BeforeHash {
+		t.Fatalf("step output patches = %+v, want beforeHash %q", outputPatches, patches[0].BeforeHash)
+	}
+
+	stepID := common.StepID("run-patch/step-1")
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status": "ok",
+		"patches": []map[string]any{
+			{
+				"targetRef": "docs/result.txt",
+				"content":   "duplicate patch should not apply\n",
+				"summary":   "duplicate write",
+			},
+		},
+	}}, nil); err != nil {
+		t.Fatalf("duplicate finalize runtime result: %v", err)
+	}
+	content, err = os.ReadFile(filepath.Join(deliverableDirectory, "docs", "result.txt"))
+	if err != nil {
+		t.Fatalf("read applied patch file after duplicate: %v", err)
+	}
+	if string(content) != "runtime patch applied\n" {
+		t.Fatalf("applied file content after duplicate = %q, want original patch content", string(content))
+	}
+	patches, err = patchRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list patches after duplicate: %v", err)
+	}
+	if len(patches) != 1 || patches[0].Summary != "write runtime result" {
+		t.Fatalf("patches after duplicate = %+v, want only original applied patch", patches)
+	}
 }
 
 func TestRuntimeOrchestrator_DispatchRejectsCoverageBoundPatchBeforeApply(t *testing.T) {
@@ -1197,5 +1847,20 @@ func TestRuntimeOrchestrator_StartRunDispatchesPatchApplyGraphNode(t *testing.T)
 	targets := stringSliceFromValue(patches[0].CoverageTargets)
 	if len(targets) != 2 || targets[0] != "goal-alpha" || targets[1] != "deliverable-alpha" {
 		t.Fatalf("patch coverageTargets = %+v, want graph patch metadata preserved", patches[0].CoverageTargets)
+	}
+	patchStep, err := stepRepo.Get(ctx, patches[0].StepID)
+	if err != nil {
+		t.Fatalf("get graph patch step: %v", err)
+	}
+	outputPatches := mapSliceFromValue(patchStep.Output[stepOutputKeyPatches])
+	if len(outputPatches) != 1 ||
+		outputPatches[0]["patchId"] != string(patches[0].ID) ||
+		outputPatches[0]["evidenceRef"] != string(patches[0].ID) ||
+		outputPatches[0]["state"] != string(common.PatchStateApplied) ||
+		outputPatches[0]["afterHash"] != patches[0].AfterHash {
+		t.Fatalf("graph patch step output patches = %+v, want applied patch evidence refs", outputPatches)
+	}
+	if patches[0].BeforeHash != "" && outputPatches[0]["beforeHash"] != patches[0].BeforeHash {
+		t.Fatalf("graph patch step output patches = %+v, want beforeHash %q", outputPatches, patches[0].BeforeHash)
 	}
 }

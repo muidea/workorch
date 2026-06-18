@@ -116,7 +116,7 @@ var (
 		},
 	}
 	workorchTicketSnapshotContract = workorchSnapshotContract{
-		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved},
+		publishedTopics: []string{decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved, decisionevents.TopicTicketUpdated},
 		matches: func(item events.WorkorchEvent, ref workorchSnapshotRef) bool {
 			return item.Envelope().SubjectID == ref.subjectID
 		},

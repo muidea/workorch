@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-09
+Last Updated: 2026-06-17
 
 ## Purpose
 
@@ -30,8 +30,10 @@ Last Updated: 2026-06-09
 7. [kernel-context-capability.md](kernel-context-capability.md)
 8. [blocks-runtime-adapters.md](blocks-runtime-adapters.md)
 9. [llm-provider-assembly.md](llm-provider-assembly.md)
-10. [storage-readmodel.md](storage-readmodel.md)
-11. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
+10. [eventhub-driven-workorchd-state-loop-design.md](eventhub-driven-workorchd-state-loop-design.md)
+11. [runtime-execution-event-queue-state-loop-design.md](runtime-execution-event-queue-state-loop-design.md)
+12. [storage-readmodel.md](storage-readmodel.md)
+13. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
 
 ## Cross-Layer Boundary
 

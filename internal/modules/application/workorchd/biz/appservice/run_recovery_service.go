@@ -29,23 +29,22 @@ func RecoverStuckRunningRunsWithSession(ctx context.Context, session *RuntimeSes
 }
 
 func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dataRoot string) ([]Run, error) {
-	return withBackendSession(ctx, backend, dataRoot, RecoverStuckRunningRunsWithSession)
+	return withSharedBackendSession(ctx, backend, dataRoot, RecoverStuckRunningRunsWithSession)
 }
 
 func RecoverStaleDispatchedRunsWithSession(ctx context.Context, session *RuntimeSession, minAge time.Duration, now time.Time) (ret []Run, err error) {
 	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
-		return runports.RecoverStaleDispatchedRunViews(ctx, hub, func(resumeCtx context.Context, current *runmodel.Run) error {
+		return runports.RecoverStaleRuntimeGapRunViews(ctx, hub, func(recoverCtx context.Context, current *runmodel.Run, recovery runports.RuntimeGapRecovery) error {
 			if session == nil || current == nil {
 				return common.ErrInvalidArgument
 			}
-			_, err := ResumeRunWithSession(resumeCtx, session.Borrow(), string(current.ID))
-			return err
+			return runports.RecoverRuntimeGap(recoverCtx, hub, current, recovery, nil)
 		}, minAge, now)
 	})
 }
 
 func RecoverStaleDispatchedRunsWithBackend(ctx context.Context, backend string, dataRoot string, minAge time.Duration, now time.Time) ([]Run, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) ([]Run, error) {
+	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) ([]Run, error) {
 		return RecoverStaleDispatchedRunsWithSession(ctx, session, minAge, now)
 	})
 }

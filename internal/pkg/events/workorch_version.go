@@ -36,6 +36,7 @@ var (
 		runevents.TopicStepStateChanged:                           newWorkorchEventContract(runevents.TopicStepStateChanged),
 		decisionevents.TopicTicketCreated:                         newWorkorchEventContract(decisionevents.TopicTicketCreated),
 		decisionevents.TopicTicketResolved:                        newWorkorchEventContract(decisionevents.TopicTicketResolved),
+		decisionevents.TopicTicketUpdated:                         newWorkorchEventContract(decisionevents.TopicTicketUpdated),
 		approvalevents.TopicApprovalCreated:                       newWorkorchEventContract(approvalevents.TopicApprovalCreated),
 		approvalevents.TopicApprovalResolved:                      newWorkorchEventContract(approvalevents.TopicApprovalResolved),
 		resultevents.TopicResultAccepted:                          newWorkorchEventContract(resultevents.TopicResultAccepted),

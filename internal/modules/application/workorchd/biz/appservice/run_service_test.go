@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 
@@ -553,9 +554,10 @@ func TestListRunsWithBackendReturnsFilteredRuns(t *testing.T) {
 	}
 }
 
-func TestStartRunWithBackendBlocksWhenDefaultLLMProviderUnavailable(t *testing.T) {
+func TestStartRunWithBackendReturnsRunningObservableWhenDispatchContinuesInBackground(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start", "run start workspace", "", "workspaces/run start workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -567,8 +569,8 @@ func TestStartRunWithBackendBlocksWhenDefaultLLMProviderUnavailable(t *testing.T
 	if err != nil {
 		t.Fatalf("StartRunWithBackend: %v", err)
 	}
-	if item.ID != "run-start" || item.State != "blocked_on_decision" || item.BlockingTicketID == "" || item.FailureReason != "" {
-		t.Fatalf("run = %+v, want run-start blocked on provider decision without failure reason", item)
+	if item.ID != "run-start" || item.State != "running" || item.BlockingTicketID != "" || item.FailureReason != "" {
+		t.Fatalf("run = %+v, want run-start running without blocking metadata", item)
 	}
 	compressed := runCompressedContext(t, item)
 	if compressed["version"] != "workorch.compressedContext.v1" || compressed["mode"] != "deterministic_recovery_summary" {
@@ -577,11 +579,13 @@ func TestStartRunWithBackendBlocksWhenDefaultLLMProviderUnavailable(t *testing.T
 	if compressed["runId"] != "run-start" || compressed["workspaceId"] != "ws-run-start" {
 		t.Fatalf("compressedContext identity = %+v, want run-start/ws-run-start", compressed)
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, "run-start", string(common.RunStateBlockedOnDecision))
 }
 
 func TestStartRunWithBackendReturnsConflictForBlockedProviderRunAfterReload(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-run-start-restart", "run start restart workspace", "", "workspaces/run start restart workspace"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -591,6 +595,7 @@ func TestStartRunWithBackendReturnsConflictForBlockedProviderRunAfterReload(t *t
 	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-start-restart"); err != nil {
 		t.Fatalf("first StartRunWithBackend: %v", err)
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, "run-start-restart", string(common.RunStateBlockedOnDecision))
 
 	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, "run-start-restart"); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("second StartRunWithBackend err = %v, want conflict for blocked provider run", err)
@@ -607,16 +612,21 @@ func TestStartRunWithBackendReturnsBlockedDecisionRun(t *testing.T) {
 
 func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T) {
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	runID := "run-approval-rejected"
 	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-approval-rejected", runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
 		t.Fatalf("RejectApprovalWithBackend: %v", err)
 	}
 
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
+	accepted, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
 	if err != nil {
 		t.Fatalf("ResumeRunWithBackend: %v", err)
 	}
+	if accepted.ID != runID {
+		t.Fatalf("accepted run = %+v, want %s", accepted, runID)
+	}
+	item := waitRunStateWithBackend(t, "file", dataRoot, runID, "failed")
 	if item.State != "failed" || item.BlockingApprovalID != "" || item.FailureReason == "" {
 		t.Fatalf("run = %+v, want failed with reason and cleared approval", item)
 	}
@@ -634,6 +644,7 @@ func TestResumeRunWithBackendReturnsFailedRunAfterApprovalRejected(t *testing.T)
 
 func TestResumeRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	runID := "run-approval-rejected-restart"
 	started := prepareApprovalRun(t, dataRoot, "ws-run-resume-failed", runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
@@ -642,6 +653,7 @@ func TestResumeRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {
 		t.Fatalf("first ResumeRunWithBackend: %v", err)
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, runID, "failed")
 
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("second ResumeRunWithBackend err = %v, want conflict for failed run", err)
@@ -650,6 +662,7 @@ func TestResumeRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T
 
 func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T) {
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	runID := "run-approval-failed-start-conflict"
 	started := prepareApprovalRun(t, dataRoot, "ws-run-start-failed", runID)
 	if _, err := RejectApprovalWithBackend(context.Background(), "file", dataRoot, started.BlockingApprovalID); err != nil {
@@ -658,6 +671,7 @@ func TestStartRunWithBackendReturnsConflictForFailedRunAfterReload(t *testing.T)
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {
 		t.Fatalf("ResumeRunWithBackend: %v", err)
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, runID, "failed")
 
 	if _, err := StartRunWithBackend(context.Background(), "file", dataRoot, runID); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("err = %v, want conflict", err)
@@ -679,6 +693,7 @@ func TestResumeRunWithBackendReturnsBlockedWhenDependencyPending(t *testing.T) {
 
 func TestResumeRunWithBackendResolvedReplanCreatesObservableSuccessor(t *testing.T) {
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	runID := "run-decision-replan-resume"
 	workspaceID := "ws-run-decision-replan-resume"
 	started := prepareDecisionRun(t, dataRoot, workspaceID, runID)
@@ -692,17 +707,28 @@ func TestResumeRunWithBackendResolvedReplanCreatesObservableSuccessor(t *testing
 		t.Fatalf("ResolveDecisionWithBackend: %v", err)
 	}
 
-	item, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
+	accepted, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID)
 	if err != nil {
 		t.Fatalf("ResumeRunWithBackend: %v", err)
 	}
+	if accepted.ID != runID {
+		t.Fatalf("accepted run = %+v, want %s", accepted, runID)
+	}
+	item := waitRunWithBackend(t, "file", dataRoot, runID, 5*time.Second, func(item Run) bool {
+		return item.State != "blocked_on_decision" && item.BlockingTicketID == ""
+	})
 	if item.State == "blocked_on_decision" || item.BlockingTicketID != "" {
 		t.Fatalf("run = %+v, want resolved replan resume to clear blocking decision", item)
 	}
-	runs, err := ListRunsWithBackend(context.Background(), "file", dataRoot, workspaceID)
-	if err != nil {
-		t.Fatalf("ListRunsWithBackend: %v", err)
-	}
+	runs := waitRunListWithBackend(t, "file", dataRoot, workspaceID, 5*time.Second, func(items []Run) bool {
+		for _, candidate := range items {
+			replan := contextMapFromValue(t, candidate.ExecutionContext["replanContinuation"])
+			if replan["predecessorRunId"] == runID {
+				return true
+			}
+		}
+		return false
+	})
 	var successor Run
 	for _, candidate := range runs {
 		replan := contextMapFromValue(t, candidate.ExecutionContext["replanContinuation"])
@@ -856,6 +882,7 @@ func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *t
 func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-dispatched", "orphan dispatched workspace", "", "workspaces/orphan-dispatched"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -906,8 +933,11 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
 	}
 	if len(recovered) != 1 || recovered[0].ID != "run-orphan-dispatched" || recovered[0].State != "completed" {
-		t.Fatalf("recovered = %+v, want completed run after redispatched step", recovered)
+		if len(recovered) != 1 || recovered[0].ID != "run-orphan-dispatched" {
+			t.Fatalf("recovered = %+v, want recovered run", recovered)
+		}
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, "run-orphan-dispatched", "completed")
 	verifySession, err := NewRuntimeSessionWithBackend("file", dataRoot)
 	if err != nil {
 		t.Fatalf("NewRuntimeSessionWithBackend verify: %v", err)
@@ -933,10 +963,122 @@ func TestRecoverStuckRunningRunsWithBackendRedispatchesOrphanDispatchedStep(t *t
 	_ = verifySession.Close(ctx)
 }
 
+func TestRecoverStaleDispatchedRunsWithBackendFinalizesDurableRuntimeResult(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	workspaceID := common.WorkspaceID("ws-stale-durable-result")
+	runID := common.RunID("run-stale-durable-result")
+	stepID := common.StepID("run-stale-durable-result/file-list")
+
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, string(workspaceID), "stale durable result workspace", "", "workspaces/stale-durable-result"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, string(workspaceID), string(runID), "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	workspaceItem, err := exports.Repositories.Workspaces.Get(scopedCtx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = runID
+	if err := exports.Repositories.Workspaces.Update(scopedCtx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(scopedCtx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(scopedCtx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(scopedCtx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  filecommon.StepKindList,
+		State: common.StepStateDispatched,
+		Input: map[string]any{"path": ".", "maxEntries": 1},
+	}); err != nil {
+		t.Fatalf("create dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(scopedCtx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-durable-result/checkpoint/accepted",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:00:00Z",
+		Data: map[string]any{
+			"event":     "runtime_execute_accepted",
+			"requestId": "request-stale-durable-result",
+		},
+	}); err != nil {
+		t.Fatalf("create accepted checkpoint: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(scopedCtx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-durable-result/checkpoint/result",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:01:00Z",
+		Data: map[string]any{
+			"event":       "runtime_step_result_available",
+			"requestId":   "request-stale-durable-result",
+			"completedAt": "2026-06-09T08:00:59Z",
+			"output": map[string]any{
+				"status": "completed",
+				"source": "durable-runtime-result",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("create result checkpoint: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	recovered, err := RecoverStaleDispatchedRunsWithBackend(ctx, "file", dataRoot, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleDispatchedRunsWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != string(runID) {
+		t.Fatalf("recovered = %+v, want recovered run %s", recovered, runID)
+	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, string(runID), string(common.RunStateCompleted))
+
+	verifySession, verifyCtx := newTestRuntimeSession(t, "file", dataRoot)
+	verifyExports, err := verifySession.Exports()
+	if err != nil {
+		t.Fatalf("verify exports: %v", err)
+	}
+	step, err := verifyExports.Repositories.Steps.Get(common.ContextWithRuntimeWorkspaceID(verifyCtx, workspaceID), stepID)
+	if err != nil {
+		t.Fatalf("get recovered step: %v", err)
+	}
+	if step.State != common.StepStateCompleted {
+		t.Fatalf("step state = %s, want completed", step.State)
+	}
+	if step.Output["source"] != "durable-runtime-result" {
+		t.Fatalf("step output = %+v, want durable runtime result marker", step.Output)
+	}
+}
+
 func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-llm", "orphan llm workspace", "", "workspaces/orphan-llm"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -992,12 +1134,11 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanLLMStepOnProviderMissing(
 		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
 	}
 	if len(recovered) != 1 || recovered[0].ID != "run-orphan-llm" || recovered[0].State != string(common.RunStateBlockedOnDecision) {
-		t.Fatalf("recovered = %+v, want blocked_on_decision orphan llm run", recovered)
+		if len(recovered) != 1 || recovered[0].ID != "run-orphan-llm" {
+			t.Fatalf("recovered = %+v, want recovered run", recovered)
+		}
 	}
-	runAfter, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-orphan-llm")
-	if err != nil {
-		t.Fatalf("ReadRunWithBackend: %v", err)
-	}
+	runAfter := waitRunStateWithBackend(t, "file", dataRoot, "run-orphan-llm", string(common.RunStateBlockedOnDecision))
 	if runAfter.BlockingTicketID == "" {
 		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
 	}
@@ -1019,6 +1160,7 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-orphan-provider-retry", "orphan provider retry workspace", "", "workspaces/orphan-provider-retry"); err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
@@ -1099,12 +1241,11 @@ func TestRecoverStuckRunningRunsWithBackendBlocksOrphanProviderRetryOnProviderMi
 		t.Fatalf("RecoverStuckRunningRunsWithBackend: %v", err)
 	}
 	if len(recovered) != 1 || recovered[0].ID != "run-orphan-provider-retry" || recovered[0].State != string(common.RunStateBlockedOnDecision) {
-		t.Fatalf("recovered = %+v, want blocked_on_decision provider retry run", recovered)
+		if len(recovered) != 1 || recovered[0].ID != "run-orphan-provider-retry" {
+			t.Fatalf("recovered = %+v, want recovered run", recovered)
+		}
 	}
-	runAfter, err := ReadRunWithBackend(ctx, "file", dataRoot, "run-orphan-provider-retry")
-	if err != nil {
-		t.Fatalf("ReadRunWithBackend: %v", err)
-	}
+	runAfter := waitRunStateWithBackend(t, "file", dataRoot, "run-orphan-provider-retry", string(common.RunStateBlockedOnDecision))
 	if runAfter.BlockingTicketID == "" {
 		t.Fatalf("run after = %+v, want provider recovery decision ticket", runAfter)
 	}

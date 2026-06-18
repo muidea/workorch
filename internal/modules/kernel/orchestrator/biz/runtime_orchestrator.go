@@ -15,6 +15,10 @@ type RuntimeAdapter interface {
 	ExecuteRuntimeStep(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error)
 }
 
+type RuntimeExecutionRequester interface {
+	RequestRuntimeStepExecution(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.RuntimeStepExecutionAccepted, error)
+}
+
 const (
 	stepOutputKeyNextStep               = "nextStep"
 	stepOutputKeyNextKind               = "nextKind"
@@ -96,28 +100,30 @@ type RuntimePolicy = workorchruntimepolicy.RuntimePolicy
 type LLMOutputRuntimePolicy = workorchruntimepolicy.LLMOutputRuntimePolicy
 
 type RuntimeOrchestrator struct {
-	runtime     RuntimeAdapter
-	runs        repository.RunRepository
-	steps       repository.StepRepository
-	workspaces  repository.WorkspaceRepository
-	tickets     repository.DecisionTicketRepository
-	resolutions repository.DecisionResolutionRepository
-	approvals   repository.ApprovalRepository
-	evidence    RuntimeEvidenceRepositories
-	eventHub    events.Hub
-	policyMu    sync.RWMutex
-	policy      RuntimePolicy
-	checkpoints *checkpointSubsystem
-	eventer     *eventSubsystem
-	llmContext  *llmContextSubsystem
-	repair      *repairSubsystem
-	graph       *graphSubsystem
-	convergence *convergenceSubsystem
-	coverage    *coverageSubsystem
-	patches     *patchSubsystem
-	results     *resultSubsystem
-	runState    *runStateSubsystem
-	decision    *decisionResumeSubsystem
+	runtime             RuntimeAdapter
+	runs                repository.RunRepository
+	steps               repository.StepRepository
+	workspaces          repository.WorkspaceRepository
+	tickets             repository.DecisionTicketRepository
+	resolutions         repository.DecisionResolutionRepository
+	approvals           repository.ApprovalRepository
+	evidence            RuntimeEvidenceRepositories
+	eventHub            events.Hub
+	eventDrivenDispatch bool
+	policyMu            sync.RWMutex
+	policy              RuntimePolicy
+	checkpoints         *checkpointSubsystem
+	eventer             *eventSubsystem
+	llmContext          *llmContextSubsystem
+	repair              *repairSubsystem
+	graph               *graphSubsystem
+	convergence         *convergenceSubsystem
+	coverage            *coverageSubsystem
+	patches             *patchSubsystem
+	results             *resultSubsystem
+	runState            *runStateSubsystem
+	decision            *decisionResumeSubsystem
+	finalizeMu          sync.Map
 }
 
 func (o *RuntimeOrchestrator) RuntimePolicy() RuntimePolicy {

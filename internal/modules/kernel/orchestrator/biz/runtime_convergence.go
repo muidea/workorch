@@ -572,11 +572,11 @@ func coverageWorkItemContextHasMissingEvidenceKind(context map[string]any, evide
 		return false
 	}
 	for _, key := range []string{"currentFocus", "currentFocusItems", "unresolvedItems", "ledgerSummary"} {
-		if item := mapFromValue(context[key]); len(item) > 0 && stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))[evidenceKind] {
+		if item := mapFromValue(context[key]); len(item) > 0 && stringSet(coverageMissingEvidenceKinds(item))[evidenceKind] {
 			return true
 		}
 		for _, item := range mapSliceFromValue(context[key]) {
-			if stringSet(stringSliceFromValue(item["missingEvidenceKinds"]))[evidenceKind] {
+			if stringSet(coverageMissingEvidenceKinds(item))[evidenceKind] {
 				return true
 			}
 		}
@@ -1781,6 +1781,10 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	if len(targets) == 0 {
 		return nil
 	}
+	targets = coverageTargetsMissingProfileStateChangeEvidence(targets)
+	if len(targets) == 0 {
+		return nil
+	}
 	requirements := coverageTargetEvidenceKindRequirementsFromInput(run, input, targets)
 	if len(requirements) == 0 {
 		return nil
@@ -1897,6 +1901,31 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func coverageTargetsMissingProfileStateChangeEvidence(targets []map[string]any) []map[string]any {
+	if len(targets) == 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		if coverageTargetProfileStateChangeEvidenceSatisfied(target) {
+			continue
+		}
+		ret = append(ret, target)
+	}
+	return ret
+}
+
+func coverageTargetProfileStateChangeEvidenceSatisfied(target map[string]any) bool {
+	if len(target) == 0 {
+		return false
+	}
+	accepted := mapStringSliceValue(target["acceptedEvidenceByKind"])
+	if coverageEvidenceCountForKind("state_change", accepted["state_change"]) == 0 {
+		return false
+	}
+	return !stringSet(coverageMissingEvidenceKinds(target))["state_change"]
 }
 
 func coverageTargetsCanStartPrimaryStateChangeWithoutTargetEvidence(run *runModel.Run, targets []map[string]any) bool {
@@ -2270,6 +2299,9 @@ func convergenceConcreteValidationCannotAdvanceWithoutTarget(input map[string]an
 		return false
 	}
 	if !coverageVerificationGapPresent(input, failedStep) {
+		return false
+	}
+	if failedConcreteValidationAssessmentOutput(failedStep.Output) && convergenceCoverageFocusRequiresValidation(input) {
 		return false
 	}
 	pkg := mapFromValue(input["repairActionPackage"])

@@ -3,6 +3,7 @@ package readmodelports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 )
 
@@ -23,5 +24,11 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmo
 		ret.CurrentStepKind = readmodelprojection.CanonicalStepKind(currentStep.Kind)
 		ret.CurrentStepState = string(currentStep.State)
 	}
+	stepViews := presenter.MapSteps(related.steps)
+	var currentStep *presenter.StepView
+	if ret.CurrentStepID != "" {
+		currentStep = &presenter.StepView{ID: ret.CurrentStepID, Kind: ret.CurrentStepKind, State: ret.CurrentStepState}
+	}
+	ret.RuntimeExecution = readmodelprojection.MapRuntimeExecutionState(stepViews, readmodelprojection.MapRuntimeCheckpoints(related.checkpoints), currentStep)
 	return ret
 }

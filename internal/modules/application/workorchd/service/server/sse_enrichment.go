@@ -31,10 +31,11 @@ func enrichSSEEnvelope(envelope events.Envelope) events.Envelope {
 		if progress := runProgressSummary(envelope); progress != "" {
 			summary["progressSummary"] = progress
 		}
-	case decisionevents.TopicTicketCreated:
+	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketUpdated:
 		if envelope.SubjectID != "" {
 			summary["blockingTicketId"] = envelope.SubjectID
 		}
+		addSSEPayloadString(summary, "decisionState", envelope.Payload, events.PayloadKeyState)
 	case approvalevents.TopicApprovalCreated:
 		if envelope.SubjectID != "" {
 			summary["blockingApprovalId"] = envelope.SubjectID

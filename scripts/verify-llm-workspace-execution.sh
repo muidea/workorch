@@ -13,6 +13,7 @@ CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
 CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
 SCRIPT_TIMEOUT_SECONDS="${WORKORCH_LLM_VERIFY_TIMEOUT_SECONDS:-900}"
 RUN_WAIT_SECONDS="${WORKORCH_LLM_VERIFY_RUN_WAIT_SECONDS:-45}"
+ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_LLM_VERIFY_ACTIVATION_RUN_WAIT_SECONDS:-${RUN_WAIT_SECONDS}}"
 MCP_SERVER_ID="mcp-context-verify-$VERIFY_SUFFIX"
 SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
@@ -748,6 +749,109 @@ activate_workspace_execution_with_provider() {
     -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
+wait_activation_run() {
+  local activation_file="$1"
+  local output_file="$2"
+  local snapshot_file="${output_file%.json}-snapshot.json"
+  local runs_file="${output_file%.json}-runs.json"
+  local run_id=""
+  local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
+
+  run_id="$(python3 - "$activation_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+for path in [
+    ("activation", "run", "id"),
+    ("run", "id"),
+]:
+    current = data
+    for part in path:
+        if not isinstance(current, dict):
+            current = {}
+            break
+        current = current.get(part)
+    if current:
+        print(current)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+    python3 - "$activation_file" "$output_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+run = ((data.get("activation") or {}).get("run") or data.get("run") or {})
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+    echo "$run_id"
+    return 0
+  }
+
+  while (( SECONDS <= deadline )); do
+    if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$snapshot_file"; then
+      run_id="$(python3 - "$snapshot_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+snapshot = data.get("snapshot") or {}
+run = snapshot.get("run") or {}
+if run.get("id"):
+    print(run["id"])
+    raise SystemExit(0)
+workspace = snapshot.get("workspace") or {}
+if workspace.get("activeRunId"):
+    print(workspace["activeRunId"])
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+        if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$runs_file"; then
+          python3 - "$runs_file" "$run_id" "$output_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+run_id = sys.argv[2]
+runs = data.get("runs") or []
+run = next((item for item in runs if item.get("id") == run_id), {"id": run_id})
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+        else
+          python3 - "$run_id" "$output_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump({"run": {"id": sys.argv[1]}}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+        fi
+        echo "$run_id"
+        return 0
+      }
+    fi
+    sleep 1
+  done
+
+  echo "activation accepted but run did not materialize within ${ACTIVATION_RUN_WAIT_SECONDS}s for workspace $workspace_id" >&2
+  cat "$activation_file" >&2 || true
+  [[ -f "$snapshot_file" ]] && cat "$snapshot_file" >&2
+  [[ -f "$runs_file" ]] && cat "$runs_file" >&2
+  return 1
+}
+
 create_acceptance_workspace() {
   local prefix="$1"
   local title="$2"
@@ -1125,7 +1229,7 @@ if curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory"
 fi
 
 activate_workspace_execution "$TMP_DIR/happy-activation.json"
-happy_run_id="$(json_path "$TMP_DIR/happy-activation.json" "activation.run.id")"
+happy_run_id="$(wait_activation_run "$TMP_DIR/happy-activation.json" "$TMP_DIR/happy-activation-run.json")"
 wait_run_state "$happy_run_id" "completed" "$TMP_DIR/happy-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/runs?workspaceId=$workspace_id" | json_grep_string_value id "$happy_run_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$happy_run_id" | json_grep_string_value state completed >/dev/null
@@ -1145,7 +1249,7 @@ grep 'Default verification preference: use go test ./...' "$TMP_DIR/memory-after
 
 create_acceptance_workspace "decision" "llm acceptance decision workspace" "verify LLM decision governance" '["decision can be resolved"]'
 activate_workspace_execution_without_memory "$TMP_DIR/decision-activation.json"
-decision_run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
+decision_run_id="$(wait_activation_run "$TMP_DIR/decision-activation.json" "$TMP_DIR/decision-activation-run.json")"
 wait_run_state_any "$decision_run_id" "$TMP_DIR/decision-current-status.json" "blocked_on_decision" "completed"
 decision_state="$(json_path "$TMP_DIR/decision-current-status.json" "status.state")"
 if [[ "$decision_state" == "blocked_on_decision" ]]; then
@@ -1194,7 +1298,7 @@ grep 'Confirmed implementation convention after decision.' "$TMP_DIR/memory-afte
 
 create_acceptance_workspace "approval" "llm acceptance approval workspace" "verify LLM approval governance" '["approval rejection fails safely"]'
 activate_workspace_execution_without_memory "$TMP_DIR/approval-activation.json"
-approval_run_id="$(json_path "$TMP_DIR/approval-activation.json" "activation.run.id")"
+approval_run_id="$(wait_activation_run "$TMP_DIR/approval-activation.json" "$TMP_DIR/approval-activation-run.json")"
 wait_run_state "$approval_run_id" "blocked_on_approval" "$TMP_DIR/approval-blocked-status.json"
 approval_id="$(json_path "$TMP_DIR/approval-blocked-status.json" "status.blockingApprovalId")"
 approval_path="$(url_encode "$approval_id")"
@@ -1212,7 +1316,7 @@ assert_run_recovery_read_models "$approval_run_id" "approval-rejected" "failed" 
 create_acceptance_workspace "multi-gate" "llm acceptance multi-gate workspace" "verify LLM decision then approval governance" '["multi gate decision then approval can complete"]'
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"multi gate decision then approval can complete"' >/dev/null
 activate_workspace_execution_without_memory "$TMP_DIR/multi-gate-decision-activation.json"
-multi_gate_run_id="$(json_path "$TMP_DIR/multi-gate-decision-activation.json" "activation.run.id")"
+multi_gate_run_id="$(wait_activation_run "$TMP_DIR/multi-gate-decision-activation.json" "$TMP_DIR/multi-gate-decision-activation-run.json")"
 wait_run_state "$multi_gate_run_id" "blocked_on_decision" "$TMP_DIR/multi-gate-decision-status.json"
 multi_gate_ticket_id="$(json_path "$TMP_DIR/multi-gate-decision-status.json" "status.blockingTicketId")"
 multi_gate_ticket_path="$(url_encode "$multi_gate_ticket_id")"
@@ -1246,7 +1350,7 @@ json_grep_string_value id "$multi_gate_approval_id" "$TMP_DIR/workspace-snapshot
 
 create_acceptance_workspace "schema" "llm acceptance schema workspace" "verify LLM schema failure observability" '["schema failure is observable"]'
 activate_workspace_execution_without_memory "$TMP_DIR/schema-failure-activation.json"
-schema_run_id="$(json_path "$TMP_DIR/schema-failure-activation.json" "activation.run.id")"
+schema_run_id="$(wait_activation_run "$TMP_DIR/schema-failure-activation.json" "$TMP_DIR/schema-failure-activation-run.json")"
 wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded" "blocked_on_decision"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
 grep '"llm_schema_invalid"' "$TMP_DIR/schema-failure-snapshot.json" >/dev/null
@@ -1285,7 +1389,7 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H
   -d '{"memoryId":"'"$MEMORY_ID"'","sourceType":"user","memoryType":"project_context","content":"Seed memory for acceptance execution.","summary":"Seeded acceptance memory is available to runs.","tags":["acceptance","seed"],"importance":8,"confidence":9,"visibility":"workspace","embeddingProviderId":"verify","embeddingModel":"verify-embedding","embeddingText":"seeded acceptance memory","vector":[0.1,0.2,0.3]}' >"$TMP_DIR/memory-recall-seed.json"
 json_grep_string_value id "$MEMORY_ID" "$TMP_DIR/memory-recall-seed.json" >/dev/null
 activate_workspace_execution_with_auto_memory "$TMP_DIR/memory-recall-activation.json"
-memory_run_id="$(json_path "$TMP_DIR/memory-recall-activation.json" "activation.run.id")"
+memory_run_id="$(wait_activation_run "$TMP_DIR/memory-recall-activation.json" "$TMP_DIR/memory-recall-activation-run.json")"
 wait_run_state "$memory_run_id" "completed" "$TMP_DIR/memory-recall-completed-status.json"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$memory_run_id/snapshot" >"$TMP_DIR/memory-recall-snapshot.json"
 grep '"memories"' "$TMP_DIR/memory-recall-snapshot.json" >/dev/null
@@ -1377,18 +1481,18 @@ assert_run_recovery_read_models "$memory_run_id" "memory-recall" "completed" "pr
 
 create_acceptance_workspace "stream" "llm acceptance stream workspace" "verify LLM streaming usage" '["stream usage is recorded"]'
 activate_workspace_execution_without_memory "$TMP_DIR/stream-baseline-activation.json"
-stream_baseline_run_id="$(json_path "$TMP_DIR/stream-baseline-activation.json" "activation.run.id")"
+stream_baseline_run_id="$(wait_activation_run "$TMP_DIR/stream-baseline-activation.json" "$TMP_DIR/stream-baseline-activation-run.json")"
 wait_run_state "$stream_baseline_run_id" "completed" "$TMP_DIR/stream-baseline-completed-status.json"
 assert_run_recovery_read_models "$stream_baseline_run_id" "stream-baseline" "completed" "provider_native"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "verify-stream-native"
-stream_native_run_id="$(json_path "$TMP_DIR/stream-native-activation.json" "activation.run.id")"
+stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" "provider_native"
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "true"
 
 activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "verify-stream-estimated"
-stream_estimated_run_id="$(json_path "$TMP_DIR/stream-estimated-activation.json" "activation.run.id")"
+stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
 wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
 assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
 assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "true"

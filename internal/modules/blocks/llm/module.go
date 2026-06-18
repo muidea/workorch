@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	magictask "github.com/muidea/magicCommon/task"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
@@ -24,6 +25,7 @@ type Module struct {
 	runtimeAdapter *llmbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
 	eventHub       events.Hub
+	background     magictask.BackgroundRoutine
 	unsub          []func()
 }
 
@@ -32,25 +34,27 @@ func New() *Module { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
 
 type Dependencies struct {
-	EventHub events.Hub
+	EventHub   events.Hub
+	Background magictask.BackgroundRoutine
 }
 
 func (m *Module) Configure(deps ...Dependencies) error {
 	if len(deps) > 0 {
 		m.eventHub = deps[0].EventHub
+		m.background = deps[0].Background
 	}
 	m.runtimeAdapter = llmbiz.NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision)
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil {
+	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.background == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.executor != nil || len(m.unsub) > 0 {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.runtimeAdapter, StepKindWorkspaceExecution)
+	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindWorkspaceExecution)
 	if err := m.executor.Run(); err != nil {
 		return err
 	}
@@ -73,6 +77,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.executor = nil
 	m.runtimeAdapter = nil
 	m.eventHub = nil
+	m.background = nil
 	return nil
 }
 

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	magictask "github.com/muidea/magicCommon/task"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
@@ -61,20 +62,22 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 	if eventHub == nil {
 		eventHub = events.NewMagicHubWithOwner("workorch/bootstrap")
 	}
+	backgroundRoutine := magictask.NewBackgroundRoutine(1024)
 	fileModule := filemodule.New()
-	mustSetup("file", fileModule.Configure(filemodule.Dependencies{EventHub: eventHub}))
+	mustSetup("file", fileModule.Configure(filemodule.Dependencies{EventHub: eventHub, Background: backgroundRoutine}))
 	gitModule := gitmodule.New()
-	mustSetup("git", gitModule.Configure(gitmodule.Dependencies{EventHub: eventHub}))
+	mustSetup("git", gitModule.Configure(gitmodule.Dependencies{EventHub: eventHub, Background: backgroundRoutine}))
 	shellModule := shellmodule.New()
-	mustSetup("shell", shellModule.Configure(shellmodule.Dependencies{EventHub: eventHub}))
+	mustSetup("shell", shellModule.Configure(shellmodule.Dependencies{EventHub: eventHub, Background: backgroundRoutine}))
 	sshModule := sshmodule.New()
-	mustSetup("ssh", sshModule.Configure(sshmodule.Dependencies{EventHub: eventHub}))
+	mustSetup("ssh", sshModule.Configure(sshmodule.Dependencies{EventHub: eventHub, Background: backgroundRoutine}))
 	webModule := webmodule.New()
 	mustSetup("web", webModule.Configure(webmodule.Dependencies{
-		EventHub: eventHub,
+		EventHub:   eventHub,
+		Background: backgroundRoutine,
 	}))
 	llmModule := llmmodule.New()
-	mustSetup("llm", llmModule.Configure(llmmodule.Dependencies{EventHub: eventHub}))
+	mustSetup("llm", llmModule.Configure(llmmodule.Dependencies{EventHub: eventHub, Background: backgroundRoutine}))
 
 	soulModule := soulmodule.New()
 	mustSetup("soul", soulModule.Configure(soulmodule.Dependencies{
@@ -103,7 +106,8 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 	}))
 	mcpBlockModule := mcpblockmodule.New()
 	mustSetup("mcp-block", mcpBlockModule.Configure(mcpblockmodule.Dependencies{
-		EventHub: eventHub,
+		EventHub:   eventHub,
+		Background: backgroundRoutine,
 	}))
 
 	eventStreamModule := eventstreammodule.New()
@@ -156,6 +160,7 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 		ArtifactContinuations: repos.artifactContinuation,
 		RuntimePolicy:         runtimePolicy,
 		EventHub:              eventHub,
+		BackgroundRoutine:     backgroundRoutine,
 	}))
 
 	runModule := runmodule.New()
@@ -226,12 +231,14 @@ func newWithBackendRuntimePolicyAndEventHub(backend string, dataRoot string, run
 				Approvals:             repos.approval,
 			},
 			Infrastructure: InfrastructureExports{
-				EventHub:   eventHub,
-				LoadConfig: workorchconfig.Current,
+				EventHub:          eventHub,
+				BackgroundRoutine: backgroundRoutine,
+				LoadConfig:        workorchconfig.Current,
 			},
 		},
 		modules:         modules,
 		moduleLifecycle: moduleLifecycle,
+		background:      backgroundRoutine,
 	}
 }
 
@@ -284,13 +291,13 @@ func buildRuntimeAdapterRegistry(eventHub events.Hub) (*orchestratormodule.Runti
 			return nil, err
 		}
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, orchestratormodule.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchApply, eventAdapter); err != nil {
 		return nil, err
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, orchestratormodule.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchPreview, eventAdapter); err != nil {
 		return nil, err
 	}
-	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, orchestratormodule.NewPatchRuntimeAdapter()); err != nil {
+	if err := runtimeRegistry.Register(llmcommon.RuntimeBlockKindPatchRevert, eventAdapter); err != nil {
 		return nil, err
 	}
 	if err := runtimeRegistry.Register(llmmodule.StepKindWorkspaceExecution, eventAdapter); err != nil {

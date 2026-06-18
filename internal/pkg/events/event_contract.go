@@ -66,6 +66,12 @@ func ResolveEventHubContract(topic string) (EventHubContract, bool) {
 
 func EventHubLaneKey(envelope Envelope) string {
 	envelope.Topic = strings.TrimSpace(envelope.Topic)
+	if runtimeBlockExecuteAcceptedTopic(envelope.Topic) {
+		return runtimeExecutionStateLaneKey(envelope)
+	}
+	if runtimeBlockExecuteResultTopic(envelope.Topic) {
+		return stateLaneKey("orchestrator", envelope)
+	}
 	if contract, ok := ResolveEventHubContract(envelope.Topic); ok {
 		return contract.LaneKey(envelope)
 	}
@@ -94,6 +100,7 @@ func buildEventHubContracts() map[string]EventHubContract {
 	for _, source := range [][]eventcontract.Contract{
 		workorchdevents.Contracts(),
 		llmevents.Contracts(),
+		runtimeeventdefs.Contracts(),
 		approvalevents.Contracts(),
 		decisionevents.Contracts(),
 		eventstreamevents.Contracts(),
@@ -235,6 +242,39 @@ func executeLaneKey(contract EventHubContract, envelope Envelope) string {
 		return "exec/block/" + kind + "/workspace/" + workspaceID
 	}
 	return "exec/block/" + kind
+}
+
+func runtimeExecutionStateLaneKey(envelope Envelope) string {
+	workspaceID := strings.TrimSpace(envelope.WorkspaceID)
+	runID := strings.TrimSpace(envelope.RunID)
+	stepID := strings.TrimSpace(envelope.StepID)
+	if workspaceID != "" && runID != "" && stepID != "" {
+		return "state/runtime-exec/workspace/" + workspaceID + "/run/" + runID + "/step/" + stepID
+	}
+	if workspaceID != "" && runID != "" {
+		return "state/runtime-exec/workspace/" + workspaceID + "/run/" + runID
+	}
+	if workspaceID != "" {
+		return "state/runtime-exec/workspace/" + workspaceID
+	}
+	if stepID != "" {
+		return "state/runtime-exec/step/" + stepID
+	}
+	return "state/runtime-exec"
+}
+
+func runtimeBlockExecuteAcceptedTopic(topic string) bool {
+	return topic == runtimeeventdefs.TopicRuntimeBlockExecuteAccepted
+}
+
+func runtimeBlockExecuteResultTopic(topic string) bool {
+	switch topic {
+	case runtimeeventdefs.TopicRuntimeBlockExecuteCompleted,
+		runtimeeventdefs.TopicRuntimeBlockExecuteFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func globalLaneKey(owner string) string {

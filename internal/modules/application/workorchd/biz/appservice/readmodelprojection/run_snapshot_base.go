@@ -26,6 +26,7 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []presente
 		Decisions:             input.Decisions,
 		Approvals:             input.Approvals,
 	}
+	ret.RuntimeExecution = MapRuntimeExecutionState(ret.Steps, ret.RuntimeCheckpoints, ret.Step)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Outcome = MapRunOutcome(ret)
 	return ret

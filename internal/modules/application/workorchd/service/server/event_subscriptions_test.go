@@ -7,6 +7,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
@@ -74,6 +75,43 @@ func TestSubscribeServerStreamEventsReceivesOwnerEventAcrossHubWrappers(t *testi
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for owner event across hub wrappers")
+	}
+}
+
+func TestSubscribeServerStreamEventsReceivesTicketUpdatedAcrossHubWrappers(t *testing.T) {
+	ctx := context.Background()
+	rawHub := magicevent.NewHub(32)
+	defer rawHub.Terminate(ctx)
+
+	subscriber := events.NewMagicHubWithHubOwner(rawHub, "workorchd/sse")
+	publisher := events.NewMagicHubWithHubOwner(rawHub, "kernel/decision")
+	received := make(chan events.Envelope, 1)
+	unsubscribers := subscribeServerStreamEvents(subscriber, eventStreamViewFull, func(_ context.Context, envelope events.Envelope) error {
+		received <- envelope
+		return nil
+	})
+	defer unsubscribeAll(unsubscribers)
+
+	if err := publisher.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       decisionevents.TopicTicketUpdated,
+		WorkspaceID: "ws-ticket-updated",
+		RunID:       "run-ticket-updated",
+		StepID:      "step-ticket-updated",
+		SubjectType: "decision_ticket",
+		SubjectID:   "ticket-updated",
+		Payload:     events.DecisionTicketPayload("provider unavailable", common.DecisionTicketStateOpen),
+	}); err != nil {
+		t.Fatalf("publish ticket updated event: %v", err)
+	}
+
+	select {
+	case envelope := <-received:
+		if envelope.Topic != decisionevents.TopicTicketUpdated || envelope.WorkspaceID != "ws-ticket-updated" {
+			t.Fatalf("envelope = %+v, want ticket updated event for ws-ticket-updated", envelope)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for ticket updated event across hub wrappers")
 	}
 }
 

@@ -230,6 +230,9 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 		if err := m.tickets.Update(ctx, item); err != nil {
 			return err
 		}
+		if err := m.publishTicketUpdated(ctx, item); err != nil {
+			return err
+		}
 		return decisionCommandResponse(envelope, nil)
 	case decisionevents.TopicDecisionCommandDeleteTicket:
 		ticketID := deleteTicketIDFromPayload(envelope.Payload)
@@ -243,6 +246,23 @@ func (m *Module) handleTicketCommand(ctx context.Context, envelope events.Envelo
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func (m *Module) publishTicketUpdated(ctx context.Context, item *decisionmodel.Ticket) error {
+	if m == nil || m.eventHub == nil || item == nil {
+		return nil
+	}
+	return m.eventHub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        decisionevents.TopicTicketUpdated,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "decision_ticket",
+		SubjectID:    string(item.ID),
+		WorkspaceID:  string(item.WorkspaceID),
+		RunID:        string(item.RunID),
+		StepID:       string(item.StepID),
+		Payload:      events.DecisionTicketPayload(item.Reason, item.State),
+	})
 }
 
 func ticketCreateCommandFromModel(item *decisionmodel.Ticket) decisioncontracts.CreateTicketCommand {

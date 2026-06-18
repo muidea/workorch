@@ -47,6 +47,16 @@ func (m AppModel) renderInspectStatus() string {
 			b.WriteString("\n")
 		}
 	}
+	if status := runtimeExecutionStatusText(m.runtimeExecution); status != "" {
+		b.WriteString("- runtime execution: ")
+		b.WriteString(status)
+		b.WriteString("\n")
+		if m.runtimeExecution.LastProgressSummary != "" {
+			b.WriteString("- runtime progress: ")
+			b.WriteString(m.runtimeExecution.LastProgressSummary)
+			b.WriteString("\n")
+		}
+	}
 	if m.currentTask != "" {
 		b.WriteString("- goal: ")
 		b.WriteString(m.currentTask)
@@ -57,14 +67,14 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString(m.repairLoop)
 		b.WriteString("\n")
 	}
-	if m.blockingDecision != nil {
+	if decision := m.activeBlockingDecision(); decision != nil {
 		b.WriteString("- decision: ")
-		b.WriteString(blockingDecisionLabel(m.blockingDecision))
+		b.WriteString(blockingDecisionLabel(decision))
 		b.WriteString("\n")
 	}
-	if m.blockingApproval != nil {
+	if approval := m.activeBlockingApproval(); approval != nil {
 		b.WriteString("- approval: ")
-		b.WriteString(blockingApprovalLabel(m.blockingApproval))
+		b.WriteString(blockingApprovalLabel(approval))
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")

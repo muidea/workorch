@@ -644,6 +644,7 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 		"Outcome":               snapshot.Outcome,
 		"TaskProgress":          snapshot.TaskProgress,
 		"RunHeartbeat":          snapshot.RunHeartbeat,
+		"RuntimeExecution":      snapshot.RuntimeExecution,
 		"CoverageSummary":       cloneCLIResultValue(snapshot.CoverageSummary, 0),
 		"TaskDecompositions":    snapshot.TaskDecompositions,
 		"Goals":                 snapshot.Goals,

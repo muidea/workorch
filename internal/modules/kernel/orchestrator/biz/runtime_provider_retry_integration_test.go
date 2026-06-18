@@ -297,23 +297,27 @@ func TestRuntimeOrchestrator_ResumeResolvedProviderRetryExhaustionReblocksWithou
 
 	err := orch.ResumeRun(ctx, runID)
 	if !errors.Is(err, common.ErrBlocked) {
-		t.Fatalf("ResumeRun err = %v, want blocked on renewed provider decision", err)
+		t.Fatalf("ResumeRun err = %v, want blocked on provider dependency recovery", err)
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" || runItem.BlockingTicketID == ticketID || runItem.FailureReason != "" {
-		t.Fatalf("run = %+v, want reblocked with a new provider ticket and no failure", runItem)
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID != ticketID || runItem.FailureReason != "" {
+		t.Fatalf("run = %+v, want still blocked on original provider ticket and no failure", runItem)
 	}
-	newTicket, err := ticketRepo.Get(ctx, runItem.BlockingTicketID)
+	tickets, err := ticketRepo.ListByRunID(ctx, runID)
 	if err != nil {
-		t.Fatalf("get renewed ticket: %v", err)
+		t.Fatalf("list tickets: %v", err)
 	}
-	if newTicket.Context[decisionContextKeyResultPolicy] != decisionContextResultPolicyNone ||
-		newTicket.Context["previousTicketId"] != string(ticketID) ||
-		newTicket.Context["repeatBlocker"] != true {
-		t.Fatalf("renewed ticket context = %+v, want repeated provider blocker metadata", newTicket.Context)
+	if len(tickets) != 1 {
+		t.Fatalf("tickets = %+v, want no repeated provider blocker ticket", tickets)
+	}
+	if tickets[0].ID != ticketID || tickets[0].State != common.DecisionTicketStateOpen {
+		t.Fatalf("ticket = %+v, want original ticket reopened", tickets[0])
+	}
+	if _, err := resolutionRepo.GetByTicketID(ctx, ticketID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("resolution err = %v, want deleted resolution not found", err)
 	}
 	results, err := resultRepo.ListByRun(ctx, runID)
 	if err != nil {

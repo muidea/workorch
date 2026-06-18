@@ -4829,6 +4829,11 @@ func TestReadTerminalRunModelsWithBackendRemainStableAcrossReloads(t *testing.T)
 	if _, err := ResumeRunWithBackend(context.Background(), "file", dataRoot, runID); err != nil {
 		t.Fatalf("ResumeRunWithBackend: %v", err)
 	}
+	_ = waitRunSnapshotWithBackend(t, "file", dataRoot, runID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return snapshot.Run.State == string(common.RunStateFailed) &&
+			snapshot.TaskProgress.State == string(common.RunStateFailed) &&
+			snapshot.TaskProgress.Recovery.NextAction == "inspect_failure_reason_and_evidence"
+	})
 
 	firstRun, err := ReadRunWithBackend(context.Background(), "file", dataRoot, runID)
 	if err != nil {

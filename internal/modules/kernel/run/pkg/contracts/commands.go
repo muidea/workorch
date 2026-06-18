@@ -25,6 +25,19 @@ type ResumeRunCommand struct {
 	ExecutionContextPatch map[string]any
 }
 
+type RecoverRuntimeGapCommand struct {
+	WorkspaceID           common.WorkspaceID
+	RunID                 common.RunID
+	StepID                common.StepID
+	StepKind              string
+	Gap                   string
+	RequestID             string
+	QueueKey              string
+	LatestStepTime        string
+	Reason                string
+	ExecutionContextPatch map[string]any
+}
+
 type UpdateRunCommand struct {
 	RunID              common.RunID
 	WorkspaceID        common.WorkspaceID

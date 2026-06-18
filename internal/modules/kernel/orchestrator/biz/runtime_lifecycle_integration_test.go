@@ -24,6 +24,35 @@ type listFailingStepRepository struct {
 	err   error
 }
 
+func TestConfigOnlyDependencyResolutionStillBlockedRequiresRecoveryEvidence(t *testing.T) {
+	ticket := &decisionmodel.Ticket{
+		Context: map[string]any{
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+		},
+	}
+	tests := []struct {
+		name    string
+		payload map[string]any
+		want    bool
+	}{
+		{name: "plain continue remains blocked", payload: map[string]any{"answer": "continue"}, want: true},
+		{name: "replan remains blocked", payload: map[string]any{"recoveryAction": "replan"}, want: true},
+		{name: "retry remains blocked without recovery evidence", payload: map[string]any{"recoveryAction": "retry_same_step"}, want: true},
+		{name: "external dependency recovered can resume", payload: map[string]any{"externalDependencyRecovered": true}, want: false},
+		{name: "system config changed can resume", payload: map[string]any{"systemConfigChanged": true}, want: false},
+		{name: "runtime dependency recovered can resume", payload: map[string]any{"runtimeDependencyRecovered": true}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := configOnlyDependencyResolutionStillBlocked(ticket, &decisionmodel.Resolution{Payload: tt.payload})
+			if got != tt.want {
+				t.Fatalf("blocked = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func (r *listFailingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
 	return r.inner.Create(ctx, item)
 }
@@ -820,7 +849,7 @@ func TestRuntimeOrchestrator_ResumeProviderConfigRecoveryContinueDispatchesExpli
 		ID:       "resolution-provider-retry-continue",
 		TicketID: ticketID,
 		Type:     decisioncommon.ResolutionTypeProvideMissingInfo,
-		Payload:  map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step"},
+		Payload:  map[string]any{"answer": "继续处理", "recoveryAction": "retry_same_step", "externalDependencyRecovered": true},
 	}); err != nil {
 		t.Fatalf("seed resolution: %v", err)
 	}

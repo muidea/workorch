@@ -10,6 +10,7 @@ type WorkspaceSnapshot struct {
 	Outcome               WorkspaceOutcome        `json:"outcome"`
 	TaskProgress          TaskProgress            `json:"taskProgress"`
 	RunHeartbeat          RunHeartbeat            `json:"runHeartbeat,omitempty"`
+	RuntimeExecution      *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
 	ContextBundle         *ContextBundle          `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any          `json:"coverageSummary,omitempty"`
 	TaskDecompositions    []TaskDecomposition     `json:"taskDecompositions,omitempty"`

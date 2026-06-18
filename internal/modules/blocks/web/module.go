@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 
+	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/web/pkg/common"
@@ -20,13 +21,15 @@ const StepKindSearch = modulecommon.StepKindSearch
 const StepKindFetch = modulecommon.StepKindFetch
 
 type Dependencies struct {
-	EventHub events.Hub
+	EventHub   events.Hub
+	Background magictask.BackgroundRoutine
 }
 
 type Module struct {
 	runtimeAdapter *webbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
 	eventHub       events.Hub
+	background     magictask.BackgroundRoutine
 }
 
 func New() *Module { return &Module{} }
@@ -35,18 +38,19 @@ func (m *Module) ID() string { return ModuleID }
 
 func (m *Module) Configure(deps Dependencies) error {
 	m.eventHub = deps.EventHub
+	m.background = deps.Background
 	m.runtimeAdapter = webbiz.NewRuntimeAdapterFromConfigLoaderWithRevision(loadProviderConfigsFromWorkorchConfig, workorchconfig.Revision, webApprovalGetter{hub: deps.EventHub})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil {
+	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.background == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.executor != nil {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.runtimeAdapter, StepKindSearch, StepKindFetch)
+	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindSearch, StepKindFetch)
 	return m.executor.Run()
 }
 
@@ -58,6 +62,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.executor = nil
 	m.runtimeAdapter = nil
 	m.eventHub = nil
+	m.background = nil
 	return nil
 }
 

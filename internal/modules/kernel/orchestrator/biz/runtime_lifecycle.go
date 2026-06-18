@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/common"
+	decisionmodel "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/models"
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspaceModel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -264,12 +267,24 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			}
 			switch effectiveDecisionResolutionType(ticket, resolution) {
 			case decisioncommon.ResolutionTypeProvideMissingInfo:
+				if configOnlyDependencyResolutionStillBlocked(ticket, resolution) {
+					if err := o.reopenConfigOnlyDependencyTicket(ctx, ticket); err != nil {
+						return err
+					}
+					return common.ErrBlocked
+				}
 				resumeInput = decisionResolutionInput(ticket, resolution)
 				r.BlockingTicketID = ""
 			case decisioncommon.ResolutionTypeRejectCurrentPath:
 				mergeRunExecutionContextPatch(r, executionContextPatch)
 				return o.closeLoadedRun(ctx, r, common.RunStateFailed, fmt.Sprintf("decision ticket %s rejected", ticket.ID))
 			case decisioncommon.ResolutionTypeReplan:
+				if configOnlyDependencyResolutionStillBlocked(ticket, resolution) {
+					if err := o.reopenConfigOnlyDependencyTicket(ctx, ticket); err != nil {
+						return err
+					}
+					return common.ErrBlocked
+				}
 				mergeRunExecutionContextPatch(r, executionContextPatch)
 				return o.replanLoadedRun(ctx, r, ticket, resolution)
 			default:
@@ -298,6 +313,9 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 			return common.ErrBlocked
 		}
 	case common.RunStateRunning:
+		if recovered, err := o.recoverRuntimeTerminalResultForRunningRun(ctx, r); err != nil || recovered {
+			return err
+		}
 		recoverStepID, recoverInput, err := o.runningDecisionRecoveryContext(ctx, r)
 		if err != nil {
 			if !errors.Is(err, common.ErrConflict) {
@@ -441,6 +459,36 @@ func cloneRunForResume(run *runModel.Run) *runModel.Run {
 	cloned := *run
 	cloned.ExecutionContext = cloneStepPayload(run.ExecutionContext)
 	return &cloned
+}
+
+func configOnlyDependencyResolutionStillBlocked(ticket *decisionmodel.Ticket, resolution *decisionmodel.Resolution) bool {
+	if ticket == nil || resolution == nil {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(ticket.Context, decisionContextKeyRecoveryPolicy)) != decisionContextRecoveryPolicyConfigOnly {
+		return false
+	}
+	payload := resolution.Payload
+	if boolValue(payload["externalDependencyRecovered"]) ||
+		boolValue(payload["systemConfigChanged"]) ||
+		boolValue(payload["runtimeDependencyRecovered"]) {
+		return false
+	}
+	return true
+}
+
+func (o *RuntimeOrchestrator) reopenConfigOnlyDependencyTicket(ctx context.Context, ticket *decisionmodel.Ticket) error {
+	if o == nil || ticket == nil || ticket.ID == "" || o.tickets == nil {
+		return common.ErrInvalidArgument
+	}
+	if o.resolutions != nil {
+		if err := o.resolutions.DeleteByTicketID(ctx, ticket.ID); err != nil && !errors.Is(err, common.ErrNotFound) {
+			return err
+		}
+	}
+	ticket.State = common.DecisionTicketStateOpen
+	ticket.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return o.tickets.Update(ctx, ticket)
 }
 
 func (o *RuntimeOrchestrator) failResolvedDecisionResume(ctx context.Context, run *runModel.Run, original runResumeStateSnapshot, executionContextPatch map[string]any, cause error) error {

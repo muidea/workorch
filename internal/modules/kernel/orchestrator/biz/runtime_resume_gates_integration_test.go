@@ -18,6 +18,84 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeOrchestrator_ResumeRunFinalizesDurableRuntimeTerminalResult(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	validationRepo := memory.NewValidationResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{"status": "unexpected-runtime-call"}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		memory.NewDecisionResolutionRepository(),
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			ValidationResults:  validationRepo,
+			RuntimeCheckpoints: checkpointRepo,
+		},
+		events.NewMemoryHub(),
+	)
+	orch.EnableEventDrivenDispatch()
+	workspaceID := common.WorkspaceID("ws-resume-terminal-result")
+	runID := common.RunID("run-resume-terminal-result")
+	stepID := common.StepID("run-resume-terminal-result/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{
+		ID:          common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		ToolName:    llmcommon.StepKindWorkspaceExecution,
+		State:       common.ToolCallStateRunning,
+	}); err != nil {
+		t.Fatalf("seed tool call: %v", err)
+	}
+	if err := orch.RecordRuntimeStepTerminalResult(ctx, runID, stepID, RuntimeStepTerminalResultCheckpoint{
+		RequestID:     "request-resume-terminal",
+		TerminalTopic: "/runtime/block/execute/completed",
+		StepKind:      llmcommon.StepKindWorkspaceExecution,
+		Output: map[string]any{
+			"status":   "ok",
+			"nextStep": "next-from-terminal-result",
+			"nextKind": llmcommon.StepKindWorkspaceExecution,
+		},
+		CompletedAt: "2026-06-17T01:00:00Z",
+	}); err != nil {
+		t.Fatalf("record terminal result: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("ResumeRun: %v", err)
+	}
+	step, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("read step: %v", err)
+	}
+	if step.State != common.StepStateCompleted || step.Output["status"] != "ok" {
+		t.Fatalf("step = %+v, want completed from durable terminal result", step)
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("runtime calls = %+v, want no provider redispatch", runtime.calls)
+	}
+}
+
 func TestRuntimeOrchestrator_ResumeRunContinuesBlockExecutionGraphAfterApproval(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

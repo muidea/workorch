@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 
+	magictask "github.com/muidea/magicCommon/task"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
 	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
@@ -18,13 +19,15 @@ const StepKindResourceRead = modulecommon.StepKindResourceRead
 const StepKindPromptGet = modulecommon.StepKindPromptGet
 
 type Dependencies struct {
-	EventHub events.Hub
+	EventHub   events.Hub
+	Background magictask.BackgroundRoutine
 }
 
 type Module struct {
 	runtimeAdapter *mcpbiz.RuntimeAdapter
 	executor       *runtimeevent.Executor
 	eventHub       events.Hub
+	background     magictask.BackgroundRoutine
 }
 
 func New() *Module { return &Module{} }
@@ -36,18 +39,19 @@ func (m *Module) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	m.eventHub = deps.EventHub
+	m.background = deps.Background
 	m.runtimeAdapter = mcpbiz.NewRuntimeAdapter(mcpEventServerGetter{hub: deps.EventHub})
 	return nil
 }
 
 func (m *Module) Start() error {
-	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil {
+	if m == nil || m.runtimeAdapter == nil || m.eventHub == nil || m.background == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.executor != nil {
 		return nil
 	}
-	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.runtimeAdapter, StepKindToolCall, StepKindResourceRead, StepKindPromptGet)
+	m.executor = runtimeevent.NewExecutor(ModuleID, m.eventHub, m.background, m.runtimeAdapter, StepKindToolCall, StepKindResourceRead, StepKindPromptGet)
 	return m.executor.Run()
 }
 
@@ -62,6 +66,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	m.runtimeAdapter = nil
 	m.eventHub = nil
+	m.background = nil
 	return nil
 }
 

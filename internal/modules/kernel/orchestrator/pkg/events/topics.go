@@ -5,6 +5,7 @@ const (
 	TopicOrchestratorCommandBlockDecision                  = "/orchestrator/command/block-decision"
 	TopicOrchestratorCommandBlockApproval                  = "/orchestrator/command/block-approval"
 	TopicOrchestratorCommandResumeRun                      = "/orchestrator/command/resume-run"
+	TopicOrchestratorCommandRecoverRuntimeGap              = "/orchestrator/command/recover-runtime-gap"
 	TopicOrchestratorCommandValidateRun                    = "/orchestrator/command/validate-run"
 	TopicOrchestratorCommandCompleteRun                    = "/orchestrator/command/complete-run"
 	TopicOrchestratorCommandCancelRun                      = "/orchestrator/command/cancel-run"
@@ -16,6 +17,8 @@ const (
 	TopicOrchestratorCommandListPatchesByRun               = "/orchestrator/command/list-patches-by-run"
 	TopicOrchestratorCommandListValidationResultsByRun     = "/orchestrator/command/list-validation-results-by-run"
 	TopicOrchestratorCommandListArtifactContinuationsByRun = "/orchestrator/command/list-artifact-continuations-by-run"
+
+	TopicOrchestratorDispatchStepRequested = "/orchestrator/dispatch-step/requested"
 
 	TopicPatchPreviewed                    = "/patch/previewed"
 	TopicPatchApplied                      = "/patch/applied"

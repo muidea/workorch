@@ -110,6 +110,51 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	}
 }
 
+func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	hub.Subscribe(orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, func(_ context.Context, envelope events.Envelope) error {
+		return events.Response(envelope)
+	})
+	run := &runmodel.Run{ID: "run-runtime-gap-command", WorkspaceID: "ws-runtime-gap-command"}
+	recovery := RuntimeGapRecovery{
+		WorkspaceID:    run.WorkspaceID,
+		RunID:          run.ID,
+		StepID:         "run-runtime-gap-command/step-001",
+		StepKind:       "llm/workspace_execution",
+		Gap:            runtimeExecutionGapWorkerLost,
+		RequestID:      "request-runtime-gap",
+		QueueKey:       "queue-runtime-gap",
+		LatestStepTime: "2026-06-17T14:00:00Z",
+		Reason:         "stale dispatched runtime gap: worker_lost",
+	}
+
+	if err := RecoverRuntimeGap(ctx, hub, run, recovery, map[string]any{"mode": "recover"}); err != nil {
+		t.Fatalf("RecoverRuntimeGap: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 1 {
+		t.Fatalf("published len = %d, want 1", len(published))
+	}
+	if published[0].Topic != orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap {
+		t.Fatalf("topic = %q, want recover runtime gap", published[0].Topic)
+	}
+	cmd, ok := published[0].Payload[events.PayloadKeyCommand].(runcontracts.RecoverRuntimeGapCommand)
+	if !ok {
+		t.Fatalf("payload command = %T, want RecoverRuntimeGapCommand", published[0].Payload[events.PayloadKeyCommand])
+	}
+	if cmd.RunID != run.ID ||
+		cmd.WorkspaceID != run.WorkspaceID ||
+		cmd.StepID != recovery.StepID ||
+		cmd.Gap != string(runtimeExecutionGapWorkerLost) ||
+		cmd.RequestID != recovery.RequestID ||
+		cmd.QueueKey != recovery.QueueKey ||
+		cmd.ExecutionContextPatch["mode"] != "recover" {
+		t.Fatalf("command = %+v, want populated runtime gap recovery command", cmd)
+	}
+}
+
 func TestValidateRunDefinitionsReadsDefinitionsWithWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	hub := events.NewMemoryHub()

@@ -86,6 +86,9 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 		WorkspaceID: "ws-stuck-candidate",
 		State:       common.RunStateRunning,
 	}
+	if err := exports.Repositories.Runs.Create(ctx, candidate); err != nil {
+		t.Fatalf("seed candidate run: %v", err)
+	}
 	if !IsStuckRunningRunCandidate(ctx, exports.Infrastructure.EventHub, candidate) {
 		t.Fatal("running unblocked run without continuation checkpoint should be a stuck-running candidate")
 	}
@@ -105,8 +108,10 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 		t.Fatal("blocked run should not be a stuck-running candidate")
 	}
 
-	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+	scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, candidate.WorkspaceID)
+	if err := exports.Repositories.RuntimeCheckpoints.Create(scopedCtx, &runmodel.RuntimeCheckpoint{
 		ID:             "run-stuck-candidate/checkpoint-001",
+		WorkspaceID:    candidate.WorkspaceID,
 		RunID:          candidate.ID,
 		CheckpointType: common.CheckpointTypeRecovery,
 		Data:           map[string]any{"nextAction": "continue_run"},
@@ -360,6 +365,442 @@ func TestRecoverStaleOrphanDispatchedStepRequiresOldCheckpoint(t *testing.T) {
 	}
 	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
 		t.Fatalf("old checkpoint recovered=%+v changed=%v resumeCalls=%d, want stale recovery", recovered, changed, resumeCalls)
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepResumesRuntimeTerminalResultAvailable(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-terminal-gap-runports")
+	workspaceID := common.WorkspaceID("ws-stale-terminal-gap-runports")
+	stepID := common.StepID("run-stale-terminal-gap-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-terminal-gap-runports/checkpoint/accepted",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:00:00Z",
+		Data: map[string]any{
+			"event":     "runtime_execute_accepted",
+			"requestId": "request-terminal-gap",
+		},
+	}); err != nil {
+		t.Fatalf("seed accepted checkpoint: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-terminal-gap-runports/checkpoint/result",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:01:00Z",
+		Data: map[string]any{
+			"event":       "runtime_step_result_available",
+			"requestId":   "request-terminal-gap",
+			"completedAt": "2026-06-09T08:00:59Z",
+			"output":      map[string]any{"status": "ok"},
+		},
+	}); err != nil {
+		t.Fatalf("seed result checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	resumeCalls := 0
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep terminal gap: %v", err)
+	}
+	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
+		t.Fatalf("terminal gap recovered=%+v changed=%v resumeCalls=%d, want finalize recovery resume", recovered, changed, resumeCalls)
+	}
+}
+
+func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-gap-specific-runports")
+	workspaceID := common.WorkspaceID("ws-stale-gap-specific-runports")
+	stepID := common.StepID("run-stale-gap-specific-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-gap-specific-runports/checkpoint/accepted",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:00:00Z",
+		Data: map[string]any{
+			"event":     "runtime_execute_accepted",
+			"requestId": "request-gap-specific",
+			"queueKey":  "queue-gap-specific",
+		},
+	}); err != nil {
+		t.Fatalf("seed accepted checkpoint: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-gap-specific-runports/checkpoint/result",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:01:00Z",
+		Data: map[string]any{
+			"event":       "runtime_step_result_available",
+			"requestId":   "request-gap-specific",
+			"queueKey":    "queue-gap-specific",
+			"completedAt": "2026-06-09T08:00:59Z",
+			"output":      map[string]any{"status": "ok"},
+		},
+	}); err != nil {
+		t.Fatalf("seed result checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	var got RuntimeGapRecovery
+	items, err := RecoverStaleRuntimeGapRunViews(ctx, exports.Infrastructure.EventHub, func(_ context.Context, current *runmodel.Run, recovery RuntimeGapRecovery) error {
+		if current.ID != runID || current.WorkspaceID != workspaceID {
+			t.Fatalf("current run = %+v, want scoped run", current)
+		}
+		got = recovery
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleRuntimeGapRunViews: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want recovered run view", len(items))
+	}
+	if got.StepID != stepID ||
+		got.Gap != runtimeExecutionGapTerminalNotFinalized ||
+		got.RequestID != "request-gap-specific" ||
+		got.QueueKey != "queue-gap-specific" ||
+		got.LatestStepTime != "2026-06-09T08:01:00Z" {
+		t.Fatalf("gap recovery = %+v, want terminal-not-finalized metadata", got)
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-done-gap-runports")
+	workspaceID := common.WorkspaceID("ws-stale-done-gap-runports")
+	stepID := common.StepID("run-stale-done-gap-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-done-gap-runports/checkpoint/done",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:01:00Z",
+		Data: map[string]any{
+			"event":     "runtime_step_done",
+			"requestId": "request-done-gap",
+		},
+	}); err != nil {
+		t.Fatalf("seed done checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	resumeCalls := 0
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep done gap: %v", err)
+	}
+	if changed || recovered != nil || resumeCalls != 0 {
+		t.Fatalf("done gap recovered=%+v changed=%v resumeCalls=%d, want no recovery without durable result", recovered, changed, resumeCalls)
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(t *testing.T) {
+	testCases := []struct {
+		name       string
+		event      string
+		extraData  map[string]any
+		checkpoint string
+	}{
+		{
+			name:       "accepted-no-progress",
+			event:      "runtime_execute_accepted",
+			checkpoint: "run-stale-accepted-no-progress/checkpoint/accepted",
+		},
+		{
+			name:       "accepted-in-progress",
+			event:      "runtime_step_progress",
+			checkpoint: "run-stale-accepted-in-progress/checkpoint/progress",
+			extraData:  map[string]any{"stage": "streaming"},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtime := bootstrap.NewWithBackend("memory", "")
+			t.Cleanup(func() {
+				if err := runtime.Shutdown(context.Background()); err != nil {
+					t.Errorf("shutdown runtime: %v", err)
+				}
+			})
+			exports := runtime.Exports()
+			runID := common.RunID("run-stale-" + tc.name)
+			workspaceID := common.WorkspaceID("ws-stale-" + tc.name)
+			stepID := common.StepID(string(runID) + "/provider-retry-001")
+			run := &runmodel.Run{
+				ID:          runID,
+				WorkspaceID: workspaceID,
+				State:       common.RunStateRunning,
+			}
+			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+				ID:    stepID,
+				RunID: runID,
+				Kind:  "llm/workspace_execution",
+				State: common.StepStateDispatched,
+			}); err != nil {
+				t.Fatalf("seed dispatched step: %v", err)
+			}
+			data := map[string]any{
+				"event":     tc.event,
+				"requestId": "request-" + tc.name,
+			}
+			for key, value := range tc.extraData {
+				data[key] = value
+			}
+			if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+				ID:            common.CheckpointID(tc.checkpoint),
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-09T08:00:00Z",
+				Data:          data,
+			}); err != nil {
+				t.Fatalf("seed checkpoint: %v", err)
+			}
+
+			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+			resumeCalls := 0
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+				resumeCalls++
+				return nil
+			}, 10*time.Minute, now)
+			if err != nil {
+				t.Fatalf("RecoverStaleOrphanDispatchedStep: %v", err)
+			}
+			if changed || recovered != nil || resumeCalls != 0 {
+				t.Fatalf("accepted gap recovered=%+v changed=%v resumeCalls=%d, want no recovery without worker-lost evidence", recovered, changed, resumeCalls)
+			}
+		})
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-worker-lost-runports")
+	workspaceID := common.WorkspaceID("ws-stale-worker-lost-runports")
+	stepID := common.StepID("run-stale-worker-lost-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-worker-lost-runports/checkpoint/accepted",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:00:00Z",
+		Data: map[string]any{
+			"event":      "runtime_execute_accepted",
+			"requestId":  "request-worker-lost-gap",
+			"acceptedAt": "2026-06-09T08:00:00Z",
+		},
+	}); err != nil {
+		t.Fatalf("seed accepted checkpoint: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-worker-lost-runports/checkpoint/worker-lost",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:03:00Z",
+		Data: map[string]any{
+			"event":     "runtime_worker_lost",
+			"requestId": "request-worker-lost-gap",
+			"workerId":  "runtimeevent|request-worker-lost-gap",
+			"lostAt":    "2026-06-09T08:03:00Z",
+		},
+	}); err != nil {
+		t.Fatalf("seed worker lost checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	resumeCalls := 0
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep worker lost: %v", err)
+	}
+	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
+		t.Fatalf("worker lost recovered=%+v changed=%v resumeCalls=%d, want resume recovery", recovered, changed, resumeCalls)
+	}
+}
+
+func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testing.T) {
+	ctx := context.Background()
+	runtime := bootstrap.NewWithBackend("memory", "")
+	t.Cleanup(func() {
+		if err := runtime.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown runtime: %v", err)
+		}
+	})
+	exports := runtime.Exports()
+	runID := common.RunID("run-stale-worker-heartbeat-runports")
+	workspaceID := common.WorkspaceID("ws-stale-worker-heartbeat-runports")
+	stepID := common.StepID("run-stale-worker-heartbeat-runports/provider-retry-001")
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}
+	if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+		ID:    stepID,
+		RunID: runID,
+		Kind:  "llm/workspace_execution",
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed dispatched step: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-worker-heartbeat-runports/checkpoint/accepted",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:00:00Z",
+		Data: map[string]any{
+			"event":      "runtime_execute_accepted",
+			"requestId":  "request-worker-heartbeat-gap",
+			"acceptedAt": "2026-06-09T08:00:00Z",
+		},
+	}); err != nil {
+		t.Fatalf("seed accepted checkpoint: %v", err)
+	}
+	if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+		ID:            "run-stale-worker-heartbeat-runports/checkpoint/heartbeat",
+		WorkspaceID:   workspaceID,
+		RunID:         runID,
+		CurrentStepID: stepID,
+		OccurredAt:    "2026-06-09T08:03:00Z",
+		Data: map[string]any{
+			"event":       "runtime_worker_heartbeat",
+			"requestId":   "request-worker-heartbeat-gap",
+			"workerId":    "runtimeevent|request-worker-heartbeat-gap",
+			"heartbeatAt": "2026-06-09T08:03:00Z",
+		},
+	}); err != nil {
+		t.Fatalf("seed heartbeat checkpoint: %v", err)
+	}
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	resumeCalls := 0
+	recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+		resumeCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleOrphanDispatchedStep heartbeat gap: %v", err)
+	}
+	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
+		t.Fatalf("heartbeat gap recovered=%+v changed=%v resumeCalls=%d, want resume recovery", recovered, changed, resumeCalls)
 	}
 }
 

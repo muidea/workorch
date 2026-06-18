@@ -44,6 +44,31 @@ type RunStatusInfo struct {
 	BlockingTicketID   common.TicketID
 	BlockingApprovalID common.ApprovalID
 	FailureReason      string
+	RuntimeExecution   *RuntimeExecutionInfo
+}
+
+type RuntimeExecutionInfo struct {
+	StepID              common.StepID
+	StepKind            string
+	StepState           common.StepState
+	RequestID           string
+	QueueKey            string
+	AcceptedAt          string
+	LastProgressAt      string
+	LastProgressEvent   string
+	LastProgressStage   string
+	LastProgressSummary string
+	WorkerID            string
+	WorkerStartedAt     string
+	WorkerHeartbeatAt   string
+	WorkerStoppedAt     string
+	WorkerLostAt        string
+	DoneAt              string
+	FailedAt            string
+	FinalizedAt         string
+	FinalizeEvent       string
+	Pending             bool
+	Gap                 string
 }
 
 type RunBackend interface {

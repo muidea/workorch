@@ -58,6 +58,33 @@ func ResumeRun(ctx context.Context, hub events.Hub, item *runmodel.Run, executio
 	})
 }
 
+func RecoverRuntimeGap(ctx context.Context, hub events.Hub, item *runmodel.Run, recovery RuntimeGapRecovery, executionContextPatch map[string]any) error {
+	if item == nil || item.ID == "" || recovery.StepID == "" || recovery.Gap == "" {
+		return common.ErrInvalidArgument
+	}
+	workspaceID := item.WorkspaceID
+	if recovery.WorkspaceID != "" {
+		workspaceID = recovery.WorkspaceID
+	}
+	if workspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandRecoverRuntimeGap, "run", string(item.ID), workspaceID, item.ID, map[string]any{
+		events.PayloadKeyCommand: runcontracts.RecoverRuntimeGapCommand{
+			WorkspaceID:           workspaceID,
+			RunID:                 item.ID,
+			StepID:                recovery.StepID,
+			StepKind:              recovery.StepKind,
+			Gap:                   string(recovery.Gap),
+			RequestID:             recovery.RequestID,
+			QueueKey:              recovery.QueueKey,
+			LatestStepTime:        recovery.LatestStepTime,
+			Reason:                recovery.Reason,
+			ExecutionContextPatch: cloneMap(executionContextPatch),
+		},
+	})
+}
+
 func cloneMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil

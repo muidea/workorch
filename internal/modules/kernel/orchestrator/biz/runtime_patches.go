@@ -258,11 +258,50 @@ func (p *patchSubsystem) apply(
 		if err := p.evidence.Patches.Update(ctx, patch); err != nil {
 			return err
 		}
+		annotateAppliedPatchOutput(output, idx, patch)
 		if err := p.publishChanged(ctx, run, step, toolCall, patch, orchestratorevents.TopicPatchApplied, nil); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func annotateAppliedPatchOutput(output map[string]any, idx int, patch *runModel.Patch) {
+	if output == nil || idx < 0 || patch == nil {
+		return
+	}
+	annotations := map[string]any{
+		"patchId":     string(patch.ID),
+		"evidenceRef": string(patch.ID),
+		"state":       string(patch.State),
+		"toolCallId":  string(patch.ToolCallID),
+		"beforeHash":  patch.BeforeHash,
+		"afterHash":   patch.AfterHash,
+	}
+	switch items := output[stepOutputKeyPatches].(type) {
+	case []map[string]any:
+		if idx >= len(items) || items[idx] == nil {
+			return
+		}
+		for key, value := range annotations {
+			if strings.TrimSpace(fmt.Sprint(value)) != "" {
+				items[idx][key] = value
+			}
+		}
+	case []any:
+		if idx >= len(items) {
+			return
+		}
+		item, ok := items[idx].(map[string]any)
+		if !ok || item == nil {
+			return
+		}
+		for key, value := range annotations {
+			if strings.TrimSpace(fmt.Sprint(value)) != "" {
+				item[key] = value
+			}
+		}
+	}
 }
 
 func (p *patchSubsystem) revert(

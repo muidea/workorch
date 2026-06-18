@@ -929,9 +929,10 @@ func TestModelRunContinueDoesNotBypassBlockingDecision(t *testing.T) {
 	m := NewAppModel(be, "ws-1", "")
 	m.activeWorkspaceID = "ws-1"
 	m.workspaces = []backend.WorkspaceInfo{{
-		ID:          "ws-1",
-		State:       common.WorkspaceStateRunning,
-		ActiveRunID: "run-1",
+		ID:               "ws-1",
+		State:            common.WorkspaceStateWaitingDecision,
+		ActiveRunID:      "run-1",
+		BlockingTicketID: "ticket-1",
 	}}
 	m.activeRunID = "run-1"
 	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open"}
@@ -2522,6 +2523,66 @@ func TestModelWorkspaceSwitchRestoresCachedDisplayState(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceSwitchUsesProjectedStateBeforeCachedBlocker(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	next, _ := m.Update(WorkspaceListMsg{Workspaces: []backend.WorkspaceInfo{
+		{ID: "ws-a", Title: "A", State: common.WorkspaceStateRunning, ActiveRunID: "run-a"},
+		{ID: "ws-b", Title: "B", State: common.WorkspaceStateRunning, ActiveRunID: "run-b"},
+	}})
+	m = asModel(next)
+	m.activeWorkspaceID = "ws-b"
+	m.activeRunID = "run-b"
+	m.progress = progressWaitingDecision
+	m.progressText = "Waiting for decision"
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-b-old", WorkspaceID: "ws-b", RunID: "run-b", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.saveActiveWorkspaceDisplayState()
+
+	m.activeWorkspaceID = "ws-a"
+	m.selectedWorkspaceID = "ws-b"
+	next, cmd := m.confirmWorkspaceSelection()
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("expected workspace switch refresh command")
+	}
+	input := stripANSI(m.renderInput(120))
+	if strings.Contains(input, "decision >") || !strings.Contains(input, "ws-b running >") {
+		t.Fatalf("projected running state did not override cached blocker prompt: %q", input)
+	}
+	if decision := m.activeBlockingDecision(); decision != nil {
+		t.Fatalf("active decision = %+v, want none for projected running workspace", decision)
+	}
+}
+
+func TestModelSubmitInputIgnoresStaleWorkspaceDecision(t *testing.T) {
+	be := &decisionRecordingBE{fakeBE: newFake(t)}
+	m := NewAppModel(be, "ws-a", "")
+	m.activeWorkspaceID = "ws-a"
+	m.activeRunID = "run-a"
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:          "ws-a",
+		Title:       "A",
+		State:       common.WorkspaceStateRunning,
+		ActiveRunID: "run-a",
+	}}
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-b", WorkspaceID: "ws-b", RunID: "run-b", State: "open"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.setInput("continue normal work")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = asModel(next)
+	if cmd == nil {
+		t.Fatal("expected normal run command")
+	}
+	_ = cmd()
+	if len(be.decisions) != 0 {
+		t.Fatalf("stale decision was resolved: %+v", be.decisions)
+	}
+	if m.progress != progressSubmitting || !strings.Contains(m.progressText, "Continuing active run") {
+		t.Fatalf("progress = %s/%q, want normal run continuation", m.progress, m.progressText)
+	}
+}
+
 func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-a", "")
 	m.activeWorkspaceID = "ws-a"
@@ -2539,12 +2600,23 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		LatestEffectiveProgressAt: "2026-06-10T00:00:00Z",
 		Stalled:                   true,
 	}
+	m.runtimeExecution = &backend.RuntimeExecutionInfo{
+		StepID:              "step-a",
+		StepKind:            "llm/workspace_execution",
+		StepState:           "running",
+		RequestID:           "request-a",
+		Pending:             true,
+		Gap:                 "worker_lost",
+		LastProgressSummary: "worker heartbeat lost",
+	}
 
 	got := m.renderInspectStatus()
 	for _, want := range []string{
 		"stream revision: last 42, gaps 2, latest gap 3",
 		"activity: no_activity - no effective progress evidence yet",
 		"latest progress: 2026-06-10T00:00:00Z",
+		"runtime execution: runtime pending | gap worker_lost | step step-a llm/workspace_execution running",
+		"runtime progress: worker heartbeat lost",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status = %q, missing %q", got, want)

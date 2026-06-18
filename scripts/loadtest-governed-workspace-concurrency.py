@@ -38,6 +38,7 @@ CURL_MAX_TIME = os.environ.get("WORKORCH_LOAD_CURL_MAX_TIME", "300")
 POLL_INTERVAL_SECONDS = float(os.environ.get("WORKORCH_LOAD_POLL_INTERVAL_SECONDS", "1"))
 STATUS_WAIT_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS", "0"))
 REAL_RUN_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS", "900"))
+ACTIVATION_RUN_TIMEOUT_SECONDS = float(os.environ.get("WORKORCH_LOAD_ACTIVATION_RUN_TIMEOUT_SECONDS", "180"))
 REAL_PROVIDER_TIMEOUT = os.environ.get("WORKORCH_LOAD_REAL_PROVIDER_TIMEOUT", "180s").strip()
 METRICS_SAMPLE_INTERVAL_SECONDS = float(os.environ.get("WORKORCH_LOAD_METRICS_SAMPLE_INTERVAL_SECONDS", "0.2"))
 COUNTRY = os.environ.get("WORKORCH_LOAD_COUNTRY", "中国")
@@ -63,6 +64,8 @@ if STATUS_WAIT_TIMEOUT_SECONDS < 0:
     raise SystemExit(f"WORKORCH_LOAD_STATUS_WAIT_TIMEOUT_SECONDS must not be negative, got {STATUS_WAIT_TIMEOUT_SECONDS!r}")
 if REAL_RUN_TIMEOUT_SECONDS <= 0:
     raise SystemExit(f"WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS must be positive, got {REAL_RUN_TIMEOUT_SECONDS!r}")
+if ACTIVATION_RUN_TIMEOUT_SECONDS <= 0:
+    raise SystemExit(f"WORKORCH_LOAD_ACTIVATION_RUN_TIMEOUT_SECONDS must be positive, got {ACTIVATION_RUN_TIMEOUT_SECONDS!r}")
 if METRICS_SAMPLE_INTERVAL_SECONDS <= 0:
     raise SystemExit(f"WORKORCH_LOAD_METRICS_SAMPLE_INTERVAL_SECONDS must be positive, got {METRICS_SAMPLE_INTERVAL_SECONDS!r}")
 
@@ -131,6 +134,17 @@ class WorkspaceResult:
     artifact_count: int = 0
     timeline_missing_run_state: int = 0
     llm_step_count: int = 0
+    llm_terminal_step_count: int = 0
+    llm_non_terminal_step_count: int = 0
+    workspace_state: str = ""
+    run_state: str = ""
+    run_status_state: str = ""
+    progress_state: str = ""
+    progress_terminal: bool = False
+    llm_usage_trace_count: int = 0
+    llm_usage_summary_entry_total: int = 0
+    llm_usage_provider_native_entries: int = 0
+    llm_usage_estimated_entries: int = 0
     llm_protocol_errors: list[str] = field(default_factory=list)
     http_status: int = 0
     curl_code: int = 0
@@ -437,6 +451,41 @@ def extract_run_status(response: dict[str, Any]) -> dict[str, Any]:
     return response.get("status") or response.get("run") or nested(response, "activation.run", {}) or {}
 
 
+def wait_activation_run(workspace_id: str, activation: dict[str, Any], case_dir: Path) -> dict[str, Any]:
+    run = nested(activation, "activation.run", {}) or activation.get("run") or {}
+    if run.get("id"):
+        return run
+
+    deadline = time.monotonic() + ACTIVATION_RUN_TIMEOUT_SECONDS
+    last_snapshot: dict[str, Any] = {}
+    last_runs: dict[str, Any] = {}
+    while time.monotonic() <= deadline:
+        try:
+            snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(workspace_id)}/snapshot")
+            last_snapshot = snapshot
+            snap = snapshot.get("snapshot") or {}
+            run = snap.get("run") or {}
+            if run.get("id"):
+                write_json(case_dir / "activation-run-snapshot.json", snapshot)
+                return run
+            active_run_id = nested(snapshot, "snapshot.workspace.activeRunId", "")
+            if active_run_id:
+                runs_response = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(workspace_id)}/runs")
+                last_runs = runs_response
+                for item in runs_response.get("runs") or []:
+                    if item.get("id") == active_run_id:
+                        write_json(case_dir / "activation-runs.json", runs_response)
+                        return item
+        except Exception as exc:
+            last_snapshot = {"error": str(exc)}
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    write_json(case_dir / "activation-run-last-snapshot.json", last_snapshot)
+    if last_runs:
+        write_json(case_dir / "activation-run-last-runs.json", last_runs)
+    raise RuntimeError(f"activation accepted but run did not materialize within {ACTIVATION_RUN_TIMEOUT_SECONDS}s")
+
+
 def wait_run_state(workspace_id: str, run_id: str, expected_state: str, *, timeout_seconds: float = 180, interval_seconds: float = POLL_INTERVAL_SECONDS) -> dict[str, Any]:
     return wait_run_status(
         workspace_id,
@@ -729,7 +778,12 @@ def resolve_decision(workspace_id: str, ticket_id: str, payload: dict[str, Any])
 
 def is_repair_exhaustion_ticket(ticket_id: str) -> bool:
     normalized = ticket_id.strip().lower()
-    return "repair-exhausted" in normalized or "repair_exhausted" in normalized
+    return (
+        "repair-exhausted" in normalized
+        or "repair_exhausted" in normalized
+        or "provider-retry-exhausted" in normalized
+        or "provider_retry_exhausted" in normalized
+    )
 
 
 def approve_blocking_approval(workspace_id: str, approval_id: str) -> dict[str, Any]:
@@ -808,23 +862,99 @@ def drive_real_run_until_completed(result: WorkspaceResult, case_dir: Path) -> d
     raise RuntimeError(f"real run did not complete within {REAL_RUN_TIMEOUT_SECONDS}s, last status={last_status}")
 
 
-def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], workspace_snapshot: dict[str, Any], status: dict[str, Any], observability: dict[str, Any]) -> None:
+def populate_result_state_summary(
+    result: WorkspaceResult,
+    snapshot: dict[str, Any],
+    workspace_snapshot: dict[str, Any] | None = None,
+    status: dict[str, Any] | None = None,
+    observability: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     snap = snapshot.get("snapshot") or {}
-    ws_snap = workspace_snapshot.get("snapshot") or {}
+    ws_snap = (workspace_snapshot or {}).get("snapshot") or snap
     run = snap.get("run") or {}
     workspace = ws_snap.get("workspace") or {}
-    outcome = ws_snap.get("outcome") or {}
     steps = snap.get("steps") or ([] if not snap.get("step") else [snap["step"]])
-    decisions = snap.get("decisions") or []
-    approvals = snap.get("approvals") or []
     tool_calls = snap.get("toolCalls") or []
     validations = snap.get("validationResults") or []
     checkpoints = snap.get("runtimeCheckpoints") or []
     results = snap.get("results") or []
     artifacts = snap.get("artifacts") or []
-    timeline = (observability.get("observability") or {}).get("timeline") or []
-    progress = (observability.get("observability") or {}).get("progress") or {}
-    run_status = status.get("status") or status.get("run") or {}
+    obs = (observability or {}).get("observability") or {}
+    timeline = obs.get("timeline") or []
+    progress = obs.get("progress") or {}
+    run_status = (status or {}).get("status") or (status or {}).get("run") or run
+    usage_traces = obs.get("llmUsageTraces") or (observability or {}).get("llmUsageTraces") or []
+    usage_summary = obs.get("llmUsageSummary") or (observability or {}).get("llmUsageSummary") or snap.get("llmUsageSummary") or {}
+    llm_steps = [item for item in steps if item.get("kind") == "llm/workspace_execution"]
+    llm_terminal_steps = [item for item in llm_steps if item.get("state") in ("completed", "failed")]
+    llm_non_terminal_steps = [item for item in llm_steps if item.get("state") not in ("completed", "failed")]
+    missing_run_state = [item for item in timeline if item.get("source") in ("step", "step_stream") and not item.get("runState")]
+
+    result.workspace_state = str(workspace.get("state") or "")
+    result.run_state = str(run.get("state") or "")
+    result.run_status_state = str(run_status.get("state") or "")
+    result.progress_state = str(progress.get("state") or "")
+    result.progress_terminal = progress.get("terminal") is True
+    result.llm_step_count = len(llm_steps)
+    result.llm_terminal_step_count = len(llm_terminal_steps)
+    result.llm_non_terminal_step_count = len(llm_non_terminal_steps)
+    result.llm_usage_trace_count = len(usage_traces)
+    result.llm_usage_summary_entry_total = int(usage_summary.get("entryTotal") or 0)
+    result.llm_usage_estimated_entries = int(usage_summary.get("estimatedEntries") or 0)
+    result.llm_usage_provider_native_entries = int(usage_summary.get("providerNativeEntries") or 0)
+    result.step_count = len(steps)
+    result.tool_call_count = len(tool_calls)
+    result.validation_count = len(validations)
+    result.checkpoint_count = len(checkpoints)
+    result.result_count = len(results)
+    result.artifact_count = len(artifacts)
+    result.timeline_missing_run_state = len(missing_run_state)
+
+    return {
+        "snap": snap,
+        "ws_snap": ws_snap,
+        "run": run,
+        "workspace": workspace,
+        "outcome": ws_snap.get("outcome") or {},
+        "steps": steps,
+        "decisions": snap.get("decisions") or [],
+        "approvals": snap.get("approvals") or [],
+        "tool_calls": tool_calls,
+        "validations": validations,
+        "checkpoints": checkpoints,
+        "results": results,
+        "artifacts": artifacts,
+        "timeline": timeline,
+        "progress": progress,
+        "run_status": run_status,
+        "usage_traces": usage_traces,
+        "usage_summary": usage_summary,
+        "llm_steps": llm_steps,
+        "llm_terminal_steps": llm_terminal_steps,
+        "llm_non_terminal_steps": llm_non_terminal_steps,
+        "missing_run_state": missing_run_state,
+    }
+
+
+def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], workspace_snapshot: dict[str, Any], status: dict[str, Any], observability: dict[str, Any]) -> None:
+    state = populate_result_state_summary(result, snapshot, workspace_snapshot, status, observability)
+    run = state["run"]
+    workspace = state["workspace"]
+    outcome = state["outcome"]
+    tool_calls = state["tool_calls"]
+    validations = state["validations"]
+    checkpoints = state["checkpoints"]
+    results = state["results"]
+    artifacts = state["artifacts"]
+    decisions = state["decisions"]
+    approvals = state["approvals"]
+    progress = state["progress"]
+    run_status = state["run_status"]
+    usage_traces = state["usage_traces"]
+    usage_summary = state["usage_summary"]
+    llm_steps = state["llm_steps"]
+    llm_non_terminal_steps = state["llm_non_terminal_steps"]
+    missing_run_state = state["missing_run_state"]
 
     errors: list[str] = []
     if workspace.get("state") != "completed":
@@ -840,6 +970,35 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
         errors.append(f"run status state={run_status.get('state')!r}, want completed")
     if progress.get("state") != "completed" or progress.get("terminal") is not True:
         errors.append(f"observability progress invalid: {progress}")
+    if not llm_steps:
+        errors.append("llm/workspace_execution step missing")
+    if llm_non_terminal_steps:
+        errors.append(f"llm/workspace_execution non-terminal steps remain: {llm_non_terminal_steps}")
+    if not usage_traces:
+        errors.append("observability missing llmUsageTraces")
+    else:
+        estimated_entries = 0
+        native_entries = 0
+        for trace in usage_traces:
+            estimated = bool(trace.get("estimated"))
+            usage_source = trace.get("usageSource")
+            if not usage_source:
+                errors.append(f"llm usage trace missing usageSource: {trace}")
+                continue
+            if estimated:
+                estimated_entries += 1
+                if usage_source != "estimated":
+                    errors.append(f"llm usage trace estimated/source mismatch: {trace}")
+            else:
+                native_entries += 1
+                if usage_source != "provider_native":
+                    errors.append(f"llm usage trace native/source mismatch: {trace}")
+        if usage_summary.get("entryTotal") != len(usage_traces):
+            errors.append(f"llm usage summary entryTotal mismatch: {usage_summary} vs traces={len(usage_traces)}")
+        if usage_summary.get("estimatedEntries") != estimated_entries:
+            errors.append(f"llm usage summary estimatedEntries mismatch: {usage_summary} vs {estimated_entries}")
+        if usage_summary.get("providerNativeEntries") != native_entries:
+            errors.append(f"llm usage summary providerNativeEntries mismatch: {usage_summary} vs {native_entries}")
 
     resolved_decisions = [item for item in decisions if item.get("state") == "resolved"]
     approved_approvals = [item for item in approvals if item.get("state") == "approved"]
@@ -912,21 +1071,21 @@ def validate_final_state(result: WorkspaceResult, snapshot: dict[str, Any], work
     if missing_run_state:
         errors.append(f"timeline step rows missing runState: {missing_run_state[:3]}")
 
-    result.step_count = len(steps)
-    result.tool_call_count = len(tool_calls)
-    result.validation_count = len(validations)
-    result.checkpoint_count = len(checkpoints)
-    result.result_count = len(results)
-    result.artifact_count = len(artifacts)
-    result.timeline_missing_run_state = len(missing_run_state)
-    result.llm_step_count = len([item for item in steps if item.get("kind") == "llm/workspace_execution"])
-
     if errors:
         result.llm_protocol_errors = errors
         raise RuntimeError("; ".join(errors))
 
 
 def collect_failure_evidence(result: WorkspaceResult, case_dir: Path) -> None:
+    if result.workspace_id and not result.run_id:
+        try:
+            snapshot = run_curl("GET", f"/api/v1/workorch/workspaces/{url_quote(result.workspace_id)}/snapshot")
+            write_json(case_dir / "failure-workspace-snapshot.json", snapshot)
+            recovered_run_id = nested(snapshot, "snapshot.run.id", "") or nested(snapshot, "snapshot.workspace.activeRunId", "")
+            if recovered_run_id:
+                result.run_id = recovered_run_id
+        except Exception as exc:
+            write_text(case_dir / "failure-workspace-snapshot-error.txt", str(exc) + "\n")
     if not result.workspace_id or not result.run_id:
         return
     try:
@@ -940,6 +1099,9 @@ def collect_failure_evidence(result: WorkspaceResult, case_dir: Path) -> None:
         write_json(case_dir / "failure-observability.json", observability)
     except Exception as exc:
         write_text(case_dir / "failure-observability-error.txt", str(exc) + "\n")
+        observability = {}
+
+    populate_result_state_summary(result, snapshot, None, None, observability)
 
     run = nested(snapshot, "snapshot.run", {})
     failure_reason = str(run.get("failureReason") or "")
@@ -997,7 +1159,7 @@ def execute_workspace(seq: int, provider_id: str, mcp_server_id: str) -> Workspa
                 {"goalId": goal_id, "doDId": dod_id, "llmProviderId": provider_id, "mcpServerIds": [mcp_server_id], "priority": seq % 10},
             )
         write_json(case_dir / "activation.json", activation)
-        run = nested(activation, "activation.run", {})
+        run = wait_activation_run(result.workspace_id, activation, case_dir)
         result.run_id = run.get("id", "")
         if not result.run_id:
             raise RuntimeError("run id missing")
@@ -1217,6 +1379,17 @@ def result_to_dict(result: WorkspaceResult) -> dict[str, Any]:
         "artifactCount": result.artifact_count,
         "timelineMissingRunState": result.timeline_missing_run_state,
         "llmStepCount": result.llm_step_count,
+        "llmTerminalStepCount": result.llm_terminal_step_count,
+        "llmNonTerminalStepCount": result.llm_non_terminal_step_count,
+        "workspaceState": result.workspace_state,
+        "runState": result.run_state,
+        "runStatusState": result.run_status_state,
+        "progressState": result.progress_state,
+        "progressTerminal": result.progress_terminal,
+        "llmUsageTraceCount": result.llm_usage_trace_count,
+        "llmUsageSummaryEntryTotal": result.llm_usage_summary_entry_total,
+        "llmUsageProviderNativeEntries": result.llm_usage_provider_native_entries,
+        "llmUsageEstimatedEntries": result.llm_usage_estimated_entries,
         "llmProtocolErrors": result.llm_protocol_errors,
         "httpStatus": result.http_status,
         "curlCode": result.curl_code,

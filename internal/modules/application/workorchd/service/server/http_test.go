@@ -364,6 +364,9 @@ func TestReadyzNativeRouteInjectsEventHub(t *testing.T) {
 		}
 		return nil
 	}
+	if err := state.workspaceProjection.RebuildAll(context.Background()); err != nil {
+		t.Fatalf("rebuild workspace projection baseline: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 

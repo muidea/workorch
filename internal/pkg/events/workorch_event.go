@@ -117,6 +117,7 @@ var workorchTopics = []string{
 	runevents.TopicStepStateChanged,
 	decisionevents.TopicTicketCreated,
 	decisionevents.TopicTicketResolved,
+	decisionevents.TopicTicketUpdated,
 	approvalevents.TopicApprovalCreated,
 	approvalevents.TopicApprovalResolved,
 	resultevents.TopicResultAccepted,
@@ -218,7 +219,7 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 			return nil, false
 		}
 		return event, true
-	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved:
+	case decisionevents.TopicTicketCreated, decisionevents.TopicTicketResolved, decisionevents.TopicTicketUpdated:
 		event, ok := DecodeDecisionTicketEvent(envelope)
 		if !ok {
 			return nil, false
@@ -447,7 +448,7 @@ func DecodeDecisionTicketEvent(envelope Envelope) (DecisionTicketEvent, bool) {
 			ResolutionPayload: clonePayloadMap(data.Payload),
 		}, true
 	}
-	if envelope.Topic != decisionevents.TopicTicketCreated {
+	if envelope.Topic != decisionevents.TopicTicketCreated && envelope.Topic != decisionevents.TopicTicketUpdated {
 		return DecisionTicketEvent{}, false
 	}
 	data, ok := DecodeDecisionTicketPayload(envelope.Payload)

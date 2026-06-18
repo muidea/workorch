@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	magictask "github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -19,6 +20,7 @@ type Runtime struct {
 	exports         Exports
 	modules         []lifecycle
 	moduleLifecycle *runtimeModuleLifecycle
+	background      magictask.BackgroundRoutine
 }
 
 type RepositoryExports struct {
@@ -49,8 +51,9 @@ type RepositoryExports struct {
 }
 
 type InfrastructureExports struct {
-	EventHub   events.Hub
-	LoadConfig func() (workorchconfig.Config, error)
+	EventHub          events.Hub
+	BackgroundRoutine magictask.BackgroundRoutine
+	LoadConfig        func() (workorchconfig.Config, error)
 }
 
 type Exports struct {
@@ -60,6 +63,10 @@ type Exports struct {
 
 func (r *Runtime) Shutdown(ctx context.Context) error {
 	var shutdownErr error
+	if r.background != nil {
+		r.background.Shutdown(ctx)
+		r.background = nil
+	}
 	if r.moduleLifecycle != nil && len(r.modules) == len(r.moduleLifecycle.modules) {
 		if err := r.moduleLifecycle.Shutdown(ctx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)

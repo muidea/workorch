@@ -14,6 +14,8 @@ LOAD_REAL_PROVIDER_TIMEOUT="${WORKORCH_REAL_RUNTIME_PROVIDER_TIMEOUT:-${WORKORCH
 OBSERVE_DURATION_SECONDS="${WORKORCH_REAL_RUNTIME_OBSERVE_DURATION_SECONDS:-20}"
 OBSERVE_REQUIRE_CACHE_SAMPLES="${WORKORCH_REAL_RUNTIME_REQUIRE_CACHE_SAMPLES:-1}"
 OBSERVE_MIN_CACHE_SAMPLE_COUNT="${WORKORCH_REAL_RUNTIME_MIN_CACHE_SAMPLE_COUNT:-1}"
+OBSERVE_REQUIRE_PPROF="${WORKORCH_REAL_RUNTIME_REQUIRE_PPROF:-${WORKORCH_OBSERVE_REQUIRE_PPROF:-1}}"
+OBSERVE_REQUIRE_CPU_PROFILE="${WORKORCH_REAL_RUNTIME_REQUIRE_CPU_PROFILE:-${WORKORCH_OBSERVE_REQUIRE_CPU_PROFILE:-1}}"
 OBSERVE_CACHE_PROVIDER="${WORKORCH_REAL_RUNTIME_CACHE_PROVIDER:-${WORKORCH_OBSERVE_CACHE_PROVIDER:-}}"
 OBSERVE_CACHE_MODEL="${WORKORCH_REAL_RUNTIME_CACHE_MODEL:-${WORKORCH_OBSERVE_CACHE_MODEL:-}}"
 OBSERVE_CACHE_BASELINE_FILE="${WORKORCH_REAL_RUNTIME_CACHE_BASELINE_FILE:-${WORKORCH_OBSERVE_CACHE_BASELINE_FILE:-}}"
@@ -139,18 +141,25 @@ load_artifact_dir="$TMP_DIR/loadtest"
 observe_artifact_dir="$TMP_DIR/observe-after"
 
 echo "real runtime closure loadtest starting baseUrl=$BASE_URL total=$LOAD_TOTAL concurrency=$LOAD_CONCURRENCY"
+load_status=0
 WORKORCH_BASE_URL="$BASE_URL" \
-WORKORCH_LOAD_BASE_URL="$BASE_URL" \
-WORKORCH_LOAD_LLM_MODE=real \
-WORKORCH_LOAD_TOTAL="$LOAD_TOTAL" \
-WORKORCH_LOAD_CONCURRENCY="$LOAD_CONCURRENCY" \
-WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS="$LOAD_REAL_RUN_TIMEOUT_SECONDS" \
-WORKORCH_LOAD_REAL_PROVIDER_TIMEOUT="$LOAD_REAL_PROVIDER_TIMEOUT" \
-WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP="${WORKORCH_REAL_RUNTIME_EXPECT_ACTIVE_OVERLAP:-${WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP:-1}}" \
-WORKORCH_LOAD_MIN_SUCCESS_RATE="$LOAD_MIN_SUCCESS_RATE" \
-WORKORCH_LOAD_KEEP_ARTIFACTS=1 \
-WORKORCH_LOAD_ARTIFACT_DIR="$load_artifact_dir" \
-./scripts/loadtest-governed-workspace-concurrency.sh
+  WORKORCH_LOAD_BASE_URL="$BASE_URL" \
+  WORKORCH_LOAD_LLM_MODE=real \
+  WORKORCH_LOAD_TOTAL="$LOAD_TOTAL" \
+  WORKORCH_LOAD_CONCURRENCY="$LOAD_CONCURRENCY" \
+  WORKORCH_LOAD_REAL_RUN_TIMEOUT_SECONDS="$LOAD_REAL_RUN_TIMEOUT_SECONDS" \
+  WORKORCH_LOAD_REAL_PROVIDER_TIMEOUT="$LOAD_REAL_PROVIDER_TIMEOUT" \
+  WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP="${WORKORCH_REAL_RUNTIME_EXPECT_ACTIVE_OVERLAP:-${WORKORCH_LOAD_EXPECT_ACTIVE_OVERLAP:-1}}" \
+  WORKORCH_LOAD_MIN_SUCCESS_RATE="$LOAD_MIN_SUCCESS_RATE" \
+  WORKORCH_LOAD_KEEP_ARTIFACTS=1 \
+  WORKORCH_LOAD_ARTIFACT_DIR="$load_artifact_dir" \
+  ./scripts/loadtest-governed-workspace-concurrency.sh || load_status=$?
+printf '%s\n' "$load_status" >"$TMP_DIR/loadtest.exitcode"
+
+if [[ ! -f "$load_artifact_dir/summary.json" ]]; then
+  echo "real runtime loadtest did not write summary.json; cannot continue observation" >&2
+  exit "$load_status"
+fi
 
 workspace_ids="$(python3 - "$load_artifact_dir/summary.json" <<'PY'
 import json
@@ -177,6 +186,8 @@ WORKORCH_OBSERVE_AI_PROXY_LOG="$AI_PROXY_LOG" \
 WORKORCH_OBSERVE_AI_PROXY_INTERACTIONS_DIR="$AI_PROXY_INTERACTIONS_DIR" \
 WORKORCH_OBSERVE_REQUIRE_CACHE_SAMPLES="$OBSERVE_REQUIRE_CACHE_SAMPLES" \
 WORKORCH_OBSERVE_MIN_CACHE_SAMPLE_COUNT="$OBSERVE_MIN_CACHE_SAMPLE_COUNT" \
+WORKORCH_OBSERVE_REQUIRE_PPROF="$OBSERVE_REQUIRE_PPROF" \
+WORKORCH_OBSERVE_REQUIRE_CPU_PROFILE="$OBSERVE_REQUIRE_CPU_PROFILE" \
 WORKORCH_OBSERVE_CACHE_PROVIDER="$OBSERVE_CACHE_PROVIDER" \
 WORKORCH_OBSERVE_CACHE_MODEL="$OBSERVE_CACHE_MODEL" \
 WORKORCH_OBSERVE_CACHE_SINCE="${WORKORCH_REAL_RUNTIME_CACHE_SINCE:-$cache_since}" \
@@ -186,7 +197,7 @@ WORKORCH_OBSERVE_MIN_CACHE_LATEST_DELTA="$OBSERVE_MIN_CACHE_LATEST_DELTA" \
 WORKORCH_OBSERVE_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS="$OBSERVE_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" \
 ./scripts/observe-workorch-runtime-closure.sh
 
-python3 - "$TMP_DIR" "$load_artifact_dir/summary.json" "$observe_artifact_dir/runtime-observation-summary.json" <<'PY'
+python3 - "$TMP_DIR" "$load_artifact_dir/summary.json" "$observe_artifact_dir/runtime-observation-summary.json" "$load_status" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -194,9 +205,52 @@ from pathlib import Path
 artifact_dir = Path(sys.argv[1])
 load_summary = json.load(open(sys.argv[2], encoding="utf-8"))
 observe_summary = json.load(open(sys.argv[3], encoding="utf-8"))
+load_exit_code = int(sys.argv[4])
+results = load_summary.get("results") or []
+successful_results = [item for item in results if item.get("success")]
+failed_results = [item for item in results if not item.get("success")]
+terminal_errors = []
+
+def as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+expected_total = as_int(load_summary.get("total"))
+expected_concurrency = as_int(load_summary.get("concurrency"))
+if expected_total >= 2 and len(results) < 2:
+    terminal_errors.append(f"load summary results={len(results)}, want at least 2")
+if expected_concurrency >= 2 and not load_summary.get("activeRunOverlapPass"):
+    terminal_errors.append("load summary activeRunOverlapPass is false")
+
+for item in successful_results:
+    workspace_id = item.get("workspaceId") or f"index={item.get('index')}"
+    if item.get("workspaceState") != "completed":
+        terminal_errors.append(f"{workspace_id}: workspaceState={item.get('workspaceState')!r}, want completed")
+    if item.get("runState") != "completed":
+        terminal_errors.append(f"{workspace_id}: runState={item.get('runState')!r}, want completed")
+    if item.get("runStatusState") != "completed":
+        terminal_errors.append(f"{workspace_id}: runStatusState={item.get('runStatusState')!r}, want completed")
+    if item.get("progressState") != "completed" or item.get("progressTerminal") is not True:
+        terminal_errors.append(f"{workspace_id}: progress state/terminal invalid")
+    if as_int(item.get("llmStepCount")) <= 0:
+        terminal_errors.append(f"{workspace_id}: llmStepCount missing")
+    if as_int(item.get("llmTerminalStepCount")) <= 0:
+        terminal_errors.append(f"{workspace_id}: llmTerminalStepCount missing")
+    if as_int(item.get("llmNonTerminalStepCount")) != 0:
+        terminal_errors.append(f"{workspace_id}: llmNonTerminalStepCount={item.get('llmNonTerminalStepCount')}, want 0")
+    trace_count = as_int(item.get("llmUsageTraceCount"))
+    summary_count = as_int(item.get("llmUsageSummaryEntryTotal"))
+    if trace_count <= 0:
+        terminal_errors.append(f"{workspace_id}: llmUsageTraceCount missing")
+    if summary_count != trace_count:
+        terminal_errors.append(f"{workspace_id}: llm usage summary entryTotal={summary_count}, traces={trace_count}")
+
 summary = {
     "baseUrl": load_summary.get("baseUrl"),
     "load": {
+        "exitCode": load_exit_code,
         "batchId": load_summary.get("batchId"),
         "llmMode": load_summary.get("llmMode"),
         "total": load_summary.get("total"),
@@ -206,21 +260,46 @@ summary = {
         "successRate": load_summary.get("successRate"),
         "activeRunOverlapPass": load_summary.get("activeRunOverlapPass"),
         "pass": load_summary.get("pass"),
+        "results": results,
     },
+    "failedResultEvidence": [
+        {
+            "workspaceId": item.get("workspaceId"),
+            "runId": item.get("runId"),
+            "failureClass": item.get("failureClass"),
+            "workspaceState": item.get("workspaceState"),
+            "runState": item.get("runState"),
+            "runStatusState": item.get("runStatusState"),
+            "progressState": item.get("progressState"),
+            "progressTerminal": item.get("progressTerminal"),
+            "llmStepCount": item.get("llmStepCount"),
+            "llmTerminalStepCount": item.get("llmTerminalStepCount"),
+            "llmNonTerminalStepCount": item.get("llmNonTerminalStepCount"),
+            "llmUsageTraceCount": item.get("llmUsageTraceCount"),
+            "llmUsageSummaryEntryTotal": item.get("llmUsageSummaryEntryTotal"),
+            "error": item.get("error"),
+        }
+        for item in failed_results
+    ],
     "observation": {
         "projectionState": observe_summary.get("projectionState"),
         "workspaceTotal": observe_summary.get("workspaceTotal"),
         "observedWorkspaceIds": observe_summary.get("observedWorkspaceIds"),
         "metrics": observe_summary.get("metrics"),
         "cacheHitRate": observe_summary.get("cacheHitRate"),
+        "pprof": observe_summary.get("pprof"),
+        "cpuProfile": observe_summary.get("cpuProfile"),
         "warnings": observe_summary.get("warnings"),
         "errors": observe_summary.get("errors"),
     },
+    "terminalEvidenceErrors": terminal_errors,
 }
 (artifact_dir / "real-runtime-closure-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print(json.dumps(summary, ensure_ascii=False, indent=2))
-if not load_summary.get("pass"):
+if load_exit_code != 0 or not load_summary.get("pass"):
     raise SystemExit("real runtime loadtest did not pass")
+if terminal_errors:
+    raise SystemExit("real runtime terminal evidence invalid: " + "; ".join(terminal_errors))
 if observe_summary.get("errors"):
     raise SystemExit("real runtime observation reported errors")
 PY

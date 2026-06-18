@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/kernel/decision/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/kernel/mcp/pkg/events"
@@ -46,6 +48,8 @@ func TestMain(m *testing.M) {
 	_ = os.RemoveAll(testWD)
 	os.Exit(code)
 }
+
+var testSharedBackendSessionCleanup sync.Map
 
 func newTestRuntimeSession(t *testing.T, backend string, dataRoot string) (*RuntimeSession, context.Context) {
 	t.Helper()
@@ -132,6 +136,103 @@ func createWorkspaceWithIDWithBackend(ctx context.Context, backend string, dataR
 	}
 	defer session.CloseOnReturn(ctx, &err)
 	return createWorkspaceWithIDWithSession(ctx, session, workspaceID, title, description, deliverableDirectory)
+}
+
+func cleanupSharedBackendSession(t *testing.T, backend string, dataRoot string) {
+	t.Helper()
+	key := fmt.Sprintf("%s|%s", backend, dataRoot)
+	if _, loaded := testSharedBackendSessionCleanup.LoadOrStore(key, struct{}{}); loaded {
+		return
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := closeSharedBackendSession(ctx, backend, dataRoot); err != nil {
+			t.Errorf("close shared backend session: %v", err)
+		}
+	})
+}
+
+func waitRunWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(Run) bool) Run {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last Run
+	var lastErr error
+	for {
+		item, err := ReadRunWithBackend(context.Background(), backend, dataRoot, runID)
+		if err == nil {
+			last = item
+			if accept == nil || accept(item) {
+				return item
+			}
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				t.Fatalf("run %s did not reach expected state before timeout; last err = %v", runID, lastErr)
+			}
+			t.Fatalf("run %s did not reach expected state before timeout; last = %+v", runID, last)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func waitRunStateWithBackend(t *testing.T, backend string, dataRoot string, runID string, state string) Run {
+	t.Helper()
+	return waitRunWithBackend(t, backend, dataRoot, runID, 5*time.Second, func(item Run) bool {
+		return item.State == state
+	})
+}
+
+func waitRunSnapshotWithBackend(t *testing.T, backend string, dataRoot string, runID string, timeout time.Duration, accept func(RunSnapshot) bool) RunSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last RunSnapshot
+	var lastErr error
+	for {
+		item, err := ReadRunSnapshotWithBackend(context.Background(), backend, dataRoot, runID)
+		if err == nil {
+			last = item
+			if accept == nil || accept(item) {
+				return item
+			}
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				t.Fatalf("run snapshot %s did not reach expected state before timeout; last err = %v", runID, lastErr)
+			}
+			t.Fatalf("run snapshot %s did not reach expected state before timeout; last = %+v", runID, last)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func waitRunListWithBackend(t *testing.T, backend string, dataRoot string, workspaceID string, timeout time.Duration, accept func([]Run) bool) []Run {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last []Run
+	var lastErr error
+	for {
+		items, err := ListRunsWithBackend(context.Background(), backend, dataRoot, workspaceID)
+		if err == nil {
+			last = items
+			if accept == nil || accept(items) {
+				return items
+			}
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				t.Fatalf("run list for workspace %s did not reach expected state before timeout; last err = %v", workspaceID, lastErr)
+			}
+			t.Fatalf("run list for workspace %s did not reach expected state before timeout; last = %+v", workspaceID, last)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func publishAppserviceTestCommand(ctx context.Context, hub events.Hub, envelope events.Envelope) error {

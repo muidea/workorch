@@ -156,12 +156,22 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 				cmd.WorkspaceID = common.WorkspaceID(envelope.WorkspaceID)
 			}
 		}
+		normalized, err := normalizeRunCreateCommandScope(envelope, cmd)
+		if err != nil {
+			return err
+		}
+		cmd = normalized
 		if err := m.servicePtr.EnsureRun(ctx, cmd); err != nil {
 			return err
 		}
 		return runCommandResponse(envelope, nil)
 	case runevents.TopicRunCommandCreate:
 		if cmd, ok := envelope.Payload[events.PayloadKeyCommand].(runcontracts.CreateRunCommand); ok {
+			normalized, err := normalizeRunCreateCommandScope(envelope, cmd)
+			if err != nil {
+				return err
+			}
+			cmd = normalized
 			if err := m.servicePtr.CreateRun(ctx, cmd); err != nil {
 				return err
 			}
@@ -171,6 +181,11 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if err != nil {
 			return err
 		}
+		normalized, err := normalizeRunCreateCommandScope(envelope, cmd)
+		if err != nil {
+			return err
+		}
+		cmd = normalized
 		if err := m.servicePtr.CreateRun(ctx, cmd); err != nil {
 			return err
 		}
@@ -216,6 +231,12 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if err != nil {
 			return err
 		}
+		if envelope.RunID != "" && common.RunID(envelope.RunID) != item.RunID {
+			return common.ErrConflict
+		}
+		if err := m.validateRunReadScope(ctx, item.RunID, runScopedWorkspaceID(envelope)); err != nil {
+			return err
+		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyStep: item})
 	case runevents.TopicRunCommandListStepsByRun:
 		if m.steps == nil {
@@ -224,6 +245,12 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
 		if runID == "" {
 			runID = common.RunID(envelope.RunID)
+		}
+		if runID == "" {
+			return common.ErrInvalidArgument
+		}
+		if err := m.validateRunReadScope(ctx, runID, runScopedWorkspaceID(envelope)); err != nil {
+			return err
 		}
 		items, err := m.steps.ListByRun(ctx, runID)
 		if err != nil {
@@ -242,6 +269,16 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		if err != nil {
 			return err
 		}
+		if envelope.RunID != "" && common.RunID(envelope.RunID) != item.RunID {
+			return common.ErrConflict
+		}
+		workspaceID := runScopedWorkspaceID(envelope)
+		if workspaceID != "" && item.WorkspaceID != workspaceID {
+			return common.ErrNotFound
+		}
+		if err := m.validateRunReadScope(ctx, item.RunID, workspaceID); err != nil {
+			return err
+		}
 		return runCommandResponse(envelope, map[string]any{events.PayloadKeyCheckpoint: item})
 	case runevents.TopicRunCommandListCheckpointsByRun:
 		if m.checkpoints == nil {
@@ -250,6 +287,12 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 		runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
 		if runID == "" {
 			runID = common.RunID(envelope.RunID)
+		}
+		if runID == "" {
+			return common.ErrInvalidArgument
+		}
+		if err := m.validateRunReadScope(ctx, runID, runScopedWorkspaceID(envelope)); err != nil {
+			return err
 		}
 		items, err := m.checkpoints.ListByRun(ctx, runID)
 		if err != nil {
@@ -267,6 +310,9 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 				return err
 			}
 		}
+		if err := validateRunWriteScope(envelope, item.ID, item.WorkspaceID); err != nil {
+			return err
+		}
 		if err := m.runs.Update(ctx, item); err != nil {
 			return err
 		}
@@ -274,14 +320,15 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 	case runevents.TopicRunCommandDelete:
 		runID := deleteRunIDFromPayload(envelope.Payload, envelope.RunID)
 		workspaceID := runScopedWorkspaceID(envelope)
-		if workspaceID != "" {
-			item, err := m.runs.Get(ctx, runID)
-			if err != nil {
-				return err
-			}
-			if item.WorkspaceID != workspaceID {
-				return common.ErrNotFound
-			}
+		if workspaceID == "" || runID == "" {
+			return common.ErrInvalidArgument
+		}
+		item, err := m.runs.Get(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if item.WorkspaceID != workspaceID {
+			return common.ErrNotFound
 		}
 		if err := m.runs.Delete(ctx, runID); err != nil {
 			return err
@@ -290,6 +337,51 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func normalizeRunCreateCommandScope(envelope events.Envelope, cmd runcontracts.CreateRunCommand) (runcontracts.CreateRunCommand, error) {
+	if cmd.RunID == "" {
+		cmd.RunID = common.RunID(envelope.RunID)
+	}
+	scopedWorkspaceID := runScopedWorkspaceID(envelope)
+	if cmd.WorkspaceID == "" {
+		cmd.WorkspaceID = scopedWorkspaceID
+	}
+	if cmd.RunID == "" || cmd.WorkspaceID == "" {
+		return runcontracts.CreateRunCommand{}, common.ErrInvalidArgument
+	}
+	if scopedWorkspaceID != "" && cmd.WorkspaceID != scopedWorkspaceID {
+		return runcontracts.CreateRunCommand{}, common.ErrConflict
+	}
+	return cmd, nil
+}
+
+func validateRunWriteScope(envelope events.Envelope, runID common.RunID, workspaceID common.WorkspaceID) error {
+	scopedWorkspaceID := runScopedWorkspaceID(envelope)
+	if runID == "" || workspaceID == "" || scopedWorkspaceID == "" {
+		return common.ErrInvalidArgument
+	}
+	if envelope.RunID != "" && common.RunID(envelope.RunID) != runID {
+		return common.ErrConflict
+	}
+	if scopedWorkspaceID != workspaceID {
+		return common.ErrConflict
+	}
+	return nil
+}
+
+func (m *Module) validateRunReadScope(ctx context.Context, runID common.RunID, workspaceID common.WorkspaceID) error {
+	if runID == "" || workspaceID == "" {
+		return nil
+	}
+	item, err := m.runs.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if item.WorkspaceID != workspaceID {
+		return common.ErrNotFound
+	}
+	return nil
 }
 
 func runFromPayload(payload map[string]any) (*runmodel.Run, error) {

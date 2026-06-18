@@ -2018,6 +2018,7 @@ func (s *serverState) close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	var errs []error
 	if s.workspaceProjection != nil {
 		s.workspaceProjection.Close()
 	}
@@ -2031,16 +2032,17 @@ func (s *serverState) close(ctx context.Context) error {
 	}
 	s.eventUnsubscribes = nil
 	if err := s.waitBackground(ctx); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 	s.sharedSessionMu.Lock()
 	session := s.sharedSession
 	s.sharedSession = nil
 	s.sharedSessionMu.Unlock()
-	if session == nil {
-		return nil
+	if session != nil {
+		errs = append(errs, session.Close(ctx))
 	}
-	return session.Close(ctx)
+	errs = append(errs, appservice.CloseSharedBackendSession(ctx, s.config.Backend, s.config.DataRoot))
+	return errors.Join(errs...)
 }
 
 func (s *serverState) waitBackground(ctx context.Context) error {

@@ -35,6 +35,7 @@ type DoDBackend = port.DoDBackend
 type RunInfo = port.RunInfo
 type ActivateRunRequest = port.ActivateRunRequest
 type RunStatusInfo = port.RunStatusInfo
+type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type RunBackend = port.RunBackend
 type DecisionInfo = port.DecisionInfo
 type ResolveDecisionRequest = port.ResolveDecisionRequest

@@ -24,6 +24,16 @@ MIN_CACHE_AVERAGE_DELTA="${WORKORCH_OBSERVE_MIN_CACHE_AVERAGE_DELTA:-}"
 MIN_CACHE_LATEST_DELTA="${WORKORCH_OBSERVE_MIN_CACHE_LATEST_DELTA:-}"
 EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS="${WORKORCH_OBSERVE_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS:-}"
 SYNTHETIC_WORKSPACE_COUNT="${WORKORCH_OBSERVE_SYNTHETIC_WORKSPACE_COUNT:-0}"
+ENABLE_PPROF_CHECK="${WORKORCH_OBSERVE_ENABLE_PPROF_CHECK:-1}"
+REQUIRE_PPROF="${WORKORCH_OBSERVE_REQUIRE_PPROF:-0}"
+PPROF_GOROUTINE_PATH="${WORKORCH_OBSERVE_PPROF_GOROUTINE_PATH:-/debug/pprof/goroutine?debug=2}"
+ENABLE_CPU_PROFILE_CHECK="${WORKORCH_OBSERVE_ENABLE_CPU_PROFILE_CHECK:-1}"
+REQUIRE_CPU_PROFILE="${WORKORCH_OBSERVE_REQUIRE_CPU_PROFILE:-0}"
+CPU_PROFILE_SECONDS="${WORKORCH_OBSERVE_CPU_PROFILE_SECONDS:-5}"
+MAX_PENDING_REBUILDS="${WORKORCH_OBSERVE_MAX_PENDING_REBUILDS:-10}"
+MAX_PROJECTION_SCHEDULE_DROPPED_DELTA="${WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA:-0}"
+MAX_SUSPICIOUS_CPU_FLAT_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_FLAT_PERCENT:-50}"
+MAX_SUSPICIOUS_CPU_CUM_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_CUM_PERCENT:-90}"
 
 mkdir -p "$TMP_DIR"
 
@@ -131,6 +141,24 @@ wait "$sse_pid" || true
 
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-after.txt"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
+if [[ "$ENABLE_PPROF_CHECK" == "1" || "$ENABLE_PPROF_CHECK" == "true" || "$ENABLE_PPROF_CHECK" == "yes" ]]; then
+  if ! curl -fsS "$BASE_URL$PPROF_GOROUTINE_PATH" >"$TMP_DIR/pprof-goroutine.txt"; then
+    echo "pprof goroutine unavailable at $BASE_URL$PPROF_GOROUTINE_PATH" >"$TMP_DIR/pprof-goroutine-error.txt"
+  fi
+fi
+if [[ "$ENABLE_CPU_PROFILE_CHECK" == "1" || "$ENABLE_CPU_PROFILE_CHECK" == "true" || "$ENABLE_CPU_PROFILE_CHECK" == "yes" ]]; then
+  if curl -fsS "$BASE_URL/debug/pprof/profile?seconds=$CPU_PROFILE_SECONDS" >"$TMP_DIR/pprof-cpu.pb.gz"; then
+    if command -v go >/dev/null 2>&1; then
+      if ! go tool pprof -top -nodecount=40 "$TMP_DIR/pprof-cpu.pb.gz" >"$TMP_DIR/pprof-cpu-top.txt" 2>"$TMP_DIR/pprof-cpu-top-error.txt"; then
+        echo "go tool pprof failed for CPU profile" >>"$TMP_DIR/pprof-cpu-top-error.txt"
+      fi
+    else
+      echo "go tool not found; CPU profile captured without top summary" >"$TMP_DIR/pprof-cpu-top-error.txt"
+    fi
+  else
+    echo "pprof CPU profile unavailable at $BASE_URL/debug/pprof/profile?seconds=$CPU_PROFILE_SECONDS" >"$TMP_DIR/pprof-cpu-error.txt"
+  fi
+fi
 
 if [[ ${#created_workspace_ids[@]} -gt 0 ]]; then
   created_csv="$(IFS=','; echo "${created_workspace_ids[*]}")"
@@ -174,7 +202,7 @@ if [[ -n "$WORKSPACE_IDS" ]]; then
   done
 fi
 
-python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" <<'PY'
+python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" <<'PY'
 import json
 import os
 import re
@@ -199,6 +227,14 @@ min_cache_latest_delta = sys.argv[14].strip()
 expected_stale_dispatched_step_min_age_seconds = sys.argv[15].strip()
 synthetic_workspace_count = int(sys.argv[16].strip() or "0")
 synthetic_workspace_ids_path = Path(sys.argv[17])
+enable_pprof_check = sys.argv[18].strip() in {"1", "true", "yes"}
+require_pprof = sys.argv[19].strip() in {"1", "true", "yes"}
+enable_cpu_profile_check = sys.argv[20].strip() in {"1", "true", "yes"}
+require_cpu_profile = sys.argv[21].strip() in {"1", "true", "yes"}
+max_pending_rebuilds = int(sys.argv[22].strip() or "10")
+max_projection_schedule_dropped_delta = int(sys.argv[23].strip() or "0")
+max_suspicious_cpu_flat_percent = float(sys.argv[24].strip() or "50")
+max_suspicious_cpu_cum_percent = float(sys.argv[25].strip() or "90")
 
 def read_json(path):
     with open(path, "r", encoding="utf-8") as handle:
@@ -447,6 +483,7 @@ if display_contract_issues:
     errors.extend(display_contract_issues)
 (artifact_dir / "projection-display-contract.json").write_text(json.dumps(display_contract, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+metrics_before, metrics_before_text = read_metrics(artifact_dir / "metrics-before.txt")
 metrics, metrics_text = read_metrics(artifact_dir / "metrics-after.txt")
 required_metric_markers = [
     "workorch_stale_dispatched_step_min_age_seconds",
@@ -469,6 +506,22 @@ if expected_stale_dispatched_step_min_age_seconds:
             "stale dispatched step min age metric mismatch: "
             f"got={stale_dispatched_step_min_age_seconds} expected={expected}"
         )
+
+def metric_delta(name):
+    return float(metrics.get(name) or 0) - float(metrics_before.get(name) or 0)
+
+pending_rebuilds = int(metrics.get("workorch_workspace_projection_pending_rebuilds") or 0)
+schedule_dropped_delta = int(metric_delta("workorch_workspace_projection_schedule_dropped_total"))
+if pending_rebuilds > max_pending_rebuilds:
+    errors.append(
+        "workspace projection pending rebuilds above threshold: "
+        f"pending={pending_rebuilds} threshold={max_pending_rebuilds}"
+    )
+if schedule_dropped_delta > max_projection_schedule_dropped_delta:
+    errors.append(
+        "workspace projection schedule dropped delta above threshold: "
+        f"delta={schedule_dropped_delta} threshold={max_projection_schedule_dropped_delta}"
+    )
 
 events_path = artifact_dir / "sse-events.jsonl"
 topic_counts = {}
@@ -599,6 +652,174 @@ if cache_baseline_file:
         except Exception as exc:
             errors.append(f"failed to read cache baseline summary {cache_baseline_file}: {exc}")
 
+pprof_summary = {
+    "enabled": enable_pprof_check,
+    "available": False,
+    "artifact": None,
+    "errorArtifact": None,
+    "runtimeAdapterInObserverLaneFound": False,
+    "synchronousRuntimeSendStackFound": False,
+    "recursiveDispatchStackFound": False,
+    "runtimeAdapterObserverLaneStacks": 0,
+    "synchronousRuntimeSendStacks": 0,
+    "dispatchGraphStepBatchFrames": 0,
+    "dispatchRuntimeRepairFollowUpFrames": 0,
+    "eventHubSendFrames": 0,
+    "executeRuntimeStepFrames": 0,
+    "issues": [],
+}
+if enable_pprof_check:
+    pprof_path = artifact_dir / "pprof-goroutine.txt"
+    pprof_error_path = artifact_dir / "pprof-goroutine-error.txt"
+    if pprof_path.exists() and pprof_path.stat().st_size > 0:
+        pprof_text = pprof_path.read_text(encoding="utf-8", errors="replace")
+        goroutine_stacks = [item for item in re.split(r"\n\s*\n", pprof_text) if item.strip()]
+        graph_count = pprof_text.count("dispatchGraphStepBatchWithWorkspace")
+        repair_count = pprof_text.count("dispatchRuntimeRepairFollowUp")
+        send_count = len(re.findall(r"\.(?:Hub\.)?Send\(", pprof_text)) + pprof_text.count("event.Hub.Send")
+        execute_count = pprof_text.count("ExecuteRuntimeStep")
+        adapter_observer_lane_stacks = 0
+        sync_runtime_send_stacks = 0
+        for stack in goroutine_stacks:
+            has_runtimeevent_observer = (
+                "runtimeevent.(*Executor).handle" in stack
+                or "runtimeevent.(*Executor).Handle" in stack
+            )
+            has_runtime_adapter = "ExecuteRuntimeStep" in stack
+            has_runtimeevent_worker = "runtimeevent.(*Executor).execute" in stack
+            if has_runtimeevent_observer and has_runtime_adapter and not has_runtimeevent_worker:
+                adapter_observer_lane_stacks += 1
+            has_sync_runtime_bridge = (
+                "eventRuntimeAdapter.ExecuteRuntimeStep" in stack
+                or "RuntimeAdapterRegistry.ExecuteRuntimeStep" in stack
+            )
+            has_eventhub_send = (
+                "MagicHub.Publish" in stack
+                or "event.Hub.Send" in stack
+                or re.search(r"\.(?:Hub\.)?Send\(", stack) is not None
+            )
+            if has_sync_runtime_bridge and has_eventhub_send:
+                sync_runtime_send_stacks += 1
+        recursive_found = (
+            graph_count >= 2
+            or repair_count >= 2
+            or ((graph_count > 0 or repair_count > 0) and send_count > 0 and execute_count > 0)
+        )
+        pprof_summary.update({
+            "available": True,
+            "artifact": "pprof-goroutine.txt",
+            "runtimeAdapterInObserverLaneFound": adapter_observer_lane_stacks > 0,
+            "synchronousRuntimeSendStackFound": sync_runtime_send_stacks > 0,
+            "runtimeAdapterObserverLaneStacks": adapter_observer_lane_stacks,
+            "synchronousRuntimeSendStacks": sync_runtime_send_stacks,
+            "dispatchGraphStepBatchFrames": graph_count,
+            "dispatchRuntimeRepairFollowUpFrames": repair_count,
+            "eventHubSendFrames": send_count,
+            "executeRuntimeStepFrames": execute_count,
+            "recursiveDispatchStackFound": recursive_found,
+        })
+        if adapter_observer_lane_stacks > 0:
+            issue = (
+                "pprof goroutine shows runtime adapter executing inside runtimeevent observer lane: "
+                f"stacks={adapter_observer_lane_stacks}"
+            )
+            pprof_summary["issues"].append(issue)
+            errors.append(issue)
+        if sync_runtime_send_stacks > 0:
+            issue = (
+                "pprof goroutine shows synchronous runtime EventHub Send bridge stack: "
+                f"stacks={sync_runtime_send_stacks}"
+            )
+            pprof_summary["issues"].append(issue)
+            errors.append(issue)
+        if recursive_found:
+            issue = (
+                "pprof goroutine shows recursive runtime dispatch stack: "
+                f"dispatchGraphStepBatchWithWorkspace={graph_count}, "
+                f"dispatchRuntimeRepairFollowUp={repair_count}, "
+                f"eventHubSend={send_count}, ExecuteRuntimeStep={execute_count}"
+            )
+            pprof_summary["issues"].append(issue)
+            errors.append(issue)
+    else:
+        pprof_summary["errorArtifact"] = "pprof-goroutine-error.txt" if pprof_error_path.exists() else None
+        message = "pprof goroutine profile unavailable; runtime recursive dispatch stack was not observed"
+        pprof_summary["issues"].append(message)
+        if require_pprof:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
+cpu_profile_summary = {
+    "enabled": enable_cpu_profile_check,
+    "available": False,
+    "profileArtifact": None,
+    "topArtifact": None,
+    "errorArtifact": None,
+    "suspiciousHotspots": [],
+    "thresholds": {
+        "maxFlatPercent": max_suspicious_cpu_flat_percent,
+        "maxCumPercent": max_suspicious_cpu_cum_percent,
+    },
+    "issues": [],
+}
+if enable_cpu_profile_check:
+    cpu_profile_path = artifact_dir / "pprof-cpu.pb.gz"
+    cpu_top_path = artifact_dir / "pprof-cpu-top.txt"
+    cpu_error_path = artifact_dir / "pprof-cpu-error.txt"
+    cpu_top_error_path = artifact_dir / "pprof-cpu-top-error.txt"
+    if cpu_profile_path.exists() and cpu_profile_path.stat().st_size > 0:
+        cpu_profile_summary["available"] = True
+        cpu_profile_summary["profileArtifact"] = "pprof-cpu.pb.gz"
+        if cpu_top_path.exists() and cpu_top_path.stat().st_size > 0:
+            cpu_profile_summary["topArtifact"] = "pprof-cpu-top.txt"
+            suspicious_patterns = [
+                "readEventPayload",
+                "recoverStaleDispatched",
+                "RecoverStale",
+                "workspaceviewcore.(*Manager).Rebuild",
+                "workspaceviewcore.(*Manager).rebuild",
+                "workspaceviewcore.(*Store)",
+                "dispatchGraphStepBatchWithWorkspace",
+                "dispatchRuntimeRepairFollowUp",
+            ]
+            for raw_line in cpu_top_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw_line.strip()
+                if not line or not any(pattern in line for pattern in suspicious_patterns):
+                    continue
+                percents = [float(value) for value in re.findall(r"([0-9]+(?:\.[0-9]+)?)%", line)]
+                flat_percent = percents[0] if percents else 0.0
+                cum_percent = percents[-1] if len(percents) >= 2 else flat_percent
+                hotspot = {
+                    "line": line,
+                    "flatPercent": flat_percent,
+                    "cumPercent": cum_percent,
+                }
+                cpu_profile_summary["suspiciousHotspots"].append(hotspot)
+                if flat_percent > max_suspicious_cpu_flat_percent or cum_percent > max_suspicious_cpu_cum_percent:
+                    issue = (
+                        "CPU profile hotspot above threshold: "
+                        f"flat={flat_percent:.2f}% cum={cum_percent:.2f}% line={line}"
+                    )
+                    cpu_profile_summary["issues"].append(issue)
+                    errors.append(issue)
+        else:
+            cpu_profile_summary["errorArtifact"] = "pprof-cpu-top-error.txt" if cpu_top_error_path.exists() else None
+            message = "CPU profile captured but top summary unavailable"
+            cpu_profile_summary["issues"].append(message)
+            if require_cpu_profile:
+                errors.append(message)
+            else:
+                warnings.append(message)
+    else:
+        cpu_profile_summary["errorArtifact"] = "pprof-cpu-error.txt" if cpu_error_path.exists() else None
+        message = "pprof CPU profile unavailable; runtime CPU hotspot gate was not observed"
+        cpu_profile_summary["issues"].append(message)
+        if require_cpu_profile:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
 summary = {
     "serviceReady": readyz.get("status") == "ready",
     "projectionState": projection.get("state"),
@@ -614,6 +835,12 @@ summary = {
         "stalledRuns": metrics.get("workorch_workspace_projection_stalled_runs", 0),
         "ineffectiveRetryRuns": metrics.get("workorch_workspace_projection_ineffective_retry_runs", 0),
         "staleDispatchedStepMinAgeSeconds": stale_dispatched_step_min_age_seconds,
+        "projectionPendingRebuilds": pending_rebuilds,
+        "projectionScheduleDroppedDelta": schedule_dropped_delta,
+        "projectionRebuildDelta": {
+            "full": metric_delta("workorch_workspace_projection_rebuild_total{scope=\"full\"}"),
+            "debounced": metric_delta("workorch_workspace_projection_debounced_rebuild_total"),
+        },
     },
     "displayContract": {
         "pass": display_contract.get("pass"),
@@ -640,6 +867,8 @@ summary = {
         "latestSample": cache_samples[-1] if cache_samples else None,
         "sources": sorted({str(item.get("source") or "") for item in cache_samples if item.get("source")}),
     },
+    "pprof": pprof_summary,
+    "cpuProfile": cpu_profile_summary,
     "warnings": warnings,
     "errors": errors,
 }

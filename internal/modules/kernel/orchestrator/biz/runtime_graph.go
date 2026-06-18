@@ -77,6 +77,30 @@ func (g *graphSubsystem) readyGraphStepSpecsWithSteps(
 	return g.readyGraphStepSpecsFromSteps(ctx, run, last, graph, steps), steps
 }
 
+func (g *graphSubsystem) hasActiveGraphWork(ctx context.Context, run *runModel.Run, last *runModel.Step) bool {
+	if g == nil || g.steps == nil || run == nil || last == nil || graphNodeID(last) == "" {
+		return false
+	}
+	rootStepID := graphRootStepID(last)
+	if rootStepID == "" {
+		return false
+	}
+	steps, err := g.steps.ListByRun(ctx, run.ID)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if step == nil || step.ID == last.ID || !sameGraphRoot(step, rootStepID) || graphNodeID(step) == "" {
+			continue
+		}
+		switch step.State {
+		case common.StepStatePending, common.StepStateDispatched:
+			return true
+		}
+	}
+	return false
+}
+
 func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 	ctx context.Context,
 	run *runModel.Run,
@@ -116,6 +140,16 @@ func (g *graphSubsystem) readyGraphStepSpecsFromSteps(
 func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Context, run *runModel.Run, specs []stepDispatchSpec, workspace *workspaceModel.Workspace) error {
 	if len(specs) == 0 {
 		return common.ErrConflict
+	}
+	if o.eventDrivenDispatch {
+		workspaceID := workspaceIDForDispatch(run, workspace)
+		for _, spec := range specs {
+			spec.Input = cloneStepPayload(spec.Input)
+			if err := o.requestDispatchStep(ctx, run.ID, workspaceID, spec); err != nil && !errors.Is(err, common.ErrConflict) {
+				return err
+			}
+		}
+		return nil
 	}
 	if len(specs) == 1 {
 		return o.dispatchStepWithWorkspace(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
@@ -178,13 +212,13 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return err
 	}
 	if shouldDispatchGraphFollowUp(currentRun, last, last.Output) {
-		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), o.graphManager().graphFollowUpStepInputFromSteps(currentRun, last, steps), workspaceIDForDispatch(currentRun, workspace))
 	}
 	if shouldDispatchLLMCompletionFollowUp(currentRun, last, last.Output) {
-		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.RequestUniqueDispatchStep(ctx, currentRun, llmCompletionFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), llmCompletionFollowUpStepInputFromSteps(currentRun, last, steps), workspaceIDForDispatch(currentRun, workspace))
 	}
 	if shouldDispatchNoActionableContinuationFollowUp(currentRun, last, last.Output) {
-		return dispatchUniqueStepWithWorkspace(ctx, o.steps, o.dispatchStepWithWorkspace, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspace)
+		return o.RequestUniqueDispatchStep(ctx, currentRun, noActionableContinuationFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), noActionableContinuationFollowUpStepInputFromSteps(currentRun, last, steps), workspaceIDForDispatch(currentRun, workspace))
 	}
 	if completionState := llmDecisionCompletionStateFromOutput(last.Output); completionStateRequiresActionableContinuation(last.Output, completionState) {
 		return o.handleGraphBatchCompletionGateFailure(

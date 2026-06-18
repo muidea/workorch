@@ -28,7 +28,7 @@ func ActivateWorkspaceExecutionWithSession(ctx context.Context, session *Runtime
 }
 
 func ActivateWorkspaceExecutionWithBackend(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd ActivateWorkspaceExecutionCommand) (WorkspaceExecutionActivation, error) {
-	return withBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceExecutionActivation, error) {
+	return withSharedBackendSession(ctx, backend, dataRoot, func(ctx context.Context, session *RuntimeSession) (WorkspaceExecutionActivation, error) {
 		return ActivateWorkspaceExecutionWithSession(ctx, session, workspaceID, cmd)
 	})
 }

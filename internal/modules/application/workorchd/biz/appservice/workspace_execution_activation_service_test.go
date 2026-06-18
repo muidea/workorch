@@ -751,6 +751,7 @@ func TestActivateWorkspaceExecutionWithSessionReturnsInvalidArgumentWhenSessionM
 func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-start", "activation start workspace", "", "workspaces/activation-start")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -779,9 +780,8 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 		item.Run.WorkspaceID != workspace.ID ||
 		item.Run.GoalID != goal.ID ||
 		item.Run.DoDID != dod.ID ||
-		item.Run.State != "blocked_on_decision" ||
-		item.Run.BlockingTicketID == "" {
-		t.Fatalf("activation run = %+v, want generated run blocked on provider decision with goal/dod", item.Run)
+		item.Run.State != "running" {
+		t.Fatalf("activation run = %+v, want generated running run with goal/dod", item.Run)
 	}
 	if item.Snapshot.Workspace.ID != workspace.ID || len(item.Snapshot.Runs) != 1 {
 		t.Fatalf("activation snapshot = %+v, want workspace with one run", item.Snapshot)
@@ -793,10 +793,17 @@ func TestActivateWorkspaceExecutionWithBackendCreatesAndStartsRun(t *testing.T) 
 	if compressed["runId"] != item.Run.ID || compressed["workspaceId"] != workspace.ID {
 		t.Fatalf("compressedContext identity = %+v, want activation run/workspace", compressed)
 	}
-	runSnapshot, err := ReadRunSnapshotWithBackend(context.Background(), "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
+	blocked := waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
+	if blocked.BlockingTicketID == "" {
+		t.Fatalf("run = %+v, want provider decision ticket", blocked)
 	}
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return len(snapshot.Steps) == 1 &&
+			snapshot.Steps[0].Kind == llmcommon.StepKindWorkspaceExecution &&
+			len(snapshot.ToolCalls) == 1 &&
+			len(snapshot.ValidationResults) == 1 &&
+			len(snapshot.RuntimeCheckpoints) > 0
+	})
 	if len(runSnapshot.Steps) != 1 || runSnapshot.Steps[0].Kind != llmcommon.StepKindWorkspaceExecution {
 		t.Fatalf("steps = %+v, want first llm workspace execution step", runSnapshot.Steps)
 	}
@@ -864,6 +871,7 @@ func TestActivationSnapshotDoesNotProjectCreatedRunAsActive(t *testing.T) {
 func TestActivateWorkspaceExecutionWithBackendUsesNumericRunSequence(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-sequence", "activation run sequence workspace", "", "workspaces/activation-run-sequence")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -894,6 +902,7 @@ func TestActivateWorkspaceExecutionWithBackendUsesNumericRunSequence(t *testing.
 func TestActivateWorkspaceExecutionWithBackendScopesNumericRunSequenceByWorkspace(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspaceA, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-sequence-a", "activation run sequence workspace a", "", "workspaces/activation-run-sequence-a")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend a: %v", err)
@@ -938,6 +947,7 @@ func TestActivateWorkspaceExecutionWithBackendScopesNumericRunSequenceByWorkspac
 func TestActivateWorkspaceExecutionWithBackendContinuesRunSequenceAfterRestart(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-run-restart-sequence", "activation run restart sequence workspace", "", "workspaces/activation-run-restart-sequence")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -966,6 +976,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRunSequenceAfterRestart(t
 func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-missing", "activation missing workspace", "", "workspaces/activation-missing")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -979,6 +990,7 @@ func TestActivateWorkspaceExecutionWithBackendRequiresGoalAndDoD(t *testing.T) {
 func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-ambiguous", "activation ambiguous workspace", "", "workspaces/activation-ambiguous")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1007,8 +1019,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend latest: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
-		t.Fatalf("activation run = %+v, want latest goal/dod blocked on provider decision", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "running" {
+		t.Fatalf("activation run = %+v, want latest goal/dod running", item.Run)
 	}
 	if item.Run.ExecutionContext["goalId"] != secondGoal.ID {
 		t.Fatalf("executionContext goalId = %+v, want latest goal", item.Run.ExecutionContext["goalId"])
@@ -1034,14 +1046,15 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestGoalAndDoDDefinitions(t 
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend explicit: %v", err)
 	}
-	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
-		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions and blocked on provider decision", item.Run)
+	if item.Run.GoalID != secondGoal.ID || item.Run.DoDID != secondDoD.ID || item.Run.State != "running" {
+		t.Fatalf("activation run = %+v, want stale explicit goal/dod upgraded to latest definitions and running", item.Run)
 	}
 }
 
 func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithoutDuplicateLineage(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-definition-revision", "activation definition revision workspace", "", "workspaces/activation-definition-revision")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1081,8 +1094,8 @@ func TestActivateWorkspaceExecutionWithBackendUsesLatestDefinitionRevisionWithou
 	if err != nil {
 		t.Fatalf("ActivateWorkspaceExecutionWithBackend: %v", err)
 	}
-	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != "blocked_on_decision" || item.Run.BlockingTicketID == "" {
-		t.Fatalf("activation run = %+v, want latest updated definition revision blocked on provider decision", item.Run)
+	if item.Run.GoalID != updatedGoal.ID || item.Run.DoDID != updatedDoD.ID || item.Run.State != "running" {
+		t.Fatalf("activation run = %+v, want latest updated definition revision running", item.Run)
 	}
 	goalContext, _ := item.Run.ExecutionContext["goal"].(map[string]any)
 	if text, _ := goalContext["text"].(string); text != "- first activation goal revised" {
@@ -1120,6 +1133,7 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-context", "activation context workspace", "", "workspaces/activation-context")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1240,10 +1254,9 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 		t.Fatalf("memoryIds = %+v, want selected memory", executionContext["memoryIds"])
 	}
 
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return len(snapshot.Steps) > 0
+	})
 	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
 	if stepContext["soulId"] != "soul-activation-context" {
 		t.Fatalf("first step input = %+v, want execution context propagated", runSnapshot.Steps[0].Input)
@@ -1263,6 +1276,7 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-governance-history", "activation governance history", "", "workspaces/activation-governance-history")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1337,11 +1351,11 @@ func TestActivateWorkspaceExecutionWithBackendCarriesResolvedDecisionHistory(t *
 	if payload["resumeInstruction"] != "Start from scratch and implement the MVP artifacts in this workspace." {
 		t.Fatalf("resolutionPayload = %+v, want resume instruction", payload)
 	}
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
-	stepContext := contextMapFromValue(t, runSnapshot.Steps[0].Input["executionContextPackage"])
+	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return len(snapshot.Steps) > 0
+	})
+	stepContext := contextMapFromValue(t, runSnapshot.Steps[0].Input["executionContext"])
 	if len(contextMapSliceFromValue(t, stepContext["governanceHistory"])) != 1 {
 		t.Fatalf("first step input = %+v, want governance history propagated", runSnapshot.Steps[0].Input)
 	}
@@ -1351,6 +1365,7 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-replan-continuation", "activation replan continuation", "", "workspaces/activation-replan-continuation")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1447,14 +1462,11 @@ func TestActivateWorkspaceExecutionWithBackendPromotesResolvedReplanHistoryToCon
 	if replan[llmcommon.ExecutionContextLLMProviderID] != nil {
 		t.Fatalf("replanContinuation = %+v, want no runtime llm binding", replan)
 	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
 
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
-	if len(runSnapshot.Steps) != 1 {
-		t.Fatalf("steps = %+v, want first step", runSnapshot.Steps)
-	}
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return len(snapshot.Steps) == 1
+	})
 	step := runSnapshot.Steps[0]
 	if step.Input["runtimeStage"] != "repair" ||
 		step.Input["soulStage"] != "execution" ||
@@ -1483,6 +1495,7 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-definition-change-new-run", "definition change new run", "", "workspaces/definition-change-new-run")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -1578,13 +1591,10 @@ func TestActivationDefinitionChangeSuppressesPriorActionableContinuations(t *tes
 	if item.Run.ExecutionContext["definitionChangeContinuationPolicy"] != "definition_change_supersedes_prior_actionable_continuation" {
 		t.Fatalf("definitionChangeContinuationPolicy = %v, want supersede policy", item.Run.ExecutionContext["definitionChangeContinuationPolicy"])
 	}
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
-	if len(runSnapshot.Steps) != 1 {
-		t.Fatalf("steps = %+v, want first step", runSnapshot.Steps)
-	}
+	_ = waitRunStateWithBackend(t, "file", dataRoot, item.Run.ID, "blocked_on_decision")
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return len(snapshot.Steps) == 1
+	})
 	step := runSnapshot.Steps[0]
 	if step.Input["runtimeStage"] == "repair" ||
 		step.Input["replanStateChangingContinuation"] == true ||
@@ -2403,6 +2413,7 @@ func TestWorkspaceSoulBindingsWithBackendRoutesExecutionSoulByStage(t *testing.T
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-soul-routing", "soul routing workspace", "", "workspaces/soul-routing")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -2538,6 +2549,7 @@ func TestActivateWorkspaceExecutionWithBackendAddsWorkspaceBoundEvidencePolicy(t
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
 		ID:     "soul-evidence-validation",
 		Name:   "Evidence Validation",
@@ -2602,6 +2614,7 @@ func TestActivateWorkspaceExecutionWithBackendAddsExecutionContractFromWorkspace
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
 		ID:     "soul-contract-execution",
 		Name:   "Contract Execution",
@@ -2678,6 +2691,7 @@ func TestActivateWorkspaceExecutionAppliesTemplateDefaultMCPContext(t *testing.T
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
@@ -2770,6 +2784,7 @@ func TestActivateWorkspaceExecutionUsesUpdatedTemplateMCPDefaultWhenWorkspaceHas
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
@@ -2862,6 +2877,7 @@ func TestActivateWorkspaceExecutionUsesWorkspaceMCPDefaultOverride(t *testing.T)
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	session, err := newRuntimeSessionWithBackend(ctx, "file", dataRoot)
 	if err != nil {
 		t.Fatalf("newRuntimeSessionWithBackend: %v", err)
@@ -2967,6 +2983,7 @@ func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testi
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   "template-managed-config-activation",
 		Name: "Managed Config Activation Template",
@@ -3035,6 +3052,7 @@ func TestActivateWorkspaceExecutionRepairsMissingManagedWorkspaceConfig(t *testi
 func TestActivationExecutionContractUsesWorkspaceTemplateIDBeforeSoulRouting(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	templateID := "template-explicit-contract"
 	if _, err := CreateWorkspaceTemplateWithBackend(ctx, "file", dataRoot, WorkspaceTemplate{
 		ID:   templateID,
@@ -3124,6 +3142,7 @@ func TestActivateWorkspaceExecutionWithBackendRefreshesExecutionContractFromMatc
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	if _, err := CreateSoulWithBackend(ctx, "file", dataRoot, CreateSoulCommand{
 		ID:     "soul-contract-refresh-execution",
 		Name:   "Contract Refresh Execution",
@@ -3220,6 +3239,7 @@ func TestActivateWorkspaceExecutionWithBackendUsesSystemDefaultSoul(t *testing.T
 	useSystemDefaultSoulConfig(t, "soul-system-default")
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-system-soul-routing", "system soul routing workspace", "", "workspaces/system-soul-routing")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3264,6 +3284,7 @@ func TestActivateWorkspaceExecutionWithBackendDoesNotInjectSystemDefaultSoulWhen
 	useSystemDefaultSoulConfig(t, "soul-system-default")
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-stage-bound-system-default", "stage-bound workspace", "", "workspaces/stage-bound")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3331,6 +3352,7 @@ func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *test
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-stage-capability-validation", "stage capability validation", "", "workspaces/stage-capability-validation")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3394,6 +3416,7 @@ func TestActivateWorkspaceExecutionWithBackendValidatesExecutionSoulOnly(t *test
 func TestWorkspaceSoulBindingsWithBackendRejectsInvalidBinding(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-soul-routing-invalid", "soul routing invalid workspace", "", "workspaces/soul-routing-invalid")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3415,6 +3438,7 @@ func TestActivateWorkspaceExecutionWithBackendAutoSelectsSkillAndBindsRequiredMC
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-auto-skill-context", "auto skill context workspace", "", "workspaces/auto-skill-context")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3490,6 +3514,7 @@ func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testin
 	defer provider.Close()
 	useActivationLLMConfig(t, provider.URL+"/v1", "local")
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-memory", "semantic memory workspace", "", "workspaces/activation-semantic-memory")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3547,10 +3572,9 @@ func TestActivateWorkspaceExecutionWithBackendUsesSemanticMemoryRecall(t *testin
 		!contextNumericEquals(retrieval["vectorDimension"], 3) {
 		t.Fatalf("memoryRetrieval = %+v, want semantic evidence", retrieval)
 	}
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return memoryRecallTraceBySource(snapshot.MemoryRecallTraces, "step_input") != nil
+	})
 	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
 	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
 	if activationTrace == nil ||
@@ -3581,6 +3605,7 @@ func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t
 	defer provider.Close()
 	useActivationLLMConfig(t, provider.URL+"/v1", "missing-embedding")
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-semantic-degraded", "semantic degradation workspace", "", "workspaces/activation-semantic-degraded")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3617,10 +3642,9 @@ func TestActivateWorkspaceExecutionWithBackendReportsSemanticMemoryDegradation(t
 	if retrieval["policy"] != "semantic_vector_search" || retrieval["status"] != "degraded" || retrieval["reason"] == "" {
 		t.Fatalf("memoryRetrieval = %+v, want explicit degradation evidence", retrieval)
 	}
-	runSnapshot, err := ReadRunSnapshotWithBackend(ctx, "file", dataRoot, item.Run.ID)
-	if err != nil {
-		t.Fatalf("ReadRunSnapshotWithBackend: %v", err)
-	}
+	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
+		return memoryRecallTraceBySource(snapshot.MemoryRecallTraces, "step_input") != nil
+	})
 	activationTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "activation")
 	stepInputTrace := memoryRecallTraceBySource(runSnapshot.MemoryRecallTraces, "step_input")
 	if activationTrace == nil ||
@@ -3723,6 +3747,7 @@ func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *test
 	useUnavailableLLMProvider(t)
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, "ws-activation-context-reject", "activation context reject workspace", "", "workspaces/activation-context-reject")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3765,6 +3790,7 @@ func TestActivateWorkspaceExecutionWithBackendRejectsSoulDisallowedSkill(t *test
 func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-active", "activation active workspace", "", "workspaces/activation-active")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3800,6 +3826,7 @@ func TestActivateWorkspaceExecutionWithBackendReturnsActiveRun(t *testing.T) {
 func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-created-active", "activation created active workspace", "", "workspaces/activation-created-active")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3848,6 +3875,7 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-terminal-active", "activation terminal active workspace", "", "workspaces/activation-terminal-active")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3906,6 +3934,7 @@ func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testin
 func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-rejected-terminal", "activation rejected terminal workspace", "", "workspaces/activation-rejected-terminal")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
@@ -3996,6 +4025,7 @@ func TestActivateWorkspaceExecutionWithBackendContinuesRejectedTerminalResult(t 
 func TestActivateWorkspaceExecutionWithBackendReplacesActiveRunWhenExplicitDefinitionsChange(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
 	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-replace-active", "activation replace active workspace", "", "workspaces/activation-replace-active")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)

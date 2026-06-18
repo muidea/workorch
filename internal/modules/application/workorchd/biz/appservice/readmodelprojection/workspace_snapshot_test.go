@@ -79,6 +79,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			State: string(common.StepStateCompleted),
 		},
 		TaskProgress:       readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
+		RuntimeExecution:   &readmodelcore.RuntimeExecutionState{StepID: "step-current", RequestID: "request-current", Pending: true, Gap: "runtime_terminal_not_finalized"},
 		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
 		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
@@ -125,6 +126,9 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	if got.TaskProgress.CurrentStepID != "step-current" {
 		t.Fatalf("TaskProgress = %+v, want run task progress", got.TaskProgress)
+	}
+	if got.RuntimeExecution == nil || got.RuntimeExecution.RequestID != "request-current" || got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
+		t.Fatalf("RuntimeExecution = %+v, want run runtime projection", got.RuntimeExecution)
 	}
 }
 

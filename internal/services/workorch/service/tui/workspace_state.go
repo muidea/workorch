@@ -25,6 +25,7 @@ type workspaceDisplayState struct {
 	LLMUsage              backend.LLMUsageSummaryInfo
 	LLMContext            map[string]any
 	RunHeartbeat          backend.RunHeartbeatInfo
+	RuntimeExecution      *backend.RuntimeExecutionInfo
 	RuntimeEvents         []string
 	Progress              progressState
 	ProgressText          string
@@ -400,10 +401,10 @@ func (m *AppModel) activeWorkspaceStateIsLive() bool {
 }
 
 func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
-	if m.blockingDecision != nil {
+	if m.activeBlockingDecision() != nil {
 		return progressWaitingDecision, true
 	}
-	if m.blockingApproval != nil {
+	if m.activeBlockingApproval() != nil {
 		return progressWaitingApproval, true
 	}
 	ws := findWorkspace(m.workspaces, m.activeWorkspaceID)
@@ -424,19 +425,11 @@ func (m *AppModel) activeWorkspaceBlockerProgress() (progressState, bool) {
 }
 
 func (m *AppModel) activeWorkspaceHasDecisionBlocker() bool {
-	if m.blockingDecision != nil && m.blockingDecision.ID != "" && m.decisionMatchesActiveScope(*m.blockingDecision) {
-		return true
-	}
-	ws := m.activeWorkspaceOverview()
-	return ws != nil && ws.State == common.WorkspaceStateWaitingDecision && ws.BlockingTicketID != ""
+	return m.activeBlockingDecision() != nil
 }
 
 func (m *AppModel) activeWorkspaceHasApprovalBlocker() bool {
-	if m.blockingApproval != nil && m.blockingApproval.ID != "" && m.approvalMatchesActiveScope(*m.blockingApproval) {
-		return true
-	}
-	ws := m.activeWorkspaceOverview()
-	return ws != nil && ws.State == common.WorkspaceStateBlocked && ws.BlockingApprovalID != ""
+	return m.activeBlockingApproval() != nil
 }
 
 func (m *AppModel) ensureActiveBlockingDecisionFromOverview() bool {
@@ -516,9 +509,9 @@ func (m *AppModel) blockActiveWorkspaceContinue(reason string) tea.Cmd {
 	m.progress = blockerProgress
 	switch blockerProgress {
 	case progressWaitingApproval:
-		m.progressText = nonEmpty(reason, blockingApprovalLabel(m.blockingApproval), "Waiting for approval; refreshing blocker details")
+		m.progressText = nonEmpty(reason, blockingApprovalLabel(m.activeBlockingApproval()), "Waiting for approval; refreshing blocker details")
 	default:
-		m.progressText = nonEmpty(reason, blockingDecisionLabel(m.blockingDecision), "Waiting for decision; refreshing blocker details")
+		m.progressText = nonEmpty(reason, blockingDecisionLabel(m.activeBlockingDecision()), "Waiting for decision; refreshing blocker details")
 	}
 	return m.fetchActiveBlockerDetails()
 }
@@ -536,7 +529,7 @@ func (m *AppModel) confirmWorkspaceSelection() (tea.Model, tea.Cmd) {
 	m.setActiveWorkspace(m.selectedWorkspaceID)
 	m.workspaceSelectMode = false
 	cmds := []tea.Cmd{}
-	if cmd := m.syncActiveWorkspaceBlockerOverview(); cmd != nil {
+	if cmd := m.syncActiveWorkspaceOverview(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	if !cached && m.progress != progressWaitingDecision && m.progress != progressWaitingApproval {
@@ -596,6 +589,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.applyWorkspaceProgress(msg.Workspace.State)
 		if msg.Snapshot != nil {
 			m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
+			m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
 		}
 		m.syncBlockingDecisionFromList()
 		m.syncBlockingApprovalFromList()
@@ -640,6 +634,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
+		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
 		m.repairLoop = repairLoopSummary(msg.Snapshot.TaskProgress)
 	}
 
@@ -666,6 +661,9 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 	if msg.Status != nil && msg.Status.CurrentStepKind != "" && m.progress == progressRunning {
 		m.progressText = stepProgressText("Working", msg.Status.CurrentStepKind, "Working; waiting for final result")
 	}
+	if msg.Status != nil {
+		m.applyRuntimeExecution(msg.Status.RuntimeExecution)
+	}
 	if msg.Snapshot != nil && strings.TrimSpace(msg.Snapshot.TaskProgress.Summary) != "" && m.progress == progressRunning {
 		m.progressText = strings.TrimSpace(msg.Snapshot.TaskProgress.Summary)
 	}
@@ -687,6 +685,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
+	m.runtimeExecution = nil
 	m.repairLoop = ""
 	m.failureReason = ""
 	m.failureHint = ""
@@ -812,6 +811,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
+	m.runtimeExecution = nil
 	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""
@@ -851,6 +851,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		LLMUsage:              m.llmUsage,
 		LLMContext:            clonePayloadMap(m.llmContext),
 		RunHeartbeat:          m.runHeartbeat,
+		RuntimeExecution:      cloneRuntimeExecutionInfoPtr(m.runtimeExecution),
 		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
 		Progress:              m.progress,
 		ProgressText:          m.progressText,
@@ -886,6 +887,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.llmUsage = cached.LLMUsage
 	m.llmContext = clonePayloadMap(cached.LLMContext)
 	m.runHeartbeat = cached.RunHeartbeat
+	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(cached.RuntimeExecution)
 	m.runtimeEvents = append([]string(nil), cached.RuntimeEvents...)
 	m.progress = cached.Progress
 	m.progressText = cached.ProgressText
@@ -928,6 +930,14 @@ func cloneApprovalPtr(input *backend.ApprovalInfo) *backend.ApprovalInfo {
 	return &ret
 }
 
+func cloneRuntimeExecutionInfoPtr(input *backend.RuntimeExecutionInfo) *backend.RuntimeExecutionInfo {
+	if input == nil {
+		return nil
+	}
+	ret := *input
+	return &ret
+}
+
 func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
 	m.runHeartbeat = item
 	switch item.ActivityState {
@@ -936,6 +946,14 @@ func (m *AppModel) applyRunHeartbeat(item backend.RunHeartbeatInfo) {
 			m.progressText = nonEmpty(item.Summary, string(item.ActivityState))
 		}
 	}
+}
+
+func (m *AppModel) applyRuntimeExecution(item *backend.RuntimeExecutionInfo) {
+	if item == nil {
+		m.runtimeExecution = nil
+		return
+	}
+	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(item)
 }
 
 func latestLLMContextBudget(traces []backend.LLMUsageTraceInfo) map[string]any {

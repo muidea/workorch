@@ -378,6 +378,24 @@ func TestMagicHubKeepsOrchestratorCommandsOnOrchestratorStateLane(t *testing.T) 
 	}
 }
 
+func TestMagicHubKeepsOrchestratorDispatchRequestsOnOrchestratorStateLane(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{
+		Topic:       orchestratorevents.TopicOrchestratorDispatchStepRequested,
+		WorkspaceID: "ws-a",
+		RunID:       "run-001",
+		StepID:      "run-001-step-2",
+	}); err != nil {
+		t.Fatalf("publish orchestrator dispatch request: %v", err)
+	}
+	want := "state/orchestrator/workspace/ws-a/run/run-001"
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
+		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	}
+}
+
 func TestMagicHubUsesExecuteLaneForRuntimeBlockCommands(t *testing.T) {
 	rawHub := &recordingLaneHub{}
 	hub := NewMagicHubWithHub(rawHub)
@@ -393,6 +411,77 @@ func TestMagicHubUsesExecuteLaneForRuntimeBlockCommands(t *testing.T) {
 	want := "exec/block/mcp-tool-call/workspace/ws-a/step/run-001-step-2"
 	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
 		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	}
+}
+
+func TestMagicHubUsesRuntimeExecutionStateLaneForAcceptedEvents(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	if err := hub.Publish(context.Background(), Envelope{
+		Topic:       runtimeeventdefs.TopicRuntimeBlockExecuteAccepted,
+		WorkspaceID: "ws-a",
+		RunID:       "run-001",
+		StepID:      "run-001-step-2",
+	}); err != nil {
+		t.Fatalf("publish runtime accepted event: %v", err)
+	}
+	want := "state/runtime-exec/workspace/ws-a/run/run-001/step/run-001-step-2"
+	if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
+		t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+	}
+}
+
+func TestMagicHubUsesOrchestratorStateLaneForRuntimeResultEvents(t *testing.T) {
+	for _, topic := range []string{
+		runtimeeventdefs.TopicRuntimeBlockExecuteCompleted,
+		runtimeeventdefs.TopicRuntimeBlockExecuteFailed,
+	} {
+		t.Run(topic, func(t *testing.T) {
+			rawHub := &recordingLaneHub{}
+			hub := NewMagicHubWithHub(rawHub)
+
+			if err := hub.Publish(context.Background(), Envelope{
+				Topic:       topic,
+				WorkspaceID: "ws-a",
+				RunID:       "run-001",
+				StepID:      "run-001-step-2",
+			}); err != nil {
+				t.Fatalf("publish runtime result event: %v", err)
+			}
+			want := "state/orchestrator/workspace/ws-a/run/run-001"
+			if len(rawHub.lanes) != 1 || rawHub.lanes[0] != want {
+				t.Fatalf("lanes = %v, want %s", rawHub.lanes, want)
+			}
+		})
+	}
+}
+
+func TestMagicHubKeepsRuntimeResultLanesWorkspaceScoped(t *testing.T) {
+	rawHub := &recordingLaneHub{}
+	hub := NewMagicHubWithHub(rawHub)
+
+	for _, workspaceID := range []string{"ws-a", "ws-b"} {
+		if err := hub.Publish(context.Background(), Envelope{
+			Topic:       runtimeeventdefs.TopicRuntimeBlockExecuteCompleted,
+			WorkspaceID: workspaceID,
+			RunID:       "run-001",
+			StepID:      "run-001-step-2",
+		}); err != nil {
+			t.Fatalf("publish runtime result event for %s: %v", workspaceID, err)
+		}
+	}
+	want := []string{
+		"state/orchestrator/workspace/ws-a/run/run-001",
+		"state/orchestrator/workspace/ws-b/run/run-001",
+	}
+	if len(rawHub.lanes) != len(want) {
+		t.Fatalf("lanes = %v, want %v", rawHub.lanes, want)
+	}
+	for idx := range want {
+		if rawHub.lanes[idx] != want[idx] {
+			t.Fatalf("lanes = %v, want %v", rawHub.lanes, want)
+		}
 	}
 }
 

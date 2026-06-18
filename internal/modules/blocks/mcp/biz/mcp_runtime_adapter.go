@@ -388,10 +388,14 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
+	initCtx, cancel := context.WithTimeout(ctx, timeoutFromServer(server))
 	defer cancel()
 
-	cmd := exec.Command(command, args...)
+	launchCtx := ctx
+	if strings.EqualFold(strings.TrimSpace(server.SessionPolicy), sessionPolicyLongLived) {
+		launchCtx = context.WithoutCancel(ctx)
+	}
+	cmd := exec.CommandContext(launchCtx, command, args...)
 	if dir := strings.TrimSpace(request.WorkspaceDeliverableDirectory); dir != "" {
 		cmd.Dir = dir
 	}
@@ -446,7 +450,7 @@ func newInitializedStdioSession(ctx context.Context, request runtimemodel.StepEx
 		session.Close()
 		return nil, err
 	}
-	if _, _, err := readJSONRPCResponseWithContext(callCtx, session.reader, 1, session); err != nil {
+	if _, _, err := readJSONRPCResponseWithContext(initCtx, session.reader, 1, session); err != nil {
 		session.Close()
 		return nil, err
 	}

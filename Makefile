@@ -257,7 +257,7 @@ verify-weather-ticket-approval-mock:
 
 verify-real-mvp: verify-real-llm verify-real-mcp-stdio verify-real-vector-memory
 
-verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-mcp-stdio verify-real-vector-memory
+verify-deployed-full: verify-ci-mvp verify-skillhub verify-mvp verify-real-runtime-closure verify-real-mcp-stdio verify-real-vector-memory
 
 verify-e2e-full: verify-e2e-template-contract verify-service verify-workspace-template-soul verify-llm verify-incremental-artifact-e2e verify-mcp-stdio verify-skillhub verify-auto-governance-ticket-approval verify-software-dev-code-agent verify-software-dev-goal-dod-e2e verify-software-requirement-orchestration-deployed verify-workspace-file-diff-patch verify-workspace-web-search verify-workspace-web-search-e2e verify-workspace-projection-switch verify-web-console-projection-visual verify-weather-ticket-approval-mock verify-tui-agent verify-tui-workspace-switch-visual verify-tui-terminal-render verify-tui-long-output
 

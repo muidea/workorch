@@ -314,18 +314,43 @@ type EventRecord struct {
 
 // Snapshot / Status / Observability types.
 type RunStatus struct {
-	ID                 string `json:"id"`
-	WorkspaceID        string `json:"workspaceId"`
-	State              string `json:"state"`
-	CurrentStepID      string `json:"currentStepId,omitempty"`
-	CurrentStepKind    string `json:"currentStepKind,omitempty"`
-	CurrentStepState   string `json:"currentStepState,omitempty"`
-	StepCount          int    `json:"stepCount"`
-	DecisionCount      int    `json:"decisionCount"`
-	ApprovalCount      int    `json:"approvalCount"`
-	BlockingTicketID   string `json:"blockingTicketId,omitempty"`
-	BlockingApprovalID string `json:"blockingApprovalId,omitempty"`
-	FailureReason      string `json:"failureReason,omitempty"`
+	ID                 string            `json:"id"`
+	WorkspaceID        string            `json:"workspaceId"`
+	State              string            `json:"state"`
+	CurrentStepID      string            `json:"currentStepId,omitempty"`
+	CurrentStepKind    string            `json:"currentStepKind,omitempty"`
+	CurrentStepState   string            `json:"currentStepState,omitempty"`
+	StepCount          int               `json:"stepCount"`
+	DecisionCount      int               `json:"decisionCount"`
+	ApprovalCount      int               `json:"approvalCount"`
+	BlockingTicketID   string            `json:"blockingTicketId,omitempty"`
+	BlockingApprovalID string            `json:"blockingApprovalId,omitempty"`
+	FailureReason      string            `json:"failureReason,omitempty"`
+	RuntimeExecution   *RuntimeExecution `json:"runtimeExecution,omitempty"`
+}
+
+type RuntimeExecution struct {
+	StepID              string `json:"stepId,omitempty"`
+	StepKind            string `json:"stepKind,omitempty"`
+	StepState           string `json:"stepState,omitempty"`
+	RequestID           string `json:"requestId,omitempty"`
+	QueueKey            string `json:"queueKey,omitempty"`
+	AcceptedAt          string `json:"acceptedAt,omitempty"`
+	LastProgressAt      string `json:"lastProgressAt,omitempty"`
+	LastProgressEvent   string `json:"lastProgressEvent,omitempty"`
+	LastProgressStage   string `json:"lastProgressStage,omitempty"`
+	LastProgressSummary string `json:"lastProgressSummary,omitempty"`
+	WorkerID            string `json:"workerId,omitempty"`
+	WorkerStartedAt     string `json:"workerStartedAt,omitempty"`
+	WorkerHeartbeatAt   string `json:"workerHeartbeatAt,omitempty"`
+	WorkerStoppedAt     string `json:"workerStoppedAt,omitempty"`
+	WorkerLostAt        string `json:"workerLostAt,omitempty"`
+	DoneAt              string `json:"doneAt,omitempty"`
+	FailedAt            string `json:"failedAt,omitempty"`
+	FinalizedAt         string `json:"finalizedAt,omitempty"`
+	FinalizeEvent       string `json:"finalizeEvent,omitempty"`
+	Pending             bool   `json:"pending,omitempty"`
+	Gap                 string `json:"gap,omitempty"`
 }
 
 type RecoveryPlan struct {
@@ -553,6 +578,7 @@ type WorkspaceSnapshot struct {
 	Outcome               RunOutcome             `json:"outcome"`
 	TaskProgress          TaskProgress           `json:"taskProgress"`
 	RunHeartbeat          RunHeartbeat           `json:"runHeartbeat,omitempty"`
+	RuntimeExecution      *RuntimeExecution      `json:"runtimeExecution,omitempty"`
 	ContextBundle         map[string]any         `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
@@ -602,6 +628,7 @@ type RunSnapshot struct {
 	Outcome                 RunOutcome             `json:"outcome"`
 	TaskProgress            TaskProgress           `json:"taskProgress"`
 	RepairLoop              RepairLoop             `json:"repairLoop"`
+	RuntimeExecution        *RuntimeExecution      `json:"runtimeExecution,omitempty"`
 	Steps                   []Step                 `json:"steps,omitempty"`
 	ToolCalls               []ToolCall             `json:"toolCalls,omitempty"`
 	Patches                 []Patch                `json:"patches,omitempty"`

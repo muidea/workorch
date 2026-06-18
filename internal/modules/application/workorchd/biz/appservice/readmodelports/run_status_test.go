@@ -80,6 +80,50 @@ func TestRunStatusUsesLatestCheckpointStep(t *testing.T) {
 	}
 }
 
+func TestRunStatusProjectsRuntimeExecutionAcceptedNoProgress(t *testing.T) {
+	t.Parallel()
+
+	run := &runmodel.Run{ID: "run-runtime-status", WorkspaceID: "ws-runtime-status", State: common.RunStateRunning}
+	stepID := common.StepID("step-runtime-status")
+	steps := []*runmodel.Step{
+		{ID: stepID, RunID: run.ID, Kind: "llm/workspace_execution", State: common.StepStateDispatched},
+	}
+	checkpoints := []*runmodel.RuntimeCheckpoint{
+		{
+			ID:            "checkpoint-runtime-accepted",
+			WorkspaceID:   run.WorkspaceID,
+			RunID:         run.ID,
+			CurrentStepID: stepID,
+			OccurredAt:    "2026-06-17T01:00:00Z",
+			Data: map[string]any{
+				"event":     "runtime_execute_accepted",
+				"requestId": "request-status",
+				"queueKey":  "queue-status",
+			},
+		},
+	}
+
+	got, err := RunStatus(context.Background(), RunStatusReaders{
+		Runs:        fakeRunStatusRunReader{items: []*runmodel.Run{run}},
+		Steps:       fakeRunStatusStepReader{items: steps},
+		Checkpoints: fakeRunStatusCheckpointReader{items: checkpoints},
+		Tickets:     fakeTicketReader{},
+		Approvals:   fakeApprovalListReader{},
+	}, run.ID)
+	if err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	if got.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want accepted runtime state")
+	}
+	if got.RuntimeExecution.RequestID != "request-status" ||
+		got.RuntimeExecution.QueueKey != "queue-status" ||
+		got.RuntimeExecution.Pending != true ||
+		got.RuntimeExecution.Gap != "accepted_no_progress" {
+		t.Fatalf("RuntimeExecution = %+v, want accepted no progress gap", got.RuntimeExecution)
+	}
+}
+
 type fakeRunStatusRunReader struct {
 	items []*runmodel.Run
 }

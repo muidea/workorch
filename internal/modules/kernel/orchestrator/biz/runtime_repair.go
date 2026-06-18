@@ -116,6 +116,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
 	attachContractViolationType(step.Output, execErr)
+	attachRuntimeFailureStage(step.Output, summary)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
@@ -158,6 +159,33 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 		return o.failRunWithRejectedCompletionResult(ctx, run, step, reason)
 	}
 	return o.dispatchRuntimeRepairFollowUp(ctx, run, step, execErr)
+}
+
+func attachRuntimeFailureStage(output map[string]any, summary string) {
+	if output == nil || strings.TrimSpace(stringFromMap(output, "stage")) != "" {
+		return
+	}
+	if kind := strings.TrimSpace(stringFromMap(mapFromValue(output["runtimeDiagnostics"]), "kind")); kind != "" {
+		output["stage"] = kind
+		return
+	}
+	lowerSummary := strings.ToLower(strings.TrimSpace(summary))
+	switch {
+	case strings.Contains(lowerSummary, "runtime execution contract failed") ||
+		strings.Contains(lowerSummary, "runtime state-changing contract gate failed") ||
+		strings.Contains(lowerSummary, "runtime completion gate failed") ||
+		strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) != "":
+		output["stage"] = "runtime_contract_failed"
+	case strings.Contains(lowerSummary, "runtime patch application failed") ||
+		strings.Contains(lowerSummary, "runtime patch revert failed"):
+		output["stage"] = "patch_apply_failed"
+	case strings.Contains(lowerSummary, "runtime patch dispatch gate failed"):
+		output["stage"] = "patch_dispatch_invalid"
+	case strings.Contains(lowerSummary, "runtime memory write failed"):
+		output["stage"] = "memory_write_failed"
+	case strings.Contains(lowerSummary, "runtime step failed"):
+		output["stage"] = "runtime_step_failed"
+	}
 }
 
 func attachRuntimeFailureDiagnostics(step *runModel.Step, classification runtimeFailureClassification, execErr error) {
@@ -425,7 +453,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		if !ok {
 			return common.ErrInvalidArgument
 		}
-		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
+		return o.requestDispatchStep(ctx, run.ID, run.WorkspaceID, spec)
 	case runtimeRecoveryActionProviderRetryExhausted:
 		return o.blockOnProviderRetryExhaustion(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepairExhausted:
@@ -442,7 +470,7 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		if !ok {
 			return common.ErrInvalidArgument
 		}
-		return o.dispatchStepWithWorkspace(ctx, run, spec.ID, spec.Kind, spec.Input, nil)
+		return o.requestDispatchStep(ctx, run.ID, run.WorkspaceID, spec)
 	case runtimeRecoveryActionFailRun:
 		return o.failRunWithRejectedCompletionResult(ctx, run, failedStep, o.repairManager().failRunReasonFromFailedStep(failedStep, execErr))
 	default:

@@ -4,11 +4,14 @@ import (
 	"context"
 	"testing"
 
+	magictask "github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/modules/blocks/pkg/runtimeevent"
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
 
 	approvalmodel "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
@@ -46,5 +49,46 @@ func TestWebApprovalGetterPublishesScopedOwnerCommand(t *testing.T) {
 	}
 	if captured.RunID != string(runID) || captured.Payload[events.PayloadKeyRunID] != string(runID) {
 		t.Fatalf("run scope = envelope %q payload %q, want %q", captured.RunID, captured.Payload[events.PayloadKeyRunID], runID)
+	}
+}
+
+func TestWebModuleQueuesRuntimeExecution(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMagicHub()
+	defer hub.Terminate(ctx)
+	background := magictask.NewBackgroundRoutine(2)
+	defer background.Shutdown(ctx)
+
+	module := New()
+	if err := module.Configure(Dependencies{EventHub: hub, Background: background}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer module.Stop(ctx)
+
+	err := hub.Publish(ctx, events.Envelope{
+		Topic:       runtimeevent.RuntimeBlockExecuteTopic(StepKindSearch),
+		WorkspaceID: "ws-web-queue",
+		RunID:       "run-web-queue",
+		StepID:      "run-web-queue/step-1",
+		Payload: map[string]any{
+			events.PayloadKeyRuntimeRequestID: "web-queue-request",
+			events.PayloadKeyRuntimeRequest: runtimemodel.StepExecutionRequest{
+				WorkspaceID: "ws-web-queue",
+				RunID:       "run-web-queue",
+				StepID:      "run-web-queue/step-1",
+				Kind:        StepKindSearch,
+				Input:       map[string]any{"query": "workorch"},
+			},
+		},
+	})
+	response, ok := events.ResponseEnvelope(err)
+	if !ok {
+		t.Fatalf("runtime command err = %v, want accepted response", err)
+	}
+	if _, ok := response.Payload[events.PayloadKeyRuntimeAccepted].(runtimemodel.RuntimeStepExecutionAccepted); !ok {
+		t.Fatalf("accepted payload missing: %#v", response.Payload)
 	}
 }

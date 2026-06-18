@@ -377,13 +377,13 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 		t,
 		"http://"+firstAddr+"/api/v1/workorch/workspaces/"+decisionWorkspaceID+"/runs/"+decisionRunID+"/status",
 		decisionRunID,
-		"blocked_on_decision with renewed blocking decision",
+		"blocked_on_decision with original config dependency decision reopened",
 		func(body workorchRunStatusResponse) bool {
 			return body.Status.State == "blocked_on_decision" &&
-				body.Status.BlockingTicketID != "" &&
-				body.Status.BlockingTicketID != blockedDecisionID
+				body.Status.BlockingTicketID == blockedDecisionID
 		},
 	)
+	waitForDecisionState(t, "http://"+firstAddr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "open")
 
 	approvalWorkspaceID := createWorkspace(t, "http://"+firstAddr+"/api/v1/workorch/workspaces", "restart approval file workspace")
 	assertWorkspaceLayoutDirectories(t, dataDir, approvalWorkspaceID)
@@ -413,10 +413,10 @@ func TestWorkorchServerModeRetainsFileBackedTerminalStateAcrossRestart(t *testin
 	assertRunAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+decisionWorkspaceID+"/runs/"+decisionRunID, decisionRunID, decisionWorkspaceID, "blocked_on_decision")
 	assertRunSnapshotAvailableWithState(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+decisionWorkspaceID+"/runs/"+decisionRunID+"/snapshot", decisionRunID, decisionWorkspaceID, "blocked_on_decision")
 	restartedDecisionStatus := assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+decisionWorkspaceID+"/runs/"+decisionRunID+"/status", decisionRunID, "blocked_on_decision")
-	if restartedDecisionStatus.Status.BlockingTicketID == "" || restartedDecisionStatus.Status.BlockingTicketID == blockedDecisionID {
-		t.Fatalf("restarted decision run status = %+v, want renewed blocking decision", restartedDecisionStatus.Status)
+	if restartedDecisionStatus.Status.BlockingTicketID != blockedDecisionID {
+		t.Fatalf("restarted decision run status = %+v, want original config dependency decision reopened", restartedDecisionStatus.Status)
 	}
-	assertDecisionAvailable(t, "http://"+secondAddr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "resolved")
+	waitForDecisionState(t, "http://"+secondAddr+"/api/v1/workorch/decisions/"+blockedDecisionID, blockedDecisionID, "open")
 
 	failedStatus := assertRunStatusAvailable(t, "http://"+secondAddr+"/api/v1/workorch/workspaces/"+approvalWorkspaceID+"/runs/"+approvalRunID+"/status", approvalRunID, "failed")
 	if failedStatus.Status.FailureReason == "" {
@@ -1103,6 +1103,39 @@ func assertDecisionAvailable(t *testing.T, endpoint string, ticketID string, exp
 		t.Fatalf("decision = %+v, want %s/%s", body.Decision, ticketID, expectedState)
 	}
 	return body
+}
+
+func waitForDecisionState(t *testing.T, endpoint string, ticketID string, expectedState string) workorchDecisionResponse {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var last workorchDecisionResponse
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			lastErr = err
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		var body workorchDecisionResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && decodeErr == nil {
+			last = body
+			if body.Decision.ID == ticketID && body.Decision.State == expectedState {
+				return body
+			}
+		} else if decodeErr != nil {
+			lastErr = decodeErr
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatalf("decision %s did not reach %s: last error %v", ticketID, expectedState, lastErr)
+	}
+	t.Fatalf("decision = %+v, want %s/%s", last.Decision, ticketID, expectedState)
+	return last
 }
 
 func assertDecisionResolveAvailable(t *testing.T, endpoint string, ticketID string, resolutionType string) workorchDecisionResponse {
