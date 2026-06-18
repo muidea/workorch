@@ -45,3 +45,21 @@ func ListStepsByRunOwnerCommand(ctx context.Context, hub events.Hub, runID commo
 	}
 	return items, nil
 }
+
+func ListStepSummariesByRunOwnerCommand(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
+	if hub == nil || runID == "" {
+		return nil, common.ErrInvalidArgument
+	}
+	workspaceID := workspaceScopeFromContext(ctx)
+	response, err := PublishCommandWithResponse(ctx, hub, runevents.TopicRunCommandListStepSummariesByRun, "run", string(runID), workspaceID, runID, payloadWithWorkspaceScope(map[string]any{
+		events.PayloadKeyRunID: string(runID),
+	}, workspaceID))
+	if err != nil {
+		return nil, err
+	}
+	items, ok := response.Payload[events.PayloadKeySteps].([]*runmodel.Step)
+	if !ok {
+		return nil, common.ErrInvalidArgument
+	}
+	return items, nil
+}

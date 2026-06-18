@@ -339,7 +339,8 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 					return errors.Join(o.failRunningResume(ctx, r.ID, specErr), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 				}
 				if len(specs) == 0 {
-					return err
+					cause := fmt.Errorf("%w: running run has no recoverable active step or continuation", common.ErrConflict)
+					return errors.Join(o.failRunningResume(ctx, r.ID, cause), o.reconcileWorkspaceActiveRun(ctx, r.WorkspaceID))
 				}
 			}
 			r.State = common.RunStateRunning

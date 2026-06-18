@@ -53,6 +53,38 @@ func TestConfigOnlyDependencyResolutionStillBlockedRequiresRecoveryEvidence(t *t
 	}
 }
 
+func TestRunningTerminalStepRecoverySpecsAllowsCompletedStepContinuation(t *testing.T) {
+	ctx := context.Background()
+	steps := memory.NewStepRepository()
+	runID := common.RunID("run-completed-terminal-continuation")
+	run := &runmodel.Run{ID: runID, State: common.RunStateRunning}
+	step := &runmodel.Step{
+		ID:    common.StepID(runID + "/step-1"),
+		RunID: runID,
+		State: common.StepStateCompleted,
+	}
+	if err := steps.Create(ctx, step); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+
+	called := false
+	specs, err := runningTerminalStepRecoverySpecs(ctx, steps, func(context.Context, *runmodel.Run) ([]stepDispatchSpec, bool, error) {
+		return nil, false, nil
+	}, func(_ context.Context, gotRun *runmodel.Run, gotStep *runmodel.Step) ([]stepDispatchSpec, error) {
+		called = true
+		if gotRun.ID != runID || gotStep.ID != step.ID {
+			t.Fatalf("continuation args run=%q step=%q, want %q %q", gotRun.ID, gotStep.ID, runID, step.ID)
+		}
+		return []stepDispatchSpec{{ID: common.StepID(runID + "/step-2"), Kind: "llm/workspace_execution"}}, nil
+	}, run)
+	if err != nil {
+		t.Fatalf("runningTerminalStepRecoverySpecs: %v", err)
+	}
+	if !called || len(specs) != 1 || specs[0].ID != common.StepID(runID+"/step-2") {
+		t.Fatalf("specs=%+v called=%v, want completed step continuation", specs, called)
+	}
+}
+
 func (r *listFailingStepRepository) Create(ctx context.Context, item *runmodel.Step) error {
 	return r.inner.Create(ctx, item)
 }

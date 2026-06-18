@@ -36,7 +36,9 @@ func runningTerminalStepRecoverySpecs(
 	if last == nil {
 		return nil, nil
 	}
-	if last.State != common.StepStateFailed && last.State != common.StepStateDispatched {
+	if last.State != common.StepStateCompleted &&
+		last.State != common.StepStateFailed &&
+		last.State != common.StepStateDispatched {
 		return nil, nil
 	}
 	return nextFromStep(ctx, run, last)

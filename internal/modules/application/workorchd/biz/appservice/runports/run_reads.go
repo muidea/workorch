@@ -28,6 +28,10 @@ func ListStepsByRun(ctx context.Context, hub events.Hub, runID common.RunID) ([]
 	return ownerreadports.ListStepsByRunOwnerCommand(ctx, hub, runID)
 }
 
+func ListStepSummariesByRun(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.Step, error) {
+	return ownerreadports.ListStepSummariesByRunOwnerCommand(ctx, hub, runID)
+}
+
 func ListRuntimeCheckpointsByRun(ctx context.Context, hub events.Hub, runID common.RunID) ([]*runmodel.RuntimeCheckpoint, error) {
 	return ownerreadports.ListRuntimeCheckpointsByRunOwnerCommand(ctx, hub, runID)
 }

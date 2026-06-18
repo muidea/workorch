@@ -88,6 +88,18 @@ func TestOwnerReadCommandsCarryWorkspaceScopeInEnvelopeAndPayload(t *testing.T) 
 			},
 		},
 		{
+			name:      "step summaries by run",
+			topic:     runevents.TopicRunCommandListStepSummariesByRun,
+			wantRunID: string(runID),
+			responsePayload: map[string]any{
+				events.PayloadKeySteps: []*runmodel.Step{},
+			},
+			invoke: func(ctx context.Context, hub events.Hub) error {
+				_, err := ListStepSummariesByRunOwnerCommand(ctx, hub, runID)
+				return err
+			},
+		},
+		{
 			name:      "checkpoints by run",
 			topic:     runevents.TopicRunCommandListCheckpointsByRun,
 			wantRunID: string(runID),

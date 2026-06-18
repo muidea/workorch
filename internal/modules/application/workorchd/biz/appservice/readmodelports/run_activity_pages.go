@@ -16,7 +16,7 @@ func ReadRunStepsPage(ctx context.Context, hub events.Hub, query readmodelcore.S
 	if err != nil {
 		return readmodelcore.StepPage{}, err
 	}
-	items, err := ownerreadports.ListStepsByRunOwnerCommand(ctx, hub, runID)
+	items, err := ownerreadports.ListStepSummariesByRunOwnerCommand(ctx, hub, runID)
 	if err != nil {
 		return readmodelcore.StepPage{}, err
 	}

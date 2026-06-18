@@ -149,7 +149,7 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 			},
 		})
 	})
-	hub.Subscribe(runevents.TopicRunCommandListStepsByRun, func(_ context.Context, envelope events.Envelope) error {
+	stepListHandler := func(_ context.Context, envelope events.Envelope) error {
 		if envelope.WorkspaceID != string(workspaceID) {
 			t.Fatalf("step list envelope workspace = %q, want %s", envelope.WorkspaceID, workspaceID)
 		}
@@ -162,7 +162,9 @@ func TestRecoveryCandidateReadsRunScopedItemsWithWorkspaceScope(t *testing.T) {
 				events.PayloadKeySteps: []*runmodel.Step{{ID: "run-recovery-candidate-scope/root", RunID: runID, State: common.StepStateCompleted}},
 			},
 		})
-	})
+	}
+	hub.Subscribe(runevents.TopicRunCommandListStepsByRun, stepListHandler)
+	hub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, stepListHandler)
 	run := &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}
 
 	if !IsStuckRunningRunCandidate(ctx, hub, run) {

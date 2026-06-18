@@ -18,6 +18,7 @@ func Contracts() []eventcontract.Contract {
 		TopicRunCommandListByWorkspace,
 		TopicRunCommandGetStep,
 		TopicRunCommandListStepsByRun,
+		TopicRunCommandListStepSummariesByRun,
 		TopicRunCommandGetRuntimeCheckpoint,
 		TopicRunCommandListCheckpointsByRun,
 	)...)

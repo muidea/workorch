@@ -25,7 +25,7 @@ func TerminalStepForRunningRun(ctx context.Context, hub events.Hub, item *runmod
 		return nil, nil
 	}
 	ctx = contextWithRunWorkspace(ctx, item)
-	runSteps, err := ListStepsByRun(ctx, hub, item.ID)
+	runSteps, err := ListStepSummariesByRun(ctx, hub, item.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -96,6 +96,9 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 			if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
 				slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
 			}
+			if err := s.recoverStuckRunningRunsOnly(ctx); err != nil {
+				slog.Warn("workorch periodic stuck running run recovery failed", "err", err)
+			}
 			if err := s.recoverStaleDispatchedRuns(ctx); err != nil {
 				slog.Warn("workorch stale dispatched run recovery failed", "err", err)
 			}
@@ -110,6 +113,17 @@ func (s *runContinuationScheduler) schedulePeriodicStaleDispatchedRecovery() {
 }
 
 func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) error {
+	if err := s.recoverStuckRunningRunsOnly(ctx); err != nil {
+		return err
+	}
+	if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
+		slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
+	}
+	s.recoverReplanContinuations(ctx)
+	return nil
+}
+
+func (s *runContinuationScheduler) recoverStuckRunningRunsOnly(ctx context.Context) error {
 	if s == nil || s.state == nil {
 		return nil
 	}
@@ -135,10 +149,6 @@ func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) 
 		}
 		slog.Warn("workorch recovered stuck running runs", "runIDs", runIDs)
 	}
-	if err := s.recoverResolvedGovernanceBlockedRuns(ctx); err != nil {
-		slog.Warn("workorch resolved governance blocked run recovery failed", "err", err)
-	}
-	s.recoverReplanContinuations(ctx)
 	return nil
 }
 

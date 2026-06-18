@@ -105,6 +105,7 @@ func (m *Module) Start() error {
 		m.eventHub.Subscribe(runevents.TopicRunCommandListByWorkspace, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandGetStep, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandListStepsByRun, m.handleRunQueryCommand),
+		m.eventHub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandGetRuntimeCheckpoint, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, m.handleRunQueryCommand),
 		m.eventHub.Subscribe(runevents.TopicRunCommandUpdate, m.handleRunQueryCommand),
@@ -253,6 +254,25 @@ func (m *Module) handleRunQueryCommand(ctx context.Context, envelope events.Enve
 			return err
 		}
 		items, err := m.steps.ListByRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		return runCommandResponse(envelope, map[string]any{events.PayloadKeySteps: items})
+	case runevents.TopicRunCommandListStepSummariesByRun:
+		if m.steps == nil {
+			return common.ErrInvalidArgument
+		}
+		runID := common.RunID(stringPayload(envelope.Payload, events.PayloadKeyRunID))
+		if runID == "" {
+			runID = common.RunID(envelope.RunID)
+		}
+		if runID == "" {
+			return common.ErrInvalidArgument
+		}
+		if err := m.validateRunReadScope(ctx, runID, runScopedWorkspaceID(envelope)); err != nil {
+			return err
+		}
+		items, err := m.steps.ListByRunSummary(ctx, runID)
 		if err != nil {
 			return err
 		}
