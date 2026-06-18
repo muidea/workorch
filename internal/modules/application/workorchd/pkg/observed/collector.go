@@ -13,6 +13,8 @@ type Collector struct {
 	unsubscribers []func()
 }
 
+const maxCollectedWorkorchEvents = 256
+
 func NewCollector(hub events.Hub) *Collector {
 	collector := &Collector{}
 	if hub == nil {
@@ -23,6 +25,10 @@ func NewCollector(hub events.Hub) *Collector {
 		collector.mu.Lock()
 		defer collector.mu.Unlock()
 		collector.published = append(collector.published, cloneWorkorchEvent(event))
+		if len(collector.published) > maxCollectedWorkorchEvents {
+			copy(collector.published, collector.published[len(collector.published)-maxCollectedWorkorchEvents:])
+			collector.published = collector.published[:maxCollectedWorkorchEvents]
+		}
 		return nil
 	})
 	return collector

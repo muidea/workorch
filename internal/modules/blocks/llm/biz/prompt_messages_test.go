@@ -624,6 +624,7 @@ func TestRepairActionPackagePromptSectionBoundsDuplicatedDynamicContext(t *testi
 	for idx := 0; idx < 20; idx++ {
 		coverageItems = append(coverageItems, map[string]any{
 			"id":                   fmt.Sprintf("cwi-%03d", idx),
+			"coverageTargetToken":  fmt.Sprintf("coverage-token-%03d", idx),
 			"targetText":           strings.Repeat("coverage target ", 120),
 			"acceptedEvidenceRefs": []string{fmt.Sprintf("run/step/%03d", idx), fmt.Sprintf("run/step/%03d/validation", idx)},
 			"currentGap":           strings.Repeat("gap ", 120),
@@ -658,6 +659,9 @@ func TestRepairActionPackagePromptSectionBoundsDuplicatedDynamicContext(t *testi
 	}
 	if !strings.Contains(encoded, "workspaceFileManifestSummary") || !strings.Contains(encoded, "coverageWorkItemContextRef") {
 		t.Fatalf("repair action package missing bounded refs: %s", encoded)
+	}
+	if !strings.Contains(encoded, `"coverageTargetToken":"coverage-token-000"`) {
+		t.Fatalf("repair action package missing copyable coverageTargetToken: %s", encoded)
 	}
 }
 

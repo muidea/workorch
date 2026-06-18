@@ -77,9 +77,55 @@ func redactProviderMap(path string, input map[string]any, paths *[]string) map[s
 		return nil
 	}
 	redacted := common.RedactSensitiveMap(input)
+	restoreProviderContractIdentifiers(input, redacted)
 	restoreSafeProviderRepairSnapshotContents(path, input, redacted)
 	collectRedactionPaths(path, input, redacted, paths)
 	return redacted
+}
+
+func restoreProviderContractIdentifiers(original map[string]any, redacted map[string]any) {
+	if len(original) == 0 || len(redacted) == 0 {
+		return
+	}
+	for key, value := range original {
+		redactedValue, ok := redacted[key]
+		if !ok {
+			continue
+		}
+		if providerContractIdentifierKey(key) {
+			redacted[key] = value
+			continue
+		}
+		originalMap := mapFromAny(value)
+		redactedMap := mapFromAny(redactedValue)
+		if len(originalMap) > 0 && len(redactedMap) > 0 {
+			restoreProviderContractIdentifiers(originalMap, redactedMap)
+			redacted[key] = redactedMap
+			continue
+		}
+		originalItems := mapSliceFromAny(value)
+		redactedItems := mapSliceFromAny(redactedValue)
+		if len(originalItems) > 0 && len(redactedItems) > 0 {
+			for idx := range originalItems {
+				if idx >= len(redactedItems) {
+					break
+				}
+				restoreProviderContractIdentifiers(originalItems[idx], redactedItems[idx])
+			}
+			redacted[key] = redactedItems
+		}
+	}
+}
+
+func providerContractIdentifierKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(normalized)
+	switch normalized {
+	case "coveragetargettoken":
+		return true
+	default:
+		return false
+	}
 }
 
 func restoreSafeProviderRepairSnapshotContents(path string, original map[string]any, redacted map[string]any) {

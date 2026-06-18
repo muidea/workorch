@@ -1158,6 +1158,7 @@ func compactCoverageTargetSetForPrompt(targets []map[string]any, limit int) []ma
 		item := map[string]any{}
 		for _, key := range []string{
 			"id",
+			"coverageTargetToken",
 			"source",
 			"sourceScope",
 			"sourceRequirementId",

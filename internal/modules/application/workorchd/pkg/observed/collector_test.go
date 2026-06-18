@@ -2,6 +2,7 @@ package observed
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	approvalevents "github.com/muidea/workorch/internal/modules/kernel/approval/pkg/events"
@@ -148,5 +149,33 @@ func TestCollectorPublishedWorkorchEventsReturnsDeepClonedPayloads(t *testing.T)
 	secondOutput := second[0].Envelope().Payload[events.PayloadKeyOutput].(map[string]any)
 	if secondOutput["status"] != "completed" {
 		t.Fatalf("status = %v, want completed", secondOutput["status"])
+	}
+}
+
+func TestCollectorKeepsBoundedRecentEvents(t *testing.T) {
+	hub := events.NewMemoryHub()
+	collector := NewCollector(hub)
+	defer collector.Close()
+
+	for idx := 0; idx < maxCollectedWorkorchEvents+3; idx++ {
+		runID := "run-bounded-" + strconv.Itoa(idx)
+		if err := hub.Publish(context.Background(), events.Envelope{
+			Version:     events.WorkorchEventVersion,
+			Topic:       runevents.TopicRunStateChanged,
+			SubjectType: "run",
+			SubjectID:   runID,
+			RunID:       runID,
+			Payload:     map[string]any{events.PayloadKeyState: "running"},
+		}); err != nil {
+			t.Fatalf("publish event %d: %v", idx, err)
+		}
+	}
+
+	published := collector.PublishedWorkorchEvents()
+	if len(published) != maxCollectedWorkorchEvents {
+		t.Fatalf("len(published) = %d, want %d", len(published), maxCollectedWorkorchEvents)
+	}
+	if published[0].Envelope().SubjectID != "run-bounded-3" {
+		t.Fatalf("first event = %q, want oldest events evicted", published[0].Envelope().SubjectID)
 	}
 }

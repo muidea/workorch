@@ -1027,6 +1027,53 @@ func TestRedactProviderRequestPreservesOnlySafeRepairSnapshotContent(t *testing.
 	}
 }
 
+func TestRedactProviderRequestPreservesCoverageTargetTokenContractIdentifiers(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		Input: map[string]any{
+			"accessToken": "secret-access-token",
+			"coverageTargetSet": []map[string]any{{
+				"coverageTargetToken": "goal-req-001",
+				"sourceRequirementId": "goal-req-001",
+				"targetText":          "visible goal target",
+			}},
+			"repairActionPackage": map[string]any{
+				"coverageTargetSet": []any{
+					map[string]any{
+						"coverageTargetToken": "version_control_snapshot",
+						"sourceRequirementId": "version_control_snapshot",
+						"targetText":          "version_control_snapshot",
+					},
+				},
+			},
+			"nested": map[string]any{
+				"token":               "plain-secret-token",
+				"coverageTargetToken": "dod-item-001",
+			},
+		},
+	}
+
+	got := redactProviderRequestForLLM(req)
+	if got.Input["accessToken"] != "[REDACTED]" {
+		t.Fatalf("accessToken = %#v, want redacted", got.Input["accessToken"])
+	}
+	targets := mapSliceFromAny(got.Input["coverageTargetSet"])
+	if len(targets) != 1 || targets[0]["coverageTargetToken"] != "goal-req-001" {
+		t.Fatalf("coverageTargetSet = %#v, want coverageTargetToken preserved", got.Input["coverageTargetSet"])
+	}
+	pkg := recordFromAny(got.Input["repairActionPackage"])
+	pkgTargets := mapSliceFromAny(pkg["coverageTargetSet"])
+	if len(pkgTargets) != 1 || pkgTargets[0]["coverageTargetToken"] != "version_control_snapshot" {
+		t.Fatalf("repairActionPackage.coverageTargetSet = %#v, want coverageTargetToken preserved", pkg["coverageTargetSet"])
+	}
+	nested := recordFromAny(got.Input["nested"])
+	if nested["token"] != "[REDACTED]" {
+		t.Fatalf("nested token = %#v, want redacted", nested["token"])
+	}
+	if nested["coverageTargetToken"] != "dod-item-001" {
+		t.Fatalf("nested coverageTargetToken = %#v, want preserved", nested["coverageTargetToken"])
+	}
+}
+
 func TestRedactProviderRequestDoesNotReportSafeSnapshotRedactedForJSONDecodedSlices(t *testing.T) {
 	safeContent := "package main\n\nconst APIKey = \"test-key\"\n"
 	req := llmmodels.ProviderRequest{

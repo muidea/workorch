@@ -341,9 +341,16 @@ Web/TUI 禁止：
 验收：
 
 - 静态检查主视图路径无空 event query。
-- workspace snapshot HTTP endpoint 返回 compact projection：历史 runs 有界、LLM usage trace 有界、run execution context 省略、summary 保持完整。
+- workspace snapshot HTTP endpoint 返回 compact projection：历史 runs 有界、LLM usage trace 有界、LLM context budget 有界、memory recall trace 有界、execution section 有界、context bundle 有界、run execution context 省略、summary 保持完整。
 - TUI 切换 workspace 不触发全局 event scan。
 - Web workspace board refresh 不触发 heavy snapshot fan-out。
+
+2026-06-18 核对补充：
+
+- deployed instance 显示 projection ready、pending rebuild 为 0、run queue 为 0，但两个 workspace 已处于 terminal failed，说明当前不是 projection lag 或 active runtime hang。
+- heap pprof 显示主要驻留来自 workspace detail projection、observed event collector、file step full-run cache 和 presenter/resource map clone。
+- `observed.Collector` 不能在生产期无界保存所有 WorkOrch event；只能保留最近窗口，完整审计以 eventstream owner repository 为准。
+- `workspaceviewcore.Store` 常驻的是服务端 ViewModel projection，不应承担完整审计明细缓存；detail projection 必须保持 compact，raw context/event/observability 通过显式 endpoint 按需读取。
 
 ### Phase 3: Projection Index And Backpressure
 
@@ -456,6 +463,7 @@ rg "ListProjectedWorkspaces|Snapshot|ListEvents" internal/modules/application in
 - `internal/modules/application/workorchd/biz/appservice/readmodelports`
 - `internal/modules/application/workorchd/biz/appservice/readmodelprojection`
 - `internal/modules/application/workorchd/biz/appservice/workspaceviewcore`
+- `internal/modules/application/workorchd/pkg/observed`
 - `internal/modules/application/workorchd/service/server`
 - `internal/services/workorch/biz/backends`
 - `internal/services/workorch/service/tui`
@@ -468,7 +476,7 @@ rg "ListProjectedWorkspaces|Snapshot|ListEvents" internal/modules/application in
 - [x] Event list default is metadata-only.
 - [x] Payload hydration is opt-in and scope-bound.
 - [ ] Workspace list reads projection, not global event history.
-- [x] Workspace detail projection is compact by default.
+- [x] Workspace detail projection is compact by default, including run history, LLM usage, LLM context budget, memory recall, execution sections and context bundle.
 - [ ] TUI prompt/status/main view are projection-driven.
 - [ ] Web board/detail are projection-driven.
 - [ ] Watchdog uses compact state only.
