@@ -17,7 +17,24 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func recoverableRuntimePolicyForTest() map[string]any {
+	return runtimemodel.RuntimeRecoveryPolicy{
+		SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+		IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+		WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+	}.ToMap()
+}
+
+func nonIdempotentRuntimePolicyForTest() map[string]any {
+	return runtimemodel.RuntimeRecoveryPolicy{
+		SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalWrite,
+		IdempotencyPolicy: runtimemodel.IdempotencyPolicyNonIdempotent,
+		WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+	}.ToMap()
+}
 
 func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 	ctx := context.Background()
@@ -306,7 +323,7 @@ func TestRecoverOrphanDispatchedStepUsesInjectedResume(t *testing.T) {
 	}
 }
 
-func TestRecoverStaleOrphanDispatchedStepRequiresOldCheckpoint(t *testing.T) {
+func TestRecoverStaleOrphanDispatchedStepSkipsRequestNotAcceptedGap(t *testing.T) {
 	ctx := context.Background()
 	runtime := bootstrap.NewWithBackend("memory", "")
 	t.Cleanup(func() {
@@ -365,8 +382,8 @@ func TestRecoverStaleOrphanDispatchedStepRequiresOldCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecoverStaleOrphanDispatchedStep old: %v", err)
 	}
-	if !changed || recovered == nil || recovered.ID != stepID || resumeCalls != 1 {
-		t.Fatalf("old checkpoint recovered=%+v changed=%v resumeCalls=%d, want stale recovery", recovered, changed, resumeCalls)
+	if changed || recovered != nil || resumeCalls != 0 {
+		t.Fatalf("request-not-accepted recovered=%+v changed=%v resumeCalls=%d, want diagnostic-only no recovery", recovered, changed, resumeCalls)
 	}
 }
 
@@ -522,6 +539,75 @@ func TestRecoverStaleRuntimeGapRunViewsUsesGapSpecificRecovery(t *testing.T) {
 		got.LatestStepTime != "2026-06-09T08:01:00Z" {
 		t.Fatalf("gap recovery = %+v, want terminal-not-finalized metadata", got)
 	}
+	if got.RecoverySafety != "terminal_result_evidence" {
+		t.Fatalf("gap recovery safety = %q, want terminal_result_evidence", got.RecoverySafety)
+	}
+}
+
+func TestRecoverStaleRuntimeGapRunViewsNoEligibleGapUsesBoundedReads(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	workspaceID := common.WorkspaceID("ws-stale-gap-bounded-reads")
+	runID := common.RunID("run-stale-gap-bounded-reads")
+	stepID := common.StepID("run-stale-gap-bounded-reads/root")
+	listRunsCalls := 0
+	stepSummaryCalls := 0
+	checkpointCalls := 0
+	readRunCalls := 0
+	recoverCalls := 0
+
+	hub.Subscribe(runevents.TopicRunCommandList, func(_ context.Context, envelope events.Envelope) error {
+		listRunsCalls++
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeyRuns: []*runmodel.Run{{
+					ID:          runID,
+					WorkspaceID: workspaceID,
+					State:       common.RunStateRunning,
+				}},
+			},
+		})
+	})
+	hub.Subscribe(runevents.TopicRunCommandListStepSummariesByRun, func(_ context.Context, envelope events.Envelope) error {
+		stepSummaryCalls++
+		if envelope.WorkspaceID != string(workspaceID) || envelope.RunID != string(runID) {
+			t.Fatalf("step summary envelope scope = workspace %q run %q, want %s/%s", envelope.WorkspaceID, envelope.RunID, workspaceID, runID)
+		}
+		return events.Response(events.Envelope{
+			Topic: envelope.Topic + "/response",
+			Payload: map[string]any{
+				events.PayloadKeySteps: []*runmodel.Step{{
+					ID:    stepID,
+					RunID: runID,
+					State: common.StepStateCompleted,
+				}},
+			},
+		})
+	})
+	hub.Subscribe(runevents.TopicRunCommandListCheckpointsByRun, func(_ context.Context, envelope events.Envelope) error {
+		checkpointCalls++
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyCheckpoints: []*runmodel.RuntimeCheckpoint{}}})
+	})
+	hub.Subscribe(runevents.TopicRunCommandGet, func(_ context.Context, envelope events.Envelope) error {
+		readRunCalls++
+		return events.Response(events.Envelope{Topic: envelope.Topic + "/response", Payload: map[string]any{events.PayloadKeyRun: &runmodel.Run{ID: runID, WorkspaceID: workspaceID}}})
+	})
+
+	now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+	items, err := RecoverStaleRuntimeGapRunViews(ctx, hub, func(context.Context, *runmodel.Run, RuntimeGapRecovery) error {
+		recoverCalls++
+		return nil
+	}, 10*time.Minute, now)
+	if err != nil {
+		t.Fatalf("RecoverStaleRuntimeGapRunViews: %v", err)
+	}
+	if len(items) != 0 || recoverCalls != 0 {
+		t.Fatalf("items=%+v recoverCalls=%d, want no recovery for non-dispatched terminal step", items, recoverCalls)
+	}
+	if listRunsCalls != 1 || stepSummaryCalls != 1 || checkpointCalls != 0 || readRunCalls != 0 {
+		t.Fatalf("read calls list=%d summaries=%d checkpoints=%d readRun=%d, want bounded no-gap reads 1/1/0/0", listRunsCalls, stepSummaryCalls, checkpointCalls, readRunCalls)
+	}
 }
 
 func TestRecoverStaleOrphanDispatchedStepSkipsRuntimeDoneWithoutTerminalResult(t *testing.T) {
@@ -662,6 +748,101 @@ func TestRecoverStaleOrphanDispatchedStepSkipsAcceptedWithoutWorkerLostEvidence(
 	}
 }
 
+func TestRecoverStaleOrphanDispatchedStepSkipsNonIdempotentRuntimeGap(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		event     string
+		extraData map[string]any
+	}{
+		{
+			name:      "worker-lost",
+			event:     "runtime_worker_lost",
+			extraData: map[string]any{"workerId": "runtimeevent|request-non-idempotent", "lostAt": "2026-06-09T08:03:00Z"},
+		},
+		{
+			name:      "accepted-in-progress",
+			event:     "runtime_worker_heartbeat",
+			extraData: map[string]any{"workerId": "runtimeevent|request-non-idempotent", "heartbeatAt": "2026-06-09T08:03:00Z"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtime := bootstrap.NewWithBackend("memory", "")
+			t.Cleanup(func() {
+				if err := runtime.Shutdown(context.Background()); err != nil {
+					t.Errorf("shutdown runtime: %v", err)
+				}
+			})
+			exports := runtime.Exports()
+			runID := common.RunID("run-stale-non-idempotent-" + tc.name)
+			workspaceID := common.WorkspaceID("ws-stale-non-idempotent-" + tc.name)
+			stepID := common.StepID(string(runID) + "/provider-retry-001")
+			run := &runmodel.Run{
+				ID:          runID,
+				WorkspaceID: workspaceID,
+				State:       common.RunStateRunning,
+			}
+			if err := exports.Repositories.Runs.Create(ctx, run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{
+				ID:    stepID,
+				RunID: runID,
+				Kind:  "llm/workspace_execution",
+				State: common.StepStateDispatched,
+			}); err != nil {
+				t.Fatalf("seed dispatched step: %v", err)
+			}
+			if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+				ID:            common.CheckpointID(string(runID) + "/checkpoint/accepted"),
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-09T08:00:00Z",
+				Data: map[string]any{
+					"event":                 "runtime_execute_accepted",
+					"requestId":             "request-non-idempotent",
+					"acceptedAt":            "2026-06-09T08:00:00Z",
+					"runtimeRecoveryPolicy": nonIdempotentRuntimePolicyForTest(),
+				},
+			}); err != nil {
+				t.Fatalf("seed accepted checkpoint: %v", err)
+			}
+			data := map[string]any{
+				"event":                 tc.event,
+				"requestId":             "request-non-idempotent",
+				"runtimeRecoveryPolicy": nonIdempotentRuntimePolicyForTest(),
+			}
+			for key, value := range tc.extraData {
+				data[key] = value
+			}
+			if err := exports.Repositories.RuntimeCheckpoints.Create(ctx, &runmodel.RuntimeCheckpoint{
+				ID:            common.CheckpointID(string(runID) + "/checkpoint/gap"),
+				WorkspaceID:   workspaceID,
+				RunID:         runID,
+				CurrentStepID: stepID,
+				OccurredAt:    "2026-06-09T08:03:00Z",
+				Data:          data,
+			}); err != nil {
+				t.Fatalf("seed gap checkpoint: %v", err)
+			}
+
+			now, _ := time.Parse(time.RFC3339Nano, "2026-06-09T08:30:00Z")
+			resumeCalls := 0
+			recovered, changed, err := RecoverStaleOrphanDispatchedStep(ctx, exports.Infrastructure.EventHub, run, 4, func(context.Context, *runmodel.Run) error {
+				resumeCalls++
+				return nil
+			}, 10*time.Minute, now)
+			if err != nil {
+				t.Fatalf("RecoverStaleOrphanDispatchedStep: %v", err)
+			}
+			if changed || recovered != nil || resumeCalls != 0 {
+				t.Fatalf("non-idempotent gap recovered=%+v changed=%v resumeCalls=%d, want no automatic recovery", recovered, changed, resumeCalls)
+			}
+		})
+	}
+}
+
 func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 	ctx := context.Background()
 	runtime := bootstrap.NewWithBackend("memory", "")
@@ -697,9 +878,10 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 		CurrentStepID: stepID,
 		OccurredAt:    "2026-06-09T08:00:00Z",
 		Data: map[string]any{
-			"event":      "runtime_execute_accepted",
-			"requestId":  "request-worker-lost-gap",
-			"acceptedAt": "2026-06-09T08:00:00Z",
+			"event":                 "runtime_execute_accepted",
+			"requestId":             "request-worker-lost-gap",
+			"acceptedAt":            "2026-06-09T08:00:00Z",
+			"runtimeRecoveryPolicy": recoverableRuntimePolicyForTest(),
 		},
 	}); err != nil {
 		t.Fatalf("seed accepted checkpoint: %v", err)
@@ -711,10 +893,11 @@ func TestRecoverStaleOrphanDispatchedStepResumesWorkerLostGap(t *testing.T) {
 		CurrentStepID: stepID,
 		OccurredAt:    "2026-06-09T08:03:00Z",
 		Data: map[string]any{
-			"event":     "runtime_worker_lost",
-			"requestId": "request-worker-lost-gap",
-			"workerId":  "runtimeevent|request-worker-lost-gap",
-			"lostAt":    "2026-06-09T08:03:00Z",
+			"event":                 "runtime_worker_lost",
+			"requestId":             "request-worker-lost-gap",
+			"workerId":              "runtimeevent|request-worker-lost-gap",
+			"lostAt":                "2026-06-09T08:03:00Z",
+			"runtimeRecoveryPolicy": recoverableRuntimePolicyForTest(),
 		},
 	}); err != nil {
 		t.Fatalf("seed worker lost checkpoint: %v", err)
@@ -769,9 +952,10 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 		CurrentStepID: stepID,
 		OccurredAt:    "2026-06-09T08:00:00Z",
 		Data: map[string]any{
-			"event":      "runtime_execute_accepted",
-			"requestId":  "request-worker-heartbeat-gap",
-			"acceptedAt": "2026-06-09T08:00:00Z",
+			"event":                 "runtime_execute_accepted",
+			"requestId":             "request-worker-heartbeat-gap",
+			"acceptedAt":            "2026-06-09T08:00:00Z",
+			"runtimeRecoveryPolicy": recoverableRuntimePolicyForTest(),
 		},
 	}); err != nil {
 		t.Fatalf("seed accepted checkpoint: %v", err)
@@ -783,10 +967,11 @@ func TestRecoverStaleOrphanDispatchedStepResumesStaleWorkerHeartbeatGap(t *testi
 		CurrentStepID: stepID,
 		OccurredAt:    "2026-06-09T08:03:00Z",
 		Data: map[string]any{
-			"event":       "runtime_worker_heartbeat",
-			"requestId":   "request-worker-heartbeat-gap",
-			"workerId":    "runtimeevent|request-worker-heartbeat-gap",
-			"heartbeatAt": "2026-06-09T08:03:00Z",
+			"event":                 "runtime_worker_heartbeat",
+			"requestId":             "request-worker-heartbeat-gap",
+			"workerId":              "runtimeevent|request-worker-heartbeat-gap",
+			"heartbeatAt":           "2026-06-09T08:03:00Z",
+			"runtimeRecoveryPolicy": recoverableRuntimePolicyForTest(),
 		},
 	}); err != nil {
 		t.Fatalf("seed heartbeat checkpoint: %v", err)

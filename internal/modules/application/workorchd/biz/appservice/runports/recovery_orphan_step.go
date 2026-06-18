@@ -10,6 +10,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type ResumeRunFunc func(context.Context, *runmodel.Run) error
@@ -24,6 +25,8 @@ type RuntimeGapRecovery struct {
 	RequestID      string
 	QueueKey       string
 	LatestStepTime string
+	RecoveryPolicy runtimemodel.RuntimeRecoveryPolicy
+	RecoverySafety string
 	Reason         string
 }
 

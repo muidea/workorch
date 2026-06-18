@@ -10,6 +10,7 @@ type StepExecutionRequest struct {
 	StepID                        common.StepID
 	Kind                          string
 	Input                         map[string]any
+	RecoveryPolicy                RuntimeRecoveryPolicy
 	Progress                      StepExecutionProgressFunc
 }
 

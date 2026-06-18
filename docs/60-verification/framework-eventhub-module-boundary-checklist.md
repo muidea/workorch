@@ -135,6 +135,9 @@ Last Updated: 2026-06-08
 - 事件 handler 不应做长耗时工作；若需要 resume、recovery、batch scan，应转交 scheduler/background task。
 - 所有 `Subscribe` 返回的 unsubscribe 必须在 `Stop` / `Teardown` / `Shutdown` 中调用。
 - command topic 必须使用同步 `Publish`/`Send` 路径，并要求收到 `events.Response`；无 response 视为装配或生命周期错误。
+- 对会触发后台长任务的 command，accepted 只能在 owner 快速校验通过且 work item 已成功提交到受管 `BackgroundRoutine` 后返回；后台提交失败、缺 subscriber、缺 response 或 response 类型不对都必须作为 non-accepted error 暴露。
+- Runtime block execute observer 必须先保证 accepted notification 可发布，再释放 worker 进入外部执行边界；completed/failed terminal event 发布失败不得先写本地 terminal replay 状态。
+- Watchdog recovery 只能消费结构化 runtime checkpoint 和 `RuntimeRecoveryPolicy`；`request_not_accepted`、owner command/result failure、projection failure 或 runtime notification 发布失败都是主路径缺陷，不得由 periodic watchdog 静默补偿。
 
 ## BackgroundRoutine Verification Rules
 
@@ -551,14 +554,14 @@ Last Updated: 2026-06-08
 - Code: `internal/modules/application/workorchd/service/server`
 - Owner layer: Application HTTP service
 - Expected responsibility: 接收 framework 注入的 `event.Hub` / `BackgroundRoutine`，在 `Startup` 完成接线和校验，在 `Run` 启动 listener，在 `Shutdown` 关闭 listener 并等待退出。
-- Current responsibility: HTTP handler、validation、response、SSE；periodic stale runtime gap watchdog / manual governance resume / manual replan continuation 调度已由 `runContinuationScheduler` 收敛，snapshot cache warm 仍作为 read-model cache helper 使用同一 background scheduler。
+- Current responsibility: HTTP handler、validation、response、SSE；periodic stale runtime gap watchdog / manual governance resume / manual replan continuation 调度已由 `runContinuationScheduler` 收敛，snapshot cache warm 仍作为 read-model cache helper 使用同一 background scheduler。Workspace activation/restart、run start/resume、governance continuation 和 replan continuation 均通过 scheduler command accepted response 表达提交结果。
 - Lifecycle check: `Startup` 保存 framework `BackgroundRoutine` 并传入 HTTP server；`Run` 通过 `BackgroundRoutine.AsyncFunction` 启动 listener；`Shutdown` cancel serverState context、unsubscribe event handlers、等待后台任务、关闭 shared session。
 - EventHub check: HTTP service 通过 `workorchevents.NewMagicHubWithHubOwner(eventHub, "workorchd/http")` 复用 framework hub；SSE replay 和 governance watcher 订阅在 `close` 中释放。
-- Background task check: 本轮将 `serverState` 的 manual governance resume、manual replan continuation、snapshot cache warm 统一收口到 `scheduleBackground`，框架路径使用 `BackgroundRoutine.AsyncFunction`，仅独立测试/未注入时 fallback 到受 context/WG 管理的 goroutine；watchdog timer 只执行 stale runtime gap recovery 并使用 framework `BackgroundRoutine.Timer`，governance/replan 去重状态已从 `serverState` 字段迁入 `runContinuationScheduler`。
-- State ownership check: HTTP handler 不直接改正式状态；治理 resolve 后只调度 appservice/kernel resume；recovery 状态转换已下沉到 appservice 使用 kernel `RunService.FailRun`。
+- Background task check: 本轮将 `serverState` 的 manual governance resume、manual replan continuation、snapshot cache warm 统一收口到 `scheduleBackground`，框架路径使用 `BackgroundRoutine.AsyncFunction`，仅独立测试/未注入时 fallback 到受 context/WG 管理的 goroutine；watchdog timer 只执行 stale runtime gap recovery 并使用 framework `BackgroundRoutine.Timer`，governance/replan 去重状态已从 `serverState` 字段迁入 `runContinuationScheduler`。Scheduler command handler 入队失败会返回错误并保留 pending，不会在 EventHub lane 内执行长任务。
+- State ownership check: HTTP handler 不直接改正式状态；治理 resolve 后只调度 appservice/kernel resume；recovery 状态转换已下沉到 appservice 使用 kernel `RunService.FailRun`。Periodic watchdog 只恢复具备 durable terminal evidence 或 explicit recoverable runtime policy 的 runtime gap，`request_not_accepted` 仅作为诊断投影。
 - Workspace scope check: governance/read route 将 query workspaceID 绑定到 context；appservice 已补 decision/approval wrong-scope guard；run snapshot cache key 保留 workspace-aware key。
 - Findings: serverState 曾自持服务级后台 goroutine，未接入 framework `BackgroundRoutine`；带 workspaceId 的 governance detail/resolve 曾未被 appservice 实际校验；continuation/recovery 去重状态曾散落在 `serverState`。
-- Required action: 已完成本轮收口并补 background scheduling / wrong-scope regression tests；后续若继续降低 handler 包体积，可将当前 server-local scheduler 作为窄接口传入 appservice recovery use case，但不得绕过 EventHub owner command。
+- Required action: 已完成本轮收口并补 background scheduling / wrong-scope / scheduler enqueue failure / runtime gap policy regression tests；后续若继续降低 handler 包体积，可将当前 server-local scheduler 作为窄接口传入 appservice recovery use case，但不得绕过 EventHub owner command。
 - Verification: `go test ./internal/modules/application/workorchd/service/server -run 'Background|Recovery|Governance|Replan|Resume|RunQueue' -count=1 -timeout=300s`; `go test ./internal/modules/application/workorchd/service/server -count=1 -timeout=300s`
 - Status: reviewed
 

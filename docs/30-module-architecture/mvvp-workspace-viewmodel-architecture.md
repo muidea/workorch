@@ -763,6 +763,7 @@ TUI 允许持有：
 - `transcript`
 - `mainViewport`
 - `lastError`
+- command submission pending/error state
 - 最近一次 active `WorkspaceDetail`
 
 TUI 不允许：
@@ -770,6 +771,7 @@ TUI 不允许：
 - 扫描全部 owner repository
 - 自行组合 run/status/goal/dod/decision/approval/result
 - 以旧 workspace 的异步响应覆盖当前 active workspace
+- 用 command submission pending/error 覆盖 workspace/run 的服务端业务状态
 - 使用固定 interval polling 作为主刷新机制
 
 ### TUI Startup
@@ -796,7 +798,7 @@ TUI 输入只转为 command：
 - approve/reject approval
 - inspect/detail refresh
 
-command 返回后，TUI 不直接假定最终状态；它等待 workorchd projection event 或读取新的 projection revision。
+command 返回后，TUI 不直接假定最终状态；它等待 workorchd projection event 或读取新的 projection revision。提交中、提交失败、HTTP/EventHub command 被拒绝等状态只能显示为端侧 command feedback，不能把当前 workspace/run 改写成 running、failed、decision、submitting 等业务状态。业务状态只来自服务端 projection/detail。
 
 ### TUI Refresh
 

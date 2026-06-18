@@ -299,8 +299,13 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	if err := runRepo.Create(ctx, run); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
+	recoveryPolicy := runtimemodel.RuntimeRecoveryPolicy{
+		SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+		IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+		WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+	}.ToMap()
 
-	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "llm/workspace_execution", map[string]any{"seed": "yes"}, workspace); err != nil {
+	if err := orch.dispatchStepWithWorkspace(ctx, run, stepID, "llm/workspace_execution", map[string]any{"seed": "yes", "runtimeRecoveryPolicy": recoveryPolicy}, workspace); err != nil {
 		t.Fatalf("dispatch step: %v", err)
 	}
 	if runtime.execCalls != 0 {
@@ -311,6 +316,10 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	}
 	if runtime.requests[0].Progress != nil {
 		t.Fatal("async runtime request Progress callback is set, want progress reported via runtime progress event")
+	}
+	if runtime.requests[0].RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
+		runtime.requests[0].RecoveryPolicy.IdempotencyPolicy != runtimemodel.IdempotencyPolicyIdempotent {
+		t.Fatalf("runtime request recovery policy = %+v, want recoverable retry policy", runtime.requests[0].RecoveryPolicy)
 	}
 	step, err := stepRepo.Get(ctx, stepID)
 	if err != nil {
@@ -323,8 +332,14 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	if err != nil {
 		t.Fatalf("list checkpoints: %v", err)
 	}
-	if !hasRuntimeExecuteAcceptedCheckpoint(checkpoints, stepID, "request-only") {
+	acceptedCheckpoint := runtimeExecuteAcceptedCheckpoint(checkpoints, stepID, "request-only")
+	if acceptedCheckpoint == nil {
 		t.Fatalf("checkpoints = %+v, want runtime_execute_accepted for request-only", checkpoints)
+	}
+	checkpointPolicy := mapFromValue(acceptedCheckpoint.Data["runtimeRecoveryPolicy"])
+	if checkpointPolicy["watchdogRecovery"] != runtimemodel.WatchdogRecoveryRetryExternal ||
+		acceptedCheckpoint.Data["recoverySafety"] != "recoverable_idempotent" {
+		t.Fatalf("accepted checkpoint policy/safety = %+v/%v, want recoverable retry policy", checkpointPolicy, acceptedCheckpoint.Data["recoverySafety"])
 	}
 
 	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "ok"}}, nil); err != nil {
@@ -970,15 +985,19 @@ func TestRuntimeOrchestrator_DuplicateCompletedRuntimeResultDoesNotRepeatGoverna
 }
 
 func hasRuntimeExecuteAcceptedCheckpoint(items []*runmodel.RuntimeCheckpoint, stepID common.StepID, requestID string) bool {
+	return runtimeExecuteAcceptedCheckpoint(items, stepID, requestID) != nil
+}
+
+func runtimeExecuteAcceptedCheckpoint(items []*runmodel.RuntimeCheckpoint, stepID common.StepID, requestID string) *runmodel.RuntimeCheckpoint {
 	for _, item := range items {
 		if item == nil || item.CurrentStepID != stepID || item.Data == nil {
 			continue
 		}
 		if item.Data["event"] == "runtime_execute_accepted" && item.Data["requestId"] == requestID {
-			return true
+			return item
 		}
 	}
-	return false
+	return nil
 }
 
 func TestRuntimeOrchestrator_DispatchNextStepRunsShellCommandAdapter(t *testing.T) {

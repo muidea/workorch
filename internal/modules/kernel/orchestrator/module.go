@@ -409,6 +409,12 @@ func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[stri
 	if cmd.LatestStepTime != "" {
 		recovery["latestStepTime"] = cmd.LatestStepTime
 	}
+	if policy := cmd.RecoveryPolicy.Normalized(); len(policy.ToMap()) > 0 {
+		recovery["runtimeRecoveryPolicy"] = policy.ToMap()
+	}
+	if cmd.RecoverySafety != "" {
+		recovery["recoverySafety"] = cmd.RecoverySafety
+	}
 	if cmd.Reason != "" {
 		recovery["reason"] = cmd.Reason
 	}

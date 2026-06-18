@@ -116,6 +116,7 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		return o.handleRuntimeStepFailure(ctx, run, step, toolCall, output, "runtime patch dispatch gate failed", err)
 	}
 	injectRuntimeEvidencePolicies(runtimeInput, run.ExecutionContext)
+	recoveryPolicy := runtimemodel.RuntimeRecoveryPolicyFromInput(runtimeInput)
 	request := runtimemodel.StepExecutionRequest{
 		WorkspaceID:                   run.WorkspaceID,
 		WorkspaceDeliverableDirectory: workspace.DeliverableDirectory,
@@ -124,15 +125,24 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		StepID:                        step.ID,
 		Kind:                          step.Kind,
 		Input:                         runtimeInput,
+		RecoveryPolicy:                recoveryPolicy,
 	}
 	if requester, ok := o.runtime.(RuntimeExecutionRequester); ok {
 		accepted, err := requester.RequestRuntimeStepExecution(ctx, request)
 		if err == nil {
-			if checkpointErr := o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, "runtime_execute_accepted", map[string]any{
+			acceptedPolicy := accepted.RecoveryPolicy
+			if acceptedPolicy == (runtimemodel.RuntimeRecoveryPolicy{}) {
+				acceptedPolicy = request.RecoveryPolicy
+			}
+			checkpointData := map[string]any{
 				"requestId":  accepted.RequestID,
 				"queueKey":   accepted.QueueKey,
 				"acceptedAt": accepted.AcceptedAt,
-			}); checkpointErr != nil {
+			}
+			policy := acceptedPolicy.Normalized()
+			checkpointData["runtimeRecoveryPolicy"] = policy.ToMap()
+			checkpointData["recoverySafety"] = policy.WatchdogRecoverySafety()
+			if checkpointErr := o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, "runtime_execute_accepted", checkpointData); checkpointErr != nil {
 				return checkpointErr
 			}
 			return nil

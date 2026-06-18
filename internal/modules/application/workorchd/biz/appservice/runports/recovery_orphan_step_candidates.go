@@ -67,16 +67,18 @@ func staleOrphanDispatchedRuntimeGap(ctx context.Context, hub events.Hub, item *
 	}
 	gap := classifyRuntimeExecutionGapForStep(terminal, checkpoints)
 	switch gap.Gap {
+	case runtimeExecutionGapRequestNotAccepted:
+		return nil, RuntimeGapRecovery{}, nil
 	case runtimeExecutionGapTerminalNotFinalized:
-		if !gap.HasTerminalResult {
+		if !runtimeGapAllowsAutomaticRecovery(gap) {
 			return nil, RuntimeGapRecovery{}, nil
 		}
 	case runtimeExecutionGapWorkerLost:
-		if !gap.HasWorkerLost {
+		if !gap.HasWorkerLost || !runtimeGapAllowsAutomaticRecovery(gap) {
 			return nil, RuntimeGapRecovery{}, nil
 		}
 	case runtimeExecutionGapAcceptedNoProgress, runtimeExecutionGapAcceptedInProgress:
-		if !gap.HasWorkerHeartbeat || gap.HasWorkerStopped {
+		if gap.HasWorkerStopped || !runtimeGapAllowsAutomaticRecovery(gap) {
 			return nil, RuntimeGapRecovery{}, nil
 		}
 	case runtimeExecutionGapFinalized, runtimeExecutionGapUnknown:
@@ -112,6 +114,8 @@ func runtimeGapRecoveryFromStep(item *runmodel.Run, step *runmodel.Step, gap run
 		RequestID:      state.RequestID,
 		QueueKey:       state.QueueKey,
 		LatestStepTime: state.LatestStepTime,
+		RecoveryPolicy: state.RecoveryPolicy.Normalized(),
+		RecoverySafety: runtimeGapRecoverySafetyClassification(state),
 		Reason:         reason,
 	}
 }

@@ -3,6 +3,7 @@ package contracts
 import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type CreateRunCommand struct {
@@ -34,6 +35,8 @@ type RecoverRuntimeGapCommand struct {
 	RequestID             string
 	QueueKey              string
 	LatestStepTime        string
+	RecoveryPolicy        runtimemodel.RuntimeRecoveryPolicy
+	RecoverySafety        string
 	Reason                string
 	ExecutionContextPatch map[string]any
 }

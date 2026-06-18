@@ -484,18 +484,18 @@ type governanceRunResumeRef struct {
 	RunID       string
 }
 
-func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {
+func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) bool {
 	if s == nil || s.runContinuations == nil {
-		return
+		return false
 	}
-	s.runContinuations.scheduleGovernanceRunResumeRefs(refs, priority)
+	return s.runContinuations.scheduleGovernanceRunResumeRefs(refs, priority)
 }
 
-func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {
+func (s *serverState) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) bool {
 	if s == nil || s.runContinuations == nil {
-		return
+		return false
 	}
-	s.runContinuations.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, priority)
+	return s.runContinuations.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, priority)
 }
 
 func runIsReplanSuccessorOf(item appservice.Run, predecessorRunID string) bool {

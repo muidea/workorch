@@ -19,6 +19,7 @@ type RuntimeStepTerminalResultCheckpoint struct {
 	RequestID        string
 	TerminalTopic    string
 	StepKind         string
+	RecoveryPolicy   runtimemodel.RuntimeRecoveryPolicy
 	Output           map[string]any
 	Error            string
 	FailureClass     string
@@ -59,6 +60,9 @@ func (o *RuntimeOrchestrator) RecordRuntimeStepTerminalResult(
 	if requestID := strings.TrimSpace(terminal.RequestID); requestID != "" {
 		data["requestId"] = requestID
 	}
+	policy := terminal.RecoveryPolicy.Normalized()
+	data["runtimeRecoveryPolicy"] = policy.ToMap()
+	data["recoverySafety"] = policy.WatchdogRecoverySafety()
 	if len(terminal.Output) > 0 {
 		data["output"] = cloneStepPayload(terminal.Output)
 	}

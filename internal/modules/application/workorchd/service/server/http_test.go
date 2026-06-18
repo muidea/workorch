@@ -5113,7 +5113,7 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 }
 
 func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
-	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-run-command"
@@ -5145,7 +5145,7 @@ func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *tes
 }
 
 func TestWorkorchDSchedulerCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
-	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-restart-command"
@@ -5172,6 +5172,116 @@ func TestWorkorchDSchedulerCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *te
 	}
 	if req.WorkspaceID != workspaceID || req.Priority != 6 || !req.Command.Restart || req.Command.GoalID != "goal-restart" || req.Command.DoDID != "dod-restart" || req.Command.LLMProviderID != "llm-restart" {
 		t.Fatalf("workspace restart pending request = %+v, want scoped restart command", req)
+	}
+}
+
+func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-run-command-fail"
+	const runID = "run-scheduler-command-fail"
+
+	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
+		events.PayloadKeyWorkspaceID: workspaceID,
+		events.PayloadKeyRunID:       runID,
+		events.PayloadKeyAction:      "resume",
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("publish scheduler command error = %v, want conflict", err)
+	}
+
+	state.runContinuations.runMu.Lock()
+	_, pending := state.runContinuations.runPending[workspaceID+"/"+runID+"/resume"]
+	state.runContinuations.runMu.Unlock()
+	if !pending {
+		t.Fatalf("run continuation pending entry was dropped after queue failure")
+	}
+}
+
+func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), events.NewMemoryHub(), &recordingBackgroundRoutine{})
+	for _, unsubscribe := range state.eventUnsubscribes {
+		unsubscribe()
+	}
+	state.eventUnsubscribes = nil
+
+	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested, "ws-missing-scheduler", "", map[string]any{
+		events.PayloadKeyWorkspaceID: "ws-missing-scheduler",
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("publish scheduler command error = %v, want conflict for missing accepted response", err)
+	}
+}
+
+func TestWorkorchDRESTCommandsReturnConflictWhenSchedulerQueueFails(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	handler := newMuxWithState(state)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(ctx)
+	})
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "workspace activation", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/execution-activations"},
+		{name: "workspace restart", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/execution-restarts"},
+		{name: "run start", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/runs/run-rest-scheduler-fail/start"},
+		{name: "run resume", method: http.MethodPost, path: "/api/v1/workorch/workspaces/ws-rest-scheduler-fail/runs/run-rest-scheduler-fail/resume"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("%s status = %d, want 409, body=%s", tc.name, rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), `"accepted":true`) {
+				t.Fatalf("%s returned accepted body after scheduler queue failure: %s", tc.name, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWorkorchDGovernanceResolutionReturnsConflictWhenSchedulerQueueFails(t *testing.T) {
+	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, routine)
+	const workspaceID = "ws-governance-scheduler-fail"
+	const runID = "run-governance-scheduler-fail"
+	state.resolveDecision = func(context.Context, string, string, string, appservice.ResolveDecisionCommand) (appservice.Decision, error) {
+		return appservice.Decision{ID: "ticket-scheduler-fail", WorkspaceID: workspaceID, RunID: runID, State: string(common.DecisionTicketStateResolved)}, nil
+	}
+	state.approveApproval = func(context.Context, string, string, string) (appservice.Approval, error) {
+		return appservice.Approval{ID: "approval-scheduler-fail", WorkspaceID: workspaceID, RunID: runID, State: string(common.ApprovalStateApproved)}, nil
+	}
+	handler := newMuxWithState(state)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(ctx)
+	})
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "decision resolve", path: "/api/v1/workorch/decisions/ticket-scheduler-fail/resolve"},
+		{name: "approval approve", path: "/api/v1/workorch/approvals/approval-scheduler-fail/approve"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("%s status = %d, want 409, body=%s", tc.name, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

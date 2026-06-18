@@ -106,6 +106,7 @@ func runtimeTerminalResultCheckpointFromEnvelope(envelope events.Envelope, resul
 		completed, _ := envelope.Payload[events.PayloadKeyRuntimeCompleted].(runtimemodel.RuntimeStepExecutionCompleted)
 		checkpoint.RequestID = completed.RequestID
 		checkpoint.StepKind = completed.StepKind
+		checkpoint.RecoveryPolicy = completed.RecoveryPolicy
 		checkpoint.CompletedAt = completed.CompletedAt
 		checkpoint.EvidenceRefs = append([]string(nil), completed.EvidenceRefs...)
 		checkpoint.RawResultRef = completed.RawResultRef
@@ -116,6 +117,7 @@ func runtimeTerminalResultCheckpointFromEnvelope(envelope events.Envelope, resul
 		failed, _ := envelope.Payload[events.PayloadKeyRuntimeFailed].(runtimemodel.RuntimeStepExecutionFailed)
 		checkpoint.RequestID = failed.RequestID
 		checkpoint.StepKind = failed.StepKind
+		checkpoint.RecoveryPolicy = failed.RecoveryPolicy
 		checkpoint.CompletedAt = failed.CompletedAt
 		checkpoint.FailureClass = failed.FailureClass
 		checkpoint.FailureSignature = failed.FailureSignature

@@ -198,14 +198,20 @@ func TestModuleRecoverRuntimeGapCommandSchedulesBackgroundDispatch(t *testing.T)
 
 func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 	cmd := runcontracts.RecoverRuntimeGapCommand{
-		WorkspaceID:           "ws-runtime-gap-patch",
-		RunID:                 "run-runtime-gap-patch",
-		StepID:                "run-runtime-gap-patch/step-001",
-		StepKind:              "llm/workspace_execution",
-		Gap:                   "runtime_terminal_not_finalized",
-		RequestID:             "request-runtime-gap-patch",
-		QueueKey:              "queue-runtime-gap-patch",
-		LatestStepTime:        "2026-06-17T14:00:00Z",
+		WorkspaceID:    "ws-runtime-gap-patch",
+		RunID:          "run-runtime-gap-patch",
+		StepID:         "run-runtime-gap-patch/step-001",
+		StepKind:       "llm/workspace_execution",
+		Gap:            "runtime_terminal_not_finalized",
+		RequestID:      "request-runtime-gap-patch",
+		QueueKey:       "queue-runtime-gap-patch",
+		LatestStepTime: "2026-06-17T14:00:00Z",
+		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+			SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+		},
+		RecoverySafety:        "recoverable_idempotent",
 		Reason:                "stale dispatched runtime gap: runtime_terminal_not_finalized",
 		ExecutionContextPatch: map[string]any{"existing": "value"},
 	}
@@ -227,8 +233,13 @@ func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 		recovery["requestId"] != cmd.RequestID ||
 		recovery["queueKey"] != cmd.QueueKey ||
 		recovery["latestStepTime"] != cmd.LatestStepTime ||
+		recovery["recoverySafety"] != cmd.RecoverySafety ||
 		recovery["reason"] != cmd.Reason {
 		t.Fatalf("runtimeGapRecovery = %+v, want gap-specific context", recovery)
+	}
+	policy, _ := recovery["runtimeRecoveryPolicy"].(map[string]any)
+	if policy["watchdogRecovery"] != runtimemodel.WatchdogRecoveryRetryExternal {
+		t.Fatalf("runtimeRecoveryPolicy = %+v, want retry_external", policy)
 	}
 }
 

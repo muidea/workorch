@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type runtimeExecutionGap string
@@ -27,6 +28,8 @@ type runtimeExecutionGapState struct {
 	HasWorkerLost      bool
 	HasWorkerHeartbeat bool
 	HasWorkerStopped   bool
+	RecoveryPolicy     runtimemodel.RuntimeRecoveryPolicy
+	RecoverySafety     string
 }
 
 func classifyRuntimeExecutionGapForStep(step *runmodel.Step, checkpoints []*runmodel.RuntimeCheckpoint) runtimeExecutionGapState {
@@ -51,6 +54,13 @@ func classifyRuntimeExecutionGapForStep(step *runmodel.Step, checkpoints []*runm
 		}
 		if queueKey := strings.TrimSpace(runtimeCheckpointString(checkpoint.Data["queueKey"])); queueKey != "" {
 			state.QueueKey = queueKey
+		}
+		if rawPolicy, ok := checkpoint.Data["runtimeRecoveryPolicy"]; ok {
+			state.RecoveryPolicy = runtimemodel.RuntimeRecoveryPolicyFromValue(rawPolicy)
+			state.RecoverySafety = state.RecoveryPolicy.WatchdogRecoverySafety()
+		}
+		if safety := strings.TrimSpace(runtimeCheckpointString(checkpoint.Data["recoverySafety"])); safety != "" {
+			state.RecoverySafety = safety
 		}
 		event := strings.TrimSpace(runtimeCheckpointString(checkpoint.Data["event"]))
 		switch event {
@@ -104,6 +114,35 @@ func classifyRuntimeExecutionGapForStep(step *runmodel.Step, checkpoints []*runm
 		state.Gap = runtimeExecutionGapRequestNotAccepted
 	}
 	return state
+}
+
+func runtimeGapAllowsAutomaticRecovery(state runtimeExecutionGapState) bool {
+	switch state.Gap {
+	case runtimeExecutionGapTerminalNotFinalized:
+		return state.HasTerminalResult
+	case runtimeExecutionGapWorkerLost, runtimeExecutionGapAcceptedNoProgress, runtimeExecutionGapAcceptedInProgress:
+		return state.RecoveryPolicy.AllowsWatchdogExternalRetry()
+	default:
+		return false
+	}
+}
+
+func runtimeGapRecoverySafetyClassification(state runtimeExecutionGapState) string {
+	switch state.Gap {
+	case runtimeExecutionGapTerminalNotFinalized:
+		if state.HasTerminalResult {
+			return "terminal_result_evidence"
+		}
+	case runtimeExecutionGapWorkerLost, runtimeExecutionGapAcceptedNoProgress, runtimeExecutionGapAcceptedInProgress:
+		if safety := strings.TrimSpace(state.RecoverySafety); safety != "" {
+			return safety
+		}
+		return state.RecoveryPolicy.WatchdogRecoverySafety()
+	}
+	if safety := strings.TrimSpace(state.RecoverySafety); safety != "" {
+		return safety
+	}
+	return state.RecoveryPolicy.WatchdogRecoverySafety()
 }
 
 func runtimeCheckpointString(value any) string {

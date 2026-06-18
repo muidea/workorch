@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -52,10 +53,23 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 		Payload:      cloneSchedulerPayload(payload),
 	}
 	if err := s.schedulerHub.Publish(ctx, envelope); err != nil {
-		if _, ok := events.ResponseEnvelope(err); ok {
-			return nil
+		if response, ok := events.ResponseEnvelope(err); ok {
+			return validateWorkorchDSchedulerAcceptedResponse(topic, response)
 		}
 		return err
+	}
+	return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
+}
+
+func validateWorkorchDSchedulerAcceptedResponse(topic string, response events.Envelope) error {
+	if strings.TrimSpace(response.Topic) != strings.TrimSpace(topic)+"/accepted" {
+		return fmt.Errorf("%w: scheduler command %s returned unexpected response topic %s", common.ErrConflict, topic, response.Topic)
+	}
+	if accepted, _ := response.Payload["accepted"].(bool); !accepted {
+		return fmt.Errorf("%w: scheduler command %s was not accepted", common.ErrConflict, topic)
+	}
+	if strings.TrimSpace(response.SourceModule) != "workorchd/scheduler" {
+		return fmt.Errorf("%w: scheduler command %s returned response from %s", common.ErrConflict, topic, response.SourceModule)
 	}
 	return nil
 }
@@ -144,14 +158,18 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 		if strings.TrimSpace(req.WorkspaceID) == "" {
 			return common.ErrInvalidArgument
 		}
-		_ = s.runContinuations.scheduleWorkspaceActivation(req)
+		if !s.runContinuations.scheduleWorkspaceActivation(req) {
+			return schedulerCommandQueueError(envelope.Topic)
+		}
 		return nil
 	case workorchdevents.TopicWorkorchDCommandRunContinuationRequested:
 		req := runContinuationRequestFromEnvelope(envelope)
 		if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.Action) == "" {
 			return common.ErrInvalidArgument
 		}
-		_ = s.runContinuations.scheduleRunContinuation(req)
+		if !s.runContinuations.scheduleRunContinuation(req) {
+			return schedulerCommandQueueError(envelope.Topic)
+		}
 		return nil
 	case workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested:
 		workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
@@ -159,7 +177,9 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 		if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
 			return common.ErrInvalidArgument
 		}
-		s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{WorkspaceID: workspaceID, RunID: runID}}, schedulerInt(envelope.Payload, events.PayloadKeyPriority))
+		if !s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{WorkspaceID: workspaceID, RunID: runID}}, schedulerInt(envelope.Payload, events.PayloadKeyPriority)) {
+			return schedulerCommandQueueError(envelope.Topic)
+		}
 		return nil
 	case workorchdevents.TopicWorkorchDCommandReplanContinuationRequested:
 		workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
@@ -167,18 +187,26 @@ func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envel
 		if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
 			return common.ErrInvalidArgument
 		}
-		s.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, schedulerInt(envelope.Payload, events.PayloadKeyPriority))
+		if !s.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, schedulerInt(envelope.Payload, events.PayloadKeyPriority)) {
+			return schedulerCommandQueueError(envelope.Topic)
+		}
 		return nil
 	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
 		req := workspaceRestartRequestFromEnvelope(envelope)
 		if strings.TrimSpace(req.WorkspaceID) == "" {
 			return common.ErrInvalidArgument
 		}
-		_ = s.runContinuations.scheduleWorkspaceRestart(req)
+		if !s.runContinuations.scheduleWorkspaceRestart(req) {
+			return schedulerCommandQueueError(envelope.Topic)
+		}
 		return nil
 	default:
 		return common.ErrInvalidArgument
 	}
+}
+
+func schedulerCommandQueueError(topic string) error {
+	return fmt.Errorf("%w: scheduler command %s was not queued", common.ErrConflict, topic)
 }
 
 func runContinuationRequestFromEnvelope(envelope events.Envelope) runContinuationRequest {

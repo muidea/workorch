@@ -6,6 +6,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const (
@@ -71,6 +72,7 @@ func applyRuntimeExecutionCheckpoint(state *readmodelcore.RuntimeExecutionState,
 	if event == "" {
 		return
 	}
+	applyRuntimeExecutionRecoveryPolicy(state, checkpoint)
 	switch event {
 	case "runtime_execute_accepted":
 		state.RequestID = firstNonEmptyTimelineString(readModelStringValue(checkpoint.Data["requestId"]), state.RequestID)
@@ -119,6 +121,22 @@ func applyRuntimeExecutionCheckpoint(state *readmodelcore.RuntimeExecutionState,
 		if strings.HasPrefix(event, "runtime_") || strings.Contains(event, "progress") {
 			applyRuntimeExecutionProgress(state, checkpoint, event)
 		}
+	}
+}
+
+func applyRuntimeExecutionRecoveryPolicy(state *readmodelcore.RuntimeExecutionState, checkpoint readmodelcore.RuntimeCheckpoint) {
+	if state == nil || checkpoint.Data == nil {
+		return
+	}
+	if rawPolicy, ok := checkpoint.Data["runtimeRecoveryPolicy"]; ok {
+		policy := runtimemodel.RuntimeRecoveryPolicyFromValue(rawPolicy)
+		state.RuntimeRecoveryPolicy = policy.ToMap()
+		if state.RecoverySafety == "" {
+			state.RecoverySafety = policy.WatchdogRecoverySafety()
+		}
+	}
+	if safety := strings.TrimSpace(readModelStringValue(checkpoint.Data["recoverySafety"])); safety != "" {
+		state.RecoverySafety = safety
 	}
 }
 

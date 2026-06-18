@@ -8,6 +8,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing.T) {
@@ -215,6 +216,12 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionWorkerLostGap(t *testing.T
 					"requestId":  "request-worker-lost",
 					"queueKey":   "queue-worker-lost",
 					"acceptedAt": "2026-06-17T01:00:00Z",
+					"runtimeRecoveryPolicy": runtimemodel.RuntimeRecoveryPolicy{
+						SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+						IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+						WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+					}.ToMap(),
+					"recoverySafety": "recoverable_idempotent",
 				},
 			},
 			{
@@ -255,5 +262,9 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionWorkerLostGap(t *testing.T
 		got.RuntimeExecution.Pending != true ||
 		got.RuntimeExecution.Gap != "worker_lost" {
 		t.Fatalf("RuntimeExecution = %+v, want worker lost gap", got.RuntimeExecution)
+	}
+	if got.RuntimeExecution.RecoverySafety != "recoverable_idempotent" ||
+		got.RuntimeExecution.RuntimeRecoveryPolicy["watchdogRecovery"] != runtimemodel.WatchdogRecoveryRetryExternal {
+		t.Fatalf("RuntimeExecution policy/safety = %+v/%q, want recoverable retry policy", got.RuntimeExecution.RuntimeRecoveryPolicy, got.RuntimeExecution.RecoverySafety)
 	}
 }

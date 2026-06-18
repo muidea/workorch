@@ -374,16 +374,16 @@ func workspaceNeedsReplanContinuationRecovery(workspace appservice.Workspace) bo
 	}
 }
 
-func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) {
+func (s *runContinuationScheduler) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) bool {
 	if s == nil || s.state == nil {
-		return
+		return false
 	}
 	refs = uniqueGovernanceRunResumeRefs(refs)
 	if len(refs) == 0 {
-		return
+		return true
 	}
 	s.enqueueGovernanceResumeRefs(refs)
-	s.drainGovernanceResumeQueue(priority)
+	return s.drainGovernanceResumeQueue(priority)
 }
 
 func (s *runContinuationScheduler) enqueueGovernanceResumeRefs(refs []governanceRunResumeRef) {
@@ -404,15 +404,15 @@ func (s *runContinuationScheduler) enqueueGovernanceResumeRefs(refs []governance
 	}
 }
 
-func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) {
+func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) bool {
 	if s == nil || s.state == nil {
-		return
+		return false
 	}
 	state := s.state
 	for {
 		key, ref, ok := s.nextPendingGovernanceResume()
 		if !ok {
-			return
+			return true
 		}
 		resumeKey, resumeRef := key, ref
 		if !state.scheduleBackground("governance_run_resume", func(context.Context) {
@@ -459,7 +459,7 @@ func (s *runContinuationScheduler) drainGovernanceResumeQueue(priority int) {
 			resumedRun = item
 		}) {
 			s.clearGovernanceResumeStarted(resumeKey)
-			return
+			return false
 		}
 	}
 }
@@ -532,20 +532,20 @@ func (s *runContinuationScheduler) governanceResumeRefStillNeedsWork(ctx context
 	return false
 }
 
-func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) {
+func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx context.Context, workspaceID string, runID string, priority int) bool {
 	if s == nil || s.state == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
-		return
+		return false
 	}
 	state := s.state
 	if !state.runHasResolvedReplanDecision(ctx, workspaceID, runID) {
-		return
+		return true
 	}
 	if s.workspaceHasReplanSuccessor(ctx, workspaceID, runID) {
-		return
+		return true
 	}
 	key := workspaceID + "/" + runID
 	if !s.markReplanContinuationStarted(key) {
-		return
+		return true
 	}
 
 	if !state.scheduleBackground("replan_continuation", func(context.Context) {
@@ -569,7 +569,9 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 		state.notifyRunStatusChangedForRun(activation.Run)
 	}) {
 		s.clearReplanContinuationStarted(key)
+		return false
 	}
+	return true
 }
 
 func (s *runContinuationScheduler) markReplanContinuationStarted(key string) bool {

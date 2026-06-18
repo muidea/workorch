@@ -90,9 +90,9 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `serverState.registerAutoGovernanceResumeWatcher` 订阅 auto-governance resolved event。
 - `serverState.registerReplanContinuationWatcher` 已存在但当前为空逻辑。
 - `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/continue/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
-- 当前未提交修改中已给 governance resume 增加了内存 pending map 和重试测试。
+- Workspace activation/restart、run start/resume、governance continuation 和 replan continuation 已统一通过 workorchd scheduler command handler 入队。同步 command 只有在 scheduler owner 返回明确 accepted response 且后台 work item 已成功提交后，REST/TUI 才能报告 accepted。
 
-缺口是：这些能力仍不是统一的 EventHub command loop。HTTP handler 和 watcher 会直接调 scheduler 函数；scheduler 的 pending 也不是正式事件契约或可审计 command。
+剩余长期方向是把当前 server-local scheduler pending 进一步持久化或 owner 化；短期不得绕过现有 scheduler command ack 规则，也不得让 watchdog 代替正常 command 主路径。
 
 ## Design Rules
 
@@ -111,6 +111,8 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 | REST run start/resume | request run execution command | workorchd scheduler/orchestrator loop |
 
 Web/TUI 可以等待同步 command response，也可以收到 accepted response 后通过 projection/SSE/EventHub 刷新状态；但不能自行承担“如果没动就再补一刀”的业务逻辑。
+
+对于会启动长耗时工作的 scheduler command，accepted response 必须表示 owner 已完成快速校验并成功提交 BackgroundRoutine work item。缺少 subscriber、缺少 `events.Response`、response 类型错误或后台提交失败，都必须返回非 accepted 业务错误；handler 不能在 EventHub lane 内执行 activation/resume/replan/restart 本体。
 
 ### Event Ownership Rule
 
@@ -132,6 +134,7 @@ EventHub observer 必须轻量：
 - 可以校验 payload、scope、幂等 key。
 - 可以把 work item 放入 workorchd 内部 pending queue。
 - 可以发布 projection changed / accepted notification。
+- 对需要同步确认的 command，必须设置明确 `events.Response`；不能用无响应或 publish success 代替 accepted。
 - 不直接执行 LLM、MCP、shell、long running run resume、workspace activation。
 - 不在同一 lane 中同步等待需要同 lane 完成的 command。
 

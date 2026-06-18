@@ -14,6 +14,7 @@ import (
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestListRunsByWorkspaceFiltersOwnerReadResults(t *testing.T) {
@@ -126,6 +127,12 @@ func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 		RequestID:      "request-runtime-gap",
 		QueueKey:       "queue-runtime-gap",
 		LatestStepTime: "2026-06-17T14:00:00Z",
+		RecoveryPolicy: runtimemodel.RuntimeRecoveryPolicy{
+			SideEffectPolicy:  runtimemodel.SideEffectPolicyExternalRead,
+			IdempotencyPolicy: runtimemodel.IdempotencyPolicyIdempotent,
+			WatchdogRecovery:  runtimemodel.WatchdogRecoveryRetryExternal,
+		},
+		RecoverySafety: "recoverable_idempotent",
 		Reason:         "stale dispatched runtime gap: worker_lost",
 	}
 
@@ -150,6 +157,8 @@ func TestRecoverRuntimeGapPublishesGapSpecificCommandPayload(t *testing.T) {
 		cmd.Gap != string(runtimeExecutionGapWorkerLost) ||
 		cmd.RequestID != recovery.RequestID ||
 		cmd.QueueKey != recovery.QueueKey ||
+		cmd.RecoveryPolicy.WatchdogRecovery != runtimemodel.WatchdogRecoveryRetryExternal ||
+		cmd.RecoverySafety != recovery.RecoverySafety ||
 		cmd.ExecutionContextPatch["mode"] != "recover" {
 		t.Fatalf("command = %+v, want populated runtime gap recovery command", cmd)
 	}

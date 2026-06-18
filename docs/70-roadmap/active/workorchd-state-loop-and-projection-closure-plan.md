@@ -651,7 +651,9 @@ watchdog 不是正常调度链路，也不是 event 丢失的兜底替代。TUI/
   - 在 periodic watchdog 中执行。
   - 受 `MaxConcurrentRuns` run slot 和 `server.staleDispatchedStepMinAge` 控制。
   - 用于发现长时间停留在 dispatched 且已有持久 runtime checkpoint 证明存在 runtime gap 的 step，并通过 appservice / EventHub / orchestrator 恢复。
-  - 覆盖范围仅限 `runtime_terminal_not_finalized` 且存在 `runtime_step_result_available`、`worker_lost` 且存在 `runtime_worker_lost`、以及有 worker heartbeat 且超过 stale 阈值的 accepted/in-progress gap；不处理无证据的 event 丢失。
+  - `request_not_accepted` 仅作为主路径 dispatch/subscribe/queue 缺陷诊断，不由 periodic watchdog 自动恢复。
+  - `runtime_terminal_not_finalized` 仅在存在 durable `runtime_step_result_available` terminal evidence 时恢复。
+  - `worker_lost`、`accepted_no_progress`、`accepted_in_progress` 只有同时具备外部执行边界 evidence 和显式 recoverable `RuntimeRecoveryPolicy` 时才恢复；unknown、manual-only 或 non-idempotent policy 默认不自动重试。
 - `recoverResolvedGovernanceBlockedRuns`
   - 不由 periodic watchdog 自动执行。
   - 按 workspace 列表逐一扫描 workspace-scoped runs。
@@ -664,6 +666,7 @@ watchdog 不是正常调度链路，也不是 event 丢失的兜底替代。TUI/
 影响范围与边界：
 
 - Watchdog 只负责通用运行时形态恢复，不根据 workspace template、业务目标、文件名、测试框架或具体 capability 做业务分支。
+- Watchdog recovery command 必须携带用于恢复判定的中立证据，包括 request id、queue key、latest step time、gap type、terminal/worker evidence 和 recovery safety classification。
 - Watchdog 不负责补偿正常运行中的 event 丢失。event 丢失必须作为 EventHub / owner command / runtime checkpoint / projection 链路缺陷处理，并通过代码修复保证主路径可靠。
 - 正式状态转换仍由 owner module / orchestrator 完成；watchdog 不绕过 EventHub command/response，不直接写 kernel owner repository。
 - Governance resume 去重键为 `workspaceID/runID`：同一 workspace 的重复 resume 会合并，不同 workspace 即使 run ID 相同也必须独立恢复。

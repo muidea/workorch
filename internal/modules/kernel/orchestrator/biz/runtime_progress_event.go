@@ -46,5 +46,8 @@ func (o *RuntimeOrchestrator) RecordRuntimeStepProgress(ctx context.Context, pro
 	if progress.OccurredAt != "" {
 		data["occurredAt"] = progress.OccurredAt
 	}
+	policy := progress.RecoveryPolicy.Normalized()
+	data["runtimeRecoveryPolicy"] = policy.ToMap()
+	data["recoverySafety"] = policy.WatchdogRecoverySafety()
 	return o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data)
 }

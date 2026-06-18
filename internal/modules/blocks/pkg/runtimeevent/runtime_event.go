@@ -3,6 +3,7 @@ package runtimeevent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -103,11 +104,13 @@ func (e *Executor) Teardown() {
 		cancel()
 	}
 	for _, state := range lost {
-		_ = e.publishWorkerLifecycle(context.Background(), state.Request, state.RequestID, "runtime_worker_lost", "worker_lost", "runtime worker lost before terminal result", map[string]any{
+		if err := e.publishWorkerLifecycle(context.Background(), state.Request, state.RequestID, "runtime_worker_lost", "worker_lost", "runtime worker lost before terminal result", map[string]any{
 			"queueKey": state.QueueKey,
 			"workerId": state.WorkerID,
 			"lostAt":   nowRFC3339(),
-		})
+		}); err != nil {
+			slog.Warn("runtime worker lost event publish failed", "module", e.moduleID, "requestID", state.RequestID, "queueKey", state.QueueKey, "err", err)
+		}
 	}
 }
 
@@ -134,13 +137,14 @@ func (e *Executor) handle(ctx context.Context, envelope events.Envelope) error {
 	requestID := runtimeRequestID(envelope, request)
 	queueKey := runtimeQueueKey(request, requestID)
 	accepted := runtimemodel.RuntimeStepExecutionAccepted{
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		StepKind:    request.Kind,
-		RequestID:   requestID,
-		QueueKey:    queueKey,
-		AcceptedAt:  nowRFC3339(),
+		WorkspaceID:    request.WorkspaceID,
+		RunID:          request.RunID,
+		StepID:         request.StepID,
+		StepKind:       request.Kind,
+		RequestID:      requestID,
+		QueueKey:       queueKey,
+		AcceptedAt:     nowRFC3339(),
+		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
 	schedule, replay, err := e.accept(queueKey, request, requestID)
 	if err != nil {
@@ -154,18 +158,38 @@ func (e *Executor) handle(ctx context.Context, envelope events.Envelope) error {
 			workerBaseCtx = context.WithoutCancel(ctx)
 		}
 		workerCtx, workerCancel := context.WithCancel(workerBaseCtx)
+		startWorker := make(chan struct{})
 		e.markWorkerCancel(queueKey, workerCancel)
 		if err := e.background.AsyncFunction(func() {
+			select {
+			case <-startWorker:
+			case <-workerCtx.Done():
+				return
+			}
 			e.execute(workerCtx, workerRequest, requestID)
 		}); err != nil {
 			workerCancel()
 			e.forget(queueKey)
 			return err
 		}
+		if err := e.publishAccepted(ctx, accepted); err != nil {
+			workerCancel()
+			e.forget(queueKey)
+			return err
+		}
+		close(startWorker)
 	} else if replay.Topic != "" {
-		_ = publishRuntimeNotification(e.hub, ctx, replay)
+		if err := publishRuntimeNotification(e.hub, ctx, replay); err != nil {
+			return err
+		}
+		if err := e.publishAccepted(ctx, accepted); err != nil {
+			return err
+		}
+	} else {
+		if err := e.publishAccepted(ctx, accepted); err != nil {
+			return err
+		}
 	}
-	_ = e.publishAccepted(ctx, accepted)
 	payload := map[string]any{
 		events.PayloadKeyRuntimeAccepted:  accepted,
 		events.PayloadKeyRuntimeRequestID: requestID,
@@ -227,39 +251,53 @@ func (e *Executor) execute(ctx context.Context, request runtimemodel.StepExecuti
 	defer heartbeatCancel()
 	e.startWorkerHeartbeat(heartbeatCtx, request, requestID, queueKey, workerID)
 	startedAt := nowRFC3339()
-	_ = e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_started", "worker_started", "runtime worker started", map[string]any{
+	if err := e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_started", "worker_started", "runtime worker started", map[string]any{
 		"queueKey":  queueKey,
 		"workerId":  workerID,
 		"startedAt": startedAt,
-	})
+	}); err != nil {
+		slog.Warn("runtime worker started event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+	}
 	result, err := e.adapter.ExecuteRuntimeStep(ctx, request)
 	if e.closedBeforeTerminal() && ctx.Err() != nil {
-		_ = e.publishWorkerLifecycle(context.Background(), request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped after cancellation", map[string]any{
+		if err := e.publishWorkerLifecycle(context.Background(), request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped after cancellation", map[string]any{
 			"queueKey":  queueKey,
 			"workerId":  workerID,
 			"startedAt": startedAt,
 			"stoppedAt": nowRFC3339(),
 			"cancelled": true,
-		})
+		}); err != nil {
+			slog.Warn("runtime worker stopped event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+		}
 		return
 	}
 	if err != nil {
-		_ = e.publishFailed(ctx, request, requestID, result, err)
-		_ = e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped", map[string]any{
+		if publishErr := e.publishFailed(ctx, request, requestID, result, err); publishErr != nil {
+			slog.Warn("runtime failed event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", publishErr)
+			return
+		}
+		if err := e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped", map[string]any{
 			"queueKey":  queueKey,
 			"workerId":  workerID,
 			"startedAt": startedAt,
 			"stoppedAt": nowRFC3339(),
-		})
+		}); err != nil {
+			slog.Warn("runtime worker stopped event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+		}
 		return
 	}
-	_ = e.publishCompleted(ctx, request, requestID, result)
-	_ = e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped", map[string]any{
+	if err := e.publishCompleted(ctx, request, requestID, result); err != nil {
+		slog.Warn("runtime completed event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+		return
+	}
+	if err := e.publishWorkerLifecycle(ctx, request, requestID, "runtime_worker_stopped", "worker_stopped", "runtime worker stopped", map[string]any{
 		"queueKey":  queueKey,
 		"workerId":  workerID,
 		"startedAt": startedAt,
 		"stoppedAt": nowRFC3339(),
-	})
+	}); err != nil {
+		slog.Warn("runtime worker stopped event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+	}
 }
 
 func (e *Executor) markWorkerCancel(queueKey string, cancel context.CancelFunc) {
@@ -287,12 +325,14 @@ func (e *Executor) startWorkerHeartbeat(ctx context.Context, request runtimemode
 		return
 	}
 	_ = e.background.Timer(ctx, runtimeWorkerHeartbeatTask{fn: func() {
-		_ = e.publishWorkerLifecycle(context.Background(), request, requestID, "runtime_worker_heartbeat", "worker_heartbeat", "runtime worker heartbeat", map[string]any{
+		if err := e.publishWorkerLifecycle(context.Background(), request, requestID, "runtime_worker_heartbeat", "worker_heartbeat", "runtime worker heartbeat", map[string]any{
 			"queueKey":     queueKey,
 			"workerId":     workerID,
 			"heartbeatAt":  nowRFC3339(),
 			"heartbeatTTL": runtimeWorkerHeartbeatInterval.String(),
-		})
+		}); err != nil {
+			slog.Warn("runtime worker heartbeat event publish failed", "module", e.moduleID, "requestID", requestID, "queueKey", queueKey, "err", err)
+		}
 	}}, runtimeWorkerHeartbeatInterval, 0)
 }
 
@@ -311,16 +351,17 @@ func (e *Executor) publishWorkerLifecycle(ctx context.Context, request runtimemo
 		return common.ErrInvalidArgument
 	}
 	progress := runtimemodel.RuntimeStepExecutionProgressed{
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		StepKind:    request.Kind,
-		RequestID:   requestID,
-		Event:       event,
-		Stage:       stage,
-		Summary:     summary,
-		Data:        cloneMap(data),
-		OccurredAt:  nowRFC3339(),
+		WorkspaceID:    request.WorkspaceID,
+		RunID:          request.RunID,
+		StepID:         request.StepID,
+		StepKind:       request.Kind,
+		RequestID:      requestID,
+		Event:          event,
+		Stage:          stage,
+		Summary:        summary,
+		Data:           cloneMap(data),
+		OccurredAt:     nowRFC3339(),
+		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
 	return publishRuntimeNotification(e.hub, ctx, events.Envelope{
 		Topic:        TopicRuntimeBlockExecuteProgress,
@@ -340,18 +381,19 @@ func (e *Executor) publishWorkerLifecycle(ctx context.Context, request runtimemo
 func (e *Executor) progressPublisher(request runtimemodel.StepExecutionRequest, requestID string) runtimemodel.StepExecutionProgressFunc {
 	return func(progress runtimemodel.StepExecutionProgress) error {
 		payload := runtimemodel.RuntimeStepExecutionProgressed{
-			WorkspaceID: request.WorkspaceID,
-			RunID:       request.RunID,
-			StepID:      request.StepID,
-			StepKind:    request.Kind,
-			RequestID:   requestID,
-			Event:       progress.Event,
-			Stage:       progress.Stage,
-			Summary:     progress.Summary,
-			Data:        cloneMap(progress.Data),
-			OccurredAt:  nowRFC3339(),
+			WorkspaceID:    request.WorkspaceID,
+			RunID:          request.RunID,
+			StepID:         request.StepID,
+			StepKind:       request.Kind,
+			RequestID:      requestID,
+			Event:          progress.Event,
+			Stage:          progress.Stage,
+			Summary:        progress.Summary,
+			Data:           cloneMap(progress.Data),
+			OccurredAt:     nowRFC3339(),
+			RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 		}
-		_ = publishRuntimeNotification(e.hub, context.Background(), events.Envelope{
+		if err := publishRuntimeNotification(e.hub, context.Background(), events.Envelope{
 			Topic:        TopicRuntimeBlockExecuteProgress,
 			SourceModule: e.moduleID,
 			SubjectType:  "runtime_step",
@@ -363,7 +405,9 @@ func (e *Executor) progressPublisher(request runtimemodel.StepExecutionRequest, 
 				events.PayloadKeyRuntimeProgress:  payload,
 				events.PayloadKeyRuntimeRequestID: requestID,
 			},
-		})
+		}); err != nil {
+			return err
+		}
 		return nil
 	}
 }
@@ -387,13 +431,14 @@ func (e *Executor) publishAccepted(ctx context.Context, accepted runtimemodel.Ru
 
 func (e *Executor) publishCompleted(ctx context.Context, request runtimemodel.StepExecutionRequest, requestID string, result runtimemodel.StepExecutionResult) error {
 	completed := runtimemodel.RuntimeStepExecutionCompleted{
-		WorkspaceID: request.WorkspaceID,
-		RunID:       request.RunID,
-		StepID:      request.StepID,
-		StepKind:    request.Kind,
-		RequestID:   requestID,
-		Output:      cloneMap(result.Output),
-		CompletedAt: nowRFC3339(),
+		WorkspaceID:    request.WorkspaceID,
+		RunID:          request.RunID,
+		StepID:         request.StepID,
+		StepKind:       request.Kind,
+		RequestID:      requestID,
+		Output:         cloneMap(result.Output),
+		CompletedAt:    nowRFC3339(),
+		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
 	envelope := events.Envelope{
 		Topic:        TopicRuntimeBlockExecuteCompleted,
@@ -409,20 +454,24 @@ func (e *Executor) publishCompleted(ctx context.Context, request runtimemodel.St
 			events.PayloadKeyRuntimeResult:    result,
 		},
 	}
+	if err := publishRuntimeNotification(e.hub, ctx, envelope); err != nil {
+		return err
+	}
 	e.recordTerminal(request, requestID, envelope)
-	return publishRuntimeNotification(e.hub, ctx, envelope)
+	return nil
 }
 
 func (e *Executor) publishFailed(ctx context.Context, request runtimemodel.StepExecutionRequest, requestID string, result runtimemodel.StepExecutionResult, execErr error) error {
 	failed := runtimemodel.RuntimeStepExecutionFailed{
-		WorkspaceID:  request.WorkspaceID,
-		RunID:        request.RunID,
-		StepID:       request.StepID,
-		StepKind:     request.Kind,
-		RequestID:    requestID,
-		Error:        execErr.Error(),
-		CompletedAt:  nowRFC3339(),
-		RawResultRef: "",
+		WorkspaceID:    request.WorkspaceID,
+		RunID:          request.RunID,
+		StepID:         request.StepID,
+		StepKind:       request.Kind,
+		RequestID:      requestID,
+		Error:          execErr.Error(),
+		CompletedAt:    nowRFC3339(),
+		RawResultRef:   "",
+		RecoveryPolicy: request.RecoveryPolicy.Normalized(),
 	}
 	envelope := events.Envelope{
 		Topic:        TopicRuntimeBlockExecuteFailed,
@@ -439,8 +488,11 @@ func (e *Executor) publishFailed(ctx context.Context, request runtimemodel.StepE
 			events.PayloadKeyError:            execErr.Error(),
 		},
 	}
+	if err := publishRuntimeNotification(e.hub, ctx, envelope); err != nil {
+		return err
+	}
 	e.recordTerminal(request, requestID, envelope)
-	return publishRuntimeNotification(e.hub, ctx, envelope)
+	return nil
 }
 
 func (e *Executor) recordTerminal(request runtimemodel.StepExecutionRequest, requestID string, envelope events.Envelope) {

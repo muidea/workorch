@@ -577,6 +577,124 @@ func TestExecutorPublishesFailedEvent(t *testing.T) {
 	}
 }
 
+func TestExecutorTerminalPublishFailureDoesNotRecordCompletedTerminal(t *testing.T) {
+	publishErr := errors.New("completed publish failed")
+	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteCompleted, err: publishErr}
+	executor := NewExecutor("test-block", hub, nil, nil, "llm/workspace_execution")
+	request := runtimemodel.StepExecutionRequest{
+		WorkspaceID: "ws-terminal-publish-fail",
+		RunID:       "run-terminal-publish-fail",
+		StepID:      "run-terminal-publish-fail/step-1",
+		Kind:        "llm/workspace_execution",
+	}
+	requestID := "request-terminal-publish-fail"
+	queueKey := runtimeQueueKey(request, requestID)
+	if _, _, err := executor.accept(queueKey, request, requestID); err != nil {
+		t.Fatalf("accept request: %v", err)
+	}
+
+	err := executor.publishCompleted(context.Background(), request, requestID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "completed"}})
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("publishCompleted err = %v, want %v", err, publishErr)
+	}
+
+	executor.mu.Lock()
+	state := executor.requests[queueKey]
+	executor.mu.Unlock()
+	if state.Terminal || state.TerminalEvent.Topic != "" {
+		t.Fatalf("terminal state = %+v, want no terminal replay recorded after publish failure", state)
+	}
+}
+
+func TestExecutorWorkerLostPublishFailureIsReturned(t *testing.T) {
+	publishErr := errors.New("progress publish failed")
+	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteProgress, err: publishErr}
+	executor := NewExecutor("test-block", hub, nil, nil, "llm/workspace_execution")
+	request := runtimemodel.StepExecutionRequest{
+		WorkspaceID: "ws-worker-lost-publish-fail",
+		RunID:       "run-worker-lost-publish-fail",
+		StepID:      "run-worker-lost-publish-fail/step-1",
+		Kind:        "llm/workspace_execution",
+	}
+
+	err := executor.publishWorkerLifecycle(context.Background(), request, "request-worker-lost-publish-fail", "runtime_worker_lost", "worker_lost", "runtime worker lost", map[string]any{
+		"queueKey": "queue-worker-lost-publish-fail",
+		"workerId": "test-block|request-worker-lost-publish-fail",
+	})
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("publishWorkerLifecycle err = %v, want %v", err, publishErr)
+	}
+}
+
+func TestExecutorAcceptedPublishFailureDoesNotStartWorker(t *testing.T) {
+	publishErr := errors.New("accepted publish failed")
+	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteAccepted, err: publishErr}
+	background := magictask.NewBackgroundRoutine(4)
+	defer background.Shutdown(context.Background())
+
+	var calls atomic.Int64
+	started := make(chan struct{})
+	executor := NewExecutor("test-block", hub, background, runtimeAdapterFunc(func(context.Context, runtimemodel.StepExecutionRequest) (runtimemodel.StepExecutionResult, error) {
+		calls.Add(1)
+		close(started)
+		return runtimemodel.StepExecutionResult{Output: map[string]any{"unexpected": true}}, nil
+	}), "llm/workspace_execution")
+
+	err := executor.handle(context.Background(), runtimeCommandEnvelope("llm/workspace_execution", "request-accepted-publish-fail"))
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("handle err = %v, want %v", err, publishErr)
+	}
+
+	select {
+	case <-started:
+		t.Fatal("runtime worker started after accepted publish failure")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("adapter calls = %d, want 0", calls.Load())
+	}
+
+	queueKey := runtimeQueueKey(runtimeCommandEnvelope("llm/workspace_execution", "request-accepted-publish-fail").Payload[events.PayloadKeyRuntimeRequest].(runtimemodel.StepExecutionRequest), "request-accepted-publish-fail")
+	executor.mu.Lock()
+	_, exists := executor.requests[queueKey]
+	executor.mu.Unlock()
+	if exists {
+		t.Fatalf("queue key %q retained after accepted publish failure", queueKey)
+	}
+}
+
+func TestExecutorTerminalReplayPublishFailureIsReturned(t *testing.T) {
+	publishErr := errors.New("terminal replay publish failed")
+	hub := &failingRuntimePublishHub{failTopic: TopicRuntimeBlockExecuteCompleted, err: publishErr}
+	executor := NewExecutor("test-block", hub, nil, nil, "llm/workspace_execution")
+	envelope := runtimeCommandEnvelope("llm/workspace_execution", "request-terminal-replay-fail")
+	request := envelope.Payload[events.PayloadKeyRuntimeRequest].(runtimemodel.StepExecutionRequest)
+	requestID := "request-terminal-replay-fail"
+	queueKey := runtimeQueueKey(request, requestID)
+	if _, _, err := executor.accept(queueKey, request, requestID); err != nil {
+		t.Fatalf("accept request: %v", err)
+	}
+	executor.recordTerminal(request, requestID, events.Envelope{
+		Topic:       TopicRuntimeBlockExecuteCompleted,
+		WorkspaceID: string(request.WorkspaceID),
+		RunID:       string(request.RunID),
+		StepID:      string(request.StepID),
+		Payload: map[string]any{
+			events.PayloadKeyRuntimeCompleted: runtimemodel.RuntimeStepExecutionCompleted{
+				WorkspaceID: request.WorkspaceID,
+				RunID:       request.RunID,
+				StepID:      request.StepID,
+				RequestID:   requestID,
+			},
+		},
+	})
+
+	err := executor.handle(context.Background(), envelope)
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("terminal replay err = %v, want %v", err, publishErr)
+	}
+}
+
 func TestExecutorDuplicateRequestIDExecutesAdapterOnce(t *testing.T) {
 	hub := events.NewMagicHub()
 	defer hub.Terminate(context.Background())
@@ -857,4 +975,22 @@ func (h *countingRuntimeHub) Subscribe(string, events.Handler) func() {
 	return func() {
 		h.unsubscribeCount++
 	}
+}
+
+type failingRuntimePublishHub struct {
+	failTopic string
+	err       error
+	published []events.Envelope
+}
+
+func (h *failingRuntimePublishHub) Publish(_ context.Context, envelope events.Envelope) error {
+	if envelope.Topic == h.failTopic {
+		return h.err
+	}
+	h.published = append(h.published, envelope)
+	return nil
+}
+
+func (h *failingRuntimePublishHub) Subscribe(string, events.Handler) func() {
+	return func() {}
 }
