@@ -5869,6 +5869,7 @@ func TestMetricsEndpointReportsSchedulerDiagnostics(t *testing.T) {
 		`workorch_scheduler_command_enqueue_failures_total{kind="run_continuation",reason="scheduler_enqueue_failed"} 1`,
 		`workorch_scheduler_continuation_failures_total{kind="replan_continuation",reason="owner_command_failed"} 1`,
 		`workorch_scheduler_continuation_no_action_total{kind="replan_continuation",reason="replan_successor_exists"} 1`,
+		`workorch_watchdog_interval_seconds 30`,
 		`workorch_watchdog_ticks_total 1`,
 		`workorch_watchdog_last_error_timestamp_seconds`,
 		`workorch_watchdog_stale_runtime_gap_recoveries_total{gap="stale_dispatched",safety="runtime_recovery_policy"} 2`,

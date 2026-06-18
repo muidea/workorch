@@ -294,6 +294,16 @@ watchdog 触发动作必须继续通过 appservice/kernel runtime contract：
 
 不得直接改写正式状态机。
 
+Scheduler continuation 另有一条独立边界：REST/TUI/CLI 命令必须通过
+workorchd scheduler command 主路径进入 `BackgroundRoutine` 后才算 accepted。
+missing subscriber、missing response、not accepted、enqueue failure 或 owner
+command failure 必须表现为同步错误或 bounded scheduler diagnostic。周期 watchdog
+不得扫描 resolved decision/approval 后自动创建 replan continuation，也不得用
+stale runtime gap recovery 补偿 scheduler command/result 丢失。`/readyz`、
+workspace/run snapshot 和 `/metrics` 可以暴露 scheduler diagnostics 与建议的
+manual action，但这些 diagnostics 不属于 kernel owner state，也不能触发自动
+activation/resume/replan。
+
 ## Web/TUI Contract
 
 Web/TUI 只做 View + Presenter：

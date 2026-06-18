@@ -92,17 +92,33 @@ def parse_metrics(path):
             values[parts[0]] = float(parts[1])
         except ValueError:
             continue
-    return values
+    return values, text
 
 errors = []
 readyz = json.loads((artifact_dir / "readyz.json").read_text(encoding="utf-8"))
 if readyz.get("status") != "ready":
     errors.append(f"readyz status = {readyz.get('status')!r}, want ready")
 
-metrics = parse_metrics(artifact_dir / "metrics.txt")
+metrics, metrics_text = parse_metrics(artifact_dir / "metrics.txt")
 stale_age = metrics.get("workorch_stale_dispatched_step_min_age_seconds")
 if stale_age is None:
     errors.append("metrics missing workorch_stale_dispatched_step_min_age_seconds")
+required_metric_markers = [
+    "workorch_server_max_concurrent_runs",
+    "workorch_run_requests_in_flight",
+    "workorch_run_queue_waiting",
+    "workorch_scheduler_commands_total",
+    "workorch_scheduler_command_enqueue_failures_total",
+    "workorch_scheduler_continuation_failures_total",
+    "workorch_scheduler_continuation_no_action_total",
+    "workorch_watchdog_interval_seconds",
+    "workorch_watchdog_ticks_total",
+    "workorch_watchdog_last_error_timestamp_seconds",
+    "workorch_watchdog_stale_runtime_gap_recoveries_total",
+]
+missing_metric_markers = [marker for marker in required_metric_markers if marker not in metrics_text]
+if missing_metric_markers:
+    errors.append(f"metrics missing scheduler/watchdog preflight markers: {missing_metric_markers}")
 run_timeout_seconds = parse_duration_seconds(run_timeout_value)
 if stale_age is not None and stale_age >= run_timeout_seconds:
     errors.append(
@@ -117,6 +133,13 @@ summary = {
     "serviceReady": readyz.get("status") == "ready",
     "runTimeoutSeconds": run_timeout_seconds,
     "staleDispatchedStepMinAgeSeconds": stale_age,
+    "maxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs"),
+    "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight"),
+    "runQueueWaiting": metrics.get("workorch_run_queue_waiting"),
+    "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds"),
+    "watchdogTicks": metrics.get("workorch_watchdog_ticks_total"),
+    "watchdogLastErrorTimestampSeconds": metrics.get("workorch_watchdog_last_error_timestamp_seconds"),
+    "schedulerMetricMarkersPresent": not missing_metric_markers,
     "pass": not errors,
     "errors": errors,
 }
@@ -286,6 +309,7 @@ summary = {
         "workspaceTotal": observe_summary.get("workspaceTotal"),
         "observedWorkspaceIds": observe_summary.get("observedWorkspaceIds"),
         "metrics": observe_summary.get("metrics"),
+        "governanceContinuationMainPath": observe_summary.get("governanceContinuationMainPath"),
         "cacheHitRate": observe_summary.get("cacheHitRate"),
         "pprof": observe_summary.get("pprof"),
         "cpuProfile": observe_summary.get("cpuProfile"),

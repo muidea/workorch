@@ -34,6 +34,7 @@ MAX_PENDING_REBUILDS="${WORKORCH_OBSERVE_MAX_PENDING_REBUILDS:-10}"
 MAX_PROJECTION_SCHEDULE_DROPPED_DELTA="${WORKORCH_OBSERVE_MAX_PROJECTION_SCHEDULE_DROPPED_DELTA:-0}"
 MAX_SUSPICIOUS_CPU_FLAT_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_FLAT_PERCENT:-50}"
 MAX_SUSPICIOUS_CPU_CUM_PERCENT="${WORKORCH_OBSERVE_MAX_SUSPICIOUS_CPU_CUM_PERCENT:-90}"
+REQUIRE_GOVERNANCE_CONTINUATION="${WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION:-0}"
 
 mkdir -p "$TMP_DIR"
 
@@ -202,7 +203,7 @@ if [[ -n "$WORKSPACE_IDS" ]]; then
   done
 fi
 
-python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" <<'PY'
+python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$EXPECTED_STALE_DISPATCHED_STEP_MIN_AGE_SECONDS" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_CONTINUATION" <<'PY'
 import json
 import os
 import re
@@ -235,6 +236,7 @@ max_pending_rebuilds = int(sys.argv[22].strip() or "10")
 max_projection_schedule_dropped_delta = int(sys.argv[23].strip() or "0")
 max_suspicious_cpu_flat_percent = float(sys.argv[24].strip() or "50")
 max_suspicious_cpu_cum_percent = float(sys.argv[25].strip() or "90")
+require_governance_continuation = sys.argv[26].strip() in {"1", "true", "yes"}
 
 def read_json(path):
     with open(path, "r", encoding="utf-8") as handle:
@@ -314,6 +316,58 @@ def read_metrics(path):
             continue
     return values, text
 
+def parse_metric_samples(text):
+    samples = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        metric = parts[0]
+        try:
+            value = float(parts[1])
+        except ValueError:
+            continue
+        labels = {}
+        name = metric
+        if "{" in metric and metric.endswith("}"):
+            name, raw_labels = metric.split("{", 1)
+            raw_labels = raw_labels[:-1]
+            for match in re.finditer(r'([A-Za-z_][A-Za-z0-9_]*)="((?:\\.|[^"])*)"', raw_labels):
+                labels[match.group(1)] = bytes(match.group(2), "utf-8").decode("unicode_escape")
+        samples.append({"name": name, "labels": labels, "value": value})
+    return samples
+
+def metric_sample_sum(samples, name, labels=None):
+    labels = labels or {}
+    total = 0.0
+    for sample in samples:
+        if sample["name"] != name:
+            continue
+        sample_labels = sample.get("labels") or {}
+        if all(sample_labels.get(key) == value for key, value in labels.items()):
+            total += float(sample.get("value") or 0)
+    return total
+
+def scheduler_diagnostics_from_payload(payload, scope):
+    if not payload:
+        return []
+    ret = []
+    latest = payload.get("latestContinuation")
+    if isinstance(latest, dict):
+        item = dict(latest)
+        item["scope"] = f"{scope}.latestContinuation"
+        ret.append(item)
+    for idx, raw in enumerate(payload.get("recentContinuations") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        item["scope"] = f"{scope}.recentContinuations[{idx}]"
+        ret.append(item)
+    return ret
+
 def validate_projection_display_contract(projection, scope, require_workspace_revision):
     required = ["state", "globalRevision", "sourceEventRevision", "projectedSourceRevision", "updatedAt", "rebuiltAt"]
     if require_workspace_revision:
@@ -392,6 +446,7 @@ def validate_heartbeat_display_contract(heartbeat, scope):
 errors = []
 warnings = []
 readyz = read_json(artifact_dir / "readyz.json")
+scheduler_diagnostics_observed = scheduler_diagnostics_from_payload(readyz.get("diagnostics") or {}, "readyz")
 if readyz.get("status") != "ready":
     errors.append(f"readyz status = {readyz.get('status')!r}, want ready")
 projection = readyz.get("projection") or {}
@@ -441,6 +496,9 @@ for workspace_id in workspace_ids:
         snapshot_body = read_json(snapshot_path)
         snapshot_projection = snapshot_body.get("projection") or {}
         snapshot = snapshot_body.get("snapshot") or {}
+        scheduler_diagnostics_observed.extend(
+            scheduler_diagnostics_from_payload(snapshot.get("schedulerDiagnostics") or {}, f"workspace-snapshot[{workspace_id}]")
+        )
         snapshot_display = {
             "workspaceId": workspace_id,
             "projection": validate_projection_display_contract(snapshot_projection, f"workspace-snapshot[{workspace_id}]", True),
@@ -485,6 +543,8 @@ if display_contract_issues:
 
 metrics_before, metrics_before_text = read_metrics(artifact_dir / "metrics-before.txt")
 metrics, metrics_text = read_metrics(artifact_dir / "metrics-after.txt")
+metric_samples_before = parse_metric_samples(metrics_before_text)
+metric_samples = parse_metric_samples(metrics_text)
 required_metric_markers = [
     "workorch_stale_dispatched_step_min_age_seconds",
     "workorch_workspace_projection_rebuild_total",
@@ -492,6 +552,14 @@ required_metric_markers = [
     "workorch_workspace_projection_active_run_heartbeat_age_seconds_max",
     "workorch_workspace_projection_stalled_runs",
     "workorch_workspace_projection_ineffective_retry_runs",
+    "workorch_scheduler_commands_total",
+    "workorch_scheduler_command_enqueue_failures_total",
+    "workorch_scheduler_continuation_failures_total",
+    "workorch_scheduler_continuation_no_action_total",
+    "workorch_watchdog_interval_seconds",
+    "workorch_watchdog_ticks_total",
+    "workorch_watchdog_last_error_timestamp_seconds",
+    "workorch_watchdog_stale_runtime_gap_recoveries_total",
 ]
 for marker in required_metric_markers:
     if marker not in metrics_text:
@@ -510,6 +578,9 @@ if expected_stale_dispatched_step_min_age_seconds:
 def metric_delta(name):
     return float(metrics.get(name) or 0) - float(metrics_before.get(name) or 0)
 
+def labeled_metric_delta(name, labels=None):
+    return metric_sample_sum(metric_samples, name, labels) - metric_sample_sum(metric_samples_before, name, labels)
+
 pending_rebuilds = int(metrics.get("workorch_workspace_projection_pending_rebuilds") or 0)
 schedule_dropped_delta = int(metric_delta("workorch_workspace_projection_schedule_dropped_total"))
 if pending_rebuilds > max_pending_rebuilds:
@@ -521,6 +592,101 @@ if schedule_dropped_delta > max_projection_schedule_dropped_delta:
     errors.append(
         "workspace projection schedule dropped delta above threshold: "
         f"delta={schedule_dropped_delta} threshold={max_projection_schedule_dropped_delta}"
+    )
+
+governance_resolution_delta = (
+    metric_delta('workorch_http_requests_total{endpoint="decision_resolve"}')
+    + metric_delta('workorch_http_requests_total{endpoint="approval_approve"}')
+    + metric_delta('workorch_http_requests_total{endpoint="approval_reject"}')
+)
+governance_command_accepted_delta = labeled_metric_delta(
+    "workorch_scheduler_commands_total",
+    {"kind": "governance_continuation", "result": "accepted"},
+)
+replan_command_accepted_delta = labeled_metric_delta(
+    "workorch_scheduler_commands_total",
+    {"kind": "replan_continuation", "result": "accepted"},
+)
+governance_command_error_delta = sum(
+    labeled_metric_delta("workorch_scheduler_commands_total", {"kind": "governance_continuation", "result": result})
+    for result in ("failed", "not_accepted", "missing_response")
+)
+replan_command_error_delta = sum(
+    labeled_metric_delta("workorch_scheduler_commands_total", {"kind": "replan_continuation", "result": result})
+    for result in ("failed", "not_accepted", "missing_response")
+)
+governance_enqueue_failure_delta = labeled_metric_delta(
+    "workorch_scheduler_command_enqueue_failures_total",
+    {"kind": "governance_continuation", "reason": "scheduler_enqueue_failed"},
+)
+replan_enqueue_failure_delta = labeled_metric_delta(
+    "workorch_scheduler_command_enqueue_failures_total",
+    {"kind": "replan_continuation", "reason": "scheduler_enqueue_failed"},
+)
+governance_continuation_failure_delta = labeled_metric_delta(
+    "workorch_scheduler_continuation_failures_total",
+    {"kind": "governance_continuation"},
+)
+replan_continuation_failure_delta = labeled_metric_delta(
+    "workorch_scheduler_continuation_failures_total",
+    {"kind": "replan_continuation"},
+)
+governance_continuation_no_action_delta = labeled_metric_delta(
+    "workorch_scheduler_continuation_no_action_total",
+    {"kind": "governance_continuation"},
+)
+replan_continuation_no_action_delta = labeled_metric_delta(
+    "workorch_scheduler_continuation_no_action_total",
+    {"kind": "replan_continuation"},
+)
+watchdog_ticks_delta = metric_delta("workorch_watchdog_ticks_total")
+watchdog_stale_recovery_delta = labeled_metric_delta("workorch_watchdog_stale_runtime_gap_recoveries_total")
+governance_scheduler_diagnostics = [
+    item for item in scheduler_diagnostics_observed
+    if item.get("kind") in {"governance_continuation", "replan_continuation"}
+]
+governance_scheduler_evidence_delta = (
+    governance_command_accepted_delta
+    + replan_command_accepted_delta
+    + governance_command_error_delta
+    + replan_command_error_delta
+    + governance_enqueue_failure_delta
+    + replan_enqueue_failure_delta
+    + governance_continuation_failure_delta
+    + replan_continuation_failure_delta
+    + governance_continuation_no_action_delta
+    + replan_continuation_no_action_delta
+)
+governance_continuation_main_path = {
+    "required": require_governance_continuation,
+    "governanceResolutionDelta": governance_resolution_delta,
+    "governanceCommandAcceptedDelta": governance_command_accepted_delta,
+    "replanCommandAcceptedDelta": replan_command_accepted_delta,
+    "governanceCommandErrorDelta": governance_command_error_delta,
+    "replanCommandErrorDelta": replan_command_error_delta,
+    "governanceEnqueueFailureDelta": governance_enqueue_failure_delta,
+    "replanEnqueueFailureDelta": replan_enqueue_failure_delta,
+    "governanceContinuationFailureDelta": governance_continuation_failure_delta,
+    "replanContinuationFailureDelta": replan_continuation_failure_delta,
+    "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
+    "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
+    "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
+    "diagnosticItems": governance_scheduler_diagnostics,
+    "explicitSchedulerEvidence": governance_scheduler_evidence_delta > 0 or len(governance_scheduler_diagnostics) > 0,
+    "hiddenWatchdogCompensationSuspected": False,
+}
+if governance_resolution_delta > 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+    errors.append(
+        "governance resolution observed but no scheduler accepted/error metric or continuation diagnostic was observed"
+    )
+if require_governance_continuation and governance_resolution_delta <= 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+    errors.append(
+        "WORKORCH_OBSERVE_REQUIRE_GOVERNANCE_CONTINUATION is enabled but no governance continuation evidence was observed"
+    )
+if governance_resolution_delta > 0 and watchdog_stale_recovery_delta > 0 and not governance_continuation_main_path["explicitSchedulerEvidence"]:
+    governance_continuation_main_path["hiddenWatchdogCompensationSuspected"] = True
+    errors.append(
+        "governance continuation appears to rely on watchdog stale-runtime recovery without scheduler evidence"
     )
 
 events_path = artifact_dir / "sse-events.jsonl"
@@ -835,13 +1001,33 @@ summary = {
         "stalledRuns": metrics.get("workorch_workspace_projection_stalled_runs", 0),
         "ineffectiveRetryRuns": metrics.get("workorch_workspace_projection_ineffective_retry_runs", 0),
         "staleDispatchedStepMinAgeSeconds": stale_dispatched_step_min_age_seconds,
+        "serverMaxConcurrentRuns": metrics.get("workorch_server_max_concurrent_runs", 0),
+        "runRequestsInFlight": metrics.get("workorch_run_requests_in_flight", 0),
+        "runQueueWaiting": metrics.get("workorch_run_queue_waiting", 0),
+        "watchdogIntervalSeconds": metrics.get("workorch_watchdog_interval_seconds", 0),
         "projectionPendingRebuilds": pending_rebuilds,
         "projectionScheduleDroppedDelta": schedule_dropped_delta,
         "projectionRebuildDelta": {
             "full": metric_delta("workorch_workspace_projection_rebuild_total{scope=\"full\"}"),
             "debounced": metric_delta("workorch_workspace_projection_debounced_rebuild_total"),
         },
+        "scheduler": {
+            "governanceResolutionDelta": governance_resolution_delta,
+            "governanceCommandAcceptedDelta": governance_command_accepted_delta,
+            "replanCommandAcceptedDelta": replan_command_accepted_delta,
+            "governanceCommandErrorDelta": governance_command_error_delta,
+            "replanCommandErrorDelta": replan_command_error_delta,
+            "governanceEnqueueFailureDelta": governance_enqueue_failure_delta,
+            "replanEnqueueFailureDelta": replan_enqueue_failure_delta,
+            "governanceContinuationFailureDelta": governance_continuation_failure_delta,
+            "replanContinuationFailureDelta": replan_continuation_failure_delta,
+            "governanceContinuationNoActionDelta": governance_continuation_no_action_delta,
+            "replanContinuationNoActionDelta": replan_continuation_no_action_delta,
+            "watchdogTicksDelta": watchdog_ticks_delta,
+            "watchdogStaleRecoveryDelta": watchdog_stale_recovery_delta,
+        },
     },
+    "governanceContinuationMainPath": governance_continuation_main_path,
     "displayContract": {
         "pass": display_contract.get("pass"),
         "snapshotCount": len(display_contract.get("snapshots") or []),

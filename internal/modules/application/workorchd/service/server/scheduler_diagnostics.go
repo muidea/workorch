@@ -251,6 +251,8 @@ func (s *schedulerDiagnosticsStore) renderMetrics() string {
 	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_failures_total", "kind", "reason", s.continuationFailures)
 	b.WriteString("# TYPE workorch_scheduler_continuation_no_action_total counter\n")
 	writeLabelPairMetrics(&b, "workorch_scheduler_continuation_no_action_total", "kind", "reason", s.continuationNoActions)
+	b.WriteString("# TYPE workorch_watchdog_interval_seconds gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_watchdog_interval_seconds %.0f\n", runWatchdogInterval.Seconds()))
 	b.WriteString("# TYPE workorch_watchdog_ticks_total counter\n")
 	b.WriteString(fmt.Sprintf("workorch_watchdog_ticks_total %d\n", s.watchdogTicks))
 	b.WriteString("# TYPE workorch_watchdog_last_error_timestamp_seconds gauge\n")
