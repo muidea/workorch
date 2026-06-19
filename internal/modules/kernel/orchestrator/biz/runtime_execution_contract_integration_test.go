@@ -2139,6 +2139,296 @@ func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidation
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsConcreteValidationShellFileRedirection(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-file-redirection-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-file-redirection-validation/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "printf ok > validation.log"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "must not mutate workspace files") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want file-redirection validation shell rejection", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsConcreteValidationShellDevNullRedirection(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-dev-null-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-dev-null-validation/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "if verify >/dev/null 2>&1; then printf ok; fi"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want dev-null validation shell redirection allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspaceWrites(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-temp-writes",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-temp-writes/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`TMPDIR_ROOT="$(mktemp -d)"`,
+						`trap 'rm -rf "$TMPDIR_ROOT"' EXIT`,
+						`TMP_REPO="$TMPDIR_ROOT/repo"`,
+						`XDG_CACHE_HOME="$TMPDIR_ROOT/home/.cache"`,
+						`mkdir -p "$TMP_REPO"`,
+						`mkdir -p "$XDG_CACHE_HOME"`,
+						`cp -R . "$TMP_REPO"`,
+						`cat > "$TMP_REPO/validation.txt" <<'EOF'`,
+						`ok`,
+						`EOF`,
+						`sh -c 'test -f "$1"' _ "$TMP_REPO/validation.txt"`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "workspace mutation is isolated in a temporary copy",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want isolated controlled substitute writes allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorkspaceHarness(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-copied-workspace",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-copied-workspace/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	command := strings.Join([]string{
+		`set -eu`,
+		`tmp="$(mktemp -d)"`,
+		`trap 'rm -rf "$tmp"' EXIT INT TERM`,
+		`mkdir -p "$tmp/home" "$tmp/gocache" "$tmp/gopath" "$tmp/copy"`,
+		`XDG_CACHE_HOME="$tmp/home/.cache"`,
+		`mkdir -p "$XDG_CACHE_HOME"`,
+		`cp -R . "$tmp/copy/repo"`,
+		`cd "$tmp/copy/repo"`,
+		`set +e`,
+		`HOME="$tmp/home" GOCACHE="$tmp/gocache" GOPATH="$tmp/gopath" TMPDIR="$tmp" sh scripts/verify_usage_traceability.sh >"$tmp/validator.stdout" 2>"$tmp/validator.stderr"`,
+		`validator_rc=$?`,
+		`set -e`,
+		`printf 'validator_exit=%s\n' "$validator_rc"`,
+		`cat "$tmp/validator.stdout"`,
+		`cat "$tmp/validator.stderr"`,
+		`usage_path="$(find "$tmp" -type f -name 'usage.csv' | head -n 1 || true)"`,
+		`metadata_path="$(find "$tmp" -type f -path '*/interactions/*/metadata.json' | head -n 1 || true)"`,
+		`[ -n "$usage_path" ] || { echo 'usage.csv missing after controlled substitute' >&2; exit 1; }`,
+		`[ -n "$metadata_path" ] || { echo 'metadata.json missing after controlled substitute' >&2; exit 1; }`,
+		`round_dir="$(dirname "$metadata_path")"`,
+		`request_path="$(find "$round_dir" -maxdepth 1 -type f -name '*request*' ! -name '*upstream*' | head -n 1 || true)"`,
+		`upstream_request_path="$(find "$round_dir" -maxdepth 1 -type f -name '*upstream*request*' | head -n 1 || true)"`,
+		`response_path="$(find "$round_dir" -maxdepth 1 -type f -name '*response*' ! -name '*upstream*' | head -n 1 || true)"`,
+		`upstream_response_path="$(find "$round_dir" -maxdepth 1 -type f -name '*upstream*response*' | head -n 1 || true)"`,
+		`[ -n "$request_path" ] || { echo 'archived client request file missing' >&2; exit 1; }`,
+		`[ -n "$upstream_request_path" ] || { echo 'archived upstream request file missing' >&2; exit 1; }`,
+		`[ -n "$response_path" ] || { echo 'archived final response file missing' >&2; exit 1; }`,
+		`[ -n "$upstream_response_path" ] || { echo 'archived upstream response file missing' >&2; exit 1; }`,
+		`client_model="$(grep -Eo '"model"[[:space:]]*:[[:space:]]*"[^"]+"' "$request_path" | head -n 1 | sed 's/.*"model"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"`,
+		`upstream_model="$(grep -Eo '"model"[[:space:]]*:[[:space:]]*"[^"]+"' "$upstream_request_path" | head -n 1 | sed 's/.*"model"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"`,
+		`[ -n "$client_model" ] || { echo 'client model field missing from archived request' >&2; exit 1; }`,
+		`[ -n "$upstream_model" ] || { echo 'upstream model field missing from archived upstream request' >&2; exit 1; }`,
+		`printf 'usage_path=%s\n' "$usage_path"`,
+		`printf 'metadata_path=%s\n' "$metadata_path"`,
+	}, "\n")
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", command},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "workspace validation in an isolated temporary copy",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want copied-workspace controlled substitute allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceWrite(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-workspace-write",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-workspace-write/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", `TMPDIR_ROOT="$(mktemp -d)"; printf ok > validation.log; rm -rf "$TMPDIR_ROOT"`},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "workspace mutation is not isolated",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "must not mutate workspace files") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want workspace write rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsStateChangingGraphWithDetachedProcess(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-detached-process",

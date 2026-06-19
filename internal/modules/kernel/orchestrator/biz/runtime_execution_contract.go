@@ -2,12 +2,15 @@ package orchestrator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+var shellAssignmentPattern = regexp.MustCompile(`(?m)([a-z_][a-z0-9_]*)=("[^"]*"|'[^']*'|[^ \t\r\n;]+)`)
 
 func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, output map[string]any) error {
 	if run == nil || step == nil || output == nil || step.Kind != initialStepKind(run) {
@@ -179,7 +182,8 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 		if shellCommandLineStartsDetachedProcess(commandLine) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
 		}
-		if shellCommandLineContainsWorkspaceFileMutation(commandLine) {
+		allowIsolatedWrites := nodeValidationEvidenceMode(node) == "controlled_substitute"
+		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowIsolatedWrites) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded", common.ErrInvalidArgument)
 		}
 	}
@@ -247,10 +251,13 @@ func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 	return shellCommandLineContainsStandaloneAmpersand(lower)
 }
 
-func shellCommandLineContainsWorkspaceFileMutation(commandLine string) bool {
+func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowIsolatedControlledSubstitute bool) bool {
 	lower := strings.ToLower(strings.TrimSpace(commandLine))
 	if lower == "" {
 		return false
+	}
+	if allowIsolatedControlledSubstitute && shellCommandLineUsesIsolatedTemporaryWorkspace(lower) {
+		return shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(lower)
 	}
 	padded := " " + lower + " "
 	for _, marker := range []string{
@@ -279,31 +286,157 @@ func shellCommandLineContainsWorkspaceFileMutation(commandLine string) bool {
 			return true
 		}
 	}
-	return shellCommandLineContainsWriteRedirection(lower)
+	return shellCommandLineContainsWriteRedirection(lower, false)
 }
 
-func shellCommandLineContainsWriteRedirection(commandLine string) bool {
+func shellCommandLineUsesIsolatedTemporaryWorkspace(commandLine string) bool {
+	return strings.Contains(commandLine, "mktemp -d") && shellCommandLineSegmentReferencesTemp(commandLine)
+}
+
+func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLine string) bool {
+	tempAliases := shellCommandLineTempAliases(commandLine)
+	for _, segment := range strings.FieldsFunc(commandLine, func(r rune) bool {
+		return r == '\n' || r == ';'
+	}) {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		padded := " " + segment + " "
+		for _, marker := range []string{
+			" sed -i",
+			" perl -pi",
+			" truncate ",
+			" touch ",
+			" mv ",
+			" install ",
+			" ln ",
+			" chmod ",
+			" chown ",
+			" dd ",
+			" tee ",
+			" patch ",
+			" git apply",
+			" git checkout",
+			" git restore",
+		} {
+			if strings.Contains(padded, marker) {
+				return true
+			}
+		}
+		for _, marker := range []string{" rm ", " rm -", " mkdir ", " rmdir ", " cp "} {
+			if strings.Contains(padded, marker) && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+				return true
+			}
+		}
+		if shellCommandLineContainsWriteRedirection(segment, true, tempAliases...) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandLineTempAliases(commandLine string) []string {
+	commandLine = strings.ToLower(commandLine)
+	aliases := map[string]struct{}{}
+	for changed := true; changed; {
+		changed = false
+		for _, match := range shellAssignmentPattern.FindAllStringSubmatch(commandLine, -1) {
+			if len(match) < 3 {
+				continue
+			}
+			name := strings.TrimSpace(match[1])
+			value := strings.Trim(strings.TrimSpace(match[2]), `"'`)
+			if name == "" {
+				continue
+			}
+			if _, exists := aliases[name]; exists {
+				continue
+			}
+			if shellCommandLineSegmentReferencesTemp(value, stringStructKeys(aliases)...) {
+				aliases[name] = struct{}{}
+				changed = true
+			}
+		}
+	}
+	return stringStructKeys(aliases)
+}
+
+func stringStructKeys(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func shellCommandLineSegmentReferencesTemp(segment string, tempAliases ...string) bool {
+	segment = strings.ToLower(segment)
+	if strings.Contains(segment, "$tmp") ||
+		strings.Contains(segment, "${tmp") ||
+		strings.Contains(segment, "/tmp/") ||
+		strings.Contains(segment, "$(mktemp") {
+		return true
+	}
+	for _, alias := range tempAliases {
+		alias = strings.ToLower(strings.TrimSpace(alias))
+		if alias == "" {
+			continue
+		}
+		if strings.Contains(segment, "$"+alias) || strings.Contains(segment, "${"+alias+"}") || strings.Contains(segment, "${"+alias) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellCommandLineContainsWriteRedirection(commandLine string, allowTempTarget bool, tempAliases ...string) bool {
 	for idx := 0; idx < len(commandLine); idx++ {
 		if commandLine[idx] != '>' {
 			continue
-		}
-		prev := byte(0)
-		if idx > 0 {
-			prev = commandLine[idx-1]
 		}
 		next := byte(0)
 		if idx+1 < len(commandLine) {
 			next = commandLine[idx+1]
 		}
-		if prev >= '0' && prev <= '9' {
+		if next == '&' {
 			continue
 		}
-		if prev == '&' || next == '&' {
-			continue
+		targetStart := idx + 1
+		if next == '>' {
+			targetStart++
+		}
+		for targetStart < len(commandLine) && strings.ContainsRune(" \t\r\n", rune(commandLine[targetStart])) {
+			targetStart++
+		}
+		targetEnd := targetStart
+		for targetEnd < len(commandLine) && !strings.ContainsRune(" \t\r\n;|&(){}", rune(commandLine[targetEnd])) {
+			targetEnd++
+		}
+		if targetEnd > targetStart {
+			target := strings.Trim(commandLine[targetStart:targetEnd], `"'`)
+			if target == "/dev/null" || (allowTempTarget && shellCommandLineSegmentReferencesTemp(target, tempAliases...)) {
+				continue
+			}
 		}
 		return true
 	}
 	return false
+}
+
+func nodeValidationEvidenceMode(node runtimemodel.BlockExecutionNode) string {
+	evidence := mapFromValue(node.Input["validationEvidence"])
+	mode := strings.TrimSpace(stringFromMap(evidence, "mode"))
+	if mode == "" {
+		mode = strings.TrimSpace(stringFromMap(node.Input, "validationEvidenceMode"))
+	}
+	if mode == "" {
+		mode = strings.TrimSpace(stringFromMap(node.Input, "evidenceMode"))
+	}
+	return mode
 }
 
 func shellCommandLineContainsStandaloneAmpersand(commandLine string) bool {
