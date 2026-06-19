@@ -75,7 +75,7 @@ func completionEvidenceRefCatalogForRun(ctx context.Context, steps repository.St
 	if err != nil {
 		return catalog, err
 	}
-	runSteps = orderedRuntimeContextSteps(runSteps)
+	runSteps = orderedRuntimeEvidenceSteps(runSteps)
 	for idx, step := range runSteps {
 		if step == nil || step.ID == "" {
 			continue
@@ -731,7 +731,7 @@ func latestCompletionClosureEvidence(ctx context.Context, steps repository.StepR
 	if err != nil || len(runSteps) == 0 {
 		return nil
 	}
-	runSteps = orderedRuntimeContextSteps(runSteps)
+	runSteps = orderedRuntimeEvidenceSteps(runSteps)
 	type closureItem struct {
 		order int
 		item  map[string]any

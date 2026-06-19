@@ -674,7 +674,7 @@ func latestActionEvidenceCandidatesInSteps(runSteps []*runModel.Step, failedStep
 	if limit <= 0 || len(runSteps) == 0 {
 		return nil
 	}
-	runSteps = orderedRuntimeContextSteps(runSteps)
+	runSteps = orderedRuntimeEvidenceSteps(runSteps)
 	ret := make([]map[string]any, 0, limit)
 	for idx := len(runSteps) - 1; idx >= 0 && len(ret) < limit; idx-- {
 		step := runSteps[idx]
@@ -724,7 +724,7 @@ func latestCoverageBoundActionEvidenceCandidatesInSteps(runSteps []*runModel.Ste
 	if coverageTarget == "" {
 		return nil
 	}
-	runSteps = orderedRuntimeContextSteps(runSteps)
+	runSteps = orderedRuntimeEvidenceSteps(runSteps)
 	ret := make([]map[string]any, 0, limit)
 	for idx := len(runSteps) - 1; idx >= 0 && len(ret) < limit; idx-- {
 		step := runSteps[idx]

@@ -2202,7 +2202,7 @@ func processEvidenceTimelineFromRunSteps(run *runModel.Run, steps []*runModel.St
 	if len(steps) == 0 {
 		return nil
 	}
-	ordered := orderedRuntimeContextSteps(steps)
+	ordered := orderedRuntimeEvidenceSteps(steps)
 	candidates := make([]*runModel.Step, 0, len(ordered))
 	for _, step := range ordered {
 		if step == nil || step.ID == "" || step.ID == currentStepID {
@@ -2316,10 +2316,26 @@ func processEvidenceTimelineItem(run *runModel.Run, step *runModel.Step, order i
 	if output := compactStepOutputForRunEvidenceSummary(step.Output); len(output) > 0 {
 		item["output"] = output
 	}
+	if validationEvidence := processEvidenceValidationEvidence(step); len(validationEvidence) > 0 {
+		item["validationEvidence"] = validationEvidence
+	}
 	if toolEvidence := compactMCPToolEvidenceSummary(step); len(toolEvidence) > 0 {
 		item["toolEvidence"] = toolEvidence
 	}
 	return item
+}
+
+func processEvidenceValidationEvidence(step *runModel.Step) map[string]any {
+	if step == nil {
+		return nil
+	}
+	if evidence := mapFromValue(step.Input["validationEvidence"]); len(evidence) > 0 {
+		return compactLLMContextMap(evidence, 1)
+	}
+	if evidence := mapFromValue(step.Output["validationEvidence"]); len(evidence) > 0 {
+		return compactLLMContextMap(evidence, 1)
+	}
+	return nil
 }
 
 func processEvidenceTargetRef(step *runModel.Step) string {
@@ -2730,6 +2746,17 @@ func lastFailureSupersededByCompletedItem(failure map[string]any, completed map[
 	failedNodeID := strings.TrimSpace(stringFromMap(failure, "graphNodeId"))
 	completedNodeID := strings.TrimSpace(stringFromMap(completed, "graphNodeId"))
 	if failedNodeID != "" && completedNodeID != "" && failedNodeID == completedNodeID {
+		return true
+	}
+	failedScope := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(failure, "targetScope"),
+		stringFromMap(failure, "failureTargetScope"),
+	))
+	completedScope := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(completed, "targetScope"),
+		stringFromMap(completed, "failureTargetScope"),
+	))
+	if failedScope != "" && completedScope != "" && failedScope == completedScope {
 		return true
 	}
 	return false

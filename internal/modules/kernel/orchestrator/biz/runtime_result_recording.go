@@ -139,7 +139,7 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	patchDetails := results.resultPatchDetails(ctx, run.ID)
 	assessment, summary = resultAssessmentWithRuntimeFacts(run, assessment, summary, patchDetails)
 	evidenceRefs = doDAssessmentEvidenceRefs(step.ID, assessment)
-	webSourceDetails := results.resultWebSourceDetails(ctx, run.ID)
+	webSourceDetails := results.resultWebSourceDetailsForEvidenceRefs(ctx, run.ID, evidenceRefs)
 	gitOperationDetails := results.resultGitOperationDetails(ctx, run.ID)
 	expectedArtifactRefs := expectedCompletionArtifactRefs(run, patchDetails, webSourceDetails, gitOperationDetails)
 	manifestCh := make(chan string, 1)

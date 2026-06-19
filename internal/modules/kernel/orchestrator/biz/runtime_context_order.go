@@ -20,6 +20,51 @@ func orderedRuntimeContextSteps(steps []*runModel.Step) []*runModel.Step {
 	return ret
 }
 
+func orderedRuntimeEvidenceSteps(steps []*runModel.Step) []*runModel.Step {
+	if len(steps) == 0 {
+		return nil
+	}
+	ret := append([]*runModel.Step(nil), steps...)
+	hasExplicitSequence := false
+	for _, step := range ret {
+		if _, ok := runtimeContextExplicitSequence(step); ok {
+			hasExplicitSequence = true
+			break
+		}
+	}
+	if !hasExplicitSequence {
+		return ret
+	}
+	indexByID := map[common.StepID]int{}
+	for idx, step := range ret {
+		if step != nil {
+			indexByID[step.ID] = idx
+		}
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		leftSeq, leftHasSeq := runtimeContextExplicitSequence(ret[i])
+		rightSeq, rightHasSeq := runtimeContextExplicitSequence(ret[j])
+		if leftHasSeq && rightHasSeq && leftSeq != rightSeq {
+			return leftSeq < rightSeq
+		}
+		if leftHasSeq != rightHasSeq {
+			return leftHasSeq
+		}
+		return runtimeEvidenceStepInputIndex(indexByID, ret[i], i) < runtimeEvidenceStepInputIndex(indexByID, ret[j], j)
+	})
+	return ret
+}
+
+func runtimeEvidenceStepInputIndex(indexByID map[common.StepID]int, step *runModel.Step, fallback int) int {
+	if step == nil {
+		return fallback
+	}
+	if idx, ok := indexByID[step.ID]; ok {
+		return idx
+	}
+	return fallback
+}
+
 func runtimeContextStepLess(left, right *runModel.Step) bool {
 	leftSeq, leftHasSeq := runtimeContextExplicitSequence(left)
 	rightSeq, rightHasSeq := runtimeContextExplicitSequence(right)

@@ -568,6 +568,41 @@ func (r *resultSubsystem) resultWebSourceDetails(ctx context.Context, runID comm
 	return ret
 }
 
+func (r *resultSubsystem) resultWebSourceDetailsForEvidenceRefs(ctx context.Context, runID common.RunID, evidenceRefs []string) []resultWebSourceDetail {
+	details := r.resultWebSourceDetails(ctx, runID)
+	if len(details) == 0 || len(evidenceRefs) == 0 {
+		return details
+	}
+	return orderResultWebSourceDetailsByEvidenceRefs(details, evidenceRefs)
+}
+
+func orderResultWebSourceDetailsByEvidenceRefs(details []resultWebSourceDetail, evidenceRefs []string) []resultWebSourceDetail {
+	if len(details) == 0 || len(evidenceRefs) == 0 {
+		return details
+	}
+	selected := make([]resultWebSourceDetail, 0, len(details))
+	used := make([]bool, len(details))
+	for _, ref := range evidenceRefs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		for idx, item := range details {
+			if used[idx] || string(item.StepID) != ref {
+				continue
+			}
+			selected = append(selected, item)
+			used[idx] = true
+		}
+	}
+	for idx, item := range details {
+		if !used[idx] {
+			selected = append(selected, item)
+		}
+	}
+	return selected
+}
+
 func (r *resultSubsystem) resultGitOperationDetails(ctx context.Context, runID common.RunID) []resultGitOperationDetail {
 	if r == nil || r.steps == nil || runID == "" {
 		return nil

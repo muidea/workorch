@@ -196,7 +196,7 @@ func (r *resultSubsystem) recordRunSummaryMemoryFromValidatedDoDAssessment(
 		SourceType:  memorycommon.MemorySourceRun,
 		SourceRef:   string(step.ID),
 		MemoryType:  memorycommon.MemoryTypeRunSummary,
-		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, r.resultPatchDetails(ctx, run.ID), r.resultEvidenceDetails(ctx, evidenceRefs), r.resultWebSourceDetails(ctx, run.ID)),
+		Content:     completionRunSummaryMemoryContent(run, summary, assessment, evidenceRefs, r.resultPatchDetails(ctx, run.ID), r.resultEvidenceDetails(ctx, evidenceRefs), r.resultWebSourceDetailsForEvidenceRefs(ctx, run.ID, evidenceRefs)),
 		Summary:     summary,
 		Tags:        []string{"run_summary", "dod_assessment", "runtime_result", runSummaryDoDGateVersionTag},
 		Importance:  70,

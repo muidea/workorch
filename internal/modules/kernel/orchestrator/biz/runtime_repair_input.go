@@ -207,6 +207,13 @@ func applyRuntimeRepairMissingCoverageProjection(
 			input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, steps, run, failedStep, open)
 		}
 	}
+	if len(mapSliceFromValue(input["missingDoDItems"])) == 0 {
+		if assessment := doDAssessmentFromOutput(failedStep.Output); len(assessment) > 0 {
+			if missing := missingDoDItemsFromDoDAssessment(assessment); len(missing) > 0 {
+				input["missingDoDItems"] = missingDoDItemsWithEvidenceCandidates(ctx, steps, run, failedStep, missing)
+			}
+		}
+	}
 	if missingDeliverableCoverage := missingDeliverableCoverageFromStep(failedStep); len(missingDeliverableCoverage) > 0 &&
 		len(mapSliceFromValue(input["missingDeliverableCoverage"])) == 0 {
 		if open := filterCoverageGapsOpenByWorkItems(input, missingDeliverableCoverage); len(open) > 0 {

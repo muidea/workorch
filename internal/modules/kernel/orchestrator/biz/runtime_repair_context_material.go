@@ -1768,6 +1768,11 @@ func missingDoDItemsFromFailureOutput(output map[string]any) []map[string]any {
 			return items
 		}
 	}
+	if assessment := doDAssessmentFromOutput(output); len(assessment) > 0 {
+		if items := missingDoDItemsFromDoDAssessment(assessment); len(items) > 0 {
+			return items
+		}
+	}
 	return nil
 }
 
@@ -1779,7 +1784,7 @@ func (r *repairSubsystem) recentRuntimeRepairAttemptSummaries(ctx context.Contex
 	if err != nil || len(steps) == 0 {
 		return nil
 	}
-	steps = orderedRuntimeContextSteps(steps)
+	steps = orderedRuntimeEvidenceSteps(steps)
 	scope := runtimeRepairScopeFromFailedStep(failedStep)
 	targetScope := runtimeFailureTargetScopeFromStep(failedStep)
 	windowRoot := runtimeRepairTargetBudgetWindowRootForFailureTarget(failedStep)

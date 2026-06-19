@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -186,6 +187,165 @@ func TestCurrentProgressDigestPrefersUnresolvedConcreteFailureOverLaterCoverageG
 	}
 }
 
+func TestProcessEvidenceTimelineKeepsCreationOrderAndSupersedesOldRepairGap(t *testing.T) {
+	runID := common.RunID("run-progress-creation-order")
+	run := &runModel.Run{ID: runID, WorkspaceID: "ws-progress-creation-order"}
+	failureScope := "failureTargets=target.txt"
+	steps := []*runModel.Step{
+		{
+			ID:    common.StepID(runID + "/graph-003/002-verify"),
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyGraphNodeID: "verify",
+				"failureTargetScope":    failureScope,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassShellCommand,
+				failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.txt|exitCode=1",
+				"error":                   "exit status 1",
+			},
+		},
+		{
+			ID:    common.StepID(runID + "/repair-007-of-graph-002-002-verify"),
+			RunID: runID,
+			Kind:  llmWorkspaceExecutionStepKind,
+			State: common.StepStateFailed,
+			Input: map[string]any{
+				stepInputKeyRepairOfStepID: string(runID + "/graph-002/002-verify"),
+				"failureTargetScope":       failureScope,
+			},
+			Output: map[string]any{
+				failureOutputKeyClass:     failureClassDoDCoverageMissing,
+				failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+				"reason":                  "old repair gap",
+			},
+		},
+		{
+			ID:    common.StepID(runID + "/graph-004/002-verify"),
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				stepInputKeyGraphNodeID:    "verify",
+				stepInputKeyRepairOfStepID: string(runID + "/graph-003/002-verify"),
+				"failureTargetScope":       failureScope,
+				"validationEvidence": map[string]any{
+					"mode":            "runtime_behavior",
+					"observationType": "runtime_observation",
+				},
+			},
+			Output: map[string]any{
+				"status":   "completed",
+				"command":  "verify",
+				"exitCode": 0,
+			},
+		},
+	}
+
+	timeline := processEvidenceTimelineFromRunSteps(run, steps, "")
+	if len(timeline) != 3 {
+		t.Fatalf("timeline = %+v, want three items", timeline)
+	}
+	if timeline[0]["stepId"] != string(steps[0].ID) || timeline[2]["stepId"] != string(steps[2].ID) {
+		t.Fatalf("timeline order = %+v, want repository creation order", timeline)
+	}
+	if validation := mapFromValue(timeline[2]["validationEvidence"]); validation["mode"] != "runtime_behavior" {
+		t.Fatalf("validationEvidence = %+v, want retained validation metadata", timeline[2]["validationEvidence"])
+	}
+	digest := currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	if failure := mapFromValue(digest["lastObservedFailure"]); len(failure) > 0 {
+		t.Fatalf("lastObservedFailure = %+v, want later scoped success to supersede old failure and repair gap", failure)
+	}
+	if digest["nextRequiredAction"] != "continue_current_stage_contract" {
+		t.Fatalf("digest = %+v, want continuation after latest scoped success", digest)
+	}
+}
+
+func TestCompletionEvidenceCatalogKeepsRepositoryOrderForLatestUsableScope(t *testing.T) {
+	runID := common.RunID("run-completion-catalog-order")
+	scope := "failureTargets=target.txt"
+	oldFailure := &runModel.Step{
+		ID:    common.StepID(runID + "/graph-003/002-verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"failureTargetScope": scope,
+		},
+		Output: map[string]any{
+			failureOutputKeySignature: "class=shell_command_failed|kind=shell/command|failureTargets=target.txt|exitCode=1",
+		},
+	}
+	oldRepairGap := &runModel.Step{
+		ID:    common.StepID(runID + "/repair-007-of-graph-002-002-verify"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			"failureTargetScope": scope,
+		},
+		Output: map[string]any{
+			failureOutputKeySignature: "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+		},
+	}
+	laterSuccess := &runModel.Step{
+		ID:    common.StepID(runID + "/graph-004/002-verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"failureTargetScope": scope,
+		},
+	}
+	repo := orderedStepRepository{steps: []*runModel.Step{oldFailure, oldRepairGap, laterSuccess}}
+
+	catalog, err := completionEvidenceRefCatalogForRun(context.Background(), repo, RuntimeEvidenceRepositories{}, &runModel.Run{ID: runID})
+	if err != nil {
+		t.Fatalf("completionEvidenceRefCatalogForRun: %v", err)
+	}
+	if got := catalog.latestUsableStepByScope[scope]; got != string(laterSuccess.ID) {
+		t.Fatalf("latest usable step for scope = %q, want %q", got, laterSuccess.ID)
+	}
+	if got := catalog.supersededFailureStepRefs[string(oldFailure.ID)]; got != string(laterSuccess.ID) {
+		t.Fatalf("old failure supersededBy = %q, want %q", got, laterSuccess.ID)
+	}
+	if got := catalog.supersededFailureStepRefs[string(oldRepairGap.ID)]; got != string(laterSuccess.ID) {
+		t.Fatalf("old repair gap supersededBy = %q, want %q", got, laterSuccess.ID)
+	}
+}
+
+func TestLatestActionEvidenceCandidatesKeepRepositoryOrder(t *testing.T) {
+	runID := common.RunID("run-latest-action-order")
+	earlySemanticRepair := &runModel.Step{
+		ID:    common.StepID(runID + "/repair-007-of-graph-002-002-verify"),
+		RunID: runID,
+		Kind:  "patch/apply",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"summary": "older repair action",
+		},
+	}
+	laterSemanticGraph := &runModel.Step{
+		ID:    common.StepID(runID + "/graph-004/002-verify"),
+		RunID: runID,
+		Kind:  "shell/command",
+		State: common.StepStateCompleted,
+		Output: map[string]any{
+			"summary": "later validation action",
+		},
+	}
+
+	candidates := latestActionEvidenceCandidatesInSteps([]*runModel.Step{earlySemanticRepair, laterSemanticGraph}, nil, 2)
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %+v, want two", candidates)
+	}
+	if candidates[0]["stepId"] != string(laterSemanticGraph.ID) {
+		t.Fatalf("first latest candidate = %+v, want later repository step", candidates[0])
+	}
+}
+
 func TestRejectedResultContinuationPreservesStructuredFailureTargetScope(t *testing.T) {
 	continuation := map[string]any{
 		"summary":            "result still lacks required evidence",
@@ -202,6 +362,33 @@ func TestRejectedResultContinuationPreservesStructuredFailureTargetScope(t *test
 		t.Fatalf("lastObservedFailure = %+v, want rejected result target scope", failure)
 	}
 }
+
+type orderedStepRepository struct {
+	steps []*runModel.Step
+}
+
+func (r orderedStepRepository) Create(context.Context, *runModel.Step) error { return nil }
+
+func (r orderedStepRepository) Get(_ context.Context, id common.StepID) (*runModel.Step, error) {
+	for _, step := range r.steps {
+		if step != nil && step.ID == id {
+			return step, nil
+		}
+	}
+	return nil, common.ErrNotFound
+}
+
+func (r orderedStepRepository) ListByRun(context.Context, common.RunID) ([]*runModel.Step, error) {
+	return append([]*runModel.Step(nil), r.steps...), nil
+}
+
+func (r orderedStepRepository) ListByRunSummary(context.Context, common.RunID) ([]*runModel.Step, error) {
+	return append([]*runModel.Step(nil), r.steps...), nil
+}
+
+func (r orderedStepRepository) Update(context.Context, *runModel.Step) error { return nil }
+
+func (r orderedStepRepository) Delete(context.Context, common.StepID) error { return nil }
 
 func TestCurrentExecutionProgressPromotionPreservesStructuredFailureTargetScope(t *testing.T) {
 	input := map[string]any{
