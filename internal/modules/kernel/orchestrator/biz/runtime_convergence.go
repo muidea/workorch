@@ -158,7 +158,7 @@ func BuildConvergenceContract(
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveStateChangingOutput
 		contract.StateChangingOutputRequired = true
-		contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+		contract.RepairActionPackage = convergenceStateChangingRepairActionPackage(input, failedStep)
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
@@ -180,7 +180,10 @@ func BuildConvergenceContract(
 		contract.RepairObjective = repairObjectiveStateChangingOutput
 		contract.StateChangingOutputRequired = true
 		if len(pkg) == 0 {
-			pkg = stateChangingRepairActionPackageForConvergence(input, failedStep)
+			pkg = convergenceStateChangingRepairActionPackage(input, failedStep)
+		} else if !boolValue(mapFromValue(pkg["requiredOutput"])["mustIncludeStateChangingNode"]) {
+			required := enforceStateChangingRequiredOutputForConvergence(pkg)
+			addStrategyReassessmentRequiredOutputContract(pkg, required)
 		}
 		contract.RepairActionPackage = pkg
 		contract.TargetEvidence = convergenceTargetEvidence(input, pkg)
@@ -198,7 +201,7 @@ func BuildConvergenceContract(
 		if pkg := stateChangingEvidenceRequirementRepairActionPackage(run, input); len(pkg) > 0 {
 			contract.RepairActionPackage = pkg
 		} else {
-			contract.RepairActionPackage = stateChangingRepairActionPackageForConvergence(input, failedStep)
+			contract.RepairActionPackage = convergenceStateChangingRepairActionPackage(input, failedStep)
 		}
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
@@ -240,7 +243,7 @@ func BuildConvergenceContract(
 		contract.RuntimeStageMode = "strict_convergence"
 		contract.RepairObjective = repairObjectiveStateChangingOutput
 		contract.StateChangingOutputRequired = true
-		contract.RepairActionPackage = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+		contract.RepairActionPackage = convergenceStateChangingRepairActionPackage(input, failedStep)
 		contract.TargetEvidence = convergenceTargetEvidence(input, contract.RepairActionPackage)
 		return contract
 	}
@@ -254,6 +257,19 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func convergenceStateChangingRepairActionPackage(input map[string]any, failedStep *runModel.Step) map[string]any {
+	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if len(pkg) == 0 {
+		return stateChangingRepairActionPackageForConvergence(input, failedStep)
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		required = enforceStateChangingRequiredOutputForConvergence(pkg)
+		addStrategyReassessmentRequiredOutputContract(pkg, required)
+	}
+	return pkg
 }
 
 func populateProfileStateChangingEvidenceConvergenceContract(input map[string]any, contract *ConvergenceContract, pkg map[string]any) {
@@ -1251,9 +1267,19 @@ func preserveStateChangingRequiredOutputSignals(required map[string]any, existin
 			continue
 		}
 		switch key {
+		case "acceptedKinds",
+			"acceptedOperations",
+			"toolStateChangingInputContract",
+			"toolStateChangingRule":
+			if boolValue(existing["mustIncludeStateChangingNode"]) {
+				required[key] = value
+			}
 		case "mustReturnValidJSON",
 			"mustNotReuseRejectedJSON",
 			"forbiddenStalePatchReuse",
+			"mustReturnPatchApplyNode",
+			"patchApplyOnlyReason",
+			"mustRebuildFromCurrentEvidence",
 			"mustPatchDirectlyFromProvidedSnapshot",
 			"sameGraphReadPatchRule",
 			"patchApplyFieldRule",
@@ -1357,9 +1383,19 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
 		input["repairGuidance"] = stateChangingConvergenceGuidance(input["repairGuidance"])
-		if len(contract.RepairActionPackage) > 0 {
-			input["repairActionPackage"] = contract.RepairActionPackage
+		pkg := cloneStepPayload(contract.RepairActionPackage)
+		if len(pkg) == 0 {
+			pkg = cloneStepPayload(mapFromValue(input["repairActionPackage"]))
 		}
+		if len(pkg) == 0 {
+			pkg = map[string]any{}
+		}
+		required := mapFromValue(pkg["requiredOutput"])
+		if !boolValue(required["mustIncludeStateChangingNode"]) {
+			required = enforceStateChangingRequiredOutputForConvergence(pkg)
+			addStrategyReassessmentRequiredOutputContract(pkg, required)
+		}
+		input["repairActionPackage"] = pkg
 	case convergenceStateNeedValidation:
 		setRuntimeStage(input, runtimeStageVerification)
 		input[stepInputKeySoulStage] = soulStageValidation

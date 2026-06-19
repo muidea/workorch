@@ -31,22 +31,114 @@ func ProjectWorkspaceSnapshotDetail(snapshot readmodelcore.WorkspaceSnapshot) re
 		ret.ContextBundle = &projected
 	}
 	if len(ret.Decisions) > 0 {
-		limit := min(len(ret.Decisions), decisionPageLimit)
+		ret.Decisions = selectWorkspaceDetailDecisions(ret, decisionPageLimit)
+		limit := len(ret.Decisions)
 		projected := make([]readmodelcore.Decision, 0, limit)
-		for _, item := range ret.Decisions[:limit] {
+		for _, item := range ret.Decisions {
 			projected = append(projected, ProjectDecisionView(item))
 		}
 		ret.Decisions = projected
 	}
 	if len(ret.Approvals) > 0 {
-		limit := min(len(ret.Approvals), approvalPageLimit)
+		ret.Approvals = selectWorkspaceDetailApprovals(ret, approvalPageLimit)
+		limit := len(ret.Approvals)
 		projected := make([]readmodelcore.Approval, 0, limit)
-		for _, item := range ret.Approvals[:limit] {
+		for _, item := range ret.Approvals {
 			projected = append(projected, ProjectApprovalView(item))
 		}
 		ret.Approvals = projected
 	}
 	return ret
+}
+
+func selectWorkspaceDetailDecisions(snapshot readmodelcore.WorkspaceSnapshot, limit int) []readmodelcore.Decision {
+	if limit <= 0 || len(snapshot.Decisions) == 0 {
+		return nil
+	}
+	selected := make([]readmodelcore.Decision, 0, min(len(snapshot.Decisions), limit))
+	seen := map[string]struct{}{}
+	add := func(item readmodelcore.Decision) {
+		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
+			return
+		}
+		if _, ok := seen[item.ID]; ok {
+			return
+		}
+		seen[item.ID] = struct{}{}
+		selected = append(selected, item)
+	}
+	addDecisionByID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		for _, item := range snapshot.Decisions {
+			if item.ID == id {
+				add(item)
+				return
+			}
+		}
+	}
+
+	addDecisionByID(snapshot.TaskProgress.Recovery.BlockingTicketID)
+	addDecisionByID(snapshot.TaskProgress.BlockingTicketID)
+	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
+	if activeRunID != "" {
+		for _, item := range snapshot.Decisions {
+			if strings.TrimSpace(item.RunID) == activeRunID && !IsResolvedDecisionState(item.State) {
+				add(item)
+			}
+		}
+	}
+	for _, item := range snapshot.Decisions {
+		add(item)
+	}
+	return selected
+}
+
+func selectWorkspaceDetailApprovals(snapshot readmodelcore.WorkspaceSnapshot, limit int) []readmodelcore.Approval {
+	if limit <= 0 || len(snapshot.Approvals) == 0 {
+		return nil
+	}
+	selected := make([]readmodelcore.Approval, 0, min(len(snapshot.Approvals), limit))
+	seen := map[string]struct{}{}
+	add := func(item readmodelcore.Approval) {
+		if len(selected) >= limit || strings.TrimSpace(item.ID) == "" {
+			return
+		}
+		if _, ok := seen[item.ID]; ok {
+			return
+		}
+		seen[item.ID] = struct{}{}
+		selected = append(selected, item)
+	}
+	addApprovalByID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		for _, item := range snapshot.Approvals {
+			if item.ID == id {
+				add(item)
+				return
+			}
+		}
+	}
+
+	addApprovalByID(snapshot.TaskProgress.Recovery.BlockingApprovalID)
+	addApprovalByID(snapshot.TaskProgress.BlockingApprovalID)
+	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
+	if activeRunID != "" {
+		for _, item := range snapshot.Approvals {
+			if strings.TrimSpace(item.RunID) == activeRunID && !IsResolvedApprovalState(item.State) {
+				add(item)
+			}
+		}
+	}
+	for _, item := range snapshot.Approvals {
+		add(item)
+	}
+	return selected
 }
 
 func projectWorkspaceSnapshotCompactFields(ret *readmodelcore.WorkspaceSnapshot) {

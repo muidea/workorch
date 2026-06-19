@@ -2379,6 +2379,68 @@ func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteCopiedWorks
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTarCopiedWorkspaceWrite(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-tar-copy-write",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-tar-copy-write/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	command := strings.Join([]string{
+		`set -eu`,
+		`TMPDIR_ROOT="$(mktemp -d)"`,
+		`cleanup() {`,
+		`  chmod -R u+w "$TMPDIR_ROOT" 2>/dev/null || true`,
+		`  rm -rf "$TMPDIR_ROOT"`,
+		`}`,
+		`trap cleanup EXIT HUP INT TERM`,
+		`mkdir -p "$TMPDIR_ROOT/src" "$TMPDIR_ROOT/gomodcache" "$TMPDIR_ROOT/gocache"`,
+		`tar cf - . | (cd "$TMPDIR_ROOT/src" && tar xf -)`,
+		`cd "$TMPDIR_ROOT/src"`,
+		`touch generated-validation-artifact`,
+		`printf 'artifact=%s\n' "$TMPDIR_ROOT/src/generated-validation-artifact"`,
+	}, "\n")
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", command},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "workspace validation in an isolated temporary copy",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want tar-copied workspace controlled substitute write allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsControlledSubstituteWorkspaceWrite(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-workspace-write",

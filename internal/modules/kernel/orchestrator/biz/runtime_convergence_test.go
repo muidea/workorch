@@ -1648,6 +1648,67 @@ func TestApplyConvergenceContractClearsStaleValidationFlagsForProfileStateChange
 	}
 }
 
+func TestApplyConvergenceContractNeedStateChangeRestoresRequiredOutput(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage: runtimeStageRepair,
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{"reason": "state-changing repair still needed"},
+		},
+	}
+	contract := ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage: map[string]any{
+			"currentFailure": map[string]any{"reason": "state-changing repair still needed"},
+		},
+	}
+
+	applied := ApplyConvergenceContract(input, contract)
+
+	pkg := mapFromValue(applied["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing output contract", required)
+	}
+	if !stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput.acceptedKinds = %+v, want state-changing patch/apply kind", required["acceptedKinds"])
+	}
+	if stringFromMap(applied, "repairObjective") != repairObjectiveStateChangingOutput || !boolValue(applied["stateChangingOutputRequired"]) {
+		t.Fatalf("applied = %+v, want state-changing repair objective", applied)
+	}
+}
+
+func TestBuildConvergenceContractNeedStateChangeRestoresRequiredOutput(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:      runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:  "strict_convergence",
+		"repairObjective":             repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired": true,
+		"repairActionPackage": map[string]any{
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "target.txt",
+				"exists":           true,
+				"contentHash":      "hash-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || !boolValue(required["mustTargetFailureScope"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing target-scoped output contract", required)
+	}
+}
+
 func TestBuildConvergenceContractKeepsConvertedReadableDecisionAssessmentOnlyWithoutCoverageGap(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-readable-decision-assessment-only",

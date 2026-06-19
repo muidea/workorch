@@ -295,6 +295,7 @@ func shellCommandLineUsesIsolatedTemporaryWorkspace(commandLine string) bool {
 
 func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLine string) bool {
 	tempAliases := shellCommandLineTempAliases(commandLine)
+	inTempCWD := false
 	for _, segment := range strings.FieldsFunc(commandLine, func(r rune) bool {
 		return r == '\n' || r == ';'
 	}) {
@@ -302,6 +303,7 @@ func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLin
 		if segment == "" {
 			continue
 		}
+		segmentTempScoped := inTempCWD || shellCommandLineSegmentRunsInTemp(segment, tempAliases...)
 		padded := " " + segment + " "
 		for _, marker := range []string{
 			" sed -i",
@@ -321,19 +323,49 @@ func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLin
 			" git restore",
 		} {
 			if strings.Contains(padded, marker) {
-				return true
+				if !segmentTempScoped && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+					return true
+				}
+				break
 			}
 		}
 		for _, marker := range []string{" rm ", " rm -", " mkdir ", " rmdir ", " cp "} {
-			if strings.Contains(padded, marker) && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+			if strings.Contains(padded, marker) && !segmentTempScoped && !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
 				return true
 			}
 		}
-		if shellCommandLineContainsWriteRedirection(segment, true, tempAliases...) {
+		if !segmentTempScoped && shellCommandLineContainsWriteRedirection(segment, true, tempAliases...) {
 			return true
+		}
+		if shellCommandLineSegmentChangesDirectory(segment) {
+			inTempCWD = shellCommandLineSegmentChangesDirectoryToTemp(segment, tempAliases...)
 		}
 	}
 	return false
+}
+
+func shellCommandLineSegmentRunsInTemp(segment string, tempAliases ...string) bool {
+	segment = strings.ToLower(strings.TrimSpace(segment))
+	if segment == "" || !shellCommandLineSegmentReferencesTemp(segment, tempAliases...) {
+		return false
+	}
+	padded := " " + segment + " "
+	return strings.Contains(padded, " cd ") || strings.Contains(segment, "(cd ")
+}
+
+func shellCommandLineSegmentChangesDirectory(segment string) bool {
+	segment = strings.ToLower(strings.TrimSpace(segment))
+	if segment == "" {
+		return false
+	}
+	return strings.HasPrefix(segment, "cd ") || strings.HasPrefix(segment, "cd\t")
+}
+
+func shellCommandLineSegmentChangesDirectoryToTemp(segment string, tempAliases ...string) bool {
+	if !shellCommandLineSegmentChangesDirectory(segment) {
+		return false
+	}
+	return shellCommandLineSegmentReferencesTemp(segment, tempAliases...)
 }
 
 func shellCommandLineTempAliases(commandLine string) []string {

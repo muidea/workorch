@@ -79,6 +79,70 @@ func TestProjectWorkspaceSnapshotDetailCompactsHeavyFields(t *testing.T) {
 	}
 }
 
+func TestProjectWorkspaceSnapshotDetailPreservesActiveBlockingGovernance(t *testing.T) {
+	t.Parallel()
+
+	decisions := make([]readmodelcore.Decision, 0, decisionPageLimit+5)
+	approvals := make([]readmodelcore.Approval, 0, approvalPageLimit+5)
+	for idx := 0; idx < decisionPageLimit+4; idx++ {
+		decisions = append(decisions, readmodelcore.Decision{
+			ID:          "old-decision-" + strconv.Itoa(idx),
+			WorkspaceID: "ws-governance-compact",
+			RunID:       "run-old",
+			State:       "open",
+		})
+	}
+	for idx := 0; idx < approvalPageLimit+4; idx++ {
+		approvals = append(approvals, readmodelcore.Approval{
+			ID:          "old-approval-" + strconv.Itoa(idx),
+			WorkspaceID: "ws-governance-compact",
+			RunID:       "run-old",
+			State:       "pending",
+		})
+	}
+	decisions = append(decisions, readmodelcore.Decision{
+		ID:          "active-blocking-decision",
+		WorkspaceID: "ws-governance-compact",
+		RunID:       "run-active",
+		State:       "open",
+		Question:    "current decision",
+	})
+	approvals = append(approvals, readmodelcore.Approval{
+		ID:          "active-blocking-approval",
+		WorkspaceID: "ws-governance-compact",
+		RunID:       "run-active",
+		State:       "pending",
+		Reason:      "current approval",
+	})
+
+	got := ProjectWorkspaceSnapshotDetail(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-governance-compact", ActiveRunID: "run-active"},
+		TaskProgress: readmodelcore.TaskProgress{
+			BlockingTicketID:   "active-blocking-decision",
+			BlockingApprovalID: "active-blocking-approval",
+			Recovery: readmodelcore.RecoveryPlan{
+				BlockingTicketID:   "active-blocking-decision",
+				BlockingApprovalID: "active-blocking-approval",
+			},
+		},
+		Decisions: decisions,
+		Approvals: approvals,
+	})
+
+	if len(got.Decisions) != decisionPageLimit {
+		t.Fatalf("decisions = %d, want %d", len(got.Decisions), decisionPageLimit)
+	}
+	if got.Decisions[0].ID != "active-blocking-decision" {
+		t.Fatalf("first decision = %q, want active blocking decision preserved before historical items", got.Decisions[0].ID)
+	}
+	if len(got.Approvals) != approvalPageLimit {
+		t.Fatalf("approvals = %d, want %d", len(got.Approvals), approvalPageLimit)
+	}
+	if got.Approvals[0].ID != "active-blocking-approval" {
+		t.Fatalf("first approval = %q, want active blocking approval preserved before historical items", got.Approvals[0].ID)
+	}
+}
+
 func TestProjectWorkspaceSnapshotDetailCompactsContextAndRunDerivedCollections(t *testing.T) {
 	t.Parallel()
 
