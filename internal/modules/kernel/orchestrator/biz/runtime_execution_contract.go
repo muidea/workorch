@@ -179,6 +179,9 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 		if shellCommandLineStartsDetachedProcess(commandLine) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
 		}
+		if shellCommandLineContainsWorkspaceFileMutation(commandLine) {
+			return fmt.Errorf("%w: concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded", common.ErrInvalidArgument)
+		}
 	}
 	return nil
 }
@@ -242,6 +245,65 @@ func shellCommandLineStartsDetachedProcess(commandLine string) bool {
 		return true
 	}
 	return shellCommandLineContainsStandaloneAmpersand(lower)
+}
+
+func shellCommandLineContainsWorkspaceFileMutation(commandLine string) bool {
+	lower := strings.ToLower(strings.TrimSpace(commandLine))
+	if lower == "" {
+		return false
+	}
+	padded := " " + lower + " "
+	for _, marker := range []string{
+		" sed -i",
+		" perl -pi",
+		" truncate ",
+		" touch ",
+		" rm ",
+		" rm -",
+		" mv ",
+		" cp ",
+		" install ",
+		" mkdir ",
+		" rmdir ",
+		" ln ",
+		" chmod ",
+		" chown ",
+		" dd ",
+		" tee ",
+		" patch ",
+		" git apply",
+		" git checkout",
+		" git restore",
+	} {
+		if strings.Contains(padded, marker) {
+			return true
+		}
+	}
+	return shellCommandLineContainsWriteRedirection(lower)
+}
+
+func shellCommandLineContainsWriteRedirection(commandLine string) bool {
+	for idx := 0; idx < len(commandLine); idx++ {
+		if commandLine[idx] != '>' {
+			continue
+		}
+		prev := byte(0)
+		if idx > 0 {
+			prev = commandLine[idx-1]
+		}
+		next := byte(0)
+		if idx+1 < len(commandLine) {
+			next = commandLine[idx+1]
+		}
+		if prev >= '0' && prev <= '9' {
+			continue
+		}
+		if prev == '&' || next == '&' {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func shellCommandLineContainsStandaloneAmpersand(commandLine string) bool {

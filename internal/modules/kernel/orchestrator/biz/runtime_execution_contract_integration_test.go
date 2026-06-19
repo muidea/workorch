@@ -2090,6 +2090,55 @@ func TestValidateLLMExecutionOutputContractRejectsConcreteValidationGraphWithDet
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsFileMutatingConcreteValidationShell(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-file-mutating-validation",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-file-mutating-validation/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args":    []string{"-c", "set -e; sed -i '33d' target.txt; ./verify-target"},
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			}},
+		},
+	}
+
+	err := validateLLMExecutionOutputContract(run, step, output)
+	if !errors.Is(err, common.ErrInvalidArgument) ||
+		!strings.Contains(err.Error(), "must not mutate workspace files") {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want file-mutating validation shell rejection", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsStateChangingGraphWithDetachedProcess(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-detached-process",
