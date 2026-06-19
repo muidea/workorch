@@ -373,7 +373,8 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		}
 	}
 	if missing["state_change"] {
-		if convergenceStateChangeAlreadySatisfied(input) {
+		if convergenceStateChangeAlreadySatisfied(input) &&
+			!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, contract.RepairActionPackage) {
 			contract.State = convergenceStateNeedValidation
 			contract.RuntimeStage = runtimeStageVerification
 			contract.RuntimeStageMode = "strict_convergence"
@@ -408,7 +409,8 @@ func populateCoverageWorkItemConvergenceContract(run *runModel.Run, input map[st
 		return true
 	}
 	if missing["validation"] || missing["artifact"] {
-		if convergenceStateChangeAlreadySatisfied(input) {
+		if convergenceStateChangeAlreadySatisfied(input) &&
+			!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, contract.RepairActionPackage) {
 			contract.State = convergenceStateNeedValidation
 			contract.RuntimeStage = runtimeStageVerification
 			contract.RuntimeStageMode = "strict_convergence"
@@ -575,7 +577,8 @@ func concreteValidationFailureCanDriveStateChange(input map[string]any, pkg map[
 	if len(input) == 0 {
 		return false
 	}
-	if convergenceStateChangeAlreadySatisfied(input) {
+	if convergenceStateChangeAlreadySatisfied(input) &&
+		!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, pkg) {
 		return false
 	}
 	if !inputHasConcreteValidationFailureDiagnostic(input, pkg) {
@@ -595,6 +598,108 @@ func convergenceStateChangeAlreadySatisfied(input map[string]any) bool {
 	pkg := mapFromValue(input["repairActionPackage"])
 	return len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 		boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"])
+}
+
+func convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input map[string]any, pkg map[string]any) bool {
+	satisfiedTargets := convergenceAlreadySatisfiedStateChangeTargetSet(input, pkg)
+	if len(satisfiedTargets) == 0 {
+		return false
+	}
+	for _, targetRef := range convergenceConcreteFailureTargetRefs(input, pkg) {
+		if !satisfiedTargets[targetRef] {
+			return true
+		}
+	}
+	return false
+}
+
+func convergenceAlreadySatisfiedStateChangeTargetSet(input map[string]any, pkg map[string]any) map[string]bool {
+	targets := map[string]bool{}
+	add := func(value string) {
+		for _, targetRef := range filterAdmissibleRuntimeRepairTargetRefs([]string{value}) {
+			targets[targetRef] = true
+		}
+	}
+	addItems := func(items []map[string]any) {
+		for _, item := range items {
+			add(stringFromMap(item, "targetRef"))
+			for _, targetRef := range stringSliceFromValue(item["targetRefs"]) {
+				add(targetRef)
+			}
+		}
+	}
+	addItems(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"]))
+	addItems(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"]))
+	if len(targets) == 0 {
+		return nil
+	}
+	return targets
+}
+
+func convergenceConcreteFailureTargetRefs(input map[string]any, pkg map[string]any) []string {
+	seen := map[string]bool{}
+	targets := make([]string, 0)
+	add := func(value string) {
+		for _, targetRef := range filterAdmissibleRuntimeRepairTargetRefs([]string{value}) {
+			if seen[targetRef] {
+				continue
+			}
+			seen[targetRef] = true
+			targets = append(targets, targetRef)
+		}
+	}
+	var addFailureMap func(map[string]any)
+	addFailureMap = func(source map[string]any) {
+		if len(source) == 0 {
+			return
+		}
+		for _, targetRef := range stringSliceFromValue(source["failureTargets"]) {
+			add(targetRef)
+		}
+		for _, targetRef := range stringSliceFromValue(source["targetRefs"]) {
+			add(targetRef)
+		}
+		for _, key := range []string{"targetRef", "conflictRef", "path"} {
+			add(stringFromMap(source, key))
+		}
+		for _, lineRef := range mapSliceFromValue(source["lineRefs"]) {
+			add(stringFromMap(lineRef, "targetRef"))
+		}
+		for _, key := range []string{failureOutputKeySignature, "failureSignature", "signature", "targetScope", "failureTargetScope"} {
+			for _, targetRef := range failureTargetsFromSignatureText(stringFromMap(source, key)) {
+				add(targetRef)
+			}
+		}
+		if diagnostics := mapFromValue(source["runtimeDiagnostics"]); len(diagnostics) > 0 {
+			addFailureMap(diagnostics)
+		}
+	}
+	addFailureMap(mapFromValue(input["lastFailureDiagnostics"]))
+	addFailureMap(mapFromValue(pkg["lastFailureDiagnostics"]))
+	addFailureMap(mapFromValue(input["structuredFailureSignals"]))
+	addFailureMap(mapFromValue(pkg["structuredFailureSignals"]))
+	for _, progress := range []map[string]any{
+		mapFromValue(input["currentExecutionProgress"]),
+		mapFromValue(pkg["currentExecutionProgress"]),
+	} {
+		if len(progress) == 0 {
+			continue
+		}
+		addFailureMap(progress)
+		addFailureMap(mapFromValue(progress["currentFailure"]))
+		addFailureMap(mapFromValue(progress["lastObservedFailure"]))
+		for _, key := range []string{"latestActionEvidence", "completedGraphEvidence"} {
+			for _, item := range mapSliceFromValue(progress[key]) {
+				addFailureMap(item)
+				addFailureMap(mapFromValue(item["outputSummary"]))
+				addFailureMap(mapFromValue(item["output"]))
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	return targets
 }
 
 func inputHasConcreteValidationFailureDiagnostic(input map[string]any, pkg map[string]any) bool {
@@ -946,12 +1051,16 @@ func convergenceTargetEvidenceReadyForStateChange(run *runModel.Run, input map[s
 	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
-		return false
+		if !convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, mapFromValue(input["repairActionPackage"])) {
+			return false
+		}
 	}
 	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
 		if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 			boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"]) {
-			return false
+			if !convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, pkg) {
+				return false
+			}
 		}
 	}
 	if convertedReadableDecisionRepairRequiresAssessmentOnly(run, input, failedStep) {
@@ -1569,12 +1678,12 @@ func convergenceNeedsValidation(input map[string]any, failedStep *runModel.Step)
 	}
 	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
-		return true
+		return !convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, mapFromValue(input["repairActionPackage"]))
 	}
 	if pkg := mapFromValue(input["repairActionPackage"]); len(pkg) > 0 {
 		if len(mapSliceFromValue(pkg["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
 			boolValue(pkg["stateChangeAlreadySatisfiedByCurrentTarget"]) {
-			return true
+			return !convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, pkg)
 		}
 		required := mapFromValue(pkg["requiredOutput"])
 		return boolValue(required["mustProduceConcreteValidationEvidence"])

@@ -3795,6 +3795,78 @@ func TestBuildConvergenceContractCoverageStateChangeAlreadySatisfiedNeedsValidat
 	}
 }
 
+func TestBuildConvergenceContractAlreadySatisfiedOldTargetAllowsNewValidationFailureStateChange(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:     runtimeStageRepair,
+		stepInputKeyRuntimeStageMode: "strict_convergence",
+		"repairObjective":            repairObjectiveConcreteValidationEvidence,
+		"currentTargetAlreadySatisfiesFailedPatch": []map[string]any{{
+			"targetRef":         "old-target.txt",
+			"patchType":         "text_replace",
+			"safeForValidation": true,
+			"mechanicalSignal":  true,
+		}},
+		"stateChangeAlreadySatisfiedByCurrentTarget": true,
+		"lastFailureDiagnostics": map[string]any{
+			"failureTargets": []string{"new-target.txt"},
+			"kind":           "validation_failed",
+		},
+		"failureTargetRepairContext": []map[string]any{{
+			"targetRef":        "new-target.txt",
+			"exists":           true,
+			"contentHash":      "hash-new-target",
+			"contentComplete":  true,
+			"safeForFileWrite": true,
+		}},
+		"coverageWorkItemContext": map[string]any{
+			"currentFocus": map[string]any{
+				"id":                    "cwi-new-target",
+				"status":                "open",
+				"sourceScope":           "goal_leaf",
+				"sourceRequirementId":   "goal-req-new-target",
+				"targetText":            "neutral target still has a concrete validation failure",
+				"requiredEvidenceKinds": []string{"validation"},
+				"missingEvidenceKinds":  []string{"validation"},
+			},
+		},
+		"repairActionPackage": map[string]any{
+			"requiredOutput": stateChangingRepairRequiredOutput(),
+			"currentTargetAlreadySatisfiesFailedPatch": []map[string]any{{
+				"targetRef":         "old-target.txt",
+				"patchType":         "text_replace",
+				"safeForValidation": true,
+				"mechanicalSignal":  true,
+			}},
+			"stateChangeAlreadySatisfiedByCurrentTarget": true,
+			"targetSnapshots": []map[string]any{{
+				"targetRef":        "new-target.txt",
+				"exists":           true,
+				"contentHash":      "hash-new-target",
+				"contentComplete":  true,
+				"safeForFileWrite": true,
+			}},
+		},
+	}
+
+	contract := BuildConvergenceContract(nil, nil, nil, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange || contract.RepairObjective != repairObjectiveStateChangingOutput {
+		t.Fatalf("convergenceContract = %+v, want state-changing repair for new validation failure target", contract)
+	}
+	if !contract.StateChangingOutputRequired {
+		t.Fatalf("convergenceContract = %+v, want state-changing output required", contract)
+	}
+	required := mapFromValue(contract.RepairActionPackage["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") {
+		t.Fatalf("requiredOutput = %+v, want state-changing patch contract", required)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if applied["stateChangingOutputRequired"] != true || applied["repairObjective"] != repairObjectiveStateChangingOutput {
+		t.Fatalf("applied input = %+v, want state-changing follow-up for new target", applied)
+	}
+}
+
 func TestBuildConvergenceContractAlreadySatisfiedProfileStateChangeDoesNotOverrideValidation(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-already-satisfied",

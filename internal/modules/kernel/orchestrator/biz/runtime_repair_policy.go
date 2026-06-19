@@ -263,8 +263,8 @@ func coverageValidationRepairShouldEscalateToStateChanging(
 	if repair.runtimeRepairAttemptCountForEffectiveScope(ctx, run.ID, failedStep) == 0 {
 		return false
 	}
-	if len(mapSliceFromValue(input["currentTargetAlreadySatisfiesFailedPatch"])) > 0 ||
-		boolValue(input["stateChangeAlreadySatisfiedByCurrentTarget"]) {
+	if convergenceStateChangeAlreadySatisfied(input) &&
+		!convergenceConcreteFailureTargetsOutsideSatisfiedStateChange(input, mapFromValue(input["repairActionPackage"])) {
 		return false
 	}
 	if coverageRepairInputRequiresStateChange(input) &&

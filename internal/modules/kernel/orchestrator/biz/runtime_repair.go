@@ -67,6 +67,7 @@ func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
 	if ret == nil {
 		ret = map[string]any{}
 	}
+	normalizeRuntimeFailureStatus(ret)
 	if execErr != nil {
 		ret["reason"] = execErr.Error()
 		ret["error"] = execErr.Error()
@@ -78,6 +79,20 @@ func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
 		}
 	}
 	return ret
+}
+
+func normalizeRuntimeFailureStatus(output map[string]any) {
+	if output == nil {
+		return
+	}
+	status := strings.TrimSpace(stringFromMap(output, "status"))
+	switch strings.ToLower(status) {
+	case "completed", "complete", "succeeded", "success", "ok":
+		output["runtimeResultStatus"] = status
+		output["status"] = "failed"
+	case "":
+		output["status"] = "failed"
+	}
 }
 
 func mergeRuntimeFailureDiagnostics(output map[string]any, diagnostics map[string]any) {

@@ -543,6 +543,124 @@ func TestRuntimeOrchestratorBlocksSensitivePatchUntilApproval(t *testing.T) {
 	}
 }
 
+func TestRuntimeOrchestratorAppliesApprovedPendingPatchOnResume(t *testing.T) {
+	ctx := context.Background()
+	deliverableDirectory := t.TempDir()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	patchRepo := memory.NewPatchRepository()
+	workspaceID := common.WorkspaceID("ws-approved-pending-patch-resume")
+	runID := common.RunID("run-approved-pending-patch-resume")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "approved pending patch resume", DeliverableDirectory: deliverableDirectory, State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	callCount := 0
+	runtime := &stubRuntimeAdapter{fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+		callCount++
+		if callCount == 1 {
+			return map[string]any{
+				"status": "completed",
+				stepOutputKeyPatches: []map[string]any{{
+					"patchType": "file_write",
+					"targetRef": ".env",
+					"content":   "TOKEN=secret\n",
+					"summary":   "write env",
+				}},
+			}, nil
+		}
+		return map[string]any{"status": "completed", "stage": "approval_resume_followup"}, nil
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		approvalRepo,
+		RuntimeEvidenceRepositories{Patches: patchRepo},
+		events.NewMemoryHub(),
+	)
+
+	if err := orch.StartRun(ctx, runID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	runItem, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if runItem.State != common.RunStateBlockedOnApproval || runItem.BlockingApprovalID == "" {
+		t.Fatalf("run = %+v, want blocked on approval", runItem)
+	}
+	approval, err := approvalRepo.Get(ctx, runItem.BlockingApprovalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(deliverableDirectory, ".env")); !os.IsNotExist(err) {
+		t.Fatalf("pending patch wrote file before approval, stat err = %v", err)
+	}
+
+	approval.State = common.ApprovalStateApproved
+	if err := approvalRepo.Update(ctx, approval); err != nil {
+		t.Fatalf("approve patch: %v", err)
+	}
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume approved run: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(deliverableDirectory, ".env"))
+	if err != nil {
+		t.Fatalf("read applied file: %v", err)
+	}
+	if string(content) != "TOKEN=secret\n" {
+		t.Fatalf("applied content = %q, want approved patch content", string(content))
+	}
+	patches, err := patchRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list patches: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("patches = %+v, want one approved applied patch", patches)
+	}
+	if patches[0].State != common.PatchStateApplied || patches[0].ApprovalID != approval.ID || patches[0].StepID != approval.StepID {
+		t.Fatalf("patch = %+v, want applied patch tied to approval and blocked step", patches[0])
+	}
+	blockedStep, err := stepRepo.Get(ctx, approval.StepID)
+	if err != nil {
+		t.Fatalf("get blocked step: %v", err)
+	}
+	application := mapFromValue(blockedStep.Output["approvedPatchApplication"])
+	if application["state"] != "applied" || application["approvalId"] != string(approval.ID) {
+		t.Fatalf("approvedPatchApplication = %+v, want applied approval summary", application)
+	}
+
+	runItem, err = runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get resumed run: %v", err)
+	}
+	again, err := orch.applyApprovedPendingPatchApproval(ctx, runItem, approval)
+	if err != nil {
+		t.Fatalf("reapply approved patch helper: %v", err)
+	}
+	if again["state"] != "already_applied" {
+		t.Fatalf("second application = %+v, want idempotent already_applied", again)
+	}
+	patches, err = patchRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list patches after idempotent apply: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("patches after idempotent apply = %+v, want one patch", patches)
+	}
+	if callCount < 2 {
+		t.Fatalf("runtime calls = %d, want resume follow-up dispatch after applying approved patch", callCount)
+	}
+}
+
 func TestRuntimeOrchestratorAllowsSensitivePatchWithApprovedApprovalID(t *testing.T) {
 	ctx := context.Background()
 	approvalRepo := memory.NewApprovalRepository()

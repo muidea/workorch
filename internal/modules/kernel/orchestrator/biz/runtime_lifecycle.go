@@ -187,7 +187,8 @@ func (o *RuntimeOrchestrator) CanResumeRun(ctx context.Context, runID common.Run
 		if r.BlockingApprovalID == "" || o.approvals == nil {
 			return common.ErrConflict
 		}
-		approval, err := o.approvals.Get(ctx, r.BlockingApprovalID)
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, r.WorkspaceID)
+		approval, err := o.approvals.Get(scopedCtx, r.BlockingApprovalID)
 		if err != nil {
 			return err
 		}
@@ -297,14 +298,22 @@ func (o *RuntimeOrchestrator) ResumeLoadedRunWithExecutionContextPatch(ctx conte
 		if r.BlockingApprovalID == "" || o.approvals == nil {
 			return common.ErrConflict
 		}
-		approval, err := o.approvals.Get(ctx, r.BlockingApprovalID)
+		scopedCtx := common.ContextWithRuntimeWorkspaceID(ctx, r.WorkspaceID)
+		approval, err := o.approvals.Get(scopedCtx, r.BlockingApprovalID)
 		if err != nil {
 			return err
 		}
 		switch approval.State {
 		case common.ApprovalStateApproved:
+			patchApplication, err := o.applyApprovedPendingPatchApproval(ctx, r, approval)
+			if err != nil {
+				return o.failResolvedDecisionResume(ctx, r, originalResumeState, executionContextPatch, err)
+			}
 			resumeAfterStepID = approval.StepID
 			resumeInput = approvalResolutionInput(approval)
+			if len(patchApplication) > 0 {
+				resumeInput["approvedPatchApplication"] = patchApplication
+			}
 			r.BlockingApprovalID = ""
 		case common.ApprovalStateRejected:
 			mergeRunExecutionContextPatch(r, executionContextPatch)

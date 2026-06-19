@@ -741,6 +741,14 @@ func TestRuntimeOrchestrator_FinalizeFailurePathsDoNotLeaveStepDispatched(t *tes
 			if got := stringFromMap(step.Output, "stage"); got != tc.wantStage {
 				t.Fatalf("failure stage = %q, want %q; output=%+v", got, tc.wantStage, step.Output)
 			}
+			if stringFromMap(tc.output, "status") == "completed" {
+				if got := stringFromMap(step.Output, "status"); got != "failed" {
+					t.Fatalf("failure status = %q, want failed; output=%+v", got, step.Output)
+				}
+				if got := stringFromMap(step.Output, "runtimeResultStatus"); got != "completed" {
+					t.Fatalf("runtime result status = %q, want completed; output=%+v", got, step.Output)
+				}
+			}
 		})
 	}
 }
