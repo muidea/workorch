@@ -38,6 +38,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 	}
 	kind = canonicalLLMWorkspaceStepKind(kind)
 	if kind == llmWorkspaceExecutionStepKind {
+		if active, err := o.hasOtherActiveLLMWorkspaceExecution(ctx, run.ID, stepID); err != nil {
+			return err
+		} else if active {
+			return nil
+		}
 		if duplicate, err := o.hasInFlightRuntimeRepairForSameScope(ctx, run.ID, stepID, input); err != nil {
 			return err
 		} else if duplicate {
@@ -579,6 +584,31 @@ func (o *RuntimeOrchestrator) hasInFlightRuntimeRepairForSameScope(ctx context.C
 			continue
 		}
 		if runtimeRepairDispatchScope(item.Input) == scope {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (o *RuntimeOrchestrator) hasOtherActiveLLMWorkspaceExecution(ctx context.Context, runID common.RunID, stepID common.StepID) (bool, error) {
+	if o == nil || o.steps == nil || runID == "" || stepID == "" {
+		return false, common.ErrInvalidArgument
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range steps {
+		if item == nil || item.ID == stepID {
+			continue
+		}
+		if canonicalLLMWorkspaceStepKind(item.Kind) != llmWorkspaceExecutionStepKind {
+			continue
+		}
+		switch item.State {
+		case common.StepStateCompleted, common.StepStateFailed:
+			continue
+		default:
 			return true, nil
 		}
 	}

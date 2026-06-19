@@ -40,6 +40,13 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 	if err != nil {
 		return nil, err
 	}
+	if active := activeLLMWorkspaceExecutionStep(steps); active != nil {
+		return []stepDispatchSpec{{
+			ID:    active.ID,
+			Kind:  active.Kind,
+			Input: cloneStepPayload(active.Input),
+		}}, nil
+	}
 	if len(steps) == 0 {
 		input := initialStepInput(run)
 		input = hydrateInitialRepairTargetSnapshots(ctx, o.workspaces, o.convergenceManager(), run, input)
@@ -58,6 +65,22 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		return nil, common.ErrConflict
 	}
 	return o.nextDispatchSpecsFromStep(ctx, run, last)
+}
+
+func activeLLMWorkspaceExecutionStep(steps []*runModel.Step) *runModel.Step {
+	for idx := len(steps) - 1; idx >= 0; idx-- {
+		step := steps[idx]
+		if step == nil || canonicalLLMWorkspaceStepKind(step.Kind) != llmWorkspaceExecutionStepKind {
+			continue
+		}
+		switch step.State {
+		case common.StepStateCompleted, common.StepStateFailed:
+			continue
+		default:
+			return step
+		}
+	}
+	return nil
 }
 
 func hydrateInitialRepairTargetSnapshots(
@@ -724,10 +747,32 @@ func dispatchStepSpecsWithWorkspace(
 	if dispatchStep == nil || dispatchGraphBatch == nil {
 		return common.ErrInvalidArgument
 	}
+	specs = selectDispatchSpecsForRunLane(specs)
+	if len(specs) == 0 {
+		return common.ErrConflict
+	}
 	if len(specs) == 1 {
 		return dispatchStep(ctx, run, specs[0].ID, specs[0].Kind, specs[0].Input, workspace)
 	}
 	return dispatchGraphBatch(ctx, run, specs, workspace)
+}
+
+func selectDispatchSpecsForRunLane(specs []stepDispatchSpec) []stepDispatchSpec {
+	if len(specs) < 2 {
+		return specs
+	}
+	selected := make([]stepDispatchSpec, 0, len(specs))
+	llmSelected := false
+	for _, spec := range specs {
+		if canonicalLLMWorkspaceStepKind(spec.Kind) == llmWorkspaceExecutionStepKind {
+			if llmSelected {
+				continue
+			}
+			llmSelected = true
+		}
+		selected = append(selected, spec)
+	}
+	return selected
 }
 
 type dispatchStepWithWorkspaceFunc func(context.Context, *runModel.Run, common.StepID, string, map[string]any, *workspaceModel.Workspace) error

@@ -25,6 +25,8 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.MemoryRecallTraces = runSnapshot.MemoryRecallTraces
 	ret.Patches = MergeWorkspaceSnapshotPatches(ret.Patches, runSnapshot.Patches)
 	ret.ArtifactContinuations = MergeWorkspaceSnapshotArtifactContinuations(ret.ArtifactContinuations, runSnapshot.ArtifactContinuations)
+	ret.Decisions = MergeWorkspaceSnapshotDecisions(ret.Decisions, runSnapshot.Decisions)
+	ret.Approvals = MergeWorkspaceSnapshotApprovals(ret.Approvals, runSnapshot.Approvals)
 	ret.WebSources = runSnapshot.WebSources
 	ret.LLMContextBudgets = runSnapshot.LLMContextBudgets
 	ret.LLMUsageTraces = MergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
@@ -34,6 +36,54 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	bundle := MapRunContextBundle(*runSnapshot)
 	ret.ContextBundle = &bundle
 	return ret
+}
+
+func MergeWorkspaceSnapshotDecisions(existing []readmodelcore.Decision, latest []readmodelcore.Decision) []readmodelcore.Decision {
+	if len(existing) == 0 {
+		return latest
+	}
+	if len(latest) == 0 {
+		return existing
+	}
+	seen := make(map[string]int, len(existing)+len(latest))
+	out := make([]readmodelcore.Decision, 0, len(existing)+len(latest))
+	for _, item := range existing {
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range latest {
+		if idx, ok := seen[item.ID]; ok {
+			out[idx] = item
+			continue
+		}
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func MergeWorkspaceSnapshotApprovals(existing []readmodelcore.Approval, latest []readmodelcore.Approval) []readmodelcore.Approval {
+	if len(existing) == 0 {
+		return latest
+	}
+	if len(latest) == 0 {
+		return existing
+	}
+	seen := make(map[string]int, len(existing)+len(latest))
+	out := make([]readmodelcore.Approval, 0, len(existing)+len(latest))
+	for _, item := range existing {
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	for _, item := range latest {
+		if idx, ok := seen[item.ID]; ok {
+			out[idx] = item
+			continue
+		}
+		seen[item.ID] = len(out)
+		out = append(out, item)
+	}
+	return out
 }
 
 func WorkspaceSnapshotWithContextBundle(snapshot readmodelcore.WorkspaceSnapshot) readmodelcore.WorkspaceSnapshot {

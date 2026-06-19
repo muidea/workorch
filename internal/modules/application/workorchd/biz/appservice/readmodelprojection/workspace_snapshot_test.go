@@ -71,6 +71,8 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			{ID: "continuation-shared", RunID: string(runID)},
 		},
 		LLMUsageTraces: []readmodelcore.LLMUsageTrace{{ID: "usage-workspace", StepID: "step-workspace", OccurredAt: "2026-06-05T00:00:00Z"}},
+		Decisions:      []readmodelcore.Decision{{ID: "decision-shared", State: "open"}, {ID: "decision-workspace-only", State: "open"}},
+		Approvals:      []readmodelcore.Approval{{ID: "approval-shared", State: "pending"}, {ID: "approval-workspace-only", State: "pending"}},
 	}
 	runSnapshot := &readmodelcore.RunSnapshot{
 		Run: readmodelcore.Run{ID: string(runID), WorkspaceID: string(workspaceID), State: string(common.RunStateCompleted)},
@@ -100,6 +102,14 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			RunID:       string(runID),
 			State:       string(common.ResultStateAccepted),
 		}},
+		Decisions: []readmodelcore.Decision{
+			{ID: "decision-shared", State: "resolved", RunID: string(runID)},
+			{ID: "decision-run-only", State: "open", RunID: string(runID)},
+		},
+		Approvals: []readmodelcore.Approval{
+			{ID: "approval-shared", State: "approved", RunID: string(runID)},
+			{ID: "approval-run-only", State: "pending", RunID: string(runID)},
+		},
 	}
 	got := WorkspaceSnapshotWithRunSnapshot(base, runSnapshot)
 
@@ -129,6 +139,12 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	if got.RuntimeExecution == nil || got.RuntimeExecution.RequestID != "request-current" || got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
 		t.Fatalf("RuntimeExecution = %+v, want run runtime projection", got.RuntimeExecution)
+	}
+	if len(got.Decisions) != 3 || got.Decisions[0].State != "resolved" {
+		t.Fatalf("Decisions = %+v, want run decision override merged into workspace snapshot", got.Decisions)
+	}
+	if len(got.Approvals) != 3 || got.Approvals[0].State != "approved" {
+		t.Fatalf("Approvals = %+v, want run approval override merged into workspace snapshot", got.Approvals)
 	}
 }
 

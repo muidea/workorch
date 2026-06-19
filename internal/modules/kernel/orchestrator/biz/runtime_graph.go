@@ -142,6 +142,7 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return common.ErrConflict
 	}
 	specs = dedupeConcurrentLLMGraphDispatchSpecs(specs)
+	specs = selectDispatchSpecsForRunLane(specs)
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}

@@ -9,6 +9,7 @@ import (
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	orchestratorcontracts "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/contracts"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -18,7 +19,7 @@ import (
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeOrchestrator_EventDrivenGraphBatchPublishesDispatchRequests(t *testing.T) {
+func TestRuntimeOrchestrator_EventDrivenGraphBatchSerializesLLMDispatchRequests(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-event-driven-graph")
 	workspaceID := common.WorkspaceID("ws-event-driven-graph")
@@ -57,8 +58,8 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchPublishesDispatchRequests(t *t
 			dispatches = append(dispatches, envelope)
 		}
 	}
-	if len(dispatches) != 2 {
-		t.Fatalf("dispatch events = %d in %+v, want 2", len(dispatches), published)
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch events = %d in %+v, want 1 serialized LLM dispatch", len(dispatches), published)
 	}
 	if dispatches[0].RunID != string(runID) || dispatches[0].WorkspaceID != string(workspaceID) || dispatches[0].StepID == "" {
 		t.Fatalf("dispatch envelope = %+v, want scoped workspace/run/step", dispatches[0])
@@ -68,6 +69,90 @@ func TestRuntimeOrchestrator_EventDrivenGraphBatchPublishesDispatchRequests(t *t
 	}
 	if _, err := stepRepo.Get(ctx, common.StepID(runID+"/graph-001/001-a")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("graph step after dispatch request err = %v, want not found before dispatch handler runs", err)
+	}
+}
+
+func TestRuntimeOrchestrator_NextDispatchReusesActiveLLMWorkspaceExecution(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-active-llm-lane")
+	activeStepID := common.StepID(runID + "/follow-up-active")
+	stepRepo := memoryrepo.NewStepRepository()
+	orch := &RuntimeOrchestrator{steps: stepRepo}
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-active-llm-lane", State: common.RunStateRunning}
+	completedRoot := &runmodel.Step{
+		ID:     common.StepID(runID + "/step-1"),
+		RunID:  runID,
+		Kind:   llmcommon.StepKindWorkspaceExecution,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{"completionState": "continue"},
+	}
+	active := &runmodel.Step{
+		ID:    activeStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateDispatched,
+		Input: map[string]any{"current": "active"},
+	}
+	for _, step := range []*runmodel.Step{completedRoot, active} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("seed step %s: %v", step.ID, err)
+		}
+	}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecs: %v", err)
+	}
+	if len(specs) != 1 || specs[0].ID != activeStepID || specs[0].Input["current"] != "active" {
+		t.Fatalf("specs = %+v, want active LLM step reused", specs)
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceExecution(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-active-llm-lane")
+	workspaceID := common.WorkspaceID("ws-dispatch-active-llm-lane")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	activeStepID := common.StepID(runID + "/active-llm")
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    activeStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateDispatched,
+	}); err != nil {
+		t.Fatalf("seed active step: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	secondStepID := common.StepID(runID + "/second-llm")
+	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      secondStepID,
+		Kind:        llmcommon.StepKindWorkspaceExecution,
+		Input:       map[string]any{"node": "second"},
+	})
+	if err != nil {
+		t.Fatalf("DispatchRequestedStep: %v", err)
+	}
+	if _, err := stepRepo.Get(ctx, secondStepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("second LLM step err = %v, want not created while %s is active", err, activeStepID)
 	}
 }
 
