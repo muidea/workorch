@@ -665,7 +665,8 @@ func createWorkspace(t *testing.T, endpoint string, title string) string {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create workspace status = %d, want 201", resp.StatusCode)
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create workspace status = %d, want 201, body = %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
 	}
 	var payload workorchWorkspaceResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {

@@ -676,6 +676,7 @@ type serverState struct {
 	runSnapshotEntries           map[string]*runSnapshotCacheEntry
 	sharedSessionMu              sync.RWMutex
 	sharedSession                *appservice.RuntimeSession
+	runtimeSessionErr            error
 	workspaceSetupDraftMu        sync.Mutex
 	workspaceSetupDraftSessions  map[string]*workspaceSetupDraftSession
 }
@@ -953,10 +954,6 @@ func (s *HTTPServer) Start() error {
 	if s == nil || s.http == nil {
 		return errors.New("http server is not configured")
 	}
-	if err := s.state.startWorkspaceProjection(s.state.backgroundContext()); err != nil {
-		return err
-	}
-	s.state.scheduleWatchdog()
 	err := s.http.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -1018,6 +1015,9 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		schedulerHub = events.NewMemoryHub()
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	if eventHub != nil {
+		backgroundCtx = appservice.ContextWithEventHub(backgroundCtx, eventHub)
+	}
 	diagnostics := newSchedulerDiagnosticsStore()
 	state := &serverState{
 		config:                       config,
@@ -1120,31 +1120,23 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 	}
 	state.runContinuations = newRunContinuationScheduler(state)
 	state.workspaceProjection = newWorkspaceProjectionManager(state)
-	state.configureApplicationRuntimeSession()
-	state.configureSharedMemorySession()
+	state.configureRuntimeSession()
 	state.registerEventReplayRecorder()
 	state.registerGovernanceResolvedResumeWatcher()
 	state.registerWorkorchDSchedulerCommandWatcher()
 	return state
 }
 
-func (s *serverState) configureApplicationRuntimeSession() {
+func (s *serverState) configureRuntimeSession() {
 	if s == nil || s.hasSharedSession() {
 		return
 	}
 	session, err := appservice.NewRuntimeSessionFromInitiator()
 	if err != nil {
-		return
-	}
-	s.configureSessionBackedOperations(session)
-}
-
-func (s *serverState) configureSharedMemorySession() {
-	if s == nil || s.hasSharedSession() || !isMemoryBackend(s.config.Backend) {
-		return
-	}
-	session, err := appservice.NewRuntimeSessionWithBackendAndEventHub(s.config.Backend, s.config.DataRoot, s.eventHub)
-	if err != nil {
+		s.runtimeSessionErr = fmt.Errorf("workorch framework runtime session unavailable: %w", err)
+		s.validate = func(context.Context, string, string) error {
+			return s.runtimeSessionErr
+		}
 		return
 	}
 	s.configureSessionBackedOperations(session)
@@ -1159,6 +1151,10 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 			s.eventHub = exports.Infrastructure.EventHub
 		}
 	}
+	if s.eventHub != nil {
+		s.backgroundCtx = appservice.ContextWithEventHub(s.backgroundContext(), s.eventHub)
+	}
+	s.runtimeSessionErr = nil
 	s.setSharedSession(session)
 	s.validate = func(ctx context.Context, _, _ string) error {
 		return s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
@@ -2097,6 +2093,16 @@ func (s *serverState) backgroundContext() context.Context {
 	return context.Background()
 }
 
+func (s *serverState) eventContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = s.backgroundContext()
+	}
+	if s == nil || s.eventHub == nil {
+		return ctx
+	}
+	return appservice.ContextWithEventHub(ctx, s.eventHub)
+}
+
 func (s *serverState) scheduleWatchdog() {
 	if s == nil {
 		return
@@ -2109,6 +2115,13 @@ func (s *serverState) recoverStuckRunningRuns(ctx context.Context) error {
 		return nil
 	}
 	return s.runContinuations.recoverStuckRunningRuns(ctx)
+}
+
+func (s *serverState) recoverStartupInactiveRunningWorkspaces(ctx context.Context) error {
+	if s == nil || s.runContinuations == nil {
+		return nil
+	}
+	return s.runContinuations.recoverStartupInactiveRunningWorkspaces(ctx)
 }
 
 func (s *serverState) recoverReplanContinuations(ctx context.Context) {

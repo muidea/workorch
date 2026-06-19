@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -99,11 +100,48 @@ func (s *runContinuationScheduler) recoverStuckRunningRuns(ctx context.Context) 
 	return nil
 }
 
+func (s *runContinuationScheduler) recoverStartupInactiveRunningWorkspaces(ctx context.Context) error {
+	if s == nil || s.state == nil {
+		return nil
+	}
+	state := s.state
+	ctx = state.eventContext(ctx)
+	var recovered []appservice.Run
+	var err error
+	if state.hasSharedSession() {
+		err = state.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
+			var recoverErr error
+			recovered, recoverErr = appservice.RecoverStartupInactiveRunningWorkspacesWithSession(ctx, session)
+			if recoverErr != nil {
+				return fmt.Errorf("recover startup inactive workspaces with shared session: %w", recoverErr)
+			}
+			return nil
+		})
+	} else {
+		recovered, err = appservice.RecoverStartupInactiveRunningWorkspacesWithBackend(ctx, state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			err = fmt.Errorf("recover startup inactive workspaces with backend: %w", err)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if len(recovered) > 0 {
+		runIDs := make([]string, 0, len(recovered))
+		for _, item := range recovered {
+			runIDs = append(runIDs, item.ID)
+		}
+		slog.Warn("workorch recovered startup inactive running workspaces", "runIDs", runIDs)
+	}
+	return nil
+}
+
 func (s *runContinuationScheduler) recoverStuckRunningRunsOnly(ctx context.Context) error {
 	if s == nil || s.state == nil {
 		return nil
 	}
 	state := s.state
+	ctx = state.eventContext(ctx)
 	var recovered []appservice.Run
 	var err error
 	if state.hasSharedSession() {
@@ -138,6 +176,7 @@ func (s *runContinuationScheduler) recoverStaleDispatchedRuns(ctx context.Contex
 	defer s.clearStaleRecoveryRunning()
 
 	state := s.state
+	ctx = state.eventContext(ctx)
 	release, err := state.acquireRunSlotWithPriority(ctx, 0)
 	if err != nil {
 		state.metrics.runCanceled.Add(1)

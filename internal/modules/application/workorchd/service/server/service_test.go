@@ -7,6 +7,10 @@ import (
 	"time"
 
 	magictask "github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 type recordingBackgroundRoutine struct {
@@ -85,6 +89,78 @@ func TestServiceRunUsesBackgroundRoutine(t *testing.T) {
 	case err := <-svc.done:
 		t.Fatalf("background function executed unexpectedly, err=%v", err)
 	default:
+	}
+}
+
+func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	const workspaceID = "ws-service-startup-inactive"
+	const runID = "run-service-startup-inactive"
+	session, err := appservice.NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "service startup inactive",
+		DeliverableDirectory: "workspaces/service-startup-inactive",
+		State:                common.WorkspaceStateRunning,
+		ActiveRunID:          runID,
+	}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := exports.Repositories.Runs.Create(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	routine := &recordingBackgroundRoutine{}
+	svc := &Service{
+		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		backgroundRoutine: routine,
+		done:              make(chan error, 1),
+	}
+	if err := svc.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	workspace, err := appservice.ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if workspace.State != string(common.WorkspaceStateActive) || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want active without active run", workspace)
+	}
+	run, err := appservice.ReadRunWithBackend(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend: %v", err)
+	}
+	if run.State != string(common.RunStateFailed) {
+		t.Fatalf("run = %+v, want failed startup inactive run", run)
+	}
+	if err := svc.http.state.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
+		t.Fatalf("RebuildWorkspace: %v", err)
+	}
+	snapshot, err := svc.ReadWorkspaceViewSnapshot(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceViewSnapshot: %v", err)
+	}
+	if snapshot.Workspace.State != string(common.WorkspaceStateActive) || snapshot.Workspace.ActiveRunID != "" {
+		t.Fatalf("projected workspace = %+v, want active without active run", snapshot.Workspace)
+	}
+	if snapshot.TaskProgress.Recovery.Mode != "idle" || snapshot.TaskProgress.Recovery.NextAction != "start_workspace_execution" {
+		t.Fatalf("projected recovery = %+v, want idle start action", snapshot.TaskProgress.Recovery)
 	}
 }
 

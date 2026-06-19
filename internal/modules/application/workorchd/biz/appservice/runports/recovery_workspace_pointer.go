@@ -3,6 +3,7 @@ package runports
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
@@ -16,7 +17,7 @@ func RecoverTerminalActiveWorkspacePointers(ctx context.Context, hub events.Hub)
 	}
 	items, err := workspaceports.ListWorkspaceRecords(ctx, hub)
 	if err != nil {
-		return err
+		return fmt.Errorf("list workspace records: %w", err)
 	}
 	for _, workspace := range items {
 		if workspace == nil || workspace.ActiveRunID == "" {
@@ -26,14 +27,14 @@ func RecoverTerminalActiveWorkspacePointers(ctx context.Context, hub events.Hub)
 		activeRun, err := ReadRun(runCtx, hub, workspace.ActiveRunID)
 		if err != nil {
 			if !errors.Is(err, common.ErrNotFound) {
-				return err
+				return fmt.Errorf("read active run %q for workspace %q: %w", workspace.ActiveRunID, workspace.ID, err)
 			}
 			workspace.ActiveRunID = ""
 			if runtimecore.IsActiveWorkspaceStateForRecovery(workspace.State) {
 				workspace.State = common.WorkspaceStateActive
 			}
 			if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
-				return err
+				return fmt.Errorf("clear missing active run pointer for workspace %q: %w", workspace.ID, err)
 			}
 			continue
 		}
@@ -43,7 +44,7 @@ func RecoverTerminalActiveWorkspacePointers(ctx context.Context, hub events.Hub)
 		workspace.ActiveRunID = ""
 		workspace.State = runtimecore.RecoveredWorkspaceStateForTerminalRun(activeRun.State)
 		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
-			return err
+			return fmt.Errorf("clear terminal active run pointer for workspace %q: %w", workspace.ID, err)
 		}
 	}
 	return nil

@@ -824,6 +824,146 @@ func TestRecoverStuckRunningRunsWithBackendFailsRunningRunWithoutContinuationChe
 	}
 }
 
+func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToActive(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	const workspaceID = "ws-startup-inactive-running"
+	const runID = "run-startup-inactive-running"
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, workspaceID, "startup inactive workspace", "", "workspaces/startup-inactive"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, workspaceID, runID, "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = runID
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runItem, err := exports.Repositories.Runs.Get(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	if err := exports.Repositories.Runs.Update(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStartupInactiveRunningWorkspacesWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStartupInactiveRunningWorkspacesWithBackend: %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != runID || recovered[0].WorkspaceID != workspaceID || recovered[0].State != string(common.RunStateFailed) {
+		t.Fatalf("recovered = %+v, want failed inactive run", recovered)
+	}
+	if recovered[0].FailureReason != runports.StartupInactiveRunFailureReason {
+		t.Fatalf("failure reason = %q, want %q", recovered[0].FailureReason, runports.StartupInactiveRunFailureReason)
+	}
+	workspace, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if workspace.State != string(common.WorkspaceStateActive) || workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want active without active run", workspace)
+	}
+	run, err := ReadRunWithBackend(common.ContextWithRuntimeWorkspaceID(ctx, workspaceID), "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend: %v", err)
+	}
+	if run.State != string(common.RunStateFailed) {
+		t.Fatalf("run = %+v, want failed", run)
+	}
+	recoveredAgain, err := RecoverStartupInactiveRunningWorkspacesWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("second RecoverStartupInactiveRunningWorkspacesWithBackend: %v", err)
+	}
+	if len(recoveredAgain) != 0 {
+		t.Fatalf("second recovered = %+v, want idempotent no-op", recoveredAgain)
+	}
+}
+
+func TestRecoverStartupInactiveRunningWorkspacesPreservesGovernanceBlockedRun(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	const workspaceID = "ws-startup-blocked-decision"
+	const runID = "run-startup-blocked-decision"
+	if _, err := createWorkspaceWithIDWithBackend(ctx, "file", dataRoot, workspaceID, "startup blocked workspace", "", "workspaces/startup-blocked"); err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	if _, err := CreateRunWithBackend(ctx, "file", dataRoot, workspaceID, runID, "", ""); err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+
+	session, err := NewRuntimeSessionWithBackend("file", dataRoot)
+	if err != nil {
+		t.Fatalf("NewRuntimeSessionWithBackend: %v", err)
+	}
+	exports, err := session.Exports()
+	if err != nil {
+		t.Fatalf("Exports: %v", err)
+	}
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = runID
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	runCtx := common.ContextWithRuntimeWorkspaceID(ctx, workspaceID)
+	runItem, err := exports.Repositories.Runs.Get(runCtx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	runItem.State = common.RunStateBlockedOnDecision
+	runItem.BlockingTicketID = "ticket-startup-blocked-decision"
+	if err := exports.Repositories.Runs.Update(runCtx, runItem); err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if err := session.Close(ctx); err != nil {
+		t.Fatalf("close seed session: %v", err)
+	}
+
+	recovered, err := RecoverStartupInactiveRunningWorkspacesWithBackend(ctx, "file", dataRoot)
+	if err != nil {
+		t.Fatalf("RecoverStartupInactiveRunningWorkspacesWithBackend: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want no failed run for governance blocker", recovered)
+	}
+	workspace, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if workspace.State != string(common.WorkspaceStateWaitingDecision) || workspace.ActiveRunID != runID {
+		t.Fatalf("workspace = %+v, want waiting_decision with active run", workspace)
+	}
+	run, err := ReadRunWithBackend(runCtx, "file", dataRoot, runID)
+	if err != nil {
+		t.Fatalf("ReadRunWithBackend: %v", err)
+	}
+	if run.State != string(common.RunStateBlockedOnDecision) || run.BlockingTicketID != "ticket-startup-blocked-decision" {
+		t.Fatalf("run = %+v, want blocked_on_decision unchanged", run)
+	}
+}
+
 func TestRecoverStuckRunningRunsWithBackendClearsTerminalActiveWorkspaceRun(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()

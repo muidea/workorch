@@ -71,14 +71,18 @@ func (s *Service) Run(_ context.Context) *cd.Error {
 	if s.http.state != nil && s.http.state.backgroundRoutine == nil {
 		s.http.state.backgroundRoutine = s.backgroundRoutine
 	}
+	if err := s.http.state.recoverStartupInactiveRunningWorkspaces(s.http.state.backgroundContext()); err != nil {
+		s.runStarted.Store(false)
+		return cd.NewError(cd.Unexpected, "startup inactive workspace recovery failed: "+err.Error())
+	}
 	if err := s.http.state.startWorkspaceProjection(s.http.state.backgroundContext()); err != nil {
 		s.runStarted.Store(false)
-		return cd.NewError(cd.Unexpected, err.Error())
+		return cd.NewError(cd.Unexpected, "workspace projection startup failed: "+err.Error())
 	}
 	s.http.state.scheduleWatchdog()
 	if err := s.backgroundRoutine.AsyncFunction(runHTTPServer); err != nil {
 		s.runStarted.Store(false)
-		return cd.NewError(cd.Unexpected, err.Error())
+		return cd.NewError(cd.Unexpected, "http server background scheduling failed: "+err.Error())
 	}
 	return nil
 }

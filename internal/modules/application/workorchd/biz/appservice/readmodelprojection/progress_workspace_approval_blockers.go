@@ -1,9 +1,20 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+)
 
 func applyWorkspaceProgressApprovalBlockers(progress *readmodelcore.TaskProgress, snapshot readmodelcore.WorkspaceSnapshot) {
+	activeRunID := strings.TrimSpace(snapshot.Workspace.ActiveRunID)
+	if activeRunID == "" {
+		return
+	}
 	for _, item := range snapshot.Approvals {
+		if strings.TrimSpace(item.RunID) != activeRunID {
+			continue
+		}
 		if IsResolvedApprovalState(item.State) {
 			continue
 		}

@@ -174,6 +174,73 @@ func TestValidateLLMExecutionOutputContractAllowsStrategySurfaceByTargetRef(t *t
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsStrategyDecisionArrayFields(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-array-fields",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-array-fields/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"failureTargetScope":              "targetRef=main.go",
+			"strategyReassessment": map[string]any{
+				"required":      true,
+				"failedSurface": "targetRef=main.go",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"repairTargetSet": []string{"main.go"},
+				"targetSnapshots": []map[string]any{{
+					"targetRef": "main.go",
+					"content":   "old",
+				}},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-main",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "main.go",
+						"patchType":            "text_replace",
+						"oldText":              "old",
+						"newText":              "new",
+						"failedSurface":        "targetRef=main.go",
+						"rootCauseTarget":      "main.go",
+						"repairTargetDecision": "patch main.go current target",
+						"repairMode":           "continue_same_target_repair",
+						"forbiddenRepair": []string{
+							"do not edit unrelated files",
+						},
+						"verificationPlan": "run bounded verification for targetRef=main.go",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want non-empty array decision fields accepted", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsStrategyCurrentSnapshotRepairMode(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-current-snapshot",

@@ -10,7 +10,7 @@ func AcceptedTerminalRun(snapshot readmodelcore.RunSnapshot) bool {
 }
 
 func IsResolvedDecisionState(state string) bool {
-	return state == string(common.DecisionTicketStateResolved)
+	return state == string(common.DecisionTicketStateResolved) || state == string(common.DecisionTicketStateDismissed)
 }
 
 func IsResolvedApprovalState(state string) bool {

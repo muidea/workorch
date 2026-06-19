@@ -2,6 +2,7 @@ package workorchd
 
 import (
 	"context"
+	"fmt"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 
@@ -68,14 +69,14 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 		return cd.NewError(cd.IllegalParam, "workorch module is not configured")
 	}
 	if err := m.service.Run(ctx); err != nil {
-		return err
+		return cd.NewError(err.Code, fmt.Sprintf("workorch service run failed: %s", err.Message))
 	}
 	if m.eventHub != nil {
 		m.cliDispatcher = appservice.NewCLICommandDispatcher(m.session, m.eventHub, m.service)
 		if err := m.cliDispatcher.Run(); err != nil {
 			m.cliDispatcher = nil
 			m.service.Shutdown(ctx)
-			return cd.NewError(cd.IllegalParam, err.Error())
+			return cd.NewError(cd.IllegalParam, fmt.Sprintf("workorch cli dispatcher run failed: %v", err))
 		}
 		m.doneUnsub = m.eventHub.Subscribe(workorchdevents.TopicWorkorchDCommandDone, m.handleDoneCommand)
 	}

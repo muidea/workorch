@@ -32,6 +32,16 @@ func RecoverStuckRunningRunsWithBackend(ctx context.Context, backend string, dat
 	return withSharedBackendSession(ctx, backend, dataRoot, RecoverStuckRunningRunsWithSession)
 }
 
+func RecoverStartupInactiveRunningWorkspacesWithSession(ctx context.Context, session *RuntimeSession) (ret []Run, err error) {
+	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
+		return runports.RecoverStartupInactiveRunningWorkspaceViews(ctx, hub)
+	})
+}
+
+func RecoverStartupInactiveRunningWorkspacesWithBackend(ctx context.Context, backend string, dataRoot string) ([]Run, error) {
+	return withSharedBackendSession(ctx, backend, dataRoot, RecoverStartupInactiveRunningWorkspacesWithSession)
+}
+
 func RecoverStaleDispatchedRunsWithSession(ctx context.Context, session *RuntimeSession, minAge time.Duration, now time.Time) (ret []Run, err error) {
 	return withEventHubSession(ctx, session, func(ctx context.Context, hub events.Hub) ([]Run, error) {
 		return runports.RecoverStaleRuntimeGapRunViews(ctx, hub, func(recoverCtx context.Context, current *runmodel.Run, recovery runports.RuntimeGapRecovery) error {

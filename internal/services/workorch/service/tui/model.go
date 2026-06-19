@@ -1883,6 +1883,16 @@ func (m *AppModel) decisionMatchesActiveScope(item backend.DecisionInfo) bool {
 	if m.activeRunID != "" {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
+	ws := m.activeWorkspaceOverview()
+	if ws == nil || ws.State != common.WorkspaceStateWaitingDecision || ws.BlockingTicketID == "" {
+		return false
+	}
+	if item.ID != ws.BlockingTicketID {
+		return false
+	}
+	if ws.ActiveRunID != "" {
+		return item.RunID == ws.ActiveRunID
+	}
 	return true
 }
 
@@ -1893,6 +1903,16 @@ func (m *AppModel) approvalMatchesActiveScope(item backend.ApprovalInfo) bool {
 	if m.activeRunID != "" {
 		return item.RunID == common.RunID(m.activeRunID)
 	}
+	ws := m.activeWorkspaceOverview()
+	if ws == nil || ws.State != common.WorkspaceStateBlocked || ws.BlockingApprovalID == "" {
+		return false
+	}
+	if item.ID != ws.BlockingApprovalID {
+		return false
+	}
+	if ws.ActiveRunID != "" {
+		return item.RunID == ws.ActiveRunID
+	}
 	return true
 }
 
@@ -1902,7 +1922,7 @@ func (m AppModel) activeScopeDecisions() []backend.DecisionInfo {
 		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
 			continue
 		}
-		if m.activeRunID != "" && item.RunID != common.RunID(m.activeRunID) {
+		if !m.decisionMatchesActiveScope(item) {
 			continue
 		}
 		out = append(out, item)
@@ -1916,7 +1936,7 @@ func (m AppModel) activeScopeApprovals() []backend.ApprovalInfo {
 		if m.activeWorkspaceID != "" && item.WorkspaceID != "" && item.WorkspaceID != common.WorkspaceID(m.activeWorkspaceID) {
 			continue
 		}
-		if m.activeRunID != "" && item.RunID != common.RunID(m.activeRunID) {
+		if !m.approvalMatchesActiveScope(item) {
 			continue
 		}
 		out = append(out, item)

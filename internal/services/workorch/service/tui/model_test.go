@@ -1644,7 +1644,8 @@ func TestModelApprovalSlashCompletionSuggestsContextSubcommands(t *testing.T) {
 func TestModelDecisionReplanSlashSubcommandUsesExplicitResolutionType(t *testing.T) {
 	be := &decisionRecordingBE{fakeBE: newFake(t)}
 	m := NewAppModel(be, "ws-1", "")
-	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", State: "open", Question: "choose next"}
+	projectDecisionBlocker(&m, "ws-1", "run-1", "ticket-1")
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-1", WorkspaceID: "ws-1", RunID: "run-1", State: "open", Question: "choose next"}
 	m.setInput("/decision replan 重新规划当前路径")
 
 	next, cmd := m.submitInput()
@@ -3886,6 +3887,36 @@ func TestModelWorkspaceListSynchronizesWaitingDecisionPrompt(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Waiting for decision") || !strings.Contains(view, "ws-a decision >") {
 		t.Fatalf("view did not reflect waiting decision overview:\n%s", view)
+	}
+}
+
+func TestModelActiveWorkspaceWithoutRunIgnoresHistoricalGovernance(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-a", "")
+	m.width = 100
+	m.height = 16
+	m.workspaces = []backend.WorkspaceInfo{{
+		ID:    "ws-a",
+		Title: "A",
+		State: common.WorkspaceStateActive,
+	}}
+	m.activeRunID = ""
+	m.blockingDecision = &backend.DecisionInfo{ID: "ticket-old", WorkspaceID: "ws-a", RunID: "run-old", State: "open"}
+	m.blockingApproval = &backend.ApprovalInfo{ID: "approval-old", WorkspaceID: "ws-a", RunID: "run-old", State: "pending"}
+	m.decisions = []backend.DecisionInfo{*m.blockingDecision}
+	m.approvals = []backend.ApprovalInfo{*m.blockingApproval}
+	m.progress = progressWaitingDecision
+
+	m.syncBlockingDecisionFromList()
+	m.syncBlockingApprovalFromList()
+
+	if m.blockingDecision != nil || m.blockingApproval != nil {
+		t.Fatalf("blockers = %+v/%+v, want historical blockers ignored", m.blockingDecision, m.blockingApproval)
+	}
+	if len(m.activeScopeDecisions()) != 0 || len(m.activeScopeApprovals()) != 0 {
+		t.Fatalf("active governance = %+v/%+v, want none without active run", m.activeScopeDecisions(), m.activeScopeApprovals())
+	}
+	if input := stripANSI(m.renderInput(100)); strings.Contains(input, "decision >") || strings.Contains(input, "approval >") {
+		t.Fatalf("input prompt = %q, want active workspace prompt without historical blocker suffix", input)
 	}
 }
 

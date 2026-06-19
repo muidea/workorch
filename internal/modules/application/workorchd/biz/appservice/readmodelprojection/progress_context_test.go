@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestWorkspaceSnapshotTaskProgressUsesExistingProgress(t *testing.T) {
@@ -20,6 +21,80 @@ func TestWorkspaceSnapshotTaskProgressUsesExistingProgress(t *testing.T) {
 	got := WorkspaceSnapshotTaskProgress(snapshot)
 	if got.State != "custom" || got.WorkspaceID != "ws-progress" {
 		t.Fatalf("progress = %+v, want existing workspace progress", got)
+	}
+}
+
+func TestWorkspaceTaskProgressIgnoresHistoricalBlockersWithoutActiveRun(t *testing.T) {
+	t.Parallel()
+
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:    "ws-startup-recovered",
+			State: string(common.WorkspaceStateActive),
+		},
+		Decisions: []readmodelcore.Decision{{
+			ID:          "ticket-historical",
+			WorkspaceID: "ws-startup-recovered",
+			RunID:       "run-historical",
+			State:       "open",
+			Question:    "historical decision",
+		}},
+		Approvals: []readmodelcore.Approval{{
+			ID:          "approval-historical",
+			WorkspaceID: "ws-startup-recovered",
+			RunID:       "run-historical",
+			State:       "pending",
+			Reason:      "historical approval",
+		}},
+	})
+
+	if got.Recovery.Mode != "idle" || got.Recovery.NextAction != "start_workspace_execution" {
+		t.Fatalf("recovery = %+v, want idle start action", got.Recovery)
+	}
+	if len(got.Blockers) != 0 {
+		t.Fatalf("blockers = %+v, want no current blockers without active run", got.Blockers)
+	}
+}
+
+func TestWorkspaceTaskProgressOnlyUsesActiveRunBlockers(t *testing.T) {
+	t.Parallel()
+
+	got := MapLocalizedWorkspaceTaskProgress(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{
+			ID:          "ws-active-blocker",
+			State:       string(common.WorkspaceStateWaitingDecision),
+			ActiveRunID: "run-current",
+		},
+		Decisions: []readmodelcore.Decision{
+			{
+				ID:          "ticket-old",
+				WorkspaceID: "ws-active-blocker",
+				RunID:       "run-old",
+				State:       "open",
+				Question:    "old decision",
+			},
+			{
+				ID:          "ticket-dismissed",
+				WorkspaceID: "ws-active-blocker",
+				RunID:       "run-current",
+				State:       string(common.DecisionTicketStateDismissed),
+				Question:    "dismissed decision",
+			},
+			{
+				ID:          "ticket-current",
+				WorkspaceID: "ws-active-blocker",
+				RunID:       "run-current",
+				State:       "open",
+				Question:    "current decision",
+			},
+		},
+	})
+
+	if got.Recovery.BlockingTicketID != "ticket-current" || got.Recovery.Mode != "wait_decision" {
+		t.Fatalf("recovery = %+v, want current active run decision", got.Recovery)
+	}
+	if len(got.Blockers) != 1 || got.Blockers[0].ID != "ticket-current" {
+		t.Fatalf("blockers = %+v, want only current active run blocker", got.Blockers)
 	}
 }
 

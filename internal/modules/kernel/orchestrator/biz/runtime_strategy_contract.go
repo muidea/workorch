@@ -467,11 +467,64 @@ func strategyReassessmentDecisionCandidates(output map[string]any) ([]map[string
 
 func strategyCandidateHasRequiredFields(candidate map[string]any, required []string) bool {
 	for _, field := range required {
-		if strings.TrimSpace(stringFromAny(candidate[field])) == "" {
+		if !strategyCandidateFieldPresent(candidate[field]) {
 			return false
 		}
 	}
 	return true
+}
+
+func strategyCandidateFieldPresent(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []string:
+		for _, item := range typed {
+			if strings.TrimSpace(item) != "" {
+				return true
+			}
+		}
+		return false
+	case []any:
+		for _, item := range typed {
+			if strategyCandidateFieldPresent(item) {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	case bool:
+		return typed
+	case int:
+		return typed != 0
+	case int8:
+		return typed != 0
+	case int16:
+		return typed != 0
+	case int32:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case uint:
+		return typed != 0
+	case uint8:
+		return typed != 0
+	case uint16:
+		return typed != 0
+	case uint32:
+		return typed != 0
+	case uint64:
+		return typed != 0
+	case float32:
+		return typed != 0
+	case float64:
+		return typed != 0
+	default:
+		return false
+	}
 }
 
 func strategyFailedSurfaceMatches(candidate map[string]any, expected string) bool {

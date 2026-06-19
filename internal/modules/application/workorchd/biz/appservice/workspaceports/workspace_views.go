@@ -2,7 +2,6 @@ package workspaceports
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -30,15 +29,20 @@ func CreateWorkspaceView(ctx context.Context, hub events.Hub, req CreateWorkspac
 	if attempts <= 0 {
 		attempts = 8
 	}
+	var lastConflict error
 	for attempt := 0; attempt < attempts; attempt++ {
 		item, err := createWorkspaceViewAttempt(ctx, hub, req)
 		if err != nil {
-			if errors.Is(err, common.ErrConflict) {
+			if isWorkspaceCreateIDConflict(err) {
+				lastConflict = err
 				continue
 			}
 			return appmodelcore.Workspace{}, err
 		}
 		return workspacecore.MapWorkspace(item), nil
+	}
+	if lastConflict != nil {
+		return appmodelcore.Workspace{}, lastConflict
 	}
 	return appmodelcore.Workspace{}, common.ErrConflict
 }

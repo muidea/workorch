@@ -28,12 +28,8 @@ import (
 	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
-	magicevent "github.com/muidea/magicCommon/event"
-	plugininitiator "github.com/muidea/magicCommon/framework/plugin/initiator"
-	pluginmodule "github.com/muidea/magicCommon/framework/plugin/module"
 	magictask "github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
-	runtimecommon "github.com/muidea/workorch/internal/initiators/workorchruntime/pkg/common"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
@@ -51,19 +47,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	"github.com/muidea/workorch/internal/pkg/workorchruntimepolicy"
-
-	_ "github.com/muidea/workorch/internal/initiators/workorchruntime"
-	_ "github.com/muidea/workorch/internal/modules/blocks/llm"
-	_ "github.com/muidea/workorch/internal/modules/blocks/mcp"
-	_ "github.com/muidea/workorch/internal/modules/blocks/shell"
-	_ "github.com/muidea/workorch/internal/modules/kernel/mcp"
-	_ "github.com/muidea/workorch/internal/modules/kernel/memory"
-	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
-	_ "github.com/muidea/workorch/internal/modules/kernel/result"
-	_ "github.com/muidea/workorch/internal/modules/kernel/run"
-	_ "github.com/muidea/workorch/internal/modules/kernel/skill"
-	_ "github.com/muidea/workorch/internal/modules/kernel/soul"
-	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
 func TestMain(m *testing.M) {
@@ -109,6 +92,7 @@ func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverStat
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
 	state := newServerStateWithBackground(config, hub, routine)
+	configureIsolatedTestSession(t, state, config)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -116,6 +100,27 @@ func newTestServerState(t *testing.T, config Config, hub events.Hub) *serverStat
 		_ = routine.Shutdown(ctx)
 	})
 	return state
+}
+
+func configureIsolatedTestSession(t *testing.T, state *serverState, config Config) {
+	t.Helper()
+	if state == nil || state.sharedSession != nil {
+		return
+	}
+	session, err := appservice.NewRuntimeSessionWithBackendAndEventHub(config.Backend, config.DataRoot, state.eventHub)
+	if err != nil {
+		return
+	}
+	for _, unsubscribe := range state.eventUnsubscribes {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+	}
+	state.eventUnsubscribes = nil
+	state.configureSessionBackedOperations(session)
+	state.registerEventReplayRecorder()
+	state.registerGovernanceResolvedResumeWatcher()
+	state.registerWorkorchDSchedulerCommandWatcher()
 }
 
 func newTestMux(t *testing.T, config Config) http.Handler {
@@ -127,6 +132,7 @@ func newTestHTTPServer(t *testing.T, config Config) *HTTPServer {
 	t.Helper()
 	routine := magictask.NewBackgroundRoutine(128)
 	server := NewHTTPServerWithEventHubAndBackground(config, nil, routine)
+	configureIsolatedTestSession(t, server.state, normalizeConfig(config))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -419,63 +425,31 @@ func TestReadyzIncludesSchedulerDiagnostics(t *testing.T) {
 	}
 }
 
-func TestServerStatePrefersApplicationRuntimeSession(t *testing.T) {
+func TestServerStateRequiresFrameworkInitiatorRuntimeSession(t *testing.T) {
 	useWorkorchRuntimeTestConfig(t, "memory", "")
-	hub := magicevent.NewHub(16)
-	routine := magictask.NewBackgroundRoutine(16)
-	defer routine.Shutdown(context.Background())
-	defer hub.Terminate(context.Background())
-	defer plugininitiator.Teardown(context.Background())
-	defer pluginmodule.Teardown(context.Background())
-
-	if err := plugininitiator.Setup(context.Background(), hub, routine); err != nil {
-		t.Fatalf("setup runtime initiator: %v", err)
-	}
-	if err := pluginmodule.Setup(context.Background(), hub, routine); err != nil {
-		t.Fatalf("setup runtime modules: %v", err)
-	}
-	if err := plugininitiator.Run(context.Background()); err != nil {
-		t.Fatalf("run runtime initiator: %v", err)
-	}
-	if err := pluginmodule.Run(context.Background()); err != nil {
-		t.Fatalf("run runtime modules: %v", err)
-	}
-
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
-	if state.sharedSession == nil {
-		t.Fatal("expected shared runtime session")
-	}
-	if state.sharedSession.Bootstrap != nil {
-		t.Fatal("expected application runtime session to be non-owning")
-	}
-	if state.sharedSession.Runtime == nil {
-		t.Fatal("expected managed runtime adapter")
-	}
-
+	bg := magictask.NewBackgroundRoutine(128)
 	ctx := context.Background()
-	workspace, err := state.createWorkspace(ctx, "", "", appservice.CreateWorkspaceCommand{
-		Title:                "application runtime",
-		DeliverableDirectory: "workspaces/application-runtime",
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = bg.Shutdown(shutdownCtx)
 	})
-	if err != nil {
-		t.Fatalf("create workspace through server state: %v", err)
-	}
 
-	var helper runtimecommon.Helper
-	runtime, runtimeErr := plugininitiator.GetEntity(runtimecommon.InitiatorID, helper)
-	if runtimeErr != nil {
-		t.Fatalf("get runtime initiator: %v", runtimeErr)
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), nil, bg)
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(shutdownCtx)
+	})
+	if state.sharedSession != nil {
+		t.Fatal("server state must not create an owned bootstrap runtime when framework initiator is missing")
 	}
-	workspaceRepos := runtime.RepositoryProvider().Workspace()
-	if _, err := workspaceRepos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
-		t.Fatalf("workspace was not persisted in application runtime repositories: %v", err)
+	err := state.validate(ctx, "", "")
+	if err == nil {
+		t.Fatal("validate error = nil, want missing framework runtime session error")
 	}
-
-	if err := state.close(ctx); err != nil {
-		t.Fatalf("close server state: %v", err)
-	}
-	if _, err := workspaceRepos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID)); err != nil {
-		t.Fatalf("server state close must not teardown application runtime: %v", err)
+	if !strings.Contains(err.Error(), "framework runtime session unavailable") {
+		t.Fatalf("validate error = %v, want framework runtime session unavailable", err)
 	}
 }
 
@@ -5918,6 +5892,7 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 
 	routine := &recordingBackgroundRoutine{}
 	second := NewHTTPServerWithEventHubAndBackground(Config{Backend: "file", DataRoot: dataRoot}, nil, routine)
+	configureIsolatedTestSession(t, second.state, normalizeConfig(Config{Backend: "file", DataRoot: dataRoot}))
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
