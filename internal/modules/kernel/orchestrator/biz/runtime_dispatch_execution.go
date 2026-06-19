@@ -43,6 +43,11 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		} else if duplicate {
 			return nil
 		}
+		if duplicate, err := o.hasInFlightLLMGraphDispatchForSameScope(ctx, run.ID, stepID, kind, input); err != nil {
+			return err
+		} else if duplicate {
+			return nil
+		}
 	}
 	step, err := o.steps.Get(ctx, stepID)
 	if err != nil {
@@ -580,6 +585,44 @@ func (o *RuntimeOrchestrator) hasInFlightRuntimeRepairForSameScope(ctx context.C
 	return false, nil
 }
 
+func (o *RuntimeOrchestrator) hasInFlightLLMGraphDispatchForSameScope(ctx context.Context, runID common.RunID, stepID common.StepID, kind string, input map[string]any) (bool, error) {
+	if o == nil || o.steps == nil || runID == "" || stepID == "" {
+		return false, common.ErrInvalidArgument
+	}
+	scope := llmGraphDispatchScope(kind, input)
+	if scope == "" {
+		return false, nil
+	}
+	steps, err := o.steps.ListByRun(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range steps {
+		if item == nil || item.ID == stepID {
+			continue
+		}
+		switch item.State {
+		case common.StepStateCompleted, common.StepStateFailed:
+			continue
+		}
+		if llmGraphDispatchScope(item.Kind, item.Input) == scope {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func llmGraphDispatchScope(kind string, input map[string]any) string {
+	if canonicalLLMWorkspaceStepKind(kind) != llmWorkspaceExecutionStepKind || len(input) == 0 {
+		return ""
+	}
+	root := strings.TrimSpace(stringFromMap(input, stepInputKeyGraphRootStepID))
+	if root == "" {
+		return ""
+	}
+	return "llmGraphRoot:" + root
+}
+
 func runtimeRepairDispatchScope(input map[string]any) string {
 	if len(input) == 0 {
 		return ""
@@ -640,7 +683,10 @@ func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, r
 		}
 		last = now
 		lastSignature = signature
-		return o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data)
+		if err := o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data); err != nil {
+			return err
+		}
+		return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	}
 }
 

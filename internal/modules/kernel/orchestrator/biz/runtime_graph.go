@@ -141,6 +141,10 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	if len(specs) == 0 {
 		return common.ErrConflict
 	}
+	specs = dedupeConcurrentLLMGraphDispatchSpecs(specs)
+	if len(specs) == 0 {
+		return common.ErrConflict
+	}
 	if o.eventDrivenDispatch {
 		workspaceID := workspaceIDForDispatch(run, workspace)
 		for _, spec := range specs {
@@ -256,6 +260,25 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, currentRun, last.ID, workspace)
+}
+
+func dedupeConcurrentLLMGraphDispatchSpecs(specs []stepDispatchSpec) []stepDispatchSpec {
+	if len(specs) < 2 {
+		return specs
+	}
+	seenLLMGraphScopes := map[string]bool{}
+	ret := make([]stepDispatchSpec, 0, len(specs))
+	for _, spec := range specs {
+		scope := llmGraphDispatchScope(spec.Kind, spec.Input)
+		if scope != "" {
+			if seenLLMGraphScopes[scope] {
+				continue
+			}
+			seenLLMGraphScopes[scope] = true
+		}
+		ret = append(ret, spec)
+	}
+	return ret
 }
 
 func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(

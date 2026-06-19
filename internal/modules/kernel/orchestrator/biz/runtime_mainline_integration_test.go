@@ -1433,6 +1433,7 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 	resolutionRepo := memory.NewDecisionResolutionRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	hub := events.NewMemoryHub()
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
 			if request.Progress == nil {
@@ -1467,7 +1468,7 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 			ValidationResults:  memory.NewValidationResultRepository(),
 			RuntimeCheckpoints: checkpointRepo,
 		},
-		events.NewMemoryHub(),
+		hub,
 	)
 
 	workspaceID := common.WorkspaceID("ws-progress-evidence")
@@ -1492,6 +1493,68 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 	}
 	if !hasRuntimeProgressCheckpointData(checkpoints, "llm_provider_stream", 42) {
 		t.Fatalf("checkpoints = %+v, want provider stream progress diagnostics", checkpoints)
+	}
+	if !publishedStepState(hub.Published(), common.StepID(string(runID)+"/step-1"), common.StepStateDispatched) {
+		t.Fatalf("published events = %+v, want runtime progress to refresh step projection", hub.Published())
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchSkipsConcurrentLLMGraphScope(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	runtime := &requestOnlyRuntimeAdapter{}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memory.NewDecisionTicketRepository(),
+		memory.NewDecisionResolutionRepository(),
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository()},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-llm-graph-scope")
+	runID := common.RunID("run-llm-graph-scope")
+	workspace := &workspacemodel.Workspace{
+		ID:                   workspaceID,
+		Title:                "ws",
+		State:                common.WorkspaceStateRunning,
+		DeliverableDirectory: t.TempDir(),
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		State:           common.RunStateRunning,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	input := map[string]any{
+		stepInputKeyGraphRootStepID: string(runID) + "/root-llm-plan",
+		"graphFollowUp":             true,
+	}
+	firstStepID := common.StepID(string(runID) + "/follow-up-a")
+	secondStepID := common.StepID(string(runID) + "/follow-up-b")
+	if err := orch.dispatchStepWithWorkspace(ctx, run, firstStepID, llmWorkspaceExecutionStepKind, input, workspace); err != nil {
+		t.Fatalf("dispatch first graph llm follow-up: %v", err)
+	}
+	if err := orch.dispatchStepWithWorkspace(ctx, run, secondStepID, llmWorkspaceExecutionStepKind, input, workspace); err != nil {
+		t.Fatalf("dispatch duplicate graph llm follow-up: %v", err)
+	}
+	if len(runtime.requests) != 1 || runtime.requests[0].StepID != firstStepID {
+		t.Fatalf("runtime requests = %+v, want only first graph llm follow-up", runtime.requests)
+	}
+	if _, err := stepRepo.Get(ctx, secondStepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("second step err = %v, want not created", err)
 	}
 }
 
