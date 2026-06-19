@@ -2647,7 +2647,7 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 	}
 	digest := map[string]any{}
 	existingOutputs := []string{}
-	var lastAttempt, lastFailure, lastActionableFailure map[string]any
+	var lastAttempt, lastFailure, lastActionableFailure, lastConcreteActionableFailure map[string]any
 	for _, item := range timeline {
 		if len(item) == 0 {
 			continue
@@ -2662,6 +2662,9 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 			if lastActionableFailureSupersededByCompletedItem(lastActionableFailure, item) {
 				lastActionableFailure = nil
 			}
+			if lastActionableFailureSupersededByCompletedItem(lastConcreteActionableFailure, item) {
+				lastConcreteActionableFailure = nil
+			}
 			if lastFailureSupersededByCompletedItem(lastFailure, item) {
 				lastFailure = nil
 			}
@@ -2670,6 +2673,9 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 			lastFailure = item
 			if processEvidenceItemIsActionableFailure(item) {
 				lastActionableFailure = item
+			}
+			if processEvidenceItemIsConcreteActionableFailure(item) {
+				lastConcreteActionableFailure = item
 			}
 		}
 	}
@@ -2682,7 +2688,9 @@ func currentProgressDigestFromProcessEvidenceTimeline(timeline []map[string]any)
 	if len(lastAttempt) > 0 {
 		digest["lastAttempt"] = processEvidenceDigestStep(lastAttempt)
 	}
-	if len(lastActionableFailure) > 0 {
+	if len(lastConcreteActionableFailure) > 0 && processEvidenceItemIsActionableGap(lastActionableFailure) {
+		lastFailure = lastConcreteActionableFailure
+	} else if len(lastActionableFailure) > 0 {
 		lastFailure = lastActionableFailure
 	}
 	if len(lastFailure) > 0 {
@@ -2725,6 +2733,29 @@ func lastFailureSupersededByCompletedItem(failure map[string]any, completed map[
 		return true
 	}
 	return false
+}
+
+func processEvidenceItemIsActionableGap(item map[string]any) bool {
+	return len(item) > 0 && strings.TrimSpace(stringFromMap(item, "evidenceValidity")) == "actionable_gap"
+}
+
+func processEvidenceItemIsConcreteActionableFailure(item map[string]any) bool {
+	if len(item) == 0 || processEvidenceItemIsActionableGap(item) {
+		return false
+	}
+	if validity := strings.TrimSpace(stringFromMap(item, "evidenceValidity")); validity != "" && validity != "actionable_failure" {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(item, "kind")) {
+	case "shell/command", "patch/apply", "mcp/tool_call":
+		return true
+	}
+	switch strings.TrimSpace(stringFromMap(item, "failureClass")) {
+	case failureClassShellCommand, failureClassPatchApply, failureClassMCPRuntime:
+		return true
+	default:
+		return false
+	}
 }
 
 func processEvidenceItemIsActionableFailure(item map[string]any) bool {

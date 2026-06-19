@@ -142,6 +142,50 @@ func TestCurrentProgressDigestPreservesStructuredFailureTargetScope(t *testing.T
 	}
 }
 
+func TestCurrentProgressDigestPrefersUnresolvedConcreteFailureOverLaterCoverageGap(t *testing.T) {
+	timeline := []map[string]any{
+		{
+			"order":              1,
+			"stepId":             "run-001/graph-001/001-verify",
+			"kind":               "shell/command",
+			"state":              string(common.StepStateFailed),
+			"failureClass":       failureClassShellCommand,
+			"failureSignature":   "class=shell_command_failed|kind=shell/command|failureTargets=target.txt|exitCode=1",
+			"failureReason":      "exit status 1",
+			"evidenceValidity":   "actionable_failure",
+			"failureTargetScope": "failureTargets=target.txt",
+			"targetScope":        "failureTargets=target.txt",
+			"outputSummary":      map[string]any{"stderrPreview": "target.txt:10: invalid shape"},
+		},
+		{
+			"order":              2,
+			"stepId":             "run-001/repair-001",
+			"kind":               llmWorkspaceExecutionStepKind,
+			"state":              string(common.StepStateFailed),
+			"failureClass":       failureClassDoDCoverageMissing,
+			"failureSignature":   "class=dod_coverage_missing|kind=llm/workspace_execution|stage=llm_dod_assessment",
+			"failureReason":      "state-changing repair returned assessment without executable output",
+			"evidenceValidity":   "actionable_gap",
+			"failureTargetScope": "failureTargets=target.txt",
+			"targetScope":        "failureTargets=target.txt",
+			"summary":            "latest assessment still reports target.txt verification failure",
+		},
+	}
+
+	digest := currentProgressDigestFromProcessEvidenceTimeline(timeline)
+	failure := mapFromValue(digest["lastObservedFailure"])
+	if failure["stepId"] != "run-001/graph-001/001-verify" ||
+		failure["failureClass"] != failureClassShellCommand ||
+		failure["failureTargetScope"] != "failureTargets=target.txt" {
+		t.Fatalf("lastObservedFailure = %+v, want unresolved concrete shell failure", failure)
+	}
+	currentFailure := currentFailureFromProgressDigest(digest)
+	if currentFailure["failedStepId"] != "run-001/graph-001/001-verify" ||
+		currentFailure["failureClass"] != failureClassShellCommand {
+		t.Fatalf("currentFailure = %+v, want concrete shell failure", currentFailure)
+	}
+}
+
 func TestRejectedResultContinuationPreservesStructuredFailureTargetScope(t *testing.T) {
 	continuation := map[string]any{
 		"summary":            "result still lacks required evidence",
