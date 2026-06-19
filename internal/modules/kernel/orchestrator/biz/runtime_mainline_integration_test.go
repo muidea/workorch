@@ -20,6 +20,7 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	mcpbiz "github.com/muidea/workorch/internal/modules/kernel/mcp/biz"
 	mcpservice "github.com/muidea/workorch/internal/modules/kernel/mcp/service"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -371,7 +372,7 @@ func TestRuntimeOrchestrator_DispatchStepRequestsRuntimeExecutionWithoutWaitingF
 	}
 }
 
-func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunBlocks(t *testing.T) {
+func TestRuntimeOrchestrator_FinalizeRuntimeStepResultClosesLateResultAfterRunBlocks(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -381,6 +382,7 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunB
 	toolCallRepo := memory.NewToolCallRepository()
 	validationRepo := memory.NewValidationResultRepository()
 	checkpointRepo := memory.NewRuntimeCheckpointRepository()
+	hub := events.NewMemoryHub()
 	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
 		&requestOnlyRuntimeAdapter{},
 		runRepo,
@@ -394,7 +396,7 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunB
 			ValidationResults:  validationRepo,
 			RuntimeCheckpoints: checkpointRepo,
 		},
-		events.NewMemoryHub(),
+		hub,
 	)
 
 	workspaceID := common.WorkspaceID("ws-late-runtime-result")
@@ -412,15 +414,26 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunB
 		t.Fatalf("seed step: %v", err)
 	}
 
-	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{"status": "late"}}, nil); err != nil {
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: map[string]any{
+		"status":         "completed",
+		"stage":          "llm_completed",
+		"summary":        "late runtime result",
+		"executionGraph": []any{map[string]any{"id": "late-node"}},
+		"llmCallRefs":    []any{"llm-call-1"},
+	}}, nil); err != nil {
 		t.Fatalf("finalize late runtime result: %v", err)
 	}
 	step, err := stepRepo.Get(ctx, stepID)
 	if err != nil {
 		t.Fatalf("get step: %v", err)
 	}
-	if step.State != common.StepStateDispatched || len(step.Output) != 0 {
-		t.Fatalf("late result mutated step = %+v, want dispatched with empty output", step)
+	if step.State != common.StepStateFailed ||
+		step.Output["status"] != "ignored" ||
+		step.Output["stage"] != "runtime_result_not_accepted" ||
+		step.Output["runState"] != string(common.RunStateBlockedOnDecision) ||
+		step.Output["runtimeResultStatus"] != "completed" ||
+		step.Output["runtimeResultExecutionGraphNodeCount"] != 1 {
+		t.Fatalf("late result step = %+v, want explicit ignored terminal output", step)
 	}
 	validations, err := validationRepo.ListByStep(ctx, stepID)
 	if err != nil {
@@ -428,6 +441,9 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunB
 	}
 	if len(validations) != 0 {
 		t.Fatalf("validations = %+v, want none for late result", validations)
+	}
+	if !publishedStepState(hub.Published(), stepID, common.StepStateFailed) {
+		t.Fatalf("published events = %+v, want failed step state change for late result", hub.Published())
 	}
 
 	progress := orch.runtimeStepProgressRecorder(ctx, run, step)
@@ -441,9 +457,23 @@ func TestRuntimeOrchestrator_FinalizeRuntimeStepResultIgnoresLateResultAfterRunB
 	if err != nil {
 		t.Fatalf("list checkpoints: %v", err)
 	}
-	if len(checkpoints) != 0 {
-		t.Fatalf("checkpoints = %+v, want none for late progress", checkpoints)
+	if !hasCheckpointEvent(checkpoints, "step_failed") {
+		t.Fatalf("checkpoints = %+v, want step_failed for late result", checkpoints)
 	}
+	if hasCheckpointEvent(checkpoints, "runtime_step_done") {
+		t.Fatalf("checkpoints = %+v, want no late progress checkpoint after blocked run", checkpoints)
+	}
+}
+
+func publishedStepState(items []events.Envelope, stepID common.StepID, state common.StepState) bool {
+	for _, item := range items {
+		if item.Topic == runevents.TopicStepStateChanged &&
+			item.StepID == string(stepID) &&
+			item.Payload[events.PayloadKeyState] == string(state) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeOrchestrator_DispatchSkipsDuplicateInFlightRepairScope(t *testing.T) {

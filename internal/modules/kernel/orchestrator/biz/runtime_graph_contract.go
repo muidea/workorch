@@ -365,13 +365,8 @@ func graphNodeDeclaresStateChangingIntent(node runtimemodel.BlockExecutionNode) 
 	if boolValue(node.Input["stateChanging"]) || boolValue(node.Input["stateChange"]) {
 		return true
 	}
-	for _, key := range []string{"stateChangingReason", "stateChangeReason", "targetRef", "boundedReason"} {
+	for _, key := range []string{"stateChangingReason", "stateChangeReason"} {
 		if strings.TrimSpace(stringFromAny(node.Input[key])) != "" {
-			return true
-		}
-	}
-	for _, key := range []string{"relatedFailureTargets", "targetRefs", "affectedTargets"} {
-		if len(stringSliceFromValue(node.Input[key])) > 0 {
 			return true
 		}
 	}

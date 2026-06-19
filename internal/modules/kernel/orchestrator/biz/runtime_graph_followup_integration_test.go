@@ -2006,6 +2006,60 @@ func TestValidateLLMFollowUpGraphAllowsConcreteFailureEvidenceAcquisitionGraph(t
 	}
 }
 
+func TestValidateLLMFollowUpGraphAllowsBoundedReasonDuringConcreteFailureEvidenceAcquisition(t *testing.T) {
+	step := &runmodel.Step{
+		ID:    "run-evidence/follow-up-bounded-reason",
+		RunID: "run-evidence",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:      "strict_convergence",
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds": []string{
+						"file/list",
+						"file/read",
+						"git/read",
+						"shell/command",
+						"mcp/tool_call",
+					},
+					"mustProduceConcreteFailureEvidence": true,
+					"stateChangingForbidden":             true,
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+			{ID: "list", Kind: "file/list", Input: map[string]any{"path": "", "recursive": false}},
+			{
+				ID:        "verify",
+				Kind:      "shell/command",
+				DependsOn: []string{"list"},
+				Input: map[string]any{
+					"command":       "verify",
+					"args":          []string{"--scope", "target.txt"},
+					"boundedReason": "bounded read-only failure evidence acquisition",
+					"relatedFailureTargets": []string{
+						"target.txt",
+					},
+					"verificationScope": "failure-evidence",
+					"validationEvidence": map[string]any{
+						"mode":            "runtime_behavior",
+						"observationType": "runtime_observation",
+					},
+				},
+			},
+		}},
+	}
+	if err := validateLLMFollowUpGraphStateChangingContract(&runmodel.Run{}, step, output); err != nil {
+		t.Fatalf("validate evidence acquisition graph with boundedReason: %v", err)
+	}
+}
+
 func TestValidateLLMFollowUpGraphAllowsDeclaredToolStateChangingRepairGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-declared-tool-state-change",

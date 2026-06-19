@@ -196,7 +196,7 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return err
 	}
 	if !acceptsResult {
-		return nil
+		return o.persistLateRuntimeStepResultNotAccepted(ctx, currentRun, step, toolCall, result, execErr)
 	}
 	run = currentRun
 	if execErr != nil {
@@ -413,6 +413,94 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 		return err
 	}
 	return o.validateAndCompleteRunWithWorkspace(ctx, run, step.ID, workspace)
+}
+
+func (o *RuntimeOrchestrator) persistLateRuntimeStepResultNotAccepted(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	toolCall *runModel.ToolCall,
+	result runtimemodel.StepExecutionResult,
+	execErr error,
+) error {
+	if o == nil || run == nil || step == nil {
+		return common.ErrInvalidArgument
+	}
+	switch step.State {
+	case common.StepStateCompleted, common.StepStateFailed:
+		return nil
+	}
+	output := compactLateRuntimeResultNotAcceptedOutput(run, result.Output, execErr)
+	step.State = common.StepStateFailed
+	step.Output = output
+	_ = o.recordToolCallFailed(ctx, toolCall, execErr, output)
+	if err := o.steps.Update(ctx, step); err != nil {
+		return err
+	}
+	if err := o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed"); err != nil {
+		return err
+	}
+	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+}
+
+func compactLateRuntimeResultNotAcceptedOutput(run *runModel.Run, output map[string]any, execErr error) map[string]any {
+	ret := map[string]any{
+		"status":       "ignored",
+		"stage":        "runtime_result_not_accepted",
+		"reason":       "runtime result arrived after run state stopped accepting step results",
+		"failureClass": "runtime_result_not_accepted",
+	}
+	if run != nil {
+		ret["runState"] = string(run.State)
+		if run.BlockingTicketID != "" {
+			ret["blockingTicketId"] = string(run.BlockingTicketID)
+		}
+		if run.BlockingApprovalID != "" {
+			ret["blockingApprovalId"] = string(run.BlockingApprovalID)
+		}
+	}
+	if execErr != nil {
+		ret["error"] = execErr.Error()
+	}
+	if len(output) > 0 {
+		ret["runtimeResultAvailable"] = true
+		for _, key := range []string{"status", "stage", "summary", "completionState", "failureClass"} {
+			value := strings.TrimSpace(stringFromMap(output, key))
+			if value == "" {
+				continue
+			}
+			ret["runtimeResult"+upperFirst(key)] = value
+		}
+		if nodes := executionGraphNodeCount(output["executionGraph"]); nodes > 0 {
+			ret["runtimeResultExecutionGraphNodeCount"] = nodes
+		}
+		if refs := stringSliceFromValue(output["llmCallRefs"]); len(refs) > 0 {
+			ret["llmCallRefs"] = refs
+		}
+	}
+	return ret
+}
+
+func upperFirst(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func executionGraphNodeCount(value any) int {
+	switch typed := value.(type) {
+	case []any:
+		return len(typed)
+	case []map[string]any:
+		return len(typed)
+	case map[string]any:
+		if nodes, ok := typed["nodes"].([]any); ok {
+			return len(nodes)
+		}
+	}
+	return 0
 }
 
 func (o *RuntimeOrchestrator) lockRuntimeStepFinalize(stepID common.StepID) func() {
