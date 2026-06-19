@@ -466,6 +466,9 @@ func configOnlyDependencyResolutionStillBlocked(ticket *decisionmodel.Ticket, re
 	if ticket == nil || resolution == nil {
 		return false
 	}
+	if strings.TrimSpace(resolution.Type) == decisioncommon.ResolutionTypeReplan {
+		return false
+	}
 	if strings.TrimSpace(stringFromMap(ticket.Context, decisionContextKeyRecoveryPolicy)) != decisionContextRecoveryPolicyConfigOnly {
 		return false
 	}

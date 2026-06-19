@@ -33,11 +33,13 @@ func TestConfigOnlyDependencyResolutionStillBlockedRequiresRecoveryEvidence(t *t
 	}
 	tests := []struct {
 		name    string
+		typ     string
 		payload map[string]any
 		want    bool
 	}{
 		{name: "plain continue remains blocked", payload: map[string]any{"answer": "continue"}, want: true},
-		{name: "replan remains blocked", payload: map[string]any{"recoveryAction": "replan"}, want: true},
+		{name: "payload only replan remains blocked until resolution type is normalized", payload: map[string]any{"recoveryAction": "replan"}, want: true},
+		{name: "explicit replan resolution can create successor without recovery evidence", typ: decisioncommon.ResolutionTypeReplan, payload: map[string]any{"recoveryAction": "replan"}, want: false},
 		{name: "retry remains blocked without recovery evidence", payload: map[string]any{"recoveryAction": "retry_same_step"}, want: true},
 		{name: "external dependency recovered can resume", payload: map[string]any{"externalDependencyRecovered": true}, want: false},
 		{name: "system config changed can resume", payload: map[string]any{"systemConfigChanged": true}, want: false},
@@ -45,11 +47,127 @@ func TestConfigOnlyDependencyResolutionStillBlockedRequiresRecoveryEvidence(t *t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := configOnlyDependencyResolutionStillBlocked(ticket, &decisionmodel.Resolution{Payload: tt.payload})
+			got := configOnlyDependencyResolutionStillBlocked(ticket, &decisionmodel.Resolution{Type: tt.typ, Payload: tt.payload})
 			if got != tt.want {
 				t.Fatalf("blocked = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRuntimeOrchestrator_ProviderConfigReplanCreatesSuccessorWithoutRecoveryEvidence(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	resolutionRepo := memory.NewDecisionResolutionRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	resultRepo := memory.NewResultRepository()
+	runtime := &stubRuntimeAdapter{output: map[string]any{
+		"status":          "completed",
+		"completionState": "completed",
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": true,
+			"summary":   "provider config replan successor completed",
+			"items": []map[string]any{{
+				"item":         "successor run",
+				"state":        "satisfied",
+				"evidenceRefs": []string{"run-provider-config-replan-replan-001/step-1"},
+			}},
+		},
+	}}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		resolutionRepo,
+		approvalRepo,
+		RuntimeEvidenceRepositories{Results: resultRepo},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-provider-config-replan")
+	runID := common.RunID("run-provider-config-replan")
+	failedStepID := common.StepID(runID + "/provider-retry-002-of-planning-001")
+	ticketID := common.TicketID(failedStepID + "-provider-retry-exhausted-decision")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateWaitingDecision, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		DoDID:            "dod-provider-config-replan",
+		InitialStepKind:  llmcommon.StepKindWorkspaceExecution,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: ticketID,
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{
+		ID:    failedStepID,
+		RunID: runID,
+		Kind:  llmcommon.StepKindWorkspaceExecution,
+		State: common.StepStateFailed,
+		Output: map[string]any{
+			"stage":                   "llm_provider_timeout",
+			"error":                   "tls handshake timeout",
+			failureOutputKeyClass:     failureClassProviderTimeout,
+			failureOutputKeySignature: "class=provider_timeout|stage=llm_provider_timeout|error=tls handshake timeout",
+		},
+	}); err != nil {
+		t.Fatalf("seed failed step: %v", err)
+	}
+	if err := ticketRepo.Create(ctx, &decisionmodel.Ticket{
+		ID:          ticketID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      failedStepID,
+		State:       common.DecisionTicketStateResolved,
+		Context: map[string]any{
+			decisionContextKeyScope:          decisionContextScopeWorkorchRuntime,
+			decisionContextKeyDependency:     decisionContextDependencyLLMProvider,
+			decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyConfigOnly,
+		},
+	}); err != nil {
+		t.Fatalf("seed ticket: %v", err)
+	}
+	if err := resolutionRepo.Create(ctx, &decisionmodel.Resolution{
+		ID:       "resolution-provider-config-replan",
+		TicketID: ticketID,
+		Type:     decisioncommon.ResolutionTypeReplan,
+		Payload:  map[string]any{"operator": "tester", "recoveryAction": "replan"},
+	}); err != nil {
+		t.Fatalf("seed resolution: %v", err)
+	}
+
+	if err := orch.ResumeRun(ctx, runID); err != nil {
+		t.Fatalf("resume provider config replan: %v", err)
+	}
+	predecessor, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("load predecessor: %v", err)
+	}
+	if predecessor.State != common.RunStateSuperseded || predecessor.BlockingTicketID != "" {
+		t.Fatalf("predecessor = %+v, want superseded without blocker", predecessor)
+	}
+	ticket, err := ticketRepo.Get(ctx, ticketID)
+	if err != nil {
+		t.Fatalf("load ticket: %v", err)
+	}
+	if ticket.State != common.DecisionTicketStateResolved {
+		t.Fatalf("ticket state = %q, want resolved", ticket.State)
+	}
+	successorID := common.RunID(runID + "-replan-001")
+	successor, err := runRepo.Get(ctx, successorID)
+	if err != nil {
+		t.Fatalf("load successor %s: %v", successorID, err)
+	}
+	replan := mapFromValue(successor.ExecutionContext["replanContinuation"])
+	if got := stringFromMap(replan, "predecessorRunId"); got != string(runID) {
+		t.Fatalf("successor replan predecessor = %q, want %s", got, runID)
 	}
 }
 
