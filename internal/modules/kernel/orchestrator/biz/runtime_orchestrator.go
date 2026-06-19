@@ -92,8 +92,8 @@ const (
 const maxProviderRetryAttemptsBeforeStateChange = 2
 
 const (
-	minIneffectiveConvergenceRecoverySteps    = 18
-	minIneffectiveConvergenceContractFailures = 6
+	minIneffectiveConvergenceRecoverySteps    = 8
+	minIneffectiveConvergenceContractFailures = 3
 )
 
 type RuntimePolicy = workorchruntimepolicy.RuntimePolicy

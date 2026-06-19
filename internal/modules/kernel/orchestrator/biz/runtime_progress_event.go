@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -53,5 +52,5 @@ func (o *RuntimeOrchestrator) RecordRuntimeStepProgress(ctx context.Context, pro
 	if err := o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data); err != nil {
 		return err
 	}
-	return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+	return o.eventPublisher().publishRuntimeStepProgress(ctx, run, step, event, data)
 }

@@ -488,6 +488,53 @@ func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run
 	return nil
 }
 
+func (e *eventSubsystem) publishRuntimeStepProgress(ctx context.Context, run *runModel.Run, step *runModel.Step, event string, data map[string]any) error {
+	if e.hub == nil || run == nil || step == nil {
+		return nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(step.Kind), "llm/") {
+		return nil
+	}
+	providerID := strings.TrimSpace(firstNonEmptyString(
+		stringFromMap(data, "providerId"),
+		stringFromMap(data, "providerID"),
+	))
+	model := strings.TrimSpace(stringFromMap(data, "model"))
+	chunkCount := intFromAny(data["receivedEventCount"])
+	if chunkCount == 0 {
+		chunkCount = intFromAny(data["receivedDeltaCount"])
+	}
+	receivedBytes := intFromAny(data["receivedBytes"])
+	elapsedMs := intFromAny(data["elapsedMs"])
+	status := strings.TrimSpace(string(step.State))
+	if status == "" {
+		status = "running"
+	}
+	summary := strings.TrimSpace(firstNonEmptyString(stringFromMap(data, "summary"), event))
+	return e.hub.Publish(ctx, events.Envelope{
+		Version:      events.WorkorchEventVersion,
+		Topic:        runevents.TopicRunLLMStreamProgress,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "llm_stream_progress",
+		SubjectID:    string(step.ID),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(step.ID),
+		Payload: events.LLMStreamProgressPayload(
+			run.WorkspaceID,
+			run.ID,
+			step.ID,
+			providerID,
+			model,
+			chunkCount,
+			receivedBytes,
+			elapsedMs,
+			status,
+			summary,
+		),
+	})
+}
+
 func runtimeStepEventInput(llmContext *llmContextSubsystem, run *runModel.Run, step *runModel.Step) map[string]any {
 	if run == nil || step == nil {
 		return nil

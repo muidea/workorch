@@ -686,7 +686,7 @@ func (o *RuntimeOrchestrator) runtimeStepProgressRecorder(ctx context.Context, r
 		if err := o.checkpointManager().recordStepProgressCheckpoint(ctx, run, step, event, data); err != nil {
 			return err
 		}
-		return o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
+		return o.eventPublisher().publishRuntimeStepProgress(ctx, run, step, event, data)
 	}
 }
 

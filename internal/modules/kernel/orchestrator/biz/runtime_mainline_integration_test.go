@@ -476,6 +476,17 @@ func publishedStepState(items []events.Envelope, stepID common.StepID, state com
 	return false
 }
 
+func publishedLLMStreamProgress(items []events.Envelope, stepID common.StepID, status common.StepState) bool {
+	for _, item := range items {
+		if item.Topic == runevents.TopicRunLLMStreamProgress &&
+			item.StepID == string(stepID) &&
+			item.Payload[events.PayloadKeyStatus] == string(status) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeOrchestrator_DispatchSkipsDuplicateInFlightRepairScope(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
@@ -1502,8 +1513,20 @@ func TestRuntimeOrchestrator_StartRunRecordsRuntimeStepProgressCheckpoint(t *tes
 	if !hasRuntimeProgressCheckpointData(checkpoints, "llm_provider_stream", 42) {
 		t.Fatalf("checkpoints = %+v, want provider stream progress diagnostics", checkpoints)
 	}
-	if !publishedStepState(hub.Published(), common.StepID(string(runID)+"/step-1"), common.StepStateDispatched) {
-		t.Fatalf("published events = %+v, want runtime progress to refresh step projection", hub.Published())
+	stepID := common.StepID(string(runID) + "/step-1")
+	if !publishedLLMStreamProgress(hub.Published(), stepID, common.StepStateDispatched) {
+		t.Fatalf("published events = %+v, want runtime progress as llm stream progress", hub.Published())
+	}
+	dispatchedStateChanges := 0
+	for _, item := range hub.Published() {
+		if item.Topic == runevents.TopicStepStateChanged &&
+			item.StepID == string(stepID) &&
+			item.Payload[events.PayloadKeyState] == string(common.StepStateDispatched) {
+			dispatchedStateChanges++
+		}
+	}
+	if dispatchedStateChanges != 0 {
+		t.Fatalf("published events = %+v, want no progress-driven dispatched step state changes", hub.Published())
 	}
 }
 
