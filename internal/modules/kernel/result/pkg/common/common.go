@@ -3,9 +3,10 @@ package common
 const ModuleID = "kernel/result"
 
 const (
-	SourceTypeDoDAssessment = "dod_assessment"
-	SourceTypeOperator      = "operator"
-	SourceTypeArtifact      = "artifact"
+	SourceTypeDoDAssessment   = "dod_assessment"
+	SourceTypeAcceptanceSlice = "acceptance_slice"
+	SourceTypeOperator        = "operator"
+	SourceTypeArtifact        = "artifact"
 )
 
 const (

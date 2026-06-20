@@ -196,6 +196,94 @@ func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testin
 	}
 }
 
+func TestResultSubsystemRecordsAcceptedSliceResultWithoutFinalCompletion(t *testing.T) {
+	ctx := context.Background()
+	resultRepo := memory.NewResultRepository()
+	run := &runmodel.Run{
+		ID:          "run-slice-result",
+		WorkspaceID: "ws-slice-result",
+		GoalID:      "goal-slice-result",
+		DoDID:       "dod-slice-result",
+		ExecutionContext: map[string]any{
+			"dod": map[string]any{"items": []string{"first required item", "second required item"}},
+			"executionContract": map[string]any{
+				"acceptanceSlicePolicy": map[string]any{
+					"maxWorkItems": 1,
+					"resultPolicy": "slice_result_allowed",
+				},
+			},
+		},
+	}
+	coverage := newCoverageSubsystem()
+	coverage.ensure(run)
+	step := &runmodel.Step{
+		ID:    "run-slice-result/001-assess",
+		RunID: run.ID,
+		State: common.StepStateCompleted,
+	}
+	if !coverage.updateFromAssessment(run, step, map[string]any{
+		"items": []map[string]any{{
+			"item":         "first required item",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-slice-result/001-validate"},
+		}},
+	}) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want first slice accepted")
+	}
+	orch := &RuntimeOrchestrator{evidence: RuntimeEvidenceRepositories{Results: resultRepo}}
+	if err := orch.resultManager().recordAcceptedSliceResultsFromRun(ctx, run, step); err != nil {
+		t.Fatalf("record accepted slice result: %v", err)
+	}
+	results, err := resultRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one accepted slice result", results)
+	}
+	sliceResult := results[0]
+	if sliceResult.SourceType != resultcommon.SourceTypeAcceptanceSlice || sliceResult.State != common.ResultStateAccepted {
+		t.Fatalf("slice result = %+v, want accepted acceptance-slice result", sliceResult)
+	}
+	if acceptedCompletionResultMatchesRun(sliceResult, run) {
+		t.Fatalf("accepted slice result must not satisfy final completion result contract")
+	}
+	if diagnostics := sliceResult.SummaryDetail.Diagnostics; diagnostics["resultScope"] != "acceptance_slice" || diagnostics["finalCompletionGateState"] != "not_final_result" {
+		t.Fatalf("slice result diagnostics = %+v, want slice scope markers", diagnostics)
+	}
+	if err := coverage.validateReadyForAcceptance(run); err == nil || !strings.Contains(err.Error(), "coverageWorkItems not ready") {
+		t.Fatalf("validateReadyForAcceptance err = %v, want final gate blocked by second slice", err)
+	}
+
+	secondStep := &runmodel.Step{
+		ID:    "run-slice-result/002-assess",
+		RunID: run.ID,
+		State: common.StepStateCompleted,
+	}
+	if !coverage.updateFromAssessment(run, secondStep, map[string]any{
+		"items": []map[string]any{{
+			"item":         "second required item",
+			"state":        "satisfied",
+			"evidenceRefs": []string{"run-slice-result/002-validate"},
+		}},
+	}) {
+		t.Fatalf("coverage.updateFromAssessment changed=false, want second slice accepted")
+	}
+	if err := orch.resultManager().recordAcceptedSliceResultsFromRun(ctx, run, secondStep); err != nil {
+		t.Fatalf("record second accepted slice result: %v", err)
+	}
+	results, err = resultRepo.ListByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list final slice results: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want two slice results before final result", results)
+	}
+	if err := coverage.validateReadyForAcceptance(run); err != nil {
+		t.Fatalf("validateReadyForAcceptance after all slices accepted: %v", err)
+	}
+}
+
 func TestRuntimeOrchestrator_ReusesValidatedDoDAssessmentForCompletionEvidence(t *testing.T) {
 	ctx := context.Background()
 	runID := common.RunID("run-dod-assessment-reuse")

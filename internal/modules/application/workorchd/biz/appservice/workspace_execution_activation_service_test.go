@@ -1255,7 +1255,12 @@ func TestActivateWorkspaceExecutionWithBackendBindsSelectedContext(t *testing.T)
 	}
 
 	runSnapshot := waitRunSnapshotWithBackend(t, "file", dataRoot, item.Run.ID, 5*time.Second, func(snapshot RunSnapshot) bool {
-		return len(snapshot.Steps) > 0
+		if len(snapshot.Steps) == 0 {
+			return false
+		}
+		stepContext, _ := snapshot.Steps[0].Input["executionContext"].(map[string]any)
+		return stepContext["soulId"] == "soul-activation-context" &&
+			snapshot.Steps[0].Input[llmcommon.ExecutionContextLLMProviderID] == "selected-runtime-provider"
 	})
 	stepContext, _ := runSnapshot.Steps[0].Input["executionContext"].(map[string]any)
 	if stepContext["soulId"] != "soul-activation-context" {

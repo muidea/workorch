@@ -1,6 +1,6 @@
 # Workspace Goal Convergence Acceleration Design
 
-Status: active
+Status: completed
 
 Type: design
 
@@ -650,16 +650,25 @@ Implementation notes:
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-25 | Create accepted slice result when slice closes | result/orchestrator | pending |
-| WGC-26 | Keep final accepted result gated by required slices | completion gate | pending |
-| WGC-27 | Add version_control_snapshot ordering policy for software-dev | template/evidence policy | pending |
-| WGC-28 | Add e2e for partial slice acceptance and final acceptance | e2e | pending |
+| WGC-25 | Create accepted slice result when slice closes | result/orchestrator | completed |
+| WGC-26 | Keep final accepted result gated by required slices | completion gate | completed |
+| WGC-27 | Add version_control_snapshot ordering policy for software-dev | template/evidence policy | completed |
+| WGC-28 | Add e2e for partial slice acceptance and final acceptance | e2e | completed |
 
 Acceptance:
 
 - A workspace can show meaningful partial acceptance.
 - Final accepted result still requires all required slices.
 - version snapshot no longer becomes a late repeated blocker after many untracked changes.
+
+Implementation notes:
+
+- Orchestrator records an idempotent `acceptance_slice` result for each accepted slice whose policy allows slice results. The result carries `resultScope=acceptance_slice`, `sliceId`, `coverageWorkItemIds`, required evidence kinds, and accepted evidence refs in `SummaryDetail.Diagnostics`.
+- Slice results use a distinct neutral result source type and do not satisfy `acceptedCompletionResultMatchesRun`; final completion still requires the existing formal DoD assessment result and the full `coverageWorkItems` acceptance gate.
+- Both direct LLM completion and graph batch completion paths attempt slice result recording immediately after coverage assessment updates, before final `validateReadyForAcceptance`. This allows partial acceptance visibility while unresolved slices continue to block final accepted result.
+- The software-dev template declares a dedicated `slice-version-control-snapshot` group using generic `sourceRequirementIds=["version_control_snapshot"]` and priority between direct validation and generic supplemental evidence. Core only interprets the generic policy fields.
+- `scripts/verify-acceptance-slice-result-e2e.sh` and `make verify-acceptance-slice-result-e2e` run the partial slice/final gate runtime integration regression and template policy check.
+- `scripts/verify-acceptance-slice-result-deployed-e2e.sh` and `make verify-acceptance-slice-result-deployed-e2e` run the deployed-instance mock-provider e2e through HTTP/workorchd execution activation, run status, run snapshot and run results APIs.
 
 ## Backward Compatibility
 

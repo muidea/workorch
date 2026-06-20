@@ -177,6 +177,12 @@ verify-llm-file: verify-llm
 verify-incremental-artifact-e2e:
 	WORKORCH_INCREMENTAL_ARTIFACT_VERIFY_MOCK_ADDR=127.0.0.1:18187 ./scripts/verify-incremental-artifact-e2e.sh
 
+verify-acceptance-slice-result-e2e:
+	./scripts/verify-acceptance-slice-result-e2e.sh
+
+verify-acceptance-slice-result-deployed-e2e:
+	WORKORCH_ACCEPTANCE_SLICE_VERIFY_MOCK_ADDR=127.0.0.1:18193 ./scripts/verify-acceptance-slice-result-deployed-e2e.sh
+
 verify-runtime-profile-software-dev:
 	./scripts/verify-workorch-runtime-profile-software-dev.sh
 

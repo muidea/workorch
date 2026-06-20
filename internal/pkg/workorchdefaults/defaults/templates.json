@@ -108,6 +108,16 @@
             }
           },
           {
+            "id": "slice-version-control-snapshot",
+            "title": "Version-control snapshot",
+            "scope": "version_control_snapshot",
+            "priority": 25,
+            "maxWorkItems": 2,
+            "match": {
+              "sourceRequirementIds": ["version_control_snapshot"]
+            }
+          },
+          {
             "id": "slice-remaining-acceptance",
             "title": "Remaining acceptance",
             "scope": "remaining_acceptance",

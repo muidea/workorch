@@ -478,6 +478,19 @@ func testStringFromAny(value any) string {
 	return typed
 }
 
+func testIntFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
 func assertContainsAnyDoDItem(t *testing.T, items []string, want string) {
 	t.Helper()
 	for _, item := range items {
@@ -726,11 +739,13 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 		t.Fatalf("acceptanceSlicePolicy groups = %+v, want declared groups", policy["groups"])
 	}
 	want := map[string]bool{
-		"slice-primary-state-change":  false,
-		"slice-direct-validation":     false,
-		"slice-supplemental-evidence": false,
-		"slice-remaining-acceptance":  false,
+		"slice-primary-state-change":     false,
+		"slice-direct-validation":        false,
+		"slice-version-control-snapshot": false,
+		"slice-supplemental-evidence":    false,
+		"slice-remaining-acceptance":     false,
 	}
+	priorities := map[string]int{}
 	for _, raw := range groups {
 		group, ok := raw.(map[string]any)
 		if !ok {
@@ -740,6 +755,7 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 		if _, ok := want[id]; ok {
 			want[id] = true
 		}
+		priorities[id] = testIntFromAny(group["priority"])
 		match, ok := group["match"].(map[string]any)
 		if !ok {
 			t.Fatalf("acceptanceSlicePolicy group %q match = %+v, want map", id, group["match"])
@@ -749,6 +765,8 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 			assertStringListContains(t, match["evidenceRoles"].([]any), "primary_state_change")
 		case "slice-direct-validation":
 			assertStringListContains(t, match["missingEvidenceKinds"].([]any), "validation")
+		case "slice-version-control-snapshot":
+			assertStringListContains(t, match["sourceRequirementIds"].([]any), "version_control_snapshot")
 		case "slice-supplemental-evidence":
 			assertStringListContains(t, match["evidenceRoles"].([]any), "supplemental_evidence")
 		case "slice-remaining-acceptance":
@@ -761,6 +779,10 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 		if !seen {
 			t.Fatalf("acceptanceSlicePolicy missing group %q in %+v", id, groups)
 		}
+	}
+	if !(priorities["slice-direct-validation"] < priorities["slice-version-control-snapshot"] &&
+		priorities["slice-version-control-snapshot"] < priorities["slice-supplemental-evidence"]) {
+		t.Fatalf("acceptanceSlicePolicy priorities = %+v, want version snapshot after validation and before generic supplemental", priorities)
 	}
 }
 

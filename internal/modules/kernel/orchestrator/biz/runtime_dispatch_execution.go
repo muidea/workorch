@@ -421,6 +421,9 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 			return err
 		}
 	}
+	if err := o.resultManager().recordAcceptedSliceResultsFromRun(ctx, run, step); err != nil {
+		return err
+	}
 	if changed, bound := o.reconcileCoverageValidationEvidence(ctx, run); changed && o.runs != nil {
 		if err := o.runs.Update(ctx, run); err != nil {
 			return err

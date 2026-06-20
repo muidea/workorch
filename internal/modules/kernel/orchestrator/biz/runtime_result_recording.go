@@ -272,6 +272,156 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	return r.publishResultAccepted(ctx, item)
 }
 
+func (r *resultSubsystem) recordAcceptedSliceResultsFromRun(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if r == nil || run == nil || step == nil || r.evidence.Results == nil {
+		return nil
+	}
+	slices := mapSliceFromValue(run.ExecutionContext[acceptanceSlicesKey])
+	items := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
+	if len(slices) == 0 || len(items) == 0 {
+		return nil
+	}
+	itemsByID := map[string]map[string]any{}
+	for _, item := range items {
+		id := strings.TrimSpace(stringFromMap(item, "id"))
+		if id != "" {
+			itemsByID[id] = item
+		}
+	}
+	for _, slice := range slices {
+		if !acceptedAcceptanceSliceAllowsResult(slice) {
+			continue
+		}
+		if err := r.recordAcceptedSliceResult(ctx, run, step, slice, itemsByID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func acceptedAcceptanceSliceAllowsResult(slice map[string]any) bool {
+	if strings.TrimSpace(stringFromMap(slice, "state")) != "accepted" {
+		return false
+	}
+	policy := strings.TrimSpace(stringFromMap(slice, "resultPolicy"))
+	return policy == "" || policy == "slice_result_allowed" || policy == "accepted_slice_result"
+}
+
+func (r *resultSubsystem) recordAcceptedSliceResult(
+	ctx context.Context,
+	run *runModel.Run,
+	step *runModel.Step,
+	slice map[string]any,
+	itemsByID map[string]map[string]any,
+) error {
+	sliceID := strings.TrimSpace(stringFromMap(slice, "id"))
+	if sliceID == "" {
+		return nil
+	}
+	workItemIDs := stringSliceFromValue(slice["coverageWorkItemIds"])
+	if len(workItemIDs) == 0 {
+		return nil
+	}
+	var assessmentItems []resultmodel.DoDAssessmentItem
+	var evidenceRefs []string
+	for _, id := range workItemIDs {
+		item := itemsByID[id]
+		if len(item) == 0 {
+			continue
+		}
+		refs := stringSliceFromValue(item["acceptedEvidenceRefs"])
+		evidenceRefs = append(evidenceRefs, refs...)
+		assessmentItems = append(assessmentItems, resultmodel.DoDAssessmentItem{
+			Item:         firstNonEmptyString(stringFromMap(item, "targetText"), id),
+			State:        firstNonEmptyString(stringFromMap(item, "status"), "satisfied"),
+			EvidenceRefs: refs,
+			SourceNote:   firstNonEmptyString(stringFromMap(item, "sourceRequirementId"), stringFromMap(item, "source"), id),
+			Confidence:   1,
+		})
+	}
+	evidenceRefs = compactUniqueStrings(append(evidenceRefs, string(step.ID)))
+	if len(assessmentItems) == 0 || len(evidenceRefs) == 0 {
+		return nil
+	}
+	title := strings.TrimSpace(stringFromMap(slice, "title"))
+	if title == "" {
+		title = sliceID
+	}
+	summary := fmt.Sprintf("Acceptance slice %s accepted.", title)
+	now := runtimeEvidenceTimestamp()
+	resultID := common.ResultID(fmt.Sprintf("%s/result/acceptance-slice/%s", run.ID, acceptanceSliceResultIDPart(sliceID)))
+	item := &resultmodel.Result{
+		ID:           resultID,
+		WorkspaceID:  run.WorkspaceID,
+		RunID:        run.ID,
+		GoalID:       run.GoalID,
+		DoDID:        run.DoDID,
+		State:        common.ResultStateAccepted,
+		Title:        "Accepted Slice: " + title,
+		Summary:      summary,
+		SourceType:   resultcommon.SourceTypeAcceptanceSlice,
+		SourceRef:    string(step.ID),
+		EvidenceRefs: evidenceRefs,
+		DoDAssessment: resultmodel.DoDAssessment{
+			Satisfied: true,
+			Items:     assessmentItems,
+			Summary:   summary,
+		},
+		SummaryDetail: resultmodel.ResultSummary{
+			GoalOutcome:  summary,
+			DoDItems:     assessmentItems,
+			EvidenceRefs: evidenceRefs,
+			Diagnostics: map[string]any{
+				"resultScope":              "acceptance_slice",
+				"sliceId":                  sliceID,
+				"sliceState":               stringFromMap(slice, "state"),
+				"sliceScope":               stringFromMap(slice, "scope"),
+				"coverageWorkItemIds":      workItemIDs,
+				"requiredEvidenceKinds":    stringSliceFromValue(slice["requiredEvidenceKinds"]),
+				"finalCompletionGateState": "not_final_result",
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := r.evidence.Results.Create(ctx, item); err != nil {
+		if err != common.ErrConflict {
+			return err
+		}
+		existing, getErr := r.evidence.Results.Get(ctx, item.ID)
+		if getErr != nil {
+			return getErr
+		}
+		existing.WorkspaceID = item.WorkspaceID
+		existing.RunID = item.RunID
+		existing.GoalID = item.GoalID
+		existing.DoDID = item.DoDID
+		existing.State = item.State
+		existing.Title = item.Title
+		existing.Summary = item.Summary
+		existing.SourceType = item.SourceType
+		existing.SourceRef = item.SourceRef
+		existing.EvidenceRefs = item.EvidenceRefs
+		existing.DoDAssessment = item.DoDAssessment
+		existing.SummaryDetail = item.SummaryDetail
+		existing.UpdatedAt = now
+		if err := r.evidence.Results.Update(ctx, existing); err != nil {
+			return err
+		}
+		return r.publishResultAccepted(ctx, existing)
+	}
+	return r.publishResultAccepted(ctx, item)
+}
+
+func acceptanceSliceResultIDPart(sliceID string) string {
+	sliceID = strings.TrimSpace(sliceID)
+	if sliceID == "" {
+		return "unknown"
+	}
+	replacer := strings.NewReplacer("/", "_", "\\", "_", " ", "_", "\t", "_", "\n", "_")
+	return replacer.Replace(sliceID)
+}
+
 func (r *resultSubsystem) recordRunResultFromRejectedDoDAssessment(
 	ctx context.Context,
 	run *runModel.Run,

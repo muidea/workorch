@@ -254,6 +254,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 			return err
 		}
 	}
+	if err := o.resultManager().recordAcceptedSliceResultsFromRun(ctx, currentRun, last); err != nil {
+		return err
+	}
 	if err := o.coverageLedger().validateReadyForAcceptance(currentRun); err != nil {
 		return o.handleGraphBatchCompletionGateFailure(ctx, currentRun, last, last.Output, "runtime completion gate failed", err)
 	}
