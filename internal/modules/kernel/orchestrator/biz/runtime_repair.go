@@ -207,6 +207,9 @@ func attachRuntimeFailureDiagnostics(step *runModel.Step, classification runtime
 	if step == nil || len(step.Output) == 0 {
 		return
 	}
+	if diagnostic := validationFailureDiagnosticFromStep(step, execErr); len(diagnostic) > 0 {
+		step.Output["validationFailureDiagnostic"] = diagnostic
+	}
 	diagnostics := map[string]any{
 		"stepId":           string(step.ID),
 		"stepKind":         step.Kind,
@@ -239,6 +242,9 @@ func attachRuntimeFailureDiagnostics(step *runModel.Step, classification runtime
 	}
 	if runtimeDiagnostics := mapFromValue(step.Output["runtimeDiagnostics"]); len(runtimeDiagnostics) > 0 {
 		diagnostics["runtimeDiagnostics"] = compactLLMContextMap(runtimeDiagnostics, 1)
+	}
+	if diagnostic := mapFromValue(step.Output["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+		diagnostics["validationFailureDiagnostic"] = compactLLMContextMap(diagnostic, 1)
 	}
 	step.Output["lastFailureDiagnostics"] = diagnostics
 }
@@ -776,6 +782,9 @@ func shouldEscalateRuntimeRepairExhaustion(ctx context.Context, repair *repairSu
 	if !requiresDoDAssessmentCompletionGate(run) || isLLMProviderRuntimeFailure(run, failedStep) {
 		return false
 	}
+	if convergenceBudgetRequiresEscalation(run) {
+		return true
+	}
 	if repair.runLevelIneffectiveConvergenceExceeded(ctx, run, failedStep) {
 		return true
 	}
@@ -803,6 +812,12 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		blockerKind = "runtime_ineffective_convergence"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}
+	}
+	if budgetContext := convergenceBudgetEscalationContext(run); len(budgetContext) > 0 {
+		blockerKind = "runtime_convergence_budget_exhausted"
+		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
+		preferredRecoveryActions = []string{"replan", "terminate"}
+		diagnostics["convergenceBudget"] = budgetContext
 	}
 	recommendedNextActions := []string{
 		"Map each missing DoD item to concrete affected resources, state-changing operations, and verification actions.",

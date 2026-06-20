@@ -109,7 +109,9 @@ func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *run
 	}
 	update := coverageWorkItemStepUpdate(step)
 	if len(update.EvidenceKinds) == 0 || (len(update.WorkItemIDs) == 0 && len(update.TargetTokens) == 0) {
-		return false
+		changed := updateConvergenceBudgetFromStep(run, step, false)
+		synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+		return changed
 	}
 	changed := false
 	for _, item := range items {
@@ -120,14 +122,14 @@ func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *run
 			changed = true
 		}
 	}
-	if !changed {
-		return false
+	budgetChanged := updateConvergenceBudgetFromStep(run, step, changed)
+	if changed {
+		revision := coverageDefinitionRevision(run.ExecutionContext)
+		run.ExecutionContext[coverageWorkItemsKey] = items
+		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
-	revision := coverageDefinitionRevision(run.ExecutionContext)
-	run.ExecutionContext[coverageWorkItemsKey] = items
-	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
-	return true
+	return changed || budgetChanged
 }
 
 func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runModel.Step, reason string) bool {
@@ -143,7 +145,9 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 	update.Accepted = false
 	update.Reason = firstNonEmptyString(strings.TrimSpace(reason), stringFromMap(step.Output, "error"), stringFromMap(step.Output, "reason"))
 	if len(update.EvidenceKinds) == 0 || (len(update.WorkItemIDs) == 0 && len(update.TargetTokens) == 0) {
-		return false
+		changed := updateConvergenceBudgetFromStep(run, step, false)
+		synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+		return changed
 	}
 	changed := false
 	for _, item := range items {
@@ -154,14 +158,14 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 			changed = true
 		}
 	}
-	if !changed {
-		return false
+	budgetChanged := updateConvergenceBudgetFromStep(run, step, changed)
+	if changed {
+		revision := coverageDefinitionRevision(run.ExecutionContext)
+		run.ExecutionContext[coverageWorkItemsKey] = items
+		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
-	revision := coverageDefinitionRevision(run.ExecutionContext)
-	run.ExecutionContext[coverageWorkItemsKey] = items
-	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
-	return true
+	return changed || budgetChanged
 }
 
 func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runModel.Step, assessment map[string]any) bool {
@@ -175,7 +179,9 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 	}
 	updates := coverageWorkItemAssessmentUpdates(step, assessment)
 	if len(updates) == 0 {
-		return false
+		changed := updateConvergenceBudgetFromStep(run, step, false)
+		synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
+		return changed
 	}
 	changed := false
 	matchedAny := false
@@ -201,14 +207,14 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 			changed = true
 		}
 	}
-	if !changed {
-		return false
+	budgetChanged := updateConvergenceBudgetFromStep(run, step, changed)
+	if changed {
+		revision := coverageDefinitionRevision(run.ExecutionContext)
+		run.ExecutionContext[coverageWorkItemsKey] = items
+		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	}
-	revision := coverageDefinitionRevision(run.ExecutionContext)
-	run.ExecutionContext[coverageWorkItemsKey] = items
-	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
 	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
-	return true
+	return changed || budgetChanged
 }
 
 func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, decisionRefs []string, approvalRefs []string, updatedBy string) bool {
@@ -234,14 +240,13 @@ func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, deci
 			}
 		}
 	}
-	if !changed {
-		return false
+	if changed {
+		revision := coverageDefinitionRevision(run.ExecutionContext)
+		run.ExecutionContext[coverageWorkItemsKey] = items
+		run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+		synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	}
-	revision := coverageDefinitionRevision(run.ExecutionContext)
-	run.ExecutionContext[coverageWorkItemsKey] = items
-	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
-	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
-	return true
+	return changed
 }
 
 func coverageApplyUnlinkedAssessmentRejectedEvidence(items []map[string]any, updates []coverageWorkItemUpdate, step *runModel.Step) bool {

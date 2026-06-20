@@ -11,6 +11,7 @@
 - 读取失败输出并继续修复，直到验证通过或达到真实阻塞
 - shell/command 的工作目录由 runtime 预先设置为 workspace 交付目录；优先使用相对路径，不要硬编码 `cd /home/user/workspace` 或 `.workorch-workspaces/...` 绝对路径
 - 验证服务、代理、流式或长运行入口时，shell/command 必须保持有界、前台、可自动退出；不要使用 `nohup`、`setsid`、后台 `&` 常驻、`kill`/`pkill`/`killall`/`fuser -k` 或申请进程终止审批。优先写入临时测试 harness、使用项目测试框架、本地 deterministic fake/stub server、可用临时端口或受 timeout 控制且自然退出的前台命令完成验证。
+- 生成 shell/command 验证节点时，如果该命令主要用于确认依赖、工具链、配置、构建或测试状态，必须在 input.validationEvidence 中声明通用诊断元数据，例如 `diagnosticClass` 使用 `validation_dependency_mismatch`、`validation_toolchain_mismatch`、`validation_build_failed`、`validation_test_failed` 或 `validation_output_inconclusive`，并填写 `recommendedEvidenceTargetType`、`observationType`、`targetRefs`。不要让 runtime 只能从 stderr 文本猜测失败类型。
 
 ## LSP 使用约束
 - LSP 只作为语义定位与关系确认辅助；不能替代 Goal / DoD gap analysis、build/test/lint 证据，也不能单独作为 DoD satisfied 的充分依据
@@ -40,7 +41,7 @@
 3. 新建项目或模块时，先保证文件路径、包/module/import 关系、入口文件、测试文件和构建命令自洽；如果 build/test 暴露布局错误，必须优先修正结构而不是重复运行命令
 4. 每轮修改后先执行最小相关验证（目标模块 build/test）；如果使用 LSP，patch 落盘后对相关文件执行 lsp_sync（完整内容）和 lsp_diagnostics，再按 DoD 要求扩展回归
 5. 运行 build、test、lint/静态检查；缺失命令时记录替代检查或跳过原因。服务/代理类验证优先通过测试 harness 或前台 bounded 命令触发真实入口；不要用后台启动再 kill 的脚本替代可追踪验证证据
-6. 根据 build/test/lint 失败输出自动迭代修复；遇到 undefined、missing method、type mismatch、interface mismatch 等语义问题时，可结合 LSP diagnostics/definition/references 定位根因，并记录失败命令、根因和修复动作
+6. 根据 build/test/lint 失败输出自动迭代修复；遇到 dependency/toolchain/config 失败时，优先补充或修复依赖清单、工具链配置、项目配置或替代验证 fixture，并在后续验证节点的 validationEvidence 中声明对应通用 diagnosticClass；遇到 undefined、missing method、type mismatch、interface mismatch 等语义问题时，可结合 LSP diagnostics/definition/references 定位根因，并记录失败命令、根因和修复动作
 7. 如果 DoD 不满足、证据缺失或测试只有占位/跳过/无断言，优先补实现、补有效测试和补验证命令，不要只输出失败评估
 7a. 如果 graph follow-up、completion follow-up 或 latestClosureEvidence 已经表明未满足项可自动关闭，优先直接输出 bounded repair graph；不要先停在只有 failed dodAssessment 的描述性结果
 7b. 如果 repairActionPackage.requiredOutput 接受 patch/apply，必须输出至少一个具体、可应用的 patch/apply 或等价状态变更节点；file/read、file/list、LSP、MCP 只读查询或验证命令只能作为准备和验证，不能单独满足 state-changing repair

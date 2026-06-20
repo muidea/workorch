@@ -60,7 +60,7 @@ func synchronizeAcceptanceProjection(executionContext map[string]any, items []ma
 	slices := buildAcceptanceSlicesFromCoverageItems(items, policy)
 	activeSliceID := selectActiveAcceptanceSliceID(slices, strings.TrimSpace(stringFromMap(executionContext, activeSliceIDKey)))
 	focus := buildCoverageFocusForActiveSlice(activeSliceID, slices, items, coverageContext)
-	budget := convergenceBudgetFromPolicy(policy)
+	budget := convergenceBudgetFromPolicy(policy, mapFromValue(executionContext[convergenceBudgetKey]))
 
 	changed := false
 	if stableCoverageJSON(mapSliceFromValue(executionContext[acceptanceSlicesKey])) != stableCoverageJSON(slices) {
@@ -358,10 +358,13 @@ func coverageFocusFromWorkItem(sliceID string, item map[string]any) map[string]a
 	}
 }
 
-func convergenceBudgetFromPolicy(policy acceptanceSlicePolicy) map[string]any {
-	budget := cloneStepPayload(policy.Budget)
-	if len(budget) == 0 {
-		return nil
+func convergenceBudgetFromPolicy(policy acceptanceSlicePolicy, existing map[string]any) map[string]any {
+	budget := cloneStepPayload(existing)
+	if budget == nil {
+		budget = map[string]any{}
+	}
+	for key, value := range policy.Budget {
+		budget[key] = cloneStepInputValue(value)
 	}
 	if strings.TrimSpace(stringFromMap(budget, "state")) == "" {
 		budget["state"] = "tracking"
@@ -369,7 +372,22 @@ func convergenceBudgetFromPolicy(policy acceptanceSlicePolicy) map[string]any {
 	if strings.TrimSpace(stringFromMap(budget, "decision")) == "" {
 		budget["decision"] = "continue"
 	}
+	for key, value := range defaultConvergenceBudgetLimits() {
+		if positiveIntFromValue(budget[key], 0) == 0 {
+			budget[key] = value
+		}
+	}
 	return budget
+}
+
+func defaultConvergenceBudgetLimits() map[string]any {
+	return map[string]any{
+		"maxRepairAttemptsPerFocus":   4,
+		"maxLLMRoundsPerSlice":        12,
+		"maxRepeatedFailureSignature": 3,
+		"maxValidationOnlyRetries":    3,
+		"maxNoCoverageDeltaRounds":    3,
+	}
 }
 
 func runtimeAcceptanceSignalFromExecutionContext(executionContext map[string]any) map[string]any {

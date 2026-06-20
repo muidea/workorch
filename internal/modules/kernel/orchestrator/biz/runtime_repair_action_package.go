@@ -26,6 +26,13 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if diagnostics := repairActionLastFailureDiagnostics(input, rawFailedOutput...); len(diagnostics) > 0 {
 		pkg["lastFailureDiagnostics"] = diagnostics
 	}
+	if diagnostic := repairActionValidationFailureDiagnostic(input, rawFailedOutput...); len(diagnostic) > 0 {
+		pkg["validationFailureDiagnostic"] = diagnostic
+		requiredOutput["mustAddressValidationDiagnostic"] = true
+		if targetType := strings.TrimSpace(stringFromMap(diagnostic, "recommendedEvidenceTargetType")); targetType != "" {
+			requiredOutput["recommendedEvidenceTargetType"] = targetType
+		}
+	}
 	for _, key := range []string{
 		failureOutputKeyClass,
 		failureOutputKeySignature,
@@ -577,7 +584,7 @@ func evidenceAcquisitionRequiredOutput(existing map[string]any) map[string]any {
 	out := map[string]any{}
 	for key, value := range existing {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse":
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "forbiddenStalePatchReuse", "mustAddressValidationDiagnostic", "recommendedEvidenceTargetType":
 			out[key] = value
 		}
 	}
@@ -609,7 +616,7 @@ func concreteValidationEvidenceRequiredOutput(existing map[string]any) map[strin
 	out := map[string]any{}
 	for key, value := range existing {
 		switch key {
-		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "mustReferenceCoverageWorkItem":
+		case "mustReturnValidJSON", "mustNotReuseRejectedJSON", "mustReferenceCoverageWorkItem", "mustAddressValidationDiagnostic", "recommendedEvidenceTargetType":
 			out[key] = value
 		}
 	}
@@ -1077,10 +1084,39 @@ func repairActionCurrentFailure(input map[string]any, rawFailedOutput ...map[str
 			add("targetRef", stringFromMap(diagnostics, "targetRef"))
 		}
 	}
+	if diagnostic := repairActionValidationFailureDiagnostic(input, rawFailedOutput...); len(diagnostic) > 0 {
+		add("validationDiagnosticClass", stringFromMap(diagnostic, "class"))
+		add("recommendedEvidenceTargetType", stringFromMap(diagnostic, "recommendedEvidenceTargetType"))
+	}
 	if len(ret) == 0 {
 		return nil
 	}
 	return compactLLMContextMap(ret, 1)
+}
+
+func repairActionValidationFailureDiagnostic(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
+	for _, candidate := range []map[string]any{
+		mapFromValue(input["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(input["lastFailureDiagnostics"])["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(input["runtimeDiagnostics"])["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(input["failedStepOutput"])["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(mapFromValue(input["failedStepOutput"])["lastFailureDiagnostics"])["validationFailureDiagnostic"]),
+	} {
+		if normalized := normalizeValidationFailureDiagnostic(candidate); len(normalized) > 0 {
+			return normalized
+		}
+	}
+	output := firstRawFailureOutput(input, rawFailedOutput...)
+	for _, candidate := range []map[string]any{
+		mapFromValue(output["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(output["lastFailureDiagnostics"])["validationFailureDiagnostic"]),
+		mapFromValue(mapFromValue(output["runtimeDiagnostics"])["validationFailureDiagnostic"]),
+	} {
+		if normalized := normalizeValidationFailureDiagnostic(candidate); len(normalized) > 0 {
+			return normalized
+		}
+	}
+	return nil
 }
 
 func repairActionLastFailureDiagnostics(input map[string]any, rawFailedOutput ...map[string]any) map[string]any {
@@ -1117,6 +1153,9 @@ func repairActionLastFailureDiagnostics(input map[string]any, rawFailedOutput ..
 		if value, ok := compact[key]; ok && value != nil {
 			ret[key] = value
 		}
+	}
+	if diagnostic := mapFromValue(compact["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+		ret["validationFailureDiagnostic"] = compactLLMContextMap(diagnostic, 1)
 	}
 	if len(ret) == 0 {
 		return nil

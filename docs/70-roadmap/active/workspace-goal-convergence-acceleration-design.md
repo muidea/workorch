@@ -604,10 +604,10 @@ Implementation notes:
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-17 | Define generic validation diagnostic schema | runtime contract | pending |
-| WGC-18 | Populate shell failure metadata for classifier | shell block/runtime evidence | pending |
-| WGC-19 | Classify validation failure into generic categories | orchestrator/evidence quality | pending |
-| WGC-20 | Add software-dev guidance for toolchain/config mismatch | template/Soul | pending |
+| WGC-17 | Define generic validation diagnostic schema | runtime contract | completed |
+| WGC-18 | Populate shell failure metadata for classifier | shell block/runtime evidence | completed |
+| WGC-19 | Classify validation failure into generic categories | orchestrator/evidence quality | completed |
+| WGC-20 | Add software-dev guidance for toolchain/config mismatch | template/Soul | completed |
 
 Acceptance:
 
@@ -615,20 +615,36 @@ Acceptance:
 - Core classifier stays language-neutral.
 - Repair prompt sees the diagnostic class and recommended evidence target type.
 
+Implementation notes:
+
+- `workorchruntimecontract.ValidationFailureDiagnostic` defines the generic schema and category constants. The schema is shared by runtime blocks and orchestrator without importing template-specific code.
+- `shell/command` now emits `validationFailureDiagnostic` for policy rejection, command unavailable, timeout, zero-work/inconclusive output, and non-zero validation commands. It copies declarative `input.validationEvidence` fields such as `diagnosticClass`, `recommendedEvidenceTargetType`, `observationType`, and `targetRefs` into structured diagnostics instead of relying on stderr text interpretation.
+- Orchestrator promotes validation diagnostics into failed step output, `lastFailureDiagnostics`, compact LLM context, and `repairActionPackage.validationFailureDiagnostic`. `requiredOutput.mustAddressValidationDiagnostic` and `recommendedEvidenceTargetType` are preserved even when the repair contract narrows to evidence acquisition or concrete validation evidence.
+- The classifier remains language-neutral: dependency/toolchain/config/build/test classes come from structured validation evidence or generic shell result fields, not from language names, command strings, vendor paths, or compiler-specific text.
+- The software-dev execution and validation Souls now instruct LLM output to declare dependency/toolchain/config validation diagnostics and to route repair nextActions toward dependency manifests, toolchain declarations, configuration, command contracts, or bounded validation evidence before touching unrelated source/vendor targets.
+
 ### Phase 6: Convergence Budget
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-21 | Add budget fields and update rules | orchestrator | pending |
-| WGC-22 | Track no-delta rounds per focus and per slice | orchestrator/readmodel | pending |
-| WGC-23 | Escalate repeated failure to decision or slice switch | governance/orchestrator | pending |
-| WGC-24 | Add metrics and observability for budget decisions | workorchd/readmodel | pending |
+| WGC-21 | Add budget fields and update rules | orchestrator | completed |
+| WGC-22 | Track no-delta rounds per focus and per slice | orchestrator/readmodel | completed |
+| WGC-23 | Escalate repeated failure to decision or slice switch | governance/orchestrator | completed |
+| WGC-24 | Add metrics and observability for budget decisions | workorchd/readmodel | completed |
 
 Acceptance:
 
 - Repeated same failure does not loop indefinitely.
 - User can see why runtime stopped automatic repair.
 - Slice switch only happens when policy allows it.
+
+Implementation notes:
+
+- `convergenceBudget` now has neutral default limits and runtime counters when a run has acceptance slices/focus. Policy-provided limits override defaults while runtime counters are preserved across acceptance projection refreshes.
+- The coverage subsystem updates budget state after completed, failed, and assessment steps. It tracks active `focusId` / `sliceId`, repair attempts, LLM rounds, repeated failure signatures, validation-only retries, no-coverage-delta rounds, `lastNoDeltaReason`, and the current budget decision.
+- Coverage-producing steps reset no-delta escalation back to `decision=continue` / `state=tracking`. Repeated no-delta, repeated failure signature, validation-only retries, repair attempts, or LLM rounds set `decision=escalate_decision` with a structured `lastDecisionReason`.
+- Runtime repair exhaustion now treats an escalated `convergenceBudget` as a governance blocker and creates the existing decision-ticket flow with `blockerKind=runtime_convergence_budget_exhausted`.
+- Read model DTOs and REST/client DTOs expose `focusId`, `sliceId`, and `lastNoDeltaReason`; existing metrics consume projected budget counters and budget decisions.
 
 ### Phase 7: Slice Result and Final Closure
 

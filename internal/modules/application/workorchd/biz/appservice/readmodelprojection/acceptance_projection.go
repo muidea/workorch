@@ -147,7 +147,9 @@ func isEmptyCoverageFocus(item readmodelcore.CoverageFocus) bool {
 }
 
 func isEmptyConvergenceBudget(item readmodelcore.ConvergenceBudget) bool {
-	return strings.TrimSpace(item.State) == "" &&
+	return strings.TrimSpace(item.FocusID) == "" &&
+		strings.TrimSpace(item.SliceID) == "" &&
+		strings.TrimSpace(item.State) == "" &&
 		strings.TrimSpace(item.Decision) == "" &&
 		item.MaxRepairAttemptsPerFocus == 0 &&
 		item.MaxLLMRoundsPerSlice == 0 &&
@@ -160,6 +162,7 @@ func isEmptyConvergenceBudget(item readmodelcore.ConvergenceBudget) bool {
 		item.RepeatedFailureSignatures == 0 &&
 		item.ValidationOnlyRetries == 0 &&
 		item.NoCoverageDeltaRounds == 0 &&
+		strings.TrimSpace(item.LastNoDeltaReason) == "" &&
 		strings.TrimSpace(item.LastDecisionReason) == ""
 }
 

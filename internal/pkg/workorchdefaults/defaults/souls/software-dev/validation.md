@@ -10,6 +10,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - [ ] lint/静态检查按项目约定执行；没有可用命令时必须说明跳过原因
 - [ ] unified_diff 或 patch 证据完整且与目标（Goal）相关
 - [ ] 若 workspace 输出发生有意义变更，存在 git/write add/commit 证据，并能追踪到提交 hash、提交信息和相关路径；若无可提交变更，说明 zeroWork 或跳过原因
+- [ ] 对失败的 shell/command 或 mcp/tool_call 验证，读取 runtimeDiagnostics.validationFailureDiagnostic 或 validationFailureDiagnostic；若 class 为 `validation_dependency_mismatch`、`validation_toolchain_mismatch`、`validation_command_invalid`、`validation_environment_missing`、`validation_timeout` 或 `validation_output_inconclusive`，DoD nextActions 必须指向对应的 dependency/toolchain/config/command/environment/validation evidence 目标，不要直接建议修改无关源码或 vendor 产物。
 - [ ] 结果说明验证命令、失败/跳过原因、残余风险和后续动作
 
 ## DoD 评估要求
@@ -45,6 +46,7 @@ DoD 必须逐项评估。只有证据充分时才允许标记 satisfied。
 - 如果证据不足但可由后续自动修复补齐，应返回 failed 的 dodAssessment，并在 failed/skipped 条目的 reason、impact、nextActions 中写明需要补的文件、测试、命令和断言，不要请求用户选择执行目标
 - 对于 graph follow-up、completion follow-up 或 latestClosureEvidence 已经明确指出的 coverage gap，若当前上下文允许自动推进，应优先直接给出 bounded repair graph 或 bounded verification graph，而不是停在只有缺口描述的 failed assessment
 - 当 failed assessment 已经能机械映射到需要补的实现或测试时，nextActions 必须至少点出目标文件、目标测试和验证命令，避免让 runtime 再次做泛化 repair 归约
+- 当 failed assessment 引用 validationFailureDiagnostic 时，必须保留 diagnostic class、recommendedEvidenceTargetType、targetRefs 和 observationType。dependency/toolchain/config 类失败应优先要求补依赖清单、工具链声明、配置或受控替代验证；只有诊断或 targetRefs 明确指向生产实现缺陷时，才建议修改源码。
 - 当 failed assessment 指向 coverageTargets 缺失、只读 graph 不能满足 state-changing、或版本快照证据类型不符时，nextActions 必须明确要求 patch/apply 携带 coverageTargets、或 git/write add/commit 生成版本快照，而不是再次建议泛化重规划
 - 当 version_control_snapshot 因引用 shell/command、file/read、file/list、LSP 或其他非 git/write commit 证据被拒绝时，必须将 version_control_snapshot 标记 failed，并在 nextActions 中明确要求先 git/read status/diff，再按实际变更执行 git/write add 和 git/write commit；若确无可提交变更，输出 zeroWork/skipped 及原因
 - 如果 runtimeCapabilities.blockKinds 未声明 git/write，不能把 version_control_snapshot 标记 satisfied，也不要建议 shell/command git commit 替代；必须输出真实治理阻塞，说明 WorkOrch runtime capability contract 缺失核心 git/write 能力，要求修复能力声明/接线后继续

@@ -747,6 +747,9 @@ func compactFailureStepOutputForRuntimeContext(output map[string]any) map[string
 	if diagnostics := mapFromValue(output["lastFailureDiagnostics"]); len(diagnostics) > 0 {
 		ret["lastFailureDiagnostics"] = compactFailureStepOutputForRuntimeContext(diagnostics)
 	}
+	if diagnostic := mapFromValue(output["validationFailureDiagnostic"]); len(diagnostic) > 0 {
+		ret["validationFailureDiagnostic"] = compactLLMContextMap(diagnostic, 1)
+	}
 	if patches := mapSliceFromValue(output["patches"]); len(patches) > 0 {
 		ret["patches"] = compactPatchMetadataForRuntimeContext(patches)
 	}

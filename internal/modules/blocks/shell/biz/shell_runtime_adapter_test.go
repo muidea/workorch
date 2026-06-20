@@ -152,6 +152,44 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepAddsValidationFailureDiagnostic(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "sh",
+			"args":    []any{"-c", "echo assertion failed >&2; exit 3"},
+			"validationEvidence": map[string]any{
+				"mode":            "runtime_behavior",
+				"observationType": "test_result",
+				"targetRefs":      []any{"feature-contract"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want non-zero exit error")
+	}
+	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	}
+	if diagnostic["class"] != runtimemodel.ValidationDiagnosticTestFailed ||
+		diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetBehaviorEvidence {
+		t.Fatalf("validationFailureDiagnostic = %+v, want test failure behavior diagnostic", diagnostic)
+	}
+	refs, _ := diagnostic["targetRefs"].([]string)
+	if len(refs) != 1 || refs[0] != "feature-contract" {
+		t.Fatalf("targetRefs = %#v, want feature-contract", diagnostic["targetRefs"])
+	}
+	runtimeDiagnostics, _ := result.Output["runtimeDiagnostics"].(map[string]any)
+	if _, ok := runtimeDiagnostics["validationFailureDiagnostic"].(map[string]any); !ok {
+		t.Fatalf("runtimeDiagnostics = %+v, want nested validation diagnostic", runtimeDiagnostics)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()
@@ -179,6 +217,41 @@ func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testin
 	}
 	if diagnostics["kind"] != "runtime_capability_unavailable" || diagnostics["unavailableCommand"] != command {
 		t.Fatalf("runtimeDiagnostics = %+v, want runtime capability unavailable", diagnostics)
+	}
+	validationDiagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	}
+	if validationDiagnostic["class"] != runtimemodel.ValidationDiagnosticEnvironmentMissing {
+		t.Fatalf("validationFailureDiagnostic = %+v, want environment missing", validationDiagnostic)
+	}
+}
+
+func TestRuntimeAdapter_ExecuteRuntimeStepReturnsPolicyDiagnostic(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: t.TempDir(),
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": "kill",
+			"args":    []any{"123"},
+		},
+	})
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("ExecuteRuntimeStep err = %v, want invalid argument", err)
+	}
+	if result.Output["stage"] != "shell_command_policy_rejected" {
+		t.Fatalf("stage = %v, want shell_command_policy_rejected", result.Output["stage"])
+	}
+	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	}
+	if diagnostic["class"] != runtimemodel.ValidationDiagnosticCommandInvalid ||
+		diagnostic["commandPolicyViolation"] != true ||
+		diagnostic["recommendedEvidenceTargetType"] != runtimemodel.ValidationEvidenceTargetCommandContract {
+		t.Fatalf("validationFailureDiagnostic = %+v, want command invalid policy diagnostic", diagnostic)
 	}
 }
 
@@ -323,6 +396,13 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsTimeoutOutput(t *testing.T) {
 	}
 	if result.Output["workingDir"] != deliverableDirectory {
 		t.Fatalf("workingDir = %v, want %s", result.Output["workingDir"], deliverableDirectory)
+	}
+	diagnostic, ok := result.Output["validationFailureDiagnostic"].(map[string]any)
+	if !ok {
+		t.Fatalf("validationFailureDiagnostic = %T, want map", result.Output["validationFailureDiagnostic"])
+	}
+	if diagnostic["class"] != runtimemodel.ValidationDiagnosticTimeout || diagnostic["timedOut"] != true {
+		t.Fatalf("validationFailureDiagnostic = %+v, want timeout diagnostic", diagnostic)
 	}
 }
 

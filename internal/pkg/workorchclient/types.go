@@ -93,6 +93,8 @@ type CoverageFocus struct {
 }
 
 type ConvergenceBudget struct {
+	FocusID                     string `json:"focusId,omitempty"`
+	SliceID                     string `json:"sliceId,omitempty"`
 	State                       string `json:"state,omitempty"`
 	Decision                    string `json:"decision,omitempty"`
 	MaxRepairAttemptsPerFocus   int    `json:"maxRepairAttemptsPerFocus,omitempty"`
@@ -106,6 +108,7 @@ type ConvergenceBudget struct {
 	RepeatedFailureSignatures   int    `json:"repeatedFailureSignatures,omitempty"`
 	ValidationOnlyRetries       int    `json:"validationOnlyRetries,omitempty"`
 	NoCoverageDeltaRounds       int    `json:"noCoverageDeltaRounds,omitempty"`
+	LastNoDeltaReason           string `json:"lastNoDeltaReason,omitempty"`
 	LastDecisionReason          string `json:"lastDecisionReason,omitempty"`
 }
 

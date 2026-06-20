@@ -78,7 +78,12 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	}
 	execCommand, execArgs, commandNormalization := normalizeShellExecutionCommand(command, args)
 	if err := validateShellCommandPolicy(execCommand, execArgs, deliverableDirectory); err != nil {
-		return runtimemodel.StepExecutionResult{}, err
+		output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
+		output["status"] = "failed"
+		output["stage"] = "shell_command_policy_rejected"
+		output["reason"] = err.Error()
+		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, 0, false, true, err)
+		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 
 	timeout, err := shellCommandTimeout(request.Input, a.timeout)
@@ -112,17 +117,13 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	}
 	stdoutText := stdout.String()
 	stderrText := stderr.String()
-	output := map[string]any{
-		"status":         "completed",
-		"command":        command,
-		"args":           args,
-		"workingDir":     deliverableDirectory,
-		"stdout":         stdoutText,
-		"stderr":         sanitizeSuccessfulCommandStderr(command, args, exitCode, stdoutText, stderrText),
-		"exitCode":       exitCode,
-		"durationMillis": duration.Milliseconds(),
-		"timeoutMillis":  timeout.Milliseconds(),
-	}
+	output := shellBaseOutput(request.Input, command, args, deliverableDirectory, commandNormalization, execCommand)
+	output["status"] = "completed"
+	output["stdout"] = stdoutText
+	output["stderr"] = sanitizeSuccessfulCommandStderr(command, args, exitCode, stdoutText, stderrText)
+	output["exitCode"] = exitCode
+	output["durationMillis"] = duration.Milliseconds()
+	output["timeoutMillis"] = timeout.Milliseconds()
 	if stdout.Truncated() || stderr.Truncated() {
 		output["outputTruncated"] = stdout.Truncated() || stderr.Truncated()
 		output["stdoutTruncated"] = stdout.Truncated()
@@ -131,21 +132,39 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 		output["stderrBytes"] = stderr.TotalBytes()
 		output["maxOutputBytes"] = MaxCommandOutputBytes
 	}
-	if commandNormalization != "" {
-		output["actualCommand"] = filepath.Base(execCommand)
-		output["commandNormalization"] = commandNormalization
-	}
 	applyShellEvidencePolicies(request.Input, command, args, output)
 	if runCtx.Err() == context.DeadlineExceeded {
 		output["status"] = "timeout"
+		output["stage"] = "shell_command_timeout"
+		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, true, false, context.DeadlineExceeded)
 		return runtimemodel.StepExecutionResult{Output: output}, context.DeadlineExceeded
 	}
 	if err != nil {
 		output["status"] = "failed"
 		attachShellCommandFailureDiagnostics(output, execCommand, err)
+		attachShellValidationFailureDiagnostic(output, request.Input, execCommand, exitCode, false, false, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func shellBaseOutput(input map[string]any, command string, args []string, workingDir string, commandNormalization string, execCommand string) map[string]any {
+	output := map[string]any{
+		"command":    command,
+		"args":       args,
+		"workingDir": workingDir,
+	}
+	if commandNormalization != "" {
+		output["actualCommand"] = filepath.Base(execCommand)
+		output["commandNormalization"] = commandNormalization
+	}
+	if evidence := mapFromShellInput(input, "validationEvidence"); len(evidence) > 0 {
+		output["validationEvidence"] = evidence
+	}
+	if refs := shellStringSliceFromValue(input["targetRefs"]); len(refs) > 0 {
+		output["targetRefs"] = refs
+	}
+	return output
 }
 
 func attachShellCommandFailureDiagnostics(output map[string]any, execCommand string, err error) {
@@ -167,6 +186,240 @@ func attachShellCommandFailureDiagnostics(output map[string]any, execCommand str
 		"failureReason":      "command_not_found",
 		"unavailableCommand": command,
 	}
+}
+
+func attachShellValidationFailureDiagnostic(output map[string]any, input map[string]any, execCommand string, exitCode int, timedOut bool, policyViolation bool, err error) {
+	if output == nil {
+		return
+	}
+	validationEvidence := mapFromShellInput(input, "validationEvidence")
+	class, targetType := shellValidationDiagnosticClassAndTarget(output, validationEvidence, timedOut, policyViolation, err)
+	if class == "" {
+		return
+	}
+	diagnostic := runtimemodel.ValidationFailureDiagnostic{
+		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
+		Class:                         class,
+		Reason:                        firstNonEmptyShellString(stringFromShellValue(output["reason"]), stringFromShellValue(output["failureReason"]), errorString(err), stringFromShellValue(output["evidenceReason"])),
+		RecommendedEvidenceTargetType: targetType,
+		Stage:                         firstNonEmptyShellString(stringFromShellValue(output["stage"]), "shell_command_failed"),
+		Operation:                     "shell/command",
+		CommandKind:                   strings.TrimSpace(filepath.Base(execCommand)),
+		ExitCode:                      exitCode,
+		TimedOut:                      timedOut,
+		CommandPolicyViolation:        policyViolation,
+		UnavailableCommand:            stringFromShellValue(output["unavailableCommand"]),
+		TargetRefs:                    shellValidationDiagnosticTargetRefs(output, validationEvidence),
+		ObservationType:               firstNonEmptyShellString(stringFromShellValue(validationEvidence["observationType"]), stringFromShellValue(validationEvidence["observation"])),
+		EvidenceMode:                  stringFromShellValue(validationEvidence["mode"]),
+		StdoutPreview:                 shellPreview(stringFromShellValue(output["stdout"]), 2048),
+		StderrPreview:                 shellPreview(stringFromShellValue(output["stderr"]), 2048),
+	}
+	diagnosticMap := diagnostic.ToMap()
+	output["validationFailureDiagnostic"] = diagnosticMap
+	runtimeDiagnostics := mapFromShellOutput(output, "runtimeDiagnostics")
+	if runtimeDiagnostics == nil {
+		runtimeDiagnostics = map[string]any{}
+	}
+	runtimeDiagnostics["validationFailureDiagnostic"] = diagnosticMap
+	if class == runtimemodel.ValidationDiagnosticCommandInvalid {
+		runtimeDiagnostics["kind"] = "shell_command_policy_violation"
+		runtimeDiagnostics["commandPolicyViolation"] = true
+	}
+	output["runtimeDiagnostics"] = runtimeDiagnostics
+}
+
+func shellValidationDiagnosticClassAndTarget(output map[string]any, validationEvidence map[string]any, timedOut bool, policyViolation bool, err error) (string, string) {
+	if policyViolation {
+		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract
+	}
+	if timedOut || strings.EqualFold(stringFromShellValue(output["status"]), "timeout") {
+		return runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationEvidenceTargetValidationOutput
+	}
+	if stringFromShellValue(output["failureReason"]) == "command_not_found" || boolFromShellValue(output["capabilityUnavailable"]) {
+		return runtimemodel.ValidationDiagnosticEnvironmentMissing, runtimemodel.ValidationEvidenceTargetEnvironment
+	}
+	if class := allowedShellValidationDiagnosticClass(firstNonEmptyShellString(
+		stringFromShellValue(validationEvidence["diagnosticClass"]),
+		stringFromShellValue(validationEvidence["failureClass"]),
+		stringFromShellValue(validationEvidence["expectedFailureClass"]),
+	)); class != "" {
+		return class, firstNonEmptyShellString(
+			stringFromShellValue(validationEvidence["recommendedEvidenceTargetType"]),
+			defaultShellValidationDiagnosticTargetType(class),
+		)
+	}
+	if boolFromShellValue(output["zeroWork"]) || strings.TrimSpace(stringFromShellValue(output["evidenceQuality"])) == string(common.EvidenceQualityInconclusive) {
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
+	}
+	if exitCode, ok := numericMillis(output["exitCode"]); ok && exitCode != 0 {
+		switch strings.TrimSpace(firstNonEmptyShellString(stringFromShellValue(validationEvidence["observationType"]), stringFromShellValue(validationEvidence["observation"]))) {
+		case "dependency_resolution", "dependency_check", "dependency_contract":
+			return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract
+		case "toolchain_resolution", "toolchain_check", "toolchain_contract":
+			return runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationEvidenceTargetToolchainContract
+		case "test_result", "assertion_result", "behavior_test_result":
+			return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence
+		case "build_result", "build_observation", "executable_contract_observation":
+			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface
+		default:
+			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface
+		}
+	}
+	if err != nil {
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
+	}
+	return "", ""
+}
+
+func allowedShellValidationDiagnosticClass(value string) string {
+	switch strings.TrimSpace(value) {
+	case runtimemodel.ValidationDiagnosticCommandInvalid,
+		runtimemodel.ValidationDiagnosticEnvironmentMissing,
+		runtimemodel.ValidationDiagnosticDependencyMismatch,
+		runtimemodel.ValidationDiagnosticToolchainMismatch,
+		runtimemodel.ValidationDiagnosticBuildFailed,
+		runtimemodel.ValidationDiagnosticTestFailed,
+		runtimemodel.ValidationDiagnosticTimeout,
+		runtimemodel.ValidationDiagnosticOutputInconclusive,
+		runtimemodel.ValidationDiagnosticEvidenceBindingMissing:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
+}
+
+func defaultShellValidationDiagnosticTargetType(class string) string {
+	switch strings.TrimSpace(class) {
+	case runtimemodel.ValidationDiagnosticCommandInvalid:
+		return runtimemodel.ValidationEvidenceTargetCommandContract
+	case runtimemodel.ValidationDiagnosticEnvironmentMissing:
+		return runtimemodel.ValidationEvidenceTargetEnvironment
+	case runtimemodel.ValidationDiagnosticDependencyMismatch:
+		return runtimemodel.ValidationEvidenceTargetDependencyContract
+	case runtimemodel.ValidationDiagnosticToolchainMismatch:
+		return runtimemodel.ValidationEvidenceTargetToolchainContract
+	case runtimemodel.ValidationDiagnosticEvidenceBindingMissing:
+		return runtimemodel.ValidationEvidenceTargetCoverageBinding
+	case runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationDiagnosticTimeout:
+		return runtimemodel.ValidationEvidenceTargetValidationOutput
+	default:
+		return runtimemodel.ValidationEvidenceTargetFailureSurface
+	}
+}
+
+func shellValidationDiagnosticTargetRefs(output map[string]any, validationEvidence map[string]any) []string {
+	seen := map[string]bool{}
+	ret := []string{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	for _, value := range shellStringSliceFromValue(output["targetRefs"]) {
+		add(value)
+	}
+	for _, value := range shellStringSliceFromValue(validationEvidence["targetRefs"]) {
+		add(value)
+	}
+	for _, value := range shellStringSliceFromValue(validationEvidence["coverageTargets"]) {
+		add(value)
+	}
+	for _, key := range []string{"targetRef", "path", "file"} {
+		add(stringFromShellValue(output[key]))
+		add(stringFromShellValue(validationEvidence[key]))
+	}
+	return ret
+}
+
+func mapFromShellInput(input map[string]any, key string) map[string]any {
+	if input == nil {
+		return nil
+	}
+	return mapFromShellValue(input[key])
+}
+
+func mapFromShellOutput(output map[string]any, key string) map[string]any {
+	if output == nil {
+		return nil
+	}
+	return mapFromShellValue(output[key])
+}
+
+func mapFromShellValue(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		ret := map[string]any{}
+		for key, item := range typed {
+			ret[key] = item
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func shellStringSliceFromValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if item = strings.TrimSpace(item); item != "" {
+				ret = append(ret, item)
+			}
+		}
+		return ret
+	case []any:
+		ret := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(stringFromShellValue(item)); text != "" {
+				ret = append(ret, text)
+			}
+		}
+		return ret
+	default:
+		return nil
+	}
+}
+
+func stringFromShellValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func boolFromShellValue(value any) bool {
+	typed, _ := value.(bool)
+	return typed
+}
+
+func firstNonEmptyShellString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func shellPreview(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func shellCommandNotFound(err error) bool {
