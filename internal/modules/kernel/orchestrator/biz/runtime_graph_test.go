@@ -306,3 +306,88 @@ func TestRuntimeOrchestrator_ReadyGraphStepSpecsReusesLoadedStepsForStepID(t *te
 		t.Fatalf("spec ID = %s, want readable scoped ID without embedded root lineage", specs[0].ID)
 	}
 }
+
+func TestConcreteEvidenceAcquisitionGateStopsGraphAndRestoresStateChange(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-evidence-acquisition-gate")
+	workspaceID := common.WorkspaceID("ws-evidence-acquisition-gate")
+	graph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{ID: "list-root", Kind: "file/list"},
+		{ID: "probe-after-list", Kind: "shell/command", DependsOn: []string{"list-root"}},
+	}}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	root := &runmodel.Step{
+		ID:     common.StepID(runID + "/repair-001"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{stepOutputKeyExecutionGraph: graph},
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "coverage-item-1",
+					"status":                "missing",
+					"requiredEvidenceKinds": []string{"state_change"},
+					"missingEvidenceKinds":  []string{"state_change"},
+					"sourceScope":           "deliverable",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	listStep := &runmodel.Step{
+		ID:    graphScopedStepID(runID, 1, 1, "list-root"),
+		RunID: runID,
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID:       string(root.ID),
+			stepInputKeyGraphNodeID:           "list-root",
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"repairActionPackage":             root.Input["repairActionPackage"],
+		},
+		Output: map[string]any{
+			"stage":     "file_list",
+			"status":    "completed",
+			"path":      ".",
+			"entries":   []map[string]any{},
+			"truncated": false,
+		},
+	}
+	steps := []*runmodel.Step{root, listStep}
+	graphManager := &graphSubsystem{}
+
+	nextSpecs := graphManager.readyGraphStepSpecsFromSteps(ctx, run, listStep, graph, steps)
+	if len(nextSpecs) != 1 || nextSpecs[0].ID != graphScopedStepID(runID, 1, 2, "probe-after-list") {
+		t.Fatalf("ready graph specs = %+v, want downstream probe ready before gate", nextSpecs)
+	}
+	input, ok := graphManager.concreteEvidenceAcquisitionFollowUpInputFromSteps(run, listStep, steps)
+	if !ok {
+		t.Fatalf("concrete evidence acquisition gate did not produce follow-up input")
+	}
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		!boolValue(input["stateChangingOutputRequired"]) ||
+		boolValue(input["concreteFailureEvidenceRequired"]) {
+		t.Fatalf("follow-up input contract = %+v, want restored state-changing contract", input)
+	}
+	if !boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) ||
+		!boolValue(input["evidenceAcquisitionFollowUp"]) {
+		t.Fatalf("follow-up input = %+v, want empty workspace evidence escalation", input)
+	}
+	evidence := mapSliceFromValue(input[stepInputKeyGraphEvidence])
+	if len(evidence) != 1 || evidence[0]["nodeId"] != "list-root" {
+		t.Fatalf("graph evidence = %+v, want completed list evidence only", evidence)
+	}
+}

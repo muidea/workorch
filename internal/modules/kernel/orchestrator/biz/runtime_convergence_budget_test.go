@@ -108,6 +108,81 @@ func TestUpdateConvergenceBudgetResetsNoDeltaAfterCoverageDelta(t *testing.T) {
 	}
 }
 
+func TestConvergenceBudgetDoesNotCountConcreteEvidenceGraphNodeAsRepairAttempt(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-convergence-budget-evidence-node",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			coverageFocusKey: map[string]any{
+				"id":      "focus-item-1",
+				"sliceId": "slice-1",
+				"state":   "active",
+			},
+			convergenceBudgetKey: map[string]any{
+				"state":                       "tracking",
+				"decision":                    "continue",
+				"maxNoCoverageDeltaRounds":    2,
+				"maxRepairAttemptsPerFocus":   2,
+				"maxLLMRoundsPerSlice":        5,
+				"maxRepeatedFailureSignature": 5,
+			},
+		},
+	}
+	evidenceNode := &runmodel.Step{
+		ID:    "run-convergence-budget-evidence-node/graph-001/001-list-root",
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphNodeID:           "list-root",
+			stepInputKeyGraphRootStepID:       "run-convergence-budget-evidence-node/repair-001",
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+		Output: map[string]any{"stage": "file_list", "status": "completed"},
+	}
+
+	if !updateConvergenceBudgetFromStep(run, evidenceNode, false) {
+		t.Fatal("updateConvergenceBudgetFromStep changed = false, want focus/budget scope update")
+	}
+	budget := mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["repairAttempts"]) != 0 ||
+		int64FromValue(budget["noCoverageDeltaRounds"]) != 0 ||
+		budget["decision"] != "continue" {
+		t.Fatalf("budget after evidence node = %+v, want no repair/no-delta consumption", budget)
+	}
+
+	llmRepair := &runmodel.Step{
+		ID:    "run-convergence-budget-evidence-node/repair-002",
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+		Output: map[string]any{failureOutputKeyClass: failureClassLLMDecisionInvalid},
+	}
+	if !updateConvergenceBudgetFromStep(run, llmRepair, false) {
+		t.Fatal("LLM repair update changed = false, want budget update")
+	}
+	budget = mapFromValue(run.ExecutionContext[convergenceBudgetKey])
+	if int64FromValue(budget["repairAttempts"]) != 1 ||
+		int64FromValue(budget["noCoverageDeltaRounds"]) != 1 {
+		t.Fatalf("budget after llm repair = %+v, want one repair/no-delta round", budget)
+	}
+}
+
 func TestConvergenceBudgetEscalationBlocksRuntimeRepair(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-convergence-budget-block",

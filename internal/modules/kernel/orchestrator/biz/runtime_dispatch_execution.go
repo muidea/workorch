@@ -365,6 +365,9 @@ func (o *RuntimeOrchestrator) finalizeRuntimeStepResultWithWorkspace(
 	}
 	graphSpecs, graphSteps := o.graphManager().readyGraphStepSpecsWithSteps(ctx, run, step)
 	if len(graphSpecs) > 0 {
+		if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(run, step, graphSteps); ok {
+			return o.RequestUniqueDispatchStep(ctx, run, graphFollowUpStepID(run.ID, step), initialStepKind(run), input, workspaceIDForDispatch(run, workspace))
+		}
 		return o.dispatchGraphStepBatchWithWorkspace(ctx, run, graphSpecs, workspace)
 	}
 	if o.graphManager().hasActiveGraphWork(ctx, run, step) {

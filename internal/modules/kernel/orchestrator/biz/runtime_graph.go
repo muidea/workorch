@@ -210,6 +210,9 @@ func (o *RuntimeOrchestrator) dispatchGraphStepBatchWithWorkspace(ctx context.Co
 	}
 	if graph, ok := runtimeGraphSpecForContinuation(steps, last); ok {
 		if nextSpecs := o.graphManager().readyGraphStepSpecsFromSteps(ctx, currentRun, last, graph, steps); len(nextSpecs) > 0 {
+			if input, ok := o.graphManager().concreteEvidenceAcquisitionFollowUpInputFromSteps(currentRun, last, steps); ok {
+				return o.RequestUniqueDispatchStep(ctx, currentRun, graphFollowUpStepID(currentRun.ID, last), initialStepKind(currentRun), input, workspaceIDForDispatch(currentRun, workspace))
+			}
 			return o.dispatchGraphStepBatchWithWorkspace(ctx, currentRun, nextSpecs, workspace)
 		}
 	}
@@ -1476,6 +1479,20 @@ func (g *graphSubsystem) graphFollowUpStepInputFromSteps(run *runModel.Run, step
 	return restoreCoverageWorkItemContinuationConvergenceContract(run, input)
 }
 
+func (g *graphSubsystem) concreteEvidenceAcquisitionFollowUpInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) (map[string]any, bool) {
+	source := evidenceAcquisitionSourceStep(step, steps)
+	if !stepRequiresConcreteFailureEvidenceAcquisition(source) {
+		return nil, false
+	}
+	input := g.graphFollowUpStepInputFromSteps(run, step, steps)
+	if !boolValue(input["evidenceAcquisitionFollowUp"]) ||
+		!boolValue(input["stateChangingOutputRequired"]) ||
+		strings.TrimSpace(stringFromMap(input, "repairObjective")) != repairObjectiveStateChangingOutput {
+		return nil, false
+	}
+	return input, true
+}
+
 func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[string]any) map[string]any {
 	if len(evidence) == 0 {
 		return input
@@ -1496,11 +1513,11 @@ func enrichGraphFollowUpInputWithEvidence(input map[string]any, evidence []map[s
 }
 
 func evidenceAcquisitionSourceStep(anchor *runModel.Step, steps []*runModel.Step) *runModel.Step {
-	if stepRequiresConcreteFailureEvidenceAcquisition(anchor) {
-		return anchor
-	}
 	rootStepID := graphRootStepID(anchor)
 	if rootStepID == "" {
+		if stepRequiresConcreteFailureEvidenceAcquisition(anchor) {
+			return anchor
+		}
 		return anchor
 	}
 	for _, step := range steps {
@@ -1511,6 +1528,9 @@ func evidenceAcquisitionSourceStep(anchor *runModel.Step, steps []*runModel.Step
 			return step
 		}
 		break
+	}
+	if stepRequiresConcreteFailureEvidenceAcquisition(anchor) {
+		return anchor
 	}
 	return anchor
 }

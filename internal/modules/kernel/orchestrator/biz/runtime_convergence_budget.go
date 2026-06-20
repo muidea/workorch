@@ -108,6 +108,15 @@ func convergenceBudgetCountsRepairAttempt(step *runModel.Step) bool {
 	if step == nil || step.Input == nil {
 		return false
 	}
+	if canonicalLLMWorkspaceStepKind(strings.TrimSpace(step.Kind)) != llmWorkspaceExecutionStepKind {
+		return false
+	}
+	if stepIsConcreteFailureEvidenceAcquisitionGraphNode(step) {
+		return false
+	}
+	if stepRequiresConcreteFailureEvidenceAcquisition(step) && !boolValue(step.Input["stateChangingOutputRequired"]) {
+		return false
+	}
 	return runtimeStageFromStepInput(step.Input) == runtimeStageRepair ||
 		boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
 		len(mapFromValue(step.Input["repairActionPackage"])) > 0
@@ -117,7 +126,17 @@ func convergenceBudgetCountsNoDelta(step *runModel.Step) bool {
 	if step == nil {
 		return false
 	}
+	if stepIsConcreteFailureEvidenceAcquisitionGraphNode(step) {
+		return false
+	}
 	return step.State == common.StepStateCompleted || step.State == common.StepStateFailed
+}
+
+func stepIsConcreteFailureEvidenceAcquisitionGraphNode(step *runModel.Step) bool {
+	if step == nil || step.Input == nil || graphNodeID(step) == "" {
+		return false
+	}
+	return stepRequiresConcreteFailureEvidenceAcquisition(step) && !boolValue(step.Input["stateChangingOutputRequired"])
 }
 
 func convergenceBudgetCountsValidationOnlyRetry(step *runModel.Step) bool {
