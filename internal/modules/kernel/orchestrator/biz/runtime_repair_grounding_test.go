@@ -1078,6 +1078,57 @@ func TestRuntimeRepairEmptyWorkspaceEvidenceEscalatesToStateChangingRepair(t *te
 	}
 }
 
+func TestConcreteEvidenceAcquisitionFollowUpRestoresStateChangeForEmptyWorkspace(t *testing.T) {
+	source := &runmodel.Step{
+		ID:    "run-empty-workspace-follow-up/step-1",
+		RunID: "run-empty-workspace-follow-up",
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"concreteFailureEvidenceRequired": true,
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "cwi-primary",
+					"requiredEvidenceKinds": []string{"state_change", "validation"},
+					"missingEvidenceKinds":  []string{"state_change", "validation"},
+					"sourceScope":           "deliverable",
+					"targetText":            "primary deliverable",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"evidenceAcquisitionRequired": true,
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteFailureEvidence": true,
+				},
+			},
+		},
+	}
+	evidence := []map[string]any{{
+		"kind":   "file/list",
+		"stepId": "run-empty-workspace-follow-up/graph-001/list-root",
+		"output": map[string]any{
+			"stage":     "file_list",
+			"path":      ".",
+			"truncated": false,
+			"entries":   []map[string]any{},
+		},
+	}}
+
+	input := restoreRepairContractAfterConcreteEvidenceAcquisition(map[string]any{
+		"previousStepId": string(source.ID),
+	}, source, evidence)
+
+	if input["repairObjective"] != repairObjectiveStateChangingOutput ||
+		input["stateChangingOutputRequired"] != true ||
+		input["emptyWorkspaceEvidenceEscalatedToImplementation"] != true {
+		t.Fatalf("input = %+v, want empty workspace evidence to restore state-changing repair", input)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("requiredOutput = %+v, want state-changing node required", required)
+	}
+}
+
 func TestRuntimeRepairActionPackageIncludesStructuredFailureSignalsAndForbiddenReuse(t *testing.T) {
 	runID := common.RunID("run-repair-grounding")
 	failedStep := &runmodel.Step{

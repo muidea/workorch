@@ -804,6 +804,9 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 	maxAttempts := o.repairManager().effectiveMaxRuntimeRepairAttempts(ctx, o.RuntimePolicy(), run, failedStep)
 	reason := localizedRuntimeRepairExhaustionReason(language, maxAttempts, execErr)
 	diagnostics := runtimeFailureDecisionDiagnostics(failedStep, execErr)
+	if diagnostics == nil {
+		diagnostics = map[string]any{}
+	}
 	runLevelStats := o.repairManager().runLevelIneffectiveConvergenceStats(ctx, run, failedStep)
 	blockerKind := "runtime_repair_contract_exhausted"
 	allowedRecoveryActions := []string{"retry_same_step", "replan", "provide_information", "terminate"}
@@ -817,6 +820,7 @@ func (o *RuntimeOrchestrator) blockOnRuntimeRepairExhaustion(
 		blockerKind = "runtime_convergence_budget_exhausted"
 		allowedRecoveryActions = []string{"replan", "provide_information", "terminate"}
 		preferredRecoveryActions = []string{"replan", "terminate"}
+		reason = localizedRuntimeConvergenceBudgetExhaustionReason(language, budgetContext, execErr)
 		diagnostics["convergenceBudget"] = budgetContext
 	}
 	recommendedNextActions := []string{

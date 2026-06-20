@@ -1,6 +1,9 @@
 package orchestrator
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func localizedRuntimeRepairExhaustionReason(language string, attempts int, err error) string {
 	reason := fmt.Sprintf("runtime repair attempts exhausted after %d attempts", attempts)
@@ -14,6 +17,49 @@ func localizedRuntimeRepairExhaustionReason(language string, attempts int, err e
 		return fmt.Sprintf("%s：%s", reason, err.Error())
 	}
 	return fmt.Sprintf("%s: %s", reason, err.Error())
+}
+
+func localizedRuntimeConvergenceBudgetExhaustionReason(language string, budget map[string]any, err error) string {
+	label, count, max := convergenceBudgetReasonLabelAndCounters(budget)
+	reason := "runtime convergence budget exhausted"
+	if label != "" && count > 0 && max > 0 {
+		reason = fmt.Sprintf("%s (%s %d/%d)", reason, label, count, max)
+	} else if label != "" {
+		reason = fmt.Sprintf("%s (%s)", reason, label)
+	}
+	if prefersChinese(language) {
+		reason = "runtime 收敛预算已耗尽"
+		if label != "" && count > 0 && max > 0 {
+			reason = fmt.Sprintf("%s（%s %d/%d）", reason, label, count, max)
+		} else if label != "" {
+			reason = fmt.Sprintf("%s（%s）", reason, label)
+		}
+	}
+	if err == nil {
+		return reason
+	}
+	if prefersChinese(language) {
+		return fmt.Sprintf("%s：%s", reason, err.Error())
+	}
+	return fmt.Sprintf("%s: %s", reason, err.Error())
+}
+
+func convergenceBudgetReasonLabelAndCounters(budget map[string]any) (string, int64, int64) {
+	reason := strings.TrimSpace(stringFromMap(budget, "lastDecisionReason"))
+	switch reason {
+	case "max_repair_attempts_per_focus_exceeded":
+		return "repairAttempts", int64FromValue(budget["repairAttempts"]), int64FromValue(budget["maxRepairAttemptsPerFocus"])
+	case "max_llm_rounds_per_slice_exceeded":
+		return "llmRounds", int64FromValue(budget["llmRounds"]), int64FromValue(budget["maxLLMRoundsPerSlice"])
+	case "max_repeated_failure_signature_exceeded":
+		return "repeatedFailureSignatures", int64FromValue(budget["repeatedFailureSignatures"]), int64FromValue(budget["maxRepeatedFailureSignature"])
+	case "max_validation_only_retries_exceeded":
+		return "validationOnlyRetries", int64FromValue(budget["validationOnlyRetries"]), int64FromValue(budget["maxValidationOnlyRetries"])
+	case "max_no_coverage_delta_rounds_exceeded":
+		return "noCoverageDeltaRounds", int64FromValue(budget["noCoverageDeltaRounds"]), int64FromValue(budget["maxNoCoverageDeltaRounds"])
+	default:
+		return reason, 0, 0
+	}
 }
 
 func localizedRuntimeRepairExhaustionQuestion(language string) string {

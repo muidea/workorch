@@ -1531,6 +1531,12 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 	if len(snapshots) > 0 {
 		probe["failureTargetRepairContext"] = snapshots
 	}
+	emptyWorkspaceSurface := repairInputHasEmptyWorkspaceSurfaceEvidence(map[string]any{
+		stepInputKeyGraphEvidence: evidence,
+	}) && coverageRepairInputRequiresStateChange(probe)
+	if emptyWorkspaceSurface {
+		probe["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
+	}
 	if diagnostics := concreteFailureEvidenceAcquisitionDiagnostics(source.Input, sourcePackage); len(diagnostics) > 0 {
 		probe["lastFailureDiagnostics"] = diagnostics
 		sourcePackage["lastFailureDiagnostics"] = diagnostics
@@ -1541,13 +1547,16 @@ func restoreRepairContractAfterConcreteEvidenceAcquisition(input map[string]any,
 		sourcePackage["structuredFailureSignals"] = mergeStructuredFailureSignals(mapFromValue(sourcePackage["structuredFailureSignals"]), evidenceSignals)
 	}
 	actionPackage := repairActionPackageForEvidenceAcquisitionFollowUp(probe, sourcePackage, snapshots)
-	if !stateChangingRepairHasConcreteTargetEvidence(probe, actionPackage) {
+	if !stateChangingRepairHasActionableImplementationSurface(probe, actionPackage) {
 		return input
 	}
 	input[stepInputKeySoulStage] = soulStageExecution
 	setRuntimeStage(input, runtimeStageRepair)
 	input[stepInputKeyRuntimeRepairFollowUp] = true
 	input["evidenceAcquisitionFollowUp"] = true
+	if emptyWorkspaceSurface {
+		input["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
+	}
 	input["stateChangingOutputRequired"] = true
 	input["repairObjective"] = repairObjectiveStateChangingOutput
 	delete(input, "concreteFailureEvidenceRequired")

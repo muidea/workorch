@@ -89,6 +89,81 @@ func TestRuntimeOrchestrator_RuntimeRepairExhaustionUsesDialogLanguage(t *testin
 	}
 }
 
+func TestRuntimeOrchestrator_ConvergenceBudgetExhaustionUsesBudgetCounters(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	workspaceID := common.WorkspaceID("ws-convergence-budget-localized")
+	runID := common.RunID("run-convergence-budget-localized")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", DeliverableDirectory: t.TempDir(), State: common.WorkspaceStateActive}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		DoDID:           common.DoDID("dod-convergence-budget-localized"),
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"dialogLanguage": "zh-CN",
+			convergenceBudgetKey: map[string]any{
+				"decision":                 "escalate_decision",
+				"state":                    "escalated",
+				"lastDecisionReason":       "max_no_coverage_delta_rounds_exceeded",
+				"noCoverageDeltaRounds":    int64(3),
+				"maxNoCoverageDeltaRounds": int64(3),
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		memory.NewApprovalRepository(),
+		RuntimeEvidenceRepositories{},
+		events.NewMemoryHub(),
+	)
+	failedStep := &runmodel.Step{
+		ID:    common.StepID(fmt.Sprintf("%s/block/validate", runID)),
+		RunID: runID,
+		Kind:  shellcommon.StepKindCommand,
+		State: common.StepStateFailed,
+		Input: map[string]any{stepInputKeyGraphNodeID: "validate"},
+		Output: map[string]any{
+			failureOutputKeyClass:     failureClassShellCommand,
+			failureOutputKeySignature: "class=shell_command_failed|node=validate",
+		},
+	}
+
+	if err := orch.dispatchRuntimeRepairFollowUp(ctx, run, failedStep, errors.New("exit status 1")); err != nil {
+		t.Fatalf("repair exhaustion: %v", err)
+	}
+	updated, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	ticket, err := ticketRepo.Get(ctx, updated.BlockingTicketID)
+	if err != nil {
+		t.Fatalf("get ticket: %v", err)
+	}
+	if !strings.Contains(ticket.Reason, "收敛预算已耗尽") ||
+		!strings.Contains(ticket.Reason, "noCoverageDeltaRounds 3/3") ||
+		strings.Contains(ticket.Reason, "共 10 次") {
+		t.Fatalf("ticket reason = %q, want convergence budget counters", ticket.Reason)
+	}
+	if ticket.Context["blockerKind"] != "runtime_convergence_budget_exhausted" {
+		t.Fatalf("blockerKind = %v, want runtime_convergence_budget_exhausted", ticket.Context["blockerKind"])
+	}
+}
+
 func TestRuntimeOrchestrator_DuplicateRuntimeFailureUsesDialogLanguage(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
