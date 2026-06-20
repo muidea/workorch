@@ -12,6 +12,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	runevents "github.com/muidea/workorch/internal/modules/kernel/run/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 )
@@ -427,6 +428,9 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 	if envelope.Topic == workorchdevents.TopicWorkspaceProjectionChanged {
 		return nil
 	}
+	if envelope.Topic == runevents.TopicRunLLMStreamProgress {
+		return m.handleRuntimeProgressEvent(envelope)
+	}
 	if strings.TrimSpace(envelope.WorkspaceID) != "" {
 		m.store.MarkStale(envelope.WorkspaceID, envelope.Revision)
 		if m.isRebuildAllInFlight() {
@@ -441,6 +445,45 @@ func (m *Manager) handleEvent(_ context.Context, envelope events.Envelope) error
 		m.store.MarkStale("", envelope.Revision)
 		m.ScheduleRebuildAll()
 	}
+	return nil
+}
+
+func (m *Manager) handleRuntimeProgressEvent(envelope events.Envelope) error {
+	if m == nil || m.store == nil {
+		return nil
+	}
+	progress, _ := events.DecodeLLMStreamProgressPayload(envelope.Payload)
+	workspaceID := strings.TrimSpace(firstNonEmptyString(envelope.WorkspaceID, string(progress.WorkspaceID), stringFromPayload(envelope.Payload, events.PayloadKeyWorkspaceID)))
+	if workspaceID == "" {
+		return nil
+	}
+	update := RuntimeProgressUpdate{
+		WorkspaceID:   workspaceID,
+		RunID:         strings.TrimSpace(firstNonEmptyString(envelope.RunID, string(progress.RunID), stringFromPayload(envelope.Payload, events.PayloadKeyRunID))),
+		StepID:        strings.TrimSpace(firstNonEmptyString(envelope.StepID, string(progress.StepID), stringFromPayload(envelope.Payload, events.PayloadKeyStepID))),
+		StepKind:      strings.TrimSpace(stringFromPayload(envelope.Payload, events.PayloadKeyKind)),
+		StepState:     strings.TrimSpace(firstNonEmptyString(progress.Status, stringFromPayload(envelope.Payload, events.PayloadKeyState), stringFromPayload(envelope.Payload, events.PayloadKeyStatus))),
+		Topic:         envelope.Topic,
+		Revision:      envelope.Revision,
+		OccurredAt:    strings.TrimSpace(firstNonEmptyString(envelope.OccurredAt, stringFromPayload(envelope.Payload, "occurredAt"))),
+		Event:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, "event"), "runtime_step_progress")),
+		Stage:         strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, events.PayloadKeyStage), "llm_stream")),
+		Summary:       strings.TrimSpace(firstNonEmptyString(progress.Summary, stringFromPayload(envelope.Payload, events.PayloadKeySummary))),
+		RequestID:     strings.TrimSpace(stringFromPayload(envelope.Payload, "requestId")),
+		QueueKey:      strings.TrimSpace(stringFromPayload(envelope.Payload, "queueKey")),
+		WorkerID:      strings.TrimSpace(stringFromPayload(envelope.Payload, "workerId")),
+		WorkerEventAt: strings.TrimSpace(firstNonEmptyString(stringFromPayload(envelope.Payload, "heartbeatAt"), stringFromPayload(envelope.Payload, "workerHeartbeatAt"))),
+	}
+	if m.store.ApplyRuntimeProgress(update) {
+		m.publishProjectionChanged(context.Background(), workspaceID, "runtime_progress")
+		return nil
+	}
+	m.store.MarkStale(workspaceID, envelope.Revision)
+	if m.isRebuildAllInFlight() {
+		m.rememberPendingWorkspaceRebuild(workspaceID)
+		return nil
+	}
+	m.ScheduleRebuildWorkspace(workspaceID)
 	return nil
 }
 
@@ -574,4 +617,21 @@ func (m *Manager) publishProjectionChanged(ctx context.Context, workspaceID stri
 	if err != nil {
 		slog.Warn("workorch workspace projection change event publish failed", "workspaceID", workspaceID, "changeKind", changeKind, "err", err)
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringFromPayload(payload map[string]any, key string) string {
+	if len(payload) == 0 || key == "" {
+		return ""
+	}
+	value, _ := payload[key].(string)
+	return value
 }

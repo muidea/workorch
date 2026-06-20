@@ -10,6 +10,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/pkg/presenter"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -359,6 +360,44 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	s.updatedAt = now
 }
 
+func (s *Store) ApplyRuntimeProgress(update RuntimeProgressUpdate) bool {
+	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.workspaces[update.WorkspaceID]
+	if entry == nil || !entry.HasSnapshot {
+		return false
+	}
+	now := time.Now().UTC()
+	snapshot := entry.Snapshot
+	if !applyRuntimeProgressToSnapshot(&snapshot, update, now) {
+		return false
+	}
+	entry.Snapshot = snapshot
+	entry.Workspace = cloneWorkspace(snapshot.Workspace)
+	entry.HasWorkspace = true
+	entry.HasSnapshot = true
+	entry.Revision++
+	s.globalRevision++
+	if update.Revision > entry.SourceRevision {
+		entry.SourceRevision = update.Revision
+	}
+	entry.ProjectedSourceRevision = entry.SourceRevision
+	entry.RebuiltAt = now
+	entry.Stale = false
+	entry.StaleReason = ""
+	entry.Error = ""
+	s.refreshProjectedSourceRevisionLocked()
+	s.globalStale = false
+	s.globalStaleReason = ""
+	s.state = StateReady
+	s.errText = ""
+	s.updatedAt = now
+	return true
+}
+
 func (s *Store) MarkWorkspaceDegraded(workspaceID string, err error) {
 	if s == nil || strings.TrimSpace(workspaceID) == "" {
 		return
@@ -575,6 +614,120 @@ func runHeartbeatAgeSeconds(heartbeat readmodelcore.RunHeartbeat, now time.Time)
 		return int64(age)
 	}
 	return 0
+}
+
+func applyRuntimeProgressToSnapshot(snapshot *readmodelcore.WorkspaceSnapshot, update RuntimeProgressUpdate, now time.Time) bool {
+	if snapshot == nil {
+		return false
+	}
+	if update.RunID != "" && snapshot.Run != nil && snapshot.Run.ID != update.RunID {
+		return false
+	}
+	if update.StepID != "" && (snapshot.Step == nil || snapshot.Step.ID != update.StepID) {
+		snapshot.Step = &presenter.StepView{ID: update.StepID}
+	}
+	if snapshot.Step != nil {
+		if update.StepID != "" {
+			snapshot.Step.ID = update.StepID
+		}
+		if update.StepKind != "" {
+			snapshot.Step.Kind = update.StepKind
+		}
+		if update.StepState != "" {
+			snapshot.Step.State = update.StepState
+		}
+	}
+	if snapshot.TaskProgress.WorkspaceID == "" {
+		snapshot.TaskProgress.WorkspaceID = update.WorkspaceID
+	}
+	if update.RunID != "" {
+		snapshot.TaskProgress.RunID = update.RunID
+	}
+	if update.StepID != "" {
+		snapshot.TaskProgress.CurrentStepID = update.StepID
+	}
+	if update.StepKind != "" {
+		snapshot.TaskProgress.CurrentStepKind = update.StepKind
+	}
+	if update.StepState != "" {
+		snapshot.TaskProgress.CurrentStepState = update.StepState
+	}
+	progressAt := strings.TrimSpace(update.OccurredAt)
+	if progressAt == "" {
+		progressAt = now.Format(time.RFC3339Nano)
+	}
+	if snapshot.RunHeartbeat.WorkspaceID == "" {
+		snapshot.RunHeartbeat.WorkspaceID = update.WorkspaceID
+	}
+	if update.RunID != "" {
+		snapshot.RunHeartbeat.RunID = update.RunID
+	}
+	if snapshot.Run != nil && snapshot.RunHeartbeat.State == "" {
+		snapshot.RunHeartbeat.State = snapshot.Run.State
+	}
+	if update.StepID != "" {
+		snapshot.RunHeartbeat.LatestStepID = update.StepID
+	}
+	if update.StepKind != "" {
+		snapshot.RunHeartbeat.LatestStepKind = update.StepKind
+	}
+	if update.StepState != "" {
+		snapshot.RunHeartbeat.LatestStepState = update.StepState
+	}
+	snapshot.RunHeartbeat.ActivityState = "running"
+	snapshot.RunHeartbeat.LatestEventTopic = update.Topic
+	if update.Revision > 0 {
+		snapshot.RunHeartbeat.LatestEventRevision = update.Revision
+	}
+	snapshot.RunHeartbeat.LatestEventAt = progressAt
+	snapshot.RunHeartbeat.LatestEffectiveProgressAt = progressAt
+	if update.Summary != "" {
+		snapshot.RunHeartbeat.Summary = update.Summary
+	}
+	if snapshot.RuntimeExecution == nil {
+		snapshot.RuntimeExecution = &readmodelcore.RuntimeExecutionState{}
+	}
+	if update.StepID != "" {
+		snapshot.RuntimeExecution.StepID = update.StepID
+	}
+	if update.StepKind != "" {
+		snapshot.RuntimeExecution.StepKind = update.StepKind
+	}
+	if update.StepState != "" {
+		snapshot.RuntimeExecution.StepState = update.StepState
+	}
+	if update.RequestID != "" {
+		snapshot.RuntimeExecution.RequestID = update.RequestID
+	}
+	if update.QueueKey != "" {
+		snapshot.RuntimeExecution.QueueKey = update.QueueKey
+	}
+	if update.WorkerID != "" {
+		snapshot.RuntimeExecution.WorkerID = update.WorkerID
+	}
+	snapshot.RuntimeExecution.LastProgressAt = progressAt
+	snapshot.RuntimeExecution.LastProgressEvent = update.Event
+	snapshot.RuntimeExecution.LastProgressStage = update.Stage
+	snapshot.RuntimeExecution.LastProgressSummary = update.Summary
+	if update.WorkerEventAt != "" {
+		snapshot.RuntimeExecution.WorkerHeartbeatAt = update.WorkerEventAt
+	} else if strings.Contains(update.Summary, "heartbeat") || strings.Contains(update.Event, "heartbeat") {
+		snapshot.RuntimeExecution.WorkerHeartbeatAt = progressAt
+	}
+	snapshot.RuntimeExecution.Pending = !isTerminalRuntimeProgressState(update.StepState)
+	if snapshot.RuntimeExecution.Pending && snapshot.RuntimeExecution.Gap == "" {
+		snapshot.RuntimeExecution.Gap = "accepted_in_progress"
+	}
+	return true
+}
+
+func isTerminalRuntimeProgressState(state string) bool {
+	switch common.StepState(strings.TrimSpace(state)) {
+	case common.StepStateCompleted, common.StepStateFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func stringSliceContains(items []string, want string) bool {

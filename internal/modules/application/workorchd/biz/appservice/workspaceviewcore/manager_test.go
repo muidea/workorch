@@ -332,6 +332,121 @@ func TestManagerPublishesProjectionChangedAndIgnoresOwnEvent(t *testing.T) {
 	}
 }
 
+func TestManagerAppliesLLMProgressWithoutFullWorkspaceRebuild(t *testing.T) {
+	ctx := context.Background()
+	hub := events.NewMemoryHub()
+	scheduled := map[string]int{}
+	scheduledFuncs := map[string][]func(context.Context){}
+	manager := NewManager(ManagerOptions{
+		Loader: fakeProjectionLoader{
+			workspaces: []appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}},
+			snapshots: map[string]readmodelcore.WorkspaceSnapshot{
+				"ws-a": {
+					Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
+					Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+				},
+			},
+		},
+		Hub: hub,
+		Schedule: func(name string, fn func(context.Context)) bool {
+			scheduled[name]++
+			scheduledFuncs[name] = append(scheduledFuncs[name], fn)
+			return true
+		},
+	})
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	scheduledFuncs["workspace_projection_rebuild_all"][0](ctx)
+	scheduledFuncs["workspace_projection_rebuild"][0](ctx)
+	baselineWorkspaceRebuilds := scheduled["workspace_projection_rebuild"]
+
+	if err := hub.Publish(ctx, events.Envelope{
+		Version:     events.WorkorchEventVersion,
+		Topic:       runevents.TopicRunLLMStreamProgress,
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		StepID:      "run-a/step-1",
+		Payload: events.LLMStreamProgressPayload(
+			"ws-a",
+			"run-a",
+			"run-a/step-1",
+			"provider-a",
+			"model-a",
+			2,
+			128,
+			250,
+			string(common.StepStateDispatched),
+			"provider call waiting",
+		),
+	}); err != nil {
+		t.Fatalf("publish llm progress event: %v", err)
+	}
+	if scheduled["workspace_projection_rebuild"] != baselineWorkspaceRebuilds {
+		t.Fatalf("workspace rebuilds after progress = %d, want unchanged %d", scheduled["workspace_projection_rebuild"], baselineWorkspaceRebuilds)
+	}
+	snapshot, status, err := manager.ReadWorkspaceSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("read snapshot after progress: %v", err)
+	}
+	if status.State != StateReady || status.SourceEventRevision == 0 || status.ProjectedSourceRevision != status.SourceEventRevision {
+		t.Fatalf("status after progress = %+v, want ready projected progress revision", status)
+	}
+	if snapshot.RunHeartbeat.LatestEventTopic != runevents.TopicRunLLMStreamProgress ||
+		snapshot.RunHeartbeat.LatestStepID != "run-a/step-1" ||
+		snapshot.RunHeartbeat.LatestStepState != string(common.StepStateDispatched) ||
+		snapshot.RunHeartbeat.ActivityState != "running" {
+		t.Fatalf("heartbeat after progress = %+v", snapshot.RunHeartbeat)
+	}
+	if snapshot.RuntimeExecution == nil ||
+		snapshot.RuntimeExecution.StepID != "run-a/step-1" ||
+		snapshot.RuntimeExecution.LastProgressSummary != "provider call waiting" ||
+		!snapshot.RuntimeExecution.Pending {
+		t.Fatalf("runtime execution after progress = %+v", snapshot.RuntimeExecution)
+	}
+	var progressProjection events.Envelope
+	for _, item := range hub.Published() {
+		if item.Topic == workorchdevents.TopicWorkspaceProjectionChanged && item.Payload["changeKind"] == "runtime_progress" {
+			progressProjection = item
+		}
+	}
+	if progressProjection.Topic == "" {
+		t.Fatalf("published events = %+v, want runtime_progress projection event", hub.Published())
+	}
+}
+
+func TestStoreRejectsRuntimeProgressForDifferentRun(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+		},
+	}, nil)
+
+	if store.ApplyRuntimeProgress(RuntimeProgressUpdate{
+		WorkspaceID: "ws-a",
+		RunID:       "run-b",
+		StepID:      "run-b/step-1",
+		StepState:   string(common.StepStateDispatched),
+		Topic:       runevents.TopicRunLLMStreamProgress,
+		Revision:    10,
+		Summary:     "wrong run progress",
+	}) {
+		t.Fatalf("ApplyRuntimeProgress returned true for different run")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot after rejected progress: %v", err)
+	}
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status after rejected progress = %+v, want unchanged source revisions", status)
+	}
+	if snapshot.RunHeartbeat.LatestStepID != "" || snapshot.RuntimeExecution != nil {
+		t.Fatalf("snapshot after rejected progress = %+v, want unchanged runtime progress fields", snapshot)
+	}
+}
+
 func TestManagerStartRequiresScheduler(t *testing.T) {
 	manager := NewManager(ManagerOptions{
 		Loader: fakeProjectionLoader{},
