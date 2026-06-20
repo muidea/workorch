@@ -447,6 +447,92 @@ func TestStoreRejectsRuntimeProgressForDifferentRun(t *testing.T) {
 	}
 }
 
+func TestStoreRuntimeProgressResetsExecutionStateForNewStep(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
+				StepID:          "run-a/old-step",
+				RequestID:       "old-request",
+				QueueKey:        "old-queue",
+				WorkerStoppedAt: "2026-06-20T00:00:10Z",
+				DoneAt:          "2026-06-20T00:00:09Z",
+				Pending:         true,
+				Gap:             "runtime_terminal_not_finalized",
+			},
+		},
+	}, nil)
+
+	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		StepID:      "run-a/new-step",
+		StepKind:    "llm/workspace_execution",
+		StepState:   string(common.StepStateDispatched),
+		Topic:       runevents.TopicRunLLMStreamProgress,
+		Revision:    10,
+		Summary:     "provider call waiting",
+	}) {
+		t.Fatalf("ApplyRuntimeProgress returned false for new step progress")
+	}
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot after progress: %v", err)
+	}
+	if snapshot.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want new step progress state")
+	}
+	if snapshot.RuntimeExecution.StepID != "run-a/new-step" ||
+		snapshot.RuntimeExecution.StepKind != "llm/workspace_execution" ||
+		snapshot.RuntimeExecution.LastProgressSummary != "provider call waiting" ||
+		!snapshot.RuntimeExecution.Pending ||
+		snapshot.RuntimeExecution.Gap != "accepted_in_progress" {
+		t.Fatalf("RuntimeExecution = %+v, want new step progress state", snapshot.RuntimeExecution)
+	}
+	if snapshot.RuntimeExecution.RequestID != "" ||
+		snapshot.RuntimeExecution.QueueKey != "" ||
+		snapshot.RuntimeExecution.WorkerStoppedAt != "" ||
+		snapshot.RuntimeExecution.DoneAt != "" {
+		t.Fatalf("RuntimeExecution retained old step fields: %+v", snapshot.RuntimeExecution)
+	}
+}
+
+func TestStoreRuntimeProgressClearsGapForTerminalStep(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "running", ActiveRunID: "run-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"},
+			Run:       &readmodelcore.Run{ID: "run-a", WorkspaceID: "ws-a", State: string(common.RunStateRunning)},
+			RuntimeExecution: &readmodelcore.RuntimeExecutionState{
+				StepID:  "run-a/step-1",
+				Pending: true,
+				Gap:     "accepted_in_progress",
+			},
+		},
+	}, nil)
+
+	if !store.ApplyRuntimeProgress(RuntimeProgressUpdate{
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		StepID:      "run-a/step-1",
+		StepState:   string(common.StepStateCompleted),
+		Topic:       runevents.TopicRunLLMStreamProgress,
+		Revision:    10,
+		Summary:     "step completed",
+	}) {
+		t.Fatalf("ApplyRuntimeProgress returned false for terminal progress")
+	}
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot after terminal progress: %v", err)
+	}
+	if snapshot.RuntimeExecution == nil || snapshot.RuntimeExecution.Pending || snapshot.RuntimeExecution.Gap != "" {
+		t.Fatalf("RuntimeExecution = %+v, want terminal progress without pending gap", snapshot.RuntimeExecution)
+	}
+}
+
 func TestManagerStartRequiresScheduler(t *testing.T) {
 	manager := NewManager(ManagerOptions{
 		Loader: fakeProjectionLoader{},

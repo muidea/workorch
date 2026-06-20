@@ -684,6 +684,9 @@ func applyRuntimeProgressToSnapshot(snapshot *readmodelcore.WorkspaceSnapshot, u
 	if update.Summary != "" {
 		snapshot.RunHeartbeat.Summary = update.Summary
 	}
+	if snapshot.RuntimeExecution != nil && update.StepID != "" && snapshot.RuntimeExecution.StepID != "" && snapshot.RuntimeExecution.StepID != update.StepID {
+		snapshot.RuntimeExecution = nil
+	}
 	if snapshot.RuntimeExecution == nil {
 		snapshot.RuntimeExecution = &readmodelcore.RuntimeExecutionState{}
 	}
@@ -715,6 +718,10 @@ func applyRuntimeProgressToSnapshot(snapshot *readmodelcore.WorkspaceSnapshot, u
 		snapshot.RuntimeExecution.WorkerHeartbeatAt = progressAt
 	}
 	snapshot.RuntimeExecution.Pending = !isTerminalRuntimeProgressState(update.StepState)
+	if !snapshot.RuntimeExecution.Pending {
+		snapshot.RuntimeExecution.Gap = ""
+		return true
+	}
 	if snapshot.RuntimeExecution.Pending && snapshot.RuntimeExecution.Gap == "" {
 		snapshot.RuntimeExecution.Gap = "accepted_in_progress"
 	}
