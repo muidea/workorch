@@ -124,6 +124,66 @@ func TestRunStatusProjectsRuntimeExecutionAcceptedNoProgress(t *testing.T) {
 	}
 }
 
+func TestRunStatusProjectsRuntimeExecutionContractViolation(t *testing.T) {
+	t.Parallel()
+
+	run := &runmodel.Run{ID: "run-contract-violation-status", WorkspaceID: "ws-contract-violation-status", State: common.RunStateRunning}
+	stepID := common.StepID("step-contract-violation-status")
+	steps := []*runmodel.Step{
+		{
+			ID:    stepID,
+			RunID: run.ID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateDispatched,
+			Input: map[string]any{
+				"contractViolationRecovery": map[string]any{
+					"violatedRule":     "state_changing_required_missing",
+					"recoverability":   "retry_same_contract",
+					"attempt":          1,
+					"maxAttempts":      2,
+					"sourceStepId":     "step-source",
+					"failureSignature": "rule=state_changing_required_missing",
+				},
+			},
+		},
+	}
+	checkpoints := []*runmodel.RuntimeCheckpoint{
+		{
+			ID:            "checkpoint-contract-violation",
+			WorkspaceID:   run.WorkspaceID,
+			RunID:         run.ID,
+			CurrentStepID: stepID,
+			OccurredAt:    "2026-06-17T01:00:00Z",
+			Data: map[string]any{
+				"event":     "runtime_execute_accepted",
+				"requestId": "request-contract-violation",
+			},
+		},
+	}
+
+	got, err := RunStatus(context.Background(), RunStatusReaders{
+		Runs:        fakeRunStatusRunReader{items: []*runmodel.Run{run}},
+		Steps:       fakeRunStatusStepReader{items: steps},
+		Checkpoints: fakeRunStatusCheckpointReader{items: checkpoints},
+		Tickets:     fakeTicketReader{},
+		Approvals:   fakeApprovalListReader{},
+	}, run.ID)
+	if err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	if got.RuntimeExecution == nil || got.RuntimeExecution.ContractViolation == nil {
+		t.Fatalf("RuntimeExecution.ContractViolation is nil, got %+v", got.RuntimeExecution)
+	}
+	violation := got.RuntimeExecution.ContractViolation
+	if violation.ViolatedRule != "state_changing_required_missing" ||
+		violation.Recoverability != "retry_same_contract" ||
+		violation.Attempt != 1 ||
+		violation.MaxAttempts != 2 ||
+		violation.SourceStepID != "step-source" {
+		t.Fatalf("ContractViolation = %+v, want projected retry state", violation)
+	}
+}
+
 type fakeRunStatusRunReader struct {
 	items []*runmodel.Run
 }

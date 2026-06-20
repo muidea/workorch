@@ -91,7 +91,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 			if boolValue(step.Input[stepInputKeyProviderRetryFollowUp]) && boolValue(assessment["satisfied"]) {
 				return nil
 			}
-			return fmt.Errorf("%w: state-changing llm repair step returned dodAssessment without executable state-changing output", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned dodAssessment without executable state-changing output")
 		}
 		if spec := decisionBlockSpec(output); spec.Reason != "" {
 			return nil
@@ -99,7 +99,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		if spec := approvalBlockSpec(output); spec.Reason != "" {
 			return nil
 		}
-		return fmt.Errorf("%w: state-changing llm repair step returned no state-changing output", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing llm repair step returned no state-changing output")
 	}
 	if graphNodeID(step) == "" {
 		return nil
@@ -108,7 +108,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	if llmExecutionGraphNodeReturnedOnlyGraph(run, step, output) {
-		return fmt.Errorf("%w: execution-stage llm graph node returned executionGraph without concrete output", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationGraphNodeReturnedGraph, "execution-stage llm graph node returned executionGraph without concrete output")
 	}
 	if !graphNodeRequiresStateChangingOutput(step) {
 		return nil
@@ -122,7 +122,7 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if spec := approvalBlockSpec(output); spec.Reason != "" {
 		return nil
 	}
-	return fmt.Errorf("%w: state-changing execution-stage llm graph node returned no state-changing output", common.ErrInvalidArgument)
+	return newRuntimeContractViolationError(contractViolationExecutionNoStateChangingOutput, "state-changing execution-stage llm graph node returned no state-changing output")
 }
 
 func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, output map[string]any) error {
@@ -131,7 +131,7 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 	}
 	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
 		if !graphIsConcreteValidationEvidenceGraph(graph) {
-			return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
 		}
 		if err := validateConcreteValidationBehaviorEvidenceGraph(step, graph); err != nil {
 			return err
@@ -148,9 +148,9 @@ func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, outpu
 		if boolValue(assessment["satisfied"]) {
 			return nil
 		}
-		return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph; plain failed dodAssessment does not satisfy repairActionPackage.requiredOutput")
 	}
-	return fmt.Errorf("%w: concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs", common.ErrInvalidArgument)
+	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair must return bounded shell/command or mcp/tool_call executionGraph or a satisfied dodAssessment with concrete evidenceRefs")
 }
 
 func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph runtimemodel.BlockExecutionGraph) error {
@@ -167,7 +167,7 @@ func validateConcreteValidationBehaviorEvidenceGraph(step *runModel.Step, graph 
 	if graphHasDeclaredConcreteValidationEvidenceNode(graph) {
 		return validateConcreteValidationGraphShellSafety(graph)
 	}
-	return fmt.Errorf("%w: concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute", common.ErrInvalidArgument)
+	return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence repair returned executionGraph without a declared non-static validationEvidence contract; shell/command or mcp/tool_call nodes must declare validationEvidence.mode and validationEvidence.observationType, and controlled_substitute must declare validationEvidence.substituteFor or validationEvidence.substitute")
 }
 
 func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutionGraph) error {
@@ -180,14 +180,14 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 			continue
 		}
 		if shellCommandLineContainsProcessTermination(commandLine) {
-			return fmt.Errorf("%w: concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must use non-destructive bounded validation; shell process termination is not allowed")
 		}
 		if shellCommandLineStartsDetachedProcess(commandLine) {
-			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute")
 		}
 		allowIsolatedWrites := validationEvidenceModeAllowsIsolatedTempWrites(nodeValidationEvidenceMode(node))
 		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowIsolatedWrites) {
-			return fmt.Errorf("%w: concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded")
 		}
 	}
 	return nil

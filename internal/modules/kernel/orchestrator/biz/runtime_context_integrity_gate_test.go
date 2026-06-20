@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"testing"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -59,6 +60,26 @@ func TestStateChangingRepairRequiredUsesStructuredContractViolationType(t *testi
 
 	if !stateChangingRepairRequired(nil, step, nil) {
 		t.Fatalf("stateChangingRepairRequired = false, want true from structured contractViolationType")
+	}
+}
+
+func TestAttachContractViolationTypeUsesStructuredValidationError(t *testing.T) {
+	err := newRuntimeContractViolationError(contractViolationRepairNoStateChangingOutput, "state-changing output is required")
+	if !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("structured contract violation error does not wrap ErrInvalidArgument: %v", err)
+	}
+	output := map[string]any{}
+
+	attachContractViolationType(output, err)
+
+	if got := output[outputKeyContractViolationType]; got != contractViolationRepairNoStateChangingOutput {
+		t.Fatalf("contractViolationType = %v, want %s", got, contractViolationRepairNoStateChangingOutput)
+	}
+	if got := output["contractViolationRule"]; got != contractViolationRuleStateChangingRequiredMissing {
+		t.Fatalf("contractViolationRule = %v, want %s", got, contractViolationRuleStateChangingRequiredMissing)
+	}
+	if got := output["contractViolationRecoverability"]; got != "retry_same_contract" {
+		t.Fatalf("contractViolationRecoverability = %v, want retry_same_contract", got)
 	}
 }
 

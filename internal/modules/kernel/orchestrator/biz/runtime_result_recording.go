@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -282,6 +283,11 @@ func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx
 	}
 	if _, _, err := validatedCompletionDoDAssessment(run, output); err == nil {
 		return nil
+	} else {
+		var violation runtimeContractViolationError
+		if errors.As(err, &violation) {
+			return nil
+		}
 	}
 	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
 		return nil

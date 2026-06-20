@@ -26,6 +26,30 @@ func UpdateRuntimeConfiguration(cmd UpdateRuntimeConfigurationCommand) (ServiceC
 		}
 		cfg.Runtime.MaxProviderRetryAttempts = *cmd.MaxProviderRetryAttempts
 	}
+	if cmd.MaxContractViolationRetriesPerStep != nil {
+		if *cmd.MaxContractViolationRetriesPerStep <= 0 {
+			return ServiceConfiguration{}, fmt.Errorf("%w: maxContractViolationRetriesPerStep must be greater than zero", common.ErrInvalidArgument)
+		}
+		cfg.Runtime.MaxContractViolationRetriesPerStep = *cmd.MaxContractViolationRetriesPerStep
+	}
+	if cmd.MaxContractViolationRetriesPerRun != nil {
+		if *cmd.MaxContractViolationRetriesPerRun <= 0 {
+			return ServiceConfiguration{}, fmt.Errorf("%w: maxContractViolationRetriesPerRun must be greater than zero", common.ErrInvalidArgument)
+		}
+		cfg.Runtime.MaxContractViolationRetriesPerRun = *cmd.MaxContractViolationRetriesPerRun
+	}
+	if cmd.MaxRepeatedContractViolationSignature != nil {
+		if *cmd.MaxRepeatedContractViolationSignature <= 0 {
+			return ServiceConfiguration{}, fmt.Errorf("%w: maxRepeatedContractViolationSignature must be greater than zero", common.ErrInvalidArgument)
+		}
+		cfg.Runtime.MaxRepeatedContractViolationSignature = *cmd.MaxRepeatedContractViolationSignature
+	}
+	if cmd.MaxConsecutiveContractViolationNoShapeChange != nil {
+		if *cmd.MaxConsecutiveContractViolationNoShapeChange <= 0 {
+			return ServiceConfiguration{}, fmt.Errorf("%w: maxConsecutiveContractViolationNoShapeChange must be greater than zero", common.ErrInvalidArgument)
+		}
+		cfg.Runtime.MaxConsecutiveContractViolationNoShapeChange = *cmd.MaxConsecutiveContractViolationNoShapeChange
+	}
 	if cmd.ShellCommandTimeout != nil {
 		timeout := strings.TrimSpace(*cmd.ShellCommandTimeout)
 		if timeout != "" {

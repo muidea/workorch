@@ -58,6 +58,9 @@ func (c *checkpointSubsystem) recordStepCheckpoint(ctx context.Context, run *run
 	if signature := stringFromMap(step.Output, failureOutputKeySignature); signature != "" {
 		data[failureOutputKeySignature] = signature
 	}
+	if violation := mapFromValue(step.Output[stepOutputKeyContractViolation]); len(violation) > 0 {
+		data[stepOutputKeyContractViolation] = violation
+	}
 	if nodeID := graphNodeID(step); nodeID != "" {
 		data[stepInputKeyGraphNodeID] = nodeID
 	}

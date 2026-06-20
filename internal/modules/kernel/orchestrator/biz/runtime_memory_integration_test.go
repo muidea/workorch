@@ -155,6 +155,49 @@ func TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsTransientProviderRetry(t *
 	}
 }
 
+func TestRuntimeOrchestrator_RuntimeMemoryWriteRejectsContractViolationDiagnostic(t *testing.T) {
+	requests, err := runtimeMemoryWriteRequests(map[string]any{
+		"memoryWrites": []map[string]any{
+			{
+				"memoryType": memorycommon.MemoryTypeProjectContext,
+				"summary":    "contractViolationRecovery retry detail",
+				"content":    "violatedRule: state_changing_required_missing\nrecoverability: retry_same_contract",
+				"tags":       []string{"contract_violation", "diagnostic_only"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeMemoryWriteRequests: %v", err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want contract violation diagnostic rejected", requests)
+	}
+}
+
+func TestRuntimeOrchestrator_ContractViolationRetryDoesNotCreateRepairLessonMemory(t *testing.T) {
+	runID := common.RunID("run-contract-violation-memory")
+	step := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/contract-retry-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			"failedStepKind":                  "file/read",
+			"failureReason":                   "open target: no such file",
+			"contractViolationRetry":          true,
+			stepInputKeyContractViolationRecovery: map[string]any{
+				"violatedRule":   "state_changing_required_missing",
+				"recoverability": "retry_same_contract",
+			},
+		},
+	}
+
+	requests := appendNecessaryOutputMemoryWriteRequests(nil, &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-memory"}, step, map[string]any{"status": "completed"})
+	if len(requests) != 0 {
+		t.Fatalf("memory requests = %+v, want no implicit repair lesson for contract violation retry", requests)
+	}
+}
+
 func TestRuntimeOrchestrator_MCPFailureWritesBoundedToolFeedback(t *testing.T) {
 	runID := common.RunID("run-mcp-tool-feedback")
 	step := &runmodel.Step{

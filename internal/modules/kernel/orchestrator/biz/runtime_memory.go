@@ -161,6 +161,9 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 	if runtimeMemoryWriteHasTransientTag(request.Tags) {
 		return false
 	}
+	if runtimeMemoryWriteHasDiagnosticOnlyText(request) {
+		return false
+	}
 	switch request.MemoryType {
 	case memorycommon.MemoryTypeProjectContext:
 		return true
@@ -184,7 +187,7 @@ func shouldPersistRuntimeMemoryWrite(request runtimeMemoryWriteRequest) bool {
 func runtimeMemoryWriteHasTransientTag(tags []string) bool {
 	for _, tag := range tags {
 		switch strings.TrimSpace(strings.ToLower(tag)) {
-		case "provider_retry", "transient", "runtime_plumbing", "schema_invalid", "parse_error", "rejected_output":
+		case "provider_retry", "transient", "runtime_plumbing", "schema_invalid", "parse_error", "rejected_output", "diagnostic_only", "contract_violation":
 			return true
 		}
 	}
@@ -195,7 +198,14 @@ func runtimeMemoryWriteHasTransientText(request runtimeMemoryWriteRequest) bool 
 	return runtimeMemoryTextHasTransientSignal(request.Summary + "\n" + request.Content)
 }
 
+func runtimeMemoryWriteHasDiagnosticOnlyText(request runtimeMemoryWriteRequest) bool {
+	return runtimeMemoryTextHasDiagnosticOnlySignal(request.Summary + "\n" + request.Content + "\n" + strings.Join(request.Tags, "\n"))
+}
+
 func runtimeMemoryTextHasTransientSignal(text string) bool {
+	if runtimeMemoryTextHasDiagnosticOnlySignal(text) {
+		return true
+	}
 	text = strings.ToLower(text)
 	for _, token := range []string{
 		"provider_retry",
@@ -226,6 +236,36 @@ func runtimeMemoryTextHasTransientSignal(text string) bool {
 		"修复失败",
 		"无法通过进一步补丁",
 		"非实质性变更",
+	} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryTextHasDiagnosticOnlySignal(text string) bool {
+	text = strings.ToLower(text)
+	for _, token := range []string{
+		"contractviolationrecovery",
+		"contractviolationtype",
+		"runtime_contract_violation",
+		"contract_violation_retry",
+		"contract violation retry",
+		"contract violation recovery",
+		"rejected diagnostic",
+		"diagnostic-only",
+		"diagnostic only",
+		"llm output was rejected by the runtime contract",
+		"required_output_missing",
+		"wrong_output_shape",
+		"accepted_kind_mismatch",
+		"state_changing_required_missing",
+		"concrete_validation_contract_missing",
+		"dod_assessment_missing_evidence_refs",
+		"coverage_map_incomplete",
+		"traceability_ref_mismatch",
+		"decision_blocked_when_actionable",
 	} {
 		if strings.Contains(text, token) {
 			return true
@@ -272,6 +312,9 @@ func appendNecessaryOutputMemoryWriteRequests(requests []runtimeMemoryWriteReque
 
 func appendRepairLessonMemoryWrite(requests []runtimeMemoryWriteRequest, _ *runModel.Run, step *runModel.Step, output map[string]any) []runtimeMemoryWriteRequest {
 	if step == nil || step.Input == nil || !boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) || hasMemoryWriteType(requests, memorycommon.MemoryTypeExecutionLesson) {
+		return requests
+	}
+	if boolValue(step.Input["contractViolationRetry"]) || len(mapFromValue(step.Input[stepInputKeyContractViolationRecovery])) > 0 {
 		return requests
 	}
 	lesson := repairLessonContentHint(step, output)

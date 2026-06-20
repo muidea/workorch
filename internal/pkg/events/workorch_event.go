@@ -103,6 +103,11 @@ type AutoGovernanceEvent struct {
 	Data     AutoGovernancePayloadData
 }
 
+type OrchestratorContractViolationEvent struct {
+	envelope Envelope
+	Data     map[string]any
+}
+
 var workorchTopics = []string{
 	workspaceevents.TopicWorkspaceCreated,
 	workspaceevents.TopicWorkspaceStateChanged,
@@ -128,6 +133,9 @@ var workorchTopics = []string{
 	orchestratorevents.TopicPatchApplied,
 	orchestratorevents.TopicPatchFailed,
 	orchestratorevents.TopicPatchReverted,
+	orchestratorevents.TopicOrchestratorContractViolationRecorded,
+	orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+	orchestratorevents.TopicOrchestratorContractViolationEscalated,
 	orchestratorevents.TopicArtifactContinuationCreated,
 	orchestratorevents.TopicArtifactContinuationChunkRecorded,
 	orchestratorevents.TopicArtifactContinuationChunkRejected,
@@ -245,6 +253,14 @@ func DecodeWorkorchEvent(envelope Envelope) (WorkorchEvent, bool) {
 		return event, true
 	case orchestratorevents.TopicPatchPreviewed, orchestratorevents.TopicPatchApplied, orchestratorevents.TopicPatchFailed, orchestratorevents.TopicPatchReverted:
 		event, ok := DecodePatchEvent(envelope)
+		if !ok {
+			return nil, false
+		}
+		return event, true
+	case orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		orchestratorevents.TopicOrchestratorContractViolationEscalated:
+		event, ok := DecodeOrchestratorContractViolationEvent(envelope)
 		if !ok {
 			return nil, false
 		}
@@ -565,6 +581,26 @@ func DecodeArtifactContinuationEvent(envelope Envelope) (ArtifactContinuationEve
 	return ArtifactContinuationEvent{envelope: envelope, Data: cloneStringAnyMap(envelope.Payload)}, true
 }
 
+func DecodeOrchestratorContractViolationEvent(envelope Envelope) (OrchestratorContractViolationEvent, bool) {
+	switch envelope.Topic {
+	case orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		orchestratorevents.TopicOrchestratorContractViolationEscalated:
+	default:
+		return OrchestratorContractViolationEvent{}, false
+	}
+	spec, ok := WorkorchEventContract(envelope.Topic)
+	if !ok || !ValidateWorkorchEventVersion(envelope.Topic, envelope.Version) {
+		return OrchestratorContractViolationEvent{}, false
+	}
+	if envelope.Payload == nil {
+		return OrchestratorContractViolationEvent{}, false
+	}
+	envelope = cloneEnvelope(envelope)
+	envelope.Version = spec.CurrentVersion
+	return OrchestratorContractViolationEvent{envelope: envelope, Data: cloneStringAnyMap(envelope.Payload)}, true
+}
+
 func DecodeMemoryEvent(envelope Envelope) (MemoryEvent, bool) {
 	if envelope.Topic != memoryevents.TopicMemoryCreated && envelope.Topic != memoryevents.TopicMemoryUpdated && envelope.Topic != memoryevents.TopicMemoryDeleted {
 		return MemoryEvent{}, false
@@ -740,6 +776,14 @@ func (e ArtifactContinuationEvent) Envelope() Envelope {
 }
 
 func (e ArtifactContinuationEvent) Topic() string {
+	return e.envelope.Topic
+}
+
+func (e OrchestratorContractViolationEvent) Envelope() Envelope {
+	return cloneEnvelope(e.envelope)
+}
+
+func (e OrchestratorContractViolationEvent) Topic() string {
 	return e.envelope.Topic
 }
 

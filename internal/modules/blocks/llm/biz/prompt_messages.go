@@ -2075,22 +2075,22 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 	snapshotBudget := promptSnapshotBudgetForRequest(request)
 	if !isDecisionSchemaRequest(request) {
 		if request.Repair != nil {
-			return marshalPromptSection("Current Requested Action", map[string]any{
+			return marshalCurrentActionPromptSection(map[string]any{
 				"type": "repair_structured_json",
 				"requirements": []string{
 					"Return one valid JSON object matching " + schemaNameForPrompt(request),
 					"Keep the original structured output intent unless schema correction requires a change",
 				},
-			})
+			}, request.Input)
 		}
-		return marshalPromptSection("Current Requested Action", map[string]any{
+		return marshalCurrentActionPromptSection(map[string]any{
 			"type": "generate_structured_json",
 			"requirements": []string{
 				"Match " + schemaNameForPrompt(request),
 				"Use the supplied input instructions and output schema",
 				"Do not emit execution-planning fields unless explicitly requested by the output schema",
 			},
-		})
+		}, request.Input)
 	}
 	if request.Repair != nil {
 		requirements := []string{
@@ -2100,13 +2100,13 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		if isAssessmentOnlyDecisionRequest(request) {
 			requirements = append(requirements, "Do not include executionGraph or any executable work fields")
 		}
-		return marshalPromptSection("Current Requested Action", map[string]any{
+		return marshalCurrentActionPromptSection(map[string]any{
 			"type":         "repair_invalid_json",
 			"requirements": requirements,
-		})
+		}, request.Input)
 	}
 	if isAssessmentOnlyDecisionRequest(request) {
-		return marshalPromptSection("Current Requested Action", map[string]any{
+		return marshalCurrentActionPromptSection(map[string]any{
 			"type": "assess_only",
 			"requirements": []string{
 				"Assessment-only mode is active",
@@ -2121,11 +2121,11 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"When evidence is insufficient but the missing work can be handled by later runtime repair or replan, return failed with dodAssessment.nextActions instead of asking the user to choose the execution target",
 				"Do not return executionGraph; do not include shellCommands, patchRequests, mcpToolCalls, memoryWrites, nextAction, or executable work",
 			},
-		})
+		}, request.Input)
 	}
 	if concreteValidationDecisionRequest(request.Input) {
 		required := concreteValidationDecisionRequiredOutput(request.Input, snapshotBudget)
-		return marshalPromptSection("Current Requested Action", map[string]any{
+		return marshalCurrentActionPromptSection(map[string]any{
 			"type":           "produce_concrete_validation_evidence_or_failed_assessment",
 			"requiredOutput": required,
 			"requirements": []string{
@@ -2137,7 +2137,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 				"Validation evidence must cite concrete runtime observations, controlled substitutes, executable contracts, or dynamic execution observations when requiredOutput declares validationEvidence rules",
 				"If an external credential, permission, unavailable provider, or runtime configuration is truly required, declare it through requiredDecision/requiredApproval with structured context",
 			},
-		})
+		}, request.Input)
 	}
 	if stateChangingDecisionRequest(request.Input) {
 		required := stateChangingDecisionRequiredOutput(request.Input, snapshotBudget)
@@ -2176,7 +2176,7 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 		if len(outputContract) > 0 {
 			section["outputDecisionContract"] = outputContract
 		}
-		return marshalPromptSection("Current Requested Action", section)
+		return marshalCurrentActionPromptSection(section, request.Input)
 	}
 	requirements := []string{
 		"Use runtimeCapabilities only",
@@ -2193,10 +2193,35 @@ func currentActionPromptSection(request llmmodels.ProviderRequest) string {
 			"Do not weaken prior Goal or DoD constraints, remove valid acceptance evidence, or relax the requested outcome to make the current run pass",
 		)
 	}
-	return marshalPromptSection("Current Requested Action", map[string]any{
+	return marshalCurrentActionPromptSection(map[string]any{
 		"type":         "plan_next_step",
 		"requirements": requirements,
-	})
+	}, request.Input)
+}
+
+func marshalCurrentActionPromptSection(section map[string]any, input map[string]any) string {
+	if section == nil {
+		section = map[string]any{}
+	}
+	if recovery := contractViolationRecoveryPromptPayload(input); len(recovery) > 0 {
+		section["contractViolationRecovery"] = recovery
+		requirements := stringSliceFromAny(section["requirements"])
+		requirements = append(requirements,
+			"The previous LLM output was rejected by the runtime contract before side effects were executed; use contractViolationRecovery as the precise correction target.",
+			"Do not repeat contractViolationRecovery.actualOutputSummary; return one valid output that satisfies contractViolationRecovery.expectedContract and the current requiredOutput.",
+		)
+		section["requirements"] = requirements
+	}
+	return marshalPromptSection("Current Requested Action", section)
+}
+
+func contractViolationRecoveryPromptPayload(input map[string]any) map[string]any {
+	recovery := recordFromAny(input["contractViolationRecovery"])
+	if len(recovery) == 0 {
+		return nil
+	}
+	value := budgetProviderValue(recovery, 0, 2048, 8, 16, 3)
+	return recordFromAny(value)
 }
 
 func concreteValidationDecisionRequest(input map[string]any) bool {

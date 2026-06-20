@@ -488,6 +488,115 @@ func (e *eventSubsystem) publishStepState(ctx context.Context, run *runModel.Run
 	return nil
 }
 
+func (e *eventSubsystem) publishContractViolationRecorded(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
+	if e == nil || e.hub == nil || run == nil || step == nil {
+		return nil
+	}
+	violation := contractViolationFromFailedOutput(step)
+	if len(violation) == 0 {
+		return nil
+	}
+	return e.publishContractViolationChanged(ctx, orchestratorevents.TopicOrchestratorContractViolationRecorded, run, step, "", "", violation, nil)
+}
+
+func (e *eventSubsystem) publishContractViolationRetryRequested(ctx context.Context, run *runModel.Run, sourceStep *runModel.Step, retryStepID common.StepID, violation map[string]any) error {
+	if e == nil || e.hub == nil || run == nil || sourceStep == nil || retryStepID == "" {
+		return nil
+	}
+	return e.publishContractViolationChanged(ctx, orchestratorevents.TopicOrchestratorContractViolationRetryRequested, run, sourceStep, retryStepID, "", violation, nil)
+}
+
+func (e *eventSubsystem) publishContractViolationEscalated(ctx context.Context, run *runModel.Run, sourceStep *runModel.Step, ticketID common.TicketID, violation map[string]any, context map[string]any) error {
+	if e == nil || e.hub == nil || run == nil || sourceStep == nil {
+		return nil
+	}
+	return e.publishContractViolationChanged(ctx, orchestratorevents.TopicOrchestratorContractViolationEscalated, run, sourceStep, "", ticketID, violation, context)
+}
+
+func (e *eventSubsystem) publishContractViolationChanged(
+	ctx context.Context,
+	topic string,
+	run *runModel.Run,
+	sourceStep *runModel.Step,
+	retryStepID common.StepID,
+	ticketID common.TicketID,
+	violation map[string]any,
+	context map[string]any,
+) error {
+	if e == nil || e.hub == nil || run == nil || sourceStep == nil || len(violation) == 0 {
+		return nil
+	}
+	payload := cloneStepPayload(violation)
+	payload["contractViolation"] = cloneStepPayload(violation)
+	payload["workspaceId"] = string(run.WorkspaceID)
+	payload["runId"] = string(run.ID)
+	payload["sourceStepId"] = string(sourceStep.ID)
+	payload["stepId"] = string(sourceStep.ID)
+	payload["topic"] = topic
+	payload["summary"] = contractViolationEventSummary(topic, violation)
+	if retryStepID != "" {
+		payload["retryStepId"] = string(retryStepID)
+	}
+	if ticketID != "" {
+		payload["ticketId"] = string(ticketID)
+	}
+	if len(context) > 0 {
+		payload["context"] = cloneStepPayload(context)
+	}
+	return e.hub.Publish(ctx, events.Envelope{
+		ID:           contractViolationEventID(topic, run, sourceStep, retryStepID, ticketID, violation),
+		Version:      events.WorkorchEventVersion,
+		Topic:        topic,
+		SourceModule: modulecommon.ModuleID,
+		SubjectType:  "contract_violation",
+		SubjectID:    contractViolationSubjectID(sourceStep, violation),
+		WorkspaceID:  string(run.WorkspaceID),
+		RunID:        string(run.ID),
+		StepID:       string(sourceStep.ID),
+		Payload:      payload,
+	})
+}
+
+func contractViolationEventSummary(topic string, violation map[string]any) string {
+	action := strings.TrimPrefix(strings.TrimSpace(topic), "/orchestrator/contract_violation/")
+	if action == "" {
+		action = "changed"
+	}
+	rule := strings.TrimSpace(stringFromMap(violation, "violatedRule"))
+	if rule == "" {
+		rule = "contract_violation"
+	}
+	return "contract violation " + action + ": " + rule
+}
+
+func contractViolationSubjectID(sourceStep *runModel.Step, violation map[string]any) string {
+	if id := strings.TrimSpace(stringFromMap(violation, "id")); id != "" {
+		return id
+	}
+	if sourceStep != nil {
+		return fmt.Sprintf("%s/contract-violation", sourceStep.ID)
+	}
+	return "contract-violation"
+}
+
+func contractViolationEventID(topic string, run *runModel.Run, sourceStep *runModel.Step, retryStepID common.StepID, ticketID common.TicketID, violation map[string]any) string {
+	subjectID := contractViolationSubjectID(sourceStep, violation)
+	suffix := strings.TrimPrefix(strings.TrimSpace(topic), "/orchestrator/contract_violation/")
+	if suffix == "" {
+		suffix = "changed"
+	}
+	switch {
+	case retryStepID != "":
+		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, retryStepID)
+	case ticketID != "":
+		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, ticketID)
+	case run != nil:
+		return fmt.Sprintf("%s/event/%s/%s", subjectID, suffix, run.ID)
+	default:
+		return fmt.Sprintf("%s/event/%s", subjectID, suffix)
+	}
+}
+
 func (e *eventSubsystem) publishRuntimeStepProgress(ctx context.Context, run *runModel.Run, step *runModel.Step, event string, data map[string]any) error {
 	if e.hub == nil || run == nil || step == nil {
 		return nil

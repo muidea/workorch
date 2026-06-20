@@ -29,13 +29,25 @@ func repositoryConfiguration(cfg workorchconfig.Config) RepositoryConfiguration 
 }
 
 func runtimeConfiguration(cfg workorchconfig.Config) RuntimeConfiguration {
+	policy := workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{
+		MaxRuntimeRepairAttempts:                     cfg.Runtime.MaxRuntimeRepairAttempts,
+		MaxProviderRetryAttempts:                     cfg.Runtime.MaxProviderRetryAttempts,
+		MaxContractViolationRetriesPerStep:           cfg.Runtime.MaxContractViolationRetriesPerStep,
+		MaxContractViolationRetriesPerRun:            cfg.Runtime.MaxContractViolationRetriesPerRun,
+		MaxRepeatedContractViolationSignature:        cfg.Runtime.MaxRepeatedContractViolationSignature,
+		MaxConsecutiveContractViolationNoShapeChange: cfg.Runtime.MaxConsecutiveContractViolationNoShapeChange,
+	})
 	return RuntimeConfiguration{
-		DefaultSoulID:            strings.TrimSpace(cfg.Runtime.DefaultSoulID),
-		MaxRuntimeRepairAttempts: workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts}).MaxRuntimeRepairAttempts,
-		MaxProviderRetryAttempts: workorchruntimepolicy.NormalizeRuntimePolicy(workorchruntimepolicy.RuntimePolicy{MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts}).MaxProviderRetryAttempts,
-		ShellCommandTimeout:      runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
-		Git:                      runtimeGitConfiguration(cfg.Runtime.Git),
-		LLMOutput:                runtimeLLMOutputConfiguration(cfg.Runtime.LLMOutput),
+		DefaultSoulID:                                strings.TrimSpace(cfg.Runtime.DefaultSoulID),
+		MaxRuntimeRepairAttempts:                     policy.MaxRuntimeRepairAttempts,
+		MaxProviderRetryAttempts:                     policy.MaxProviderRetryAttempts,
+		MaxContractViolationRetriesPerStep:           policy.MaxContractViolationRetriesPerStep,
+		MaxContractViolationRetriesPerRun:            policy.MaxContractViolationRetriesPerRun,
+		MaxRepeatedContractViolationSignature:        policy.MaxRepeatedContractViolationSignature,
+		MaxConsecutiveContractViolationNoShapeChange: policy.MaxConsecutiveContractViolationNoShapeChange,
+		ShellCommandTimeout:                          runtimeShellCommandTimeout(cfg.Runtime.ShellCommandTimeout),
+		Git:                                          runtimeGitConfiguration(cfg.Runtime.Git),
+		LLMOutput:                                    runtimeLLMOutputConfiguration(cfg.Runtime.LLMOutput),
 	}
 }
 

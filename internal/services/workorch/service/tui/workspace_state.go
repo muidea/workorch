@@ -936,6 +936,14 @@ func cloneRuntimeExecutionInfoPtr(input *backend.RuntimeExecutionInfo) *backend.
 		return nil
 	}
 	ret := *input
+	if input.ContractViolation != nil {
+		violation := *input.ContractViolation
+		violation.ExpectedContract = clonePayloadMap(input.ContractViolation.ExpectedContract)
+		violation.ActualOutputSummary = clonePayloadMap(input.ContractViolation.ActualOutputSummary)
+		violation.ForbiddenRepeat = append([]string(nil), input.ContractViolation.ForbiddenRepeat...)
+		violation.SourceRefs = append([]string(nil), input.ContractViolation.SourceRefs...)
+		ret.ContractViolation = &violation
+	}
 	return &ret
 }
 

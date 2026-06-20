@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -29,9 +30,10 @@ func MapRuntimeExecutionState(steps []presenter.StepView, checkpoints []readmode
 		return nil
 	}
 	state := &readmodelcore.RuntimeExecutionState{
-		StepID:    step.ID,
-		StepKind:  CanonicalStepKind(step.Kind),
-		StepState: step.State,
+		StepID:            step.ID,
+		StepKind:          CanonicalStepKind(step.Kind),
+		StepState:         step.State,
+		ContractViolation: runtimeExecutionContractViolationFromStep(step),
 	}
 	for _, checkpoint := range orderedRuntimeCheckpoints(checkpoints) {
 		if checkpoint.CurrentStepID != step.ID {
@@ -138,6 +140,9 @@ func applyRuntimeExecutionRecoveryPolicy(state *readmodelcore.RuntimeExecutionSt
 	if safety := strings.TrimSpace(readModelStringValue(checkpoint.Data["recoverySafety"])); safety != "" {
 		state.RecoverySafety = safety
 	}
+	if violation := runtimeExecutionContractViolationFromValue(checkpoint.Data["contractViolation"]); violation != nil {
+		state.ContractViolation = violation
+	}
 }
 
 func applyRuntimeExecutionProgress(state *readmodelcore.RuntimeExecutionState, checkpoint readmodelcore.RuntimeCheckpoint, event string) {
@@ -152,6 +157,54 @@ func applyRuntimeExecutionProgress(state *readmodelcore.RuntimeExecutionState, c
 	if requestID := strings.TrimSpace(readModelStringValue(checkpoint.Data["requestId"])); requestID != "" {
 		state.RequestID = requestID
 	}
+}
+
+func runtimeExecutionContractViolationFromStep(step *presenter.StepView) *runtimemodel.ContractViolation {
+	if step == nil {
+		return nil
+	}
+	if violation := runtimeExecutionContractViolationFromValue(step.Input["contractViolationRecovery"]); violation != nil {
+		return violation
+	}
+	if violation := runtimeExecutionContractViolationFromValue(step.Output["contractViolation"]); violation != nil {
+		return violation
+	}
+	return nil
+}
+
+func runtimeExecutionContractViolationFromValue(value any) *runtimemodel.ContractViolation {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case runtimemodel.ContractViolation:
+		ret := typed
+		if runtimeExecutionContractViolationEmpty(ret) {
+			return nil
+		}
+		return &ret
+	case *runtimemodel.ContractViolation:
+		if typed == nil || runtimeExecutionContractViolationEmpty(*typed) {
+			return nil
+		}
+		ret := *typed
+		return &ret
+	}
+	data, err := json.Marshal(value)
+	if err != nil || len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var ret runtimemodel.ContractViolation
+	if err := json.Unmarshal(data, &ret); err != nil || runtimeExecutionContractViolationEmpty(ret) {
+		return nil
+	}
+	return &ret
+}
+
+func runtimeExecutionContractViolationEmpty(item runtimemodel.ContractViolation) bool {
+	return strings.TrimSpace(item.ID) == "" &&
+		strings.TrimSpace(item.ViolatedRule) == "" &&
+		strings.TrimSpace(item.FailureSignature) == "" &&
+		strings.TrimSpace(item.Recoverability) == ""
 }
 
 func deriveRuntimeExecutionGap(state *readmodelcore.RuntimeExecutionState) {

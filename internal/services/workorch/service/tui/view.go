@@ -540,6 +540,7 @@ func renderRuntimeExecutionCompact(item *backend.RuntimeExecutionInfo, width int
 		return ""
 	}
 	parts := compactStrings([]string{
+		runtimeExecutionContractViolationText(item),
 		runtimeExecutionPendingText(item),
 		runtimeExecutionGapText(item),
 		runtimeExecutionStepText(item),
@@ -562,6 +563,7 @@ func runtimeExecutionStatusText(item *backend.RuntimeExecutionInfo) string {
 		return ""
 	}
 	parts := compactStrings([]string{
+		runtimeExecutionContractViolationText(item),
 		runtimeExecutionPendingText(item),
 		runtimeExecutionGapText(item),
 		runtimeExecutionStepText(item),
@@ -580,6 +582,30 @@ func runtimeExecutionPendingText(item *backend.RuntimeExecutionInfo) string {
 		return "runtime finalized"
 	}
 	return ""
+}
+
+func runtimeExecutionContractViolationText(item *backend.RuntimeExecutionInfo) string {
+	if item == nil || item.ContractViolation == nil {
+		return ""
+	}
+	violation := item.ContractViolation
+	parts := compactStrings([]string{
+		"contract violation",
+		violation.ViolatedRule,
+		violation.Recoverability,
+		runtimeExecutionContractViolationAttemptText(violation.Attempt, violation.MaxAttempts),
+	})
+	return strings.Join(parts, " ")
+}
+
+func runtimeExecutionContractViolationAttemptText(attempt int, maxAttempts int) string {
+	if attempt <= 0 {
+		return ""
+	}
+	if maxAttempts > 0 {
+		return fmt.Sprintf("attempt %d/%d", attempt, maxAttempts)
+	}
+	return fmt.Sprintf("attempt %d", attempt)
 }
 
 func runtimeExecutionGapText(item *backend.RuntimeExecutionInfo) string {

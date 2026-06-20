@@ -398,6 +398,7 @@ func runtimeExecutionInfoFromClient(input *client.RuntimeExecution) *RuntimeExec
 		StepState:           common.StepState(input.StepState),
 		RequestID:           input.RequestID,
 		QueueKey:            input.QueueKey,
+		ContractViolation:   input.ContractViolation,
 		AcceptedAt:          input.AcceptedAt,
 		LastProgressAt:      input.LastProgressAt,
 		LastProgressEvent:   input.LastProgressEvent,

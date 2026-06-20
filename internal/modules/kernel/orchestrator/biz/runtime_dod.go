@@ -897,7 +897,7 @@ func llmDecisionCompletionStateFromOutput(output map[string]any) string {
 func validateDoDAssessmentItems(value any) error {
 	items, ok := doDAssessmentItemMaps(value)
 	if !ok || len(items) == 0 {
-		return fmt.Errorf("%w: dodAssessment.items are required", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.items are required")
 	}
 	for _, item := range items {
 		name, _ := item["item"].(string)
@@ -905,10 +905,10 @@ func validateDoDAssessmentItems(value any) error {
 		name = strings.TrimSpace(name)
 		state = strings.TrimSpace(state)
 		if name == "" || state == "" {
-			return fmt.Errorf("%w: dodAssessment item and state are required", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment item and state are required")
 		}
 		if state == "satisfied" && len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
-			return fmt.Errorf("%w: satisfied dodAssessment item requires evidenceRefs", common.ErrInvalidArgument)
+			return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, "satisfied dodAssessment item requires evidenceRefs")
 		}
 	}
 	return nil
@@ -942,10 +942,10 @@ func validateDoDAssessmentHasNoOpenEvidenceGaps(assessment map[string]any) error
 		}
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
 		if state != "satisfied" {
-			return fmt.Errorf("%w: required dodAssessment.branchCoverage item %q is not satisfied", common.ErrInvalidArgument, name)
+			return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, fmt.Sprintf("required dodAssessment.branchCoverage item %q is not satisfied", name))
 		}
 		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
-			return fmt.Errorf("%w: satisfied dodAssessment.branchCoverage item %q requires evidenceRefs", common.ErrInvalidArgument, name)
+			return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, fmt.Sprintf("satisfied dodAssessment.branchCoverage item %q requires evidenceRefs", name))
 		}
 	}
 	return nil
@@ -958,7 +958,7 @@ func validateDoDAssessmentCoversRunDoD(run *runModel.Run, assessment map[string]
 	}
 	assessmentItems, ok := doDAssessmentItemMaps(assessment["items"])
 	if !ok || len(assessmentItems) == 0 {
-		return fmt.Errorf("%w: dodAssessment.items are required", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.items are required")
 	}
 	normalizedAssessmentItems := make([]string, 0, len(assessmentItems))
 	for _, item := range assessmentItems {
@@ -1052,25 +1052,25 @@ func validatedGoalCoverageItems(assessment map[string]any) ([]string, error) {
 
 func validatedGoalCoverageItemCoverage(assessment map[string]any) ([]normalizedDoDItem, error) {
 	if assessment == nil {
-		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements", common.ErrInvalidArgument)
+		return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements")
 	}
 	coverage := mapFromValue(assessment["goalCoverage"])
 	if len(coverage) == 0 {
 		coverage = mapFromValue(assessment["goalOutcomeCoverage"])
 	}
 	if len(coverage) == 0 {
-		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements", common.ErrInvalidArgument)
+		return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage is required when Goal has uncovered leaf requirements")
 	}
 	satisfied, ok := coverage["satisfied"].(bool)
 	if !ok {
-		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage.satisfied is required", common.ErrInvalidArgument)
+		return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage.satisfied is required")
 	}
 	if !satisfied {
-		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage is not satisfied", common.ErrInvalidArgument)
+		return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage is not satisfied")
 	}
 	items, ok := doDAssessmentItemMaps(coverage["items"])
 	if !ok || len(items) == 0 {
-		return nil, fmt.Errorf("%w: dodAssessment.goalCoverage.items are required", common.ErrInvalidArgument)
+		return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage.items are required")
 	}
 	ret := make([]normalizedDoDItem, 0, len(items))
 	for _, item := range items {
@@ -1082,13 +1082,13 @@ func validatedGoalCoverageItemCoverage(assessment map[string]any) ([]normalizedD
 		))
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(item, "state")))
 		if name == "" || state == "" {
-			return nil, fmt.Errorf("%w: dodAssessment.goalCoverage item and state are required", common.ErrInvalidArgument)
+			return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.goalCoverage item and state are required")
 		}
 		if state != "satisfied" {
-			return nil, fmt.Errorf("%w: dodAssessment.goalCoverage contains unsatisfied item %q", common.ErrInvalidArgument, name)
+			return nil, newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, fmt.Sprintf("dodAssessment.goalCoverage contains unsatisfied item %q", name))
 		}
 		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
-			return nil, fmt.Errorf("%w: satisfied dodAssessment.goalCoverage item requires evidenceRefs", common.ErrInvalidArgument)
+			return nil, newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, "satisfied dodAssessment.goalCoverage item requires evidenceRefs")
 		}
 		ret = append(ret, normalizedDoDItem{
 			id:         strings.TrimSpace(firstNonEmptyString(stringFromMap(item, "goalRequirementId"), stringFromMap(item, "id"))),
@@ -1122,7 +1122,7 @@ func validateDoDAssessmentCoversRequiredProfileDimensions(run *runModel.Run, ass
 			continue
 		}
 		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 {
-			return fmt.Errorf("%w: satisfied dodAssessment.acceptanceDimensions item %q requires evidenceRefs", common.ErrInvalidArgument, id)
+			return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, fmt.Sprintf("satisfied dodAssessment.acceptanceDimensions item %q requires evidenceRefs", id))
 		}
 		covered[id] = true
 	}
@@ -1135,7 +1135,7 @@ func validateDoDAssessmentCoversRequiredProfileDimensions(run *runModel.Run, ass
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: dodAssessment.acceptanceDimensions missing required dimensions: %s", common.ErrInvalidArgument, strings.Join(missing, ", "))
+	return newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.acceptanceDimensions missing required dimensions: "+strings.Join(missing, ", "))
 }
 
 func requiredProfileAcceptanceDimensions(run *runModel.Run) []string {
@@ -1207,7 +1207,7 @@ func validateDoDAssessmentCoversRequiredDeliverables(run *runModel.Run, assessme
 			continue
 		}
 		if len(evidenceRefsFromValue(item["evidenceRefs"])) == 0 && len(stringSliceFromValue(item["artifactRefs"])) == 0 {
-			return fmt.Errorf("%w: satisfied dodAssessment.deliverableCoverage item %q requires evidenceRefs or artifactRefs", common.ErrInvalidArgument, id)
+			return newRuntimeContractViolationError(contractViolationDoDAssessmentEvidenceMissing, fmt.Sprintf("satisfied dodAssessment.deliverableCoverage item %q requires evidenceRefs or artifactRefs", id))
 		}
 		covered[id] = true
 	}
@@ -1595,7 +1595,7 @@ func newDoDCoverageMissingError(missing []normalizedDoDItem) error {
 		rawItems = append(rawItems, raw)
 	}
 	return &doDCoverageMissingError{
-		cause:   fmt.Errorf("%w: dodAssessment does not cover all current DoD items; missing: %s", common.ErrInvalidArgument, strings.Join(rawItems, "; ")),
+		cause:   newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment does not cover all current DoD items; missing: "+strings.Join(rawItems, "; ")),
 		missing: items,
 	}
 }
@@ -1636,7 +1636,7 @@ func newGoalCoverageMissingError(missing []normalizedDoDItem) error {
 		rawItems = append(rawItems, raw)
 	}
 	return &goalCoverageMissingError{
-		cause:   fmt.Errorf("%w: dodAssessment does not cover all current Goal requirements; missing: %s", common.ErrInvalidArgument, strings.Join(rawItems, "; ")),
+		cause:   newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment does not cover all current Goal requirements; missing: "+strings.Join(rawItems, "; ")),
 		missing: items,
 	}
 }
@@ -1674,7 +1674,7 @@ func newDeliverableCoverageMissingError(missing []string) error {
 		}
 	}
 	return &deliverableCoverageMissingError{
-		cause:   fmt.Errorf("%w: dodAssessment.deliverableCoverage missing required deliverables: %s", common.ErrInvalidArgument, strings.Join(items, ", ")),
+		cause:   newRuntimeContractViolationError(contractViolationCoverageMapIncomplete, "dodAssessment.deliverableCoverage missing required deliverables: "+strings.Join(items, ", ")),
 		missing: items,
 	}
 }

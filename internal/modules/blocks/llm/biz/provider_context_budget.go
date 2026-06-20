@@ -39,6 +39,7 @@ var providerP0InputKeys = []string{
 	"repairObjective", "stateChangingOutputRequired", "stateChangingRecoveryMode",
 	"providerTimeoutStateChangingRetry", "forbiddenRecoveryOutputs", "requiredRecoveryOutputs",
 	"decisionResolution", "approvalResolution",
+	"contractViolationRecovery",
 	"coverageWorkItemContext",
 }
 
@@ -1280,6 +1281,7 @@ func captureProtectedProviderRuntimeContract(input map[string]any) protectedProv
 		"graphExpansionLimitFollowUp", "graphFollowUpExpansionCount", "graphFollowUpExpansionLimit",
 		"providerRetryAssessmentOnly",
 		"runtimeStage", "runtimeStageMode", "currentRuntimeStage", "currentRuntimeStageMode", "currentSoulStage",
+		"contractViolationRecovery",
 	} {
 		if value, ok := input[key]; ok {
 			if cloned, success := cloneAny(value); success {

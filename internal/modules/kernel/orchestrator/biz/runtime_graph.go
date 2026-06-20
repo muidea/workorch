@@ -304,9 +304,11 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	}
 	step.State = common.StepStateFailed
 	step.Output = runtimeFailureOutput(outputWithDoDAssessmentDiagnostics(output), execErr)
+	attachContractViolationType(step.Output, execErr)
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
+	attachContractViolationDiagnostics(run, step, execErr)
 	errText := errorString(execErr)
 	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
 		_ = o.runs.Update(ctx, run)
@@ -315,6 +317,7 @@ func (o *RuntimeOrchestrator) handleGraphBatchCompletionGateFailure(
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, "", errText)
 	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
 	_ = o.steps.Update(ctx, step)
+	_ = o.eventPublisher().publishContractViolationRecorded(ctx, run, step)
 	_ = o.eventPublisher().publishStepState(ctx, run, step, runevents.TopicStepStateChanged)
 	if shouldCloseCompletionGateFailureWithoutRepair(summary, step, step.Output) {
 		reason := errText

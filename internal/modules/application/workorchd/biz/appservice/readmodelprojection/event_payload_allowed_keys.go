@@ -38,6 +38,9 @@ func isEventPayloadAllowedKey(key string) bool {
 	if _, ok := eventPayloadProviderAllowedKeys[key]; ok {
 		return true
 	}
+	if _, ok := eventPayloadContractViolationAllowedKeys[key]; ok {
+		return true
+	}
 	_, ok := eventPayloadRuntimeAllowedKeys[key]
 	return ok
 }

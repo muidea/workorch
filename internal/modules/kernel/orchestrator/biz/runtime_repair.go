@@ -60,6 +60,8 @@ const (
 	contractViolationPatchUnresolvedTemplate        = "patch_unresolved_template"
 	contractViolationPatchDispatchInvalid           = "patch_dispatch_invalid"
 	contractViolationFileEditConflict               = "file_edit_conflict"
+	contractViolationDoDAssessmentEvidenceMissing   = "dod_assessment_missing_evidence_refs"
+	contractViolationCoverageMapIncomplete          = "coverage_map_incomplete"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {
@@ -135,6 +137,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	classification := classifyRuntimeFailure(step, step.Output, summary, execErr)
 	attachRuntimeFailureClassification(step.Output, classification)
 	attachRuntimeFailureDiagnostics(step, classification, execErr)
+	attachContractViolationDiagnostics(run, step, execErr)
 	_ = o.recordToolCallFailed(ctx, toolCall, execErr, step.Output)
 	errText := ""
 	if execErr != nil {
@@ -146,6 +149,7 @@ func (o *RuntimeOrchestrator) handleRuntimeStepFailure(
 	}
 	_ = o.recordValidationResult(ctx, run, step, common.ValidationResultStateFailed, summary, evidenceRef, errText)
 	_ = o.checkpointManager().recordStepCheckpoint(ctx, run, step, "step_failed")
+	_ = o.eventPublisher().publishContractViolationRecorded(ctx, run, step)
 	if o.coverageLedger().updateFromFailedStep(run, step, errText) && o.runs != nil {
 		_ = o.runs.Update(ctx, run)
 	}
@@ -253,6 +257,13 @@ func attachContractViolationType(output map[string]any, execErr error) {
 	if output == nil || strings.TrimSpace(stringFromMap(output, outputKeyContractViolationType)) != "" {
 		return
 	}
+	var structured runtimeContractViolationError
+	if errors.As(execErr, &structured) && structured.violationType != "" {
+		output[outputKeyContractViolationType] = structured.violationType
+		output["contractViolationRule"] = structured.rule
+		output["contractViolationRecoverability"] = structured.recoverability
+		return
+	}
 	if violationType := contractViolationTypeFromFailure(output, execErr); violationType != "" {
 		output[outputKeyContractViolationType] = violationType
 	}
@@ -293,6 +304,19 @@ func contractViolationTypeFromFailure(output map[string]any, execErr error) stri
 		strings.Contains(text, "concrete validation evidence graph must use non-destructive bounded validation") ||
 		strings.Contains(text, "concrete validation evidence graph must not start detached or background processes"):
 		return contractViolationValidationEvidenceRequired
+	case strings.Contains(text, "satisfied dodassessment item requires evidencerefs") ||
+		strings.Contains(text, "satisfied dodassessment.goalcoverage item requires evidencerefs") ||
+		strings.Contains(text, "satisfied dodassessment.branchcoverage item") && strings.Contains(text, "requires evidencerefs") ||
+		strings.Contains(text, "satisfied dodassessment.acceptancedimensions item") && strings.Contains(text, "requires evidencerefs") ||
+		strings.Contains(text, "satisfied dodassessment.deliverablecoverage item") && strings.Contains(text, "requires evidencerefs"):
+		return contractViolationDoDAssessmentEvidenceMissing
+	case strings.Contains(text, "dodassessment.items are required") ||
+		strings.Contains(text, "dodassessment.goalcoverage is required") ||
+		strings.Contains(text, "dodassessment.goalcoverage.items are required") ||
+		strings.Contains(text, "dodassessment does not cover all current") ||
+		strings.Contains(text, "dodassessment.acceptancedimensions missing required dimensions") ||
+		strings.Contains(text, "dodassessment.deliverablecoverage missing required deliverables"):
+		return contractViolationCoverageMapIncomplete
 	case strings.Contains(text, "patch content contains unresolved runtime template") ||
 		strings.Contains(text, "patch diff contains unresolved runtime template") ||
 		strings.Contains(text, "patch text_replace contains unresolved runtime template"):
@@ -483,6 +507,20 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 		return o.blockOnDuplicateRuntimeFailure(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionContextIntegrityBlocked:
 		return o.blockOnContextIntegrityGate(ctx, run, failedStep, execErr)
+	case runtimeRecoveryActionContractViolationRetry:
+		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionContractViolationRetry, maxProviderRetryAttemptsForPolicy(policy), o, true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return common.ErrInvalidArgument
+		}
+		if err := o.eventPublisher().publishContractViolationRetryRequested(ctx, run, failedStep, spec.ID, mapFromValue(spec.Input[stepInputKeyContractViolationRecovery])); err != nil {
+			return err
+		}
+		return o.requestDispatchStep(ctx, run.ID, run.WorkspaceID, spec)
+	case runtimeRecoveryActionContractViolationExhausted:
+		return o.blockOnContractViolationRecoveryExhaustion(ctx, run, failedStep, execErr)
 	case runtimeRecoveryActionRuntimeRepair:
 		spec, ok, err := o.repairManager().recoveryDispatchSpec(ctx, run, failedStep, execErr, runtimeRecoveryActionRuntimeRepair, maxProviderRetryAttemptsForPolicy(policy), o, true)
 		if err != nil {
@@ -502,13 +540,15 @@ func (o *RuntimeOrchestrator) dispatchRuntimeRepairFollowUp(
 type runtimeRecoveryAction string
 
 const (
-	runtimeRecoveryActionProviderRetry           runtimeRecoveryAction = "provider_retry"
-	runtimeRecoveryActionProviderRetryExhausted  runtimeRecoveryAction = "provider_retry_exhausted"
-	runtimeRecoveryActionRuntimeRepairExhausted  runtimeRecoveryAction = "runtime_repair_exhausted"
-	runtimeRecoveryActionDuplicateFailure        runtimeRecoveryAction = "duplicate_failure"
-	runtimeRecoveryActionContextIntegrityBlocked runtimeRecoveryAction = "context_integrity_blocked"
-	runtimeRecoveryActionRuntimeRepair           runtimeRecoveryAction = "runtime_repair"
-	runtimeRecoveryActionFailRun                 runtimeRecoveryAction = "fail_run"
+	runtimeRecoveryActionProviderRetry              runtimeRecoveryAction = "provider_retry"
+	runtimeRecoveryActionProviderRetryExhausted     runtimeRecoveryAction = "provider_retry_exhausted"
+	runtimeRecoveryActionRuntimeRepairExhausted     runtimeRecoveryAction = "runtime_repair_exhausted"
+	runtimeRecoveryActionDuplicateFailure           runtimeRecoveryAction = "duplicate_failure"
+	runtimeRecoveryActionContextIntegrityBlocked    runtimeRecoveryAction = "context_integrity_blocked"
+	runtimeRecoveryActionContractViolationRetry     runtimeRecoveryAction = "contract_violation_retry"
+	runtimeRecoveryActionContractViolationExhausted runtimeRecoveryAction = "contract_violation_exhausted"
+	runtimeRecoveryActionRuntimeRepair              runtimeRecoveryAction = "runtime_repair"
+	runtimeRecoveryActionFailRun                    runtimeRecoveryAction = "fail_run"
 )
 
 func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *runModel.Run, failedStep *runModel.Step, runtimePolicy RuntimePolicy, runtimeAvailable bool, canCreateDecisionTicket bool) runtimeRecoveryAction {
@@ -529,6 +569,14 @@ func (r *repairSubsystem) recoveryActionForFailedStep(ctx context.Context, run *
 	}
 	if runtimeContextIntegrityGateFailure(failedStep) && !runtimeContextIntegrityGateCanRecoverWithCoverageTargets(failedStep) {
 		return runtimeRecoveryActionContextIntegrityBlocked
+	}
+	if failedStepHasRecoverableContractViolation(failedStep) {
+		if runtimeAvailable && contractViolationRetryWithinBudget(ctx, r, runtimePolicy, run, failedStep) {
+			return runtimeRecoveryActionContractViolationRetry
+		}
+		if canCreateDecisionTicket {
+			return runtimeRecoveryActionContractViolationExhausted
+		}
 	}
 	if shouldEscalateRuntimeRepairExhaustion(ctx, r, runtimePolicy, canCreateDecisionTicket, run, failedStep) {
 		return runtimeRecoveryActionRuntimeRepairExhausted
@@ -640,9 +688,108 @@ func (r *repairSubsystem) recoveryDispatchSpec(
 			Kind:  initialStepKind(run),
 			Input: builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr),
 		}, true, nil
+	case runtimeRecoveryActionContractViolationRetry:
+		attempt := contractViolationRetryAttemptCount(ctx, r, run.ID, failedStep) + 1
+		stepID, err := uniqueDispatchStepID(ctx, r.steps, run.ID, contractViolationRetryStepID(run.ID, failedStep, attempt))
+		if err != nil {
+			return stepDispatchSpec{}, true, err
+		}
+		return stepDispatchSpec{
+			ID:    stepID,
+			Kind:  initialStepKind(run),
+			Input: builder.runtimeRepairFollowUpStepInput(ctx, run, failedStep, attempt, execErr),
+		}, true, nil
 	default:
 		return stepDispatchSpec{}, false, nil
 	}
+}
+
+func contractViolationRetryStepID(runID common.RunID, failedStep *runModel.Step, attempt int) common.StepID {
+	base := ""
+	if failedStep != nil {
+		base = runtimeReadableStepLabel(runID, runtimeRepairIDLabelStepID(failedStep))
+	}
+	if base == "" {
+		base = "contract"
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	return common.StepID(fmt.Sprintf("%s/contract-retry-%03d-of-%s", runID, attempt, base))
+}
+
+func (o *RuntimeOrchestrator) blockOnContractViolationRecoveryExhaustion(
+	ctx context.Context,
+	run *runModel.Run,
+	failedStep *runModel.Step,
+	execErr error,
+) error {
+	if run == nil || failedStep == nil {
+		return common.ErrInvalidArgument
+	}
+	language := runDialogLanguage(run)
+	policy := NormalizeRuntimePolicy(o.RuntimePolicy())
+	attempts := contractViolationRetryAttemptCount(ctx, o.repairManager(), run.ID, failedStep)
+	runAttempts := contractViolationRunRetryCount(ctx, o.repairManager(), run.ID)
+	signatureRepeats := contractViolationSignatureRepeatCount(ctx, o.repairManager(), run.ID, failedStep)
+	violation := contractViolationFromFailedOutput(failedStep)
+	context := map[string]any{
+		decisionContextKeyRecoveryPolicy: decisionContextRecoveryPolicyRepairPlan,
+		decisionContextKeyResultPolicy:   decisionContextResultPolicyRejected,
+		"allowedRecoveryActions":         []string{"replan"},
+		"runtimeRepairLoopState":         "contract_violation_recovery_exhausted",
+		"failedStepId":                   string(failedStep.ID),
+		"failedStepKind":                 failedStep.Kind,
+		"failureClass":                   stringFromMap(failedStep.Output, failureOutputKeyClass),
+		"failureSignature":               stringFromMap(failedStep.Output, failureOutputKeySignature),
+		"attempts":                       attempts,
+		"runAttempts":                    runAttempts,
+		"signatureRepeatCount":           signatureRepeats,
+		"maxRetriesPerStep":              policy.MaxContractViolationRetriesPerStep,
+		"maxRetriesPerRun":               policy.MaxContractViolationRetriesPerRun,
+		"maxRepeatedViolationSignature":  policy.MaxRepeatedContractViolationSignature,
+		"contractViolation":              violation,
+		"failedStepInput":                o.llmContextManager().compactStepInput(failedStep.Input),
+		"failedStepOutput":               o.llmContextManager().compactStepOutput(failedStep.Output),
+	}
+	if execErr != nil {
+		context["error"] = execErr.Error()
+	}
+	spec := runtimeDecisionBlockSpec{
+		TicketID:     common.TicketID(runtimeChildID(failedStep.ID, "contract-violation-decision")),
+		Reason:       localizedContractViolationRecoveryExhaustedReason(language, violation),
+		DecisionKind: decisioncommon.ResolutionTypeProvideMissingInfo,
+		Question:     localizedContractViolationRecoveryExhaustedQuestion(language),
+		Context:      context,
+	}
+	if err := o.createDecisionTicket(ctx, run, failedStep, spec); err != nil {
+		return err
+	}
+	if err := o.resultManager().recordRejectedResultForDecisionBlock(ctx, run, failedStep, failedStep.Output, spec); err != nil {
+		return err
+	}
+	if err := o.blockOnDecisionAtStep(ctx, run, nil, spec.TicketID, failedStep.ID); err != nil {
+		return err
+	}
+	return o.eventPublisher().publishContractViolationEscalated(ctx, run, failedStep, spec.TicketID, violation, context)
+}
+
+func localizedContractViolationRecoveryExhaustedReason(language string, violation map[string]any) string {
+	rule := stringFromMap(violation, "violatedRule")
+	if rule == "" {
+		rule = "contract_violation"
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "zh") {
+		return "LLM 输出连续违反运行期合同，自动修正预算已耗尽: " + rule
+	}
+	return "LLM output repeatedly violated the runtime contract and automatic correction budget is exhausted: " + rule
+}
+
+func localizedContractViolationRecoveryExhaustedQuestion(language string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "zh") {
+		return "请提供新的 replan 指令、补充缺失信息，或调整目标/验收口径后重新推进。"
+	}
+	return "Provide a new replan instruction, missing information, or adjusted goal/acceptance context before continuing."
 }
 
 func shouldBlockOnProviderConfigFailure(canCreateDecisionTicket bool, run *runModel.Run, failedStep *runModel.Step) bool {

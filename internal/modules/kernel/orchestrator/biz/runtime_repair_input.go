@@ -915,6 +915,7 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 	applyRuntimeRepairUnresolvedCoverageWorkItemGuidance(input)
 	class, signature := runtimeRepairScopeClassAndSignature(failedStep)
 	applyRuntimeRepairFailureScopeProjection(input, class, signature)
+	policy := o.RuntimePolicy()
 	applyRuntimeRepairStructuredFailureSignalsProjection(input, structuredFailureSignalsFromFailureOutput(failedStep.Output, execErr, class, signature))
 	targetScope := runtimeFailureTargetScope(signature)
 	if targetScope != "" {
@@ -955,7 +956,13 @@ func (o *RuntimeOrchestrator) runtimeRepairFollowUpStepInput(
 		preserveConcreteValidationSchemaInvalidRepairContract(input, failedStep)
 	}
 	applyRuntimeRepairStateChangingTargetEvidenceGate(input, failedStep)
-	policy := o.RuntimePolicy()
+	applyContractViolationRecoveryProjection(
+		input,
+		failedStep,
+		attempt,
+		NormalizeRuntimePolicy(policy).MaxContractViolationRetriesPerStep,
+		contractViolationSignatureRepeatCount(ctx, o.repairManager(), run.ID, failedStep),
+	)
 	applyLLMOutputModeSelection(ctx, policy.LLMOutput, o.evidence.ArtifactContinuations, run, input, failedStep, attempt)
 	contract := o.convergenceManager().build(run, nil, failedStep, map[string]any{"input": input}, nil)
 	input = o.convergenceManager().apply(input, contract)

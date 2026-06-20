@@ -1,23 +1,31 @@
 package workorchruntimepolicy
 
 const (
-	defaultMaxRuntimeRepairAttempts  = 10
-	defaultMaxProviderRetryAttempts  = 10
-	defaultMaxPatchContentBytes      = 65536
-	defaultMaxGraphBytes             = 131072
-	defaultMaxGraphFileWrites        = 3
-	defaultSchemaInvalidPreviewBytes = 32768
-	defaultMaxArtifactChunkBytes     = 16384
-	defaultPreviousChunkTailBytes    = 300
-	defaultMaxChunkRetryAttempts     = 3
-	defaultMaxArtifactPlanAttempts   = 2
-	defaultMaxArtifactReplanAttempts = 2
+	defaultMaxRuntimeRepairAttempts                     = 10
+	defaultMaxProviderRetryAttempts                     = 10
+	defaultMaxContractViolationRetriesPerStep           = 2
+	defaultMaxContractViolationRetriesPerRun            = 8
+	defaultMaxRepeatedContractViolationSignature        = 1
+	defaultMaxConsecutiveContractViolationNoShapeChange = 1
+	defaultMaxPatchContentBytes                         = 65536
+	defaultMaxGraphBytes                                = 131072
+	defaultMaxGraphFileWrites                           = 3
+	defaultSchemaInvalidPreviewBytes                    = 32768
+	defaultMaxArtifactChunkBytes                        = 16384
+	defaultPreviousChunkTailBytes                       = 300
+	defaultMaxChunkRetryAttempts                        = 3
+	defaultMaxArtifactPlanAttempts                      = 2
+	defaultMaxArtifactReplanAttempts                    = 2
 )
 
 type RuntimePolicy struct {
-	MaxRuntimeRepairAttempts int
-	MaxProviderRetryAttempts int
-	LLMOutput                LLMOutputRuntimePolicy
+	MaxRuntimeRepairAttempts                     int
+	MaxProviderRetryAttempts                     int
+	MaxContractViolationRetriesPerStep           int
+	MaxContractViolationRetriesPerRun            int
+	MaxRepeatedContractViolationSignature        int
+	MaxConsecutiveContractViolationNoShapeChange int
+	LLMOutput                                    LLMOutputRuntimePolicy
 }
 
 type LLMOutputRuntimePolicy struct {
@@ -38,6 +46,18 @@ func NormalizeRuntimePolicy(policy RuntimePolicy) RuntimePolicy {
 	}
 	if policy.MaxProviderRetryAttempts <= 0 {
 		policy.MaxProviderRetryAttempts = defaultMaxProviderRetryAttempts
+	}
+	if policy.MaxContractViolationRetriesPerStep <= 0 {
+		policy.MaxContractViolationRetriesPerStep = defaultMaxContractViolationRetriesPerStep
+	}
+	if policy.MaxContractViolationRetriesPerRun <= 0 {
+		policy.MaxContractViolationRetriesPerRun = defaultMaxContractViolationRetriesPerRun
+	}
+	if policy.MaxRepeatedContractViolationSignature <= 0 {
+		policy.MaxRepeatedContractViolationSignature = defaultMaxRepeatedContractViolationSignature
+	}
+	if policy.MaxConsecutiveContractViolationNoShapeChange <= 0 {
+		policy.MaxConsecutiveContractViolationNoShapeChange = defaultMaxConsecutiveContractViolationNoShapeChange
 	}
 	policy.LLMOutput = NormalizeLLMOutputRuntimePolicy(policy.LLMOutput)
 	return policy

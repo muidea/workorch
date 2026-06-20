@@ -86,6 +86,39 @@ func TestDecodeWorkorchEventReturnsTypedPatchEvent(t *testing.T) {
 	}
 }
 
+func TestDecodeWorkorchEventReturnsContractViolationEvent(t *testing.T) {
+	event, ok := DecodeWorkorchEvent(Envelope{
+		Version:     WorkorchEventVersion,
+		Topic:       orchestratorevents.TopicOrchestratorContractViolationRecorded,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		StepID:      "run-1/step-1",
+		Payload: map[string]any{
+			"workspaceId":    "ws-1",
+			"runId":          "run-1",
+			"stepId":         "run-1/step-1",
+			"violatedRule":   "dod_assessment_missing_evidence_refs",
+			"recoverability": "retry_same_contract",
+		},
+	})
+	if !ok {
+		t.Fatalf("DecodeWorkorchEvent returned !ok")
+	}
+	violationEvent, ok := event.(OrchestratorContractViolationEvent)
+	if !ok {
+		t.Fatalf("event type = %T, want OrchestratorContractViolationEvent", event)
+	}
+	if violationEvent.Topic() != orchestratorevents.TopicOrchestratorContractViolationRecorded {
+		t.Fatalf("topic = %s, want contract violation recorded", violationEvent.Topic())
+	}
+	if violationEvent.Data["violatedRule"] != "dod_assessment_missing_evidence_refs" {
+		t.Fatalf("violation payload = %+v, want violatedRule", violationEvent.Data)
+	}
+	if violationEvent.Envelope().Payload["recoverability"] != "retry_same_contract" {
+		t.Fatalf("normalized payload = %+v, want recoverability", violationEvent.Envelope().Payload)
+	}
+}
+
 func TestDecodeWorkorchEventReturnsTypedRejectedResultEvent(t *testing.T) {
 	event, ok := DecodeWorkorchEvent(Envelope{
 		Version: WorkorchEventVersion,
@@ -233,9 +266,26 @@ func TestSubscribeWorkorchSkipsInvalidPayload(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish valid approval event: %v", err)
 	}
+	if err := hub.Publish(context.Background(), Envelope{
+		Version:     WorkorchEventVersion,
+		Topic:       orchestratorevents.TopicOrchestratorContractViolationRetryRequested,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		StepID:      "run-1/step-1",
+		Payload: map[string]any{
+			"workspaceId":    "ws-1",
+			"runId":          "run-1",
+			"sourceStepId":   "run-1/step-1",
+			"retryStepId":    "run-1/contract-retry-001-of-step-1",
+			"violatedRule":   "wrong_output_shape",
+			"recoverability": "retry_same_contract",
+		},
+	}); err != nil {
+		t.Fatalf("publish contract violation event: %v", err)
+	}
 
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1", calls)
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
 	}
 }
 

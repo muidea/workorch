@@ -46,12 +46,16 @@ type RepositoryConfig struct {
 }
 
 type RuntimeConfig struct {
-	DefaultSoulID            string                 `json:"defaultSoulId" toml:"defaultSoulId"`
-	MaxRuntimeRepairAttempts int                    `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
-	MaxProviderRetryAttempts int                    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
-	ShellCommandTimeout      string                 `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
-	Git                      GitRuntimeConfig       `json:"git" toml:"git"`
-	LLMOutput                LLMOutputRuntimeConfig `json:"llmOutput" toml:"llmOutput"`
+	DefaultSoulID                                string                 `json:"defaultSoulId" toml:"defaultSoulId"`
+	MaxRuntimeRepairAttempts                     int                    `json:"maxRuntimeRepairAttempts" toml:"maxRuntimeRepairAttempts"`
+	MaxProviderRetryAttempts                     int                    `json:"maxProviderRetryAttempts" toml:"maxProviderRetryAttempts"`
+	MaxContractViolationRetriesPerStep           int                    `json:"maxContractViolationRetriesPerStep" toml:"maxContractViolationRetriesPerStep"`
+	MaxContractViolationRetriesPerRun            int                    `json:"maxContractViolationRetriesPerRun" toml:"maxContractViolationRetriesPerRun"`
+	MaxRepeatedContractViolationSignature        int                    `json:"maxRepeatedContractViolationSignature" toml:"maxRepeatedContractViolationSignature"`
+	MaxConsecutiveContractViolationNoShapeChange int                    `json:"maxConsecutiveContractViolationNoShapeChange" toml:"maxConsecutiveContractViolationNoShapeChange"`
+	ShellCommandTimeout                          string                 `json:"shellCommandTimeout" toml:"shellCommandTimeout"`
+	Git                                          GitRuntimeConfig       `json:"git" toml:"git"`
+	LLMOutput                                    LLMOutputRuntimeConfig `json:"llmOutput" toml:"llmOutput"`
 }
 
 type GitRuntimeConfig struct {
@@ -315,8 +319,33 @@ func normalizeConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	applyRuntimeConfigDefaults(&cfg.Runtime)
 	cfg.Runtime.LLMOutput = normalized
 	return nil
+}
+
+func applyRuntimeConfigDefaults(cfg *RuntimeConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.MaxRuntimeRepairAttempts <= 0 {
+		cfg.MaxRuntimeRepairAttempts = 10
+	}
+	if cfg.MaxProviderRetryAttempts <= 0 {
+		cfg.MaxProviderRetryAttempts = 10
+	}
+	if cfg.MaxContractViolationRetriesPerStep <= 0 {
+		cfg.MaxContractViolationRetriesPerStep = 2
+	}
+	if cfg.MaxContractViolationRetriesPerRun <= 0 {
+		cfg.MaxContractViolationRetriesPerRun = 8
+	}
+	if cfg.MaxRepeatedContractViolationSignature <= 0 {
+		cfg.MaxRepeatedContractViolationSignature = 1
+	}
+	if cfg.MaxConsecutiveContractViolationNoShapeChange <= 0 {
+		cfg.MaxConsecutiveContractViolationNoShapeChange = 1
+	}
 }
 
 func validateLLMOutputRuntimeConfig(cfg LLMOutputRuntimeConfig) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type RunInfo struct {
@@ -55,6 +56,7 @@ type RuntimeExecutionInfo struct {
 	StepState           common.StepState
 	RequestID           string
 	QueueKey            string
+	ContractViolation   *runtimemodel.ContractViolation
 	AcceptedAt          string
 	LastProgressAt      string
 	LastProgressEvent   string

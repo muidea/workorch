@@ -19,15 +19,21 @@ func projectRunStatus(item *runmodel.Run, related runStatusRelatedModels) readmo
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		FailureReason:      item.FailureReason,
 	}
+	var currentRunStep *runmodel.Step
 	if currentStep := readmodelprojection.CurrentRunStatusStep(item, related.steps, related.checkpoints, related.decisions, related.approvals); currentStep != nil {
+		currentRunStep = currentStep
 		ret.CurrentStepID = string(currentStep.ID)
 		ret.CurrentStepKind = readmodelprojection.CanonicalStepKind(currentStep.Kind)
 		ret.CurrentStepState = string(currentStep.State)
 	}
 	stepViews := presenter.MapSteps(related.steps)
 	var currentStep *presenter.StepView
-	if ret.CurrentStepID != "" {
-		currentStep = &presenter.StepView{ID: ret.CurrentStepID, Kind: ret.CurrentStepKind, State: ret.CurrentStepState}
+	if currentRunStep != nil {
+		if mapped := presenter.MapStep(currentRunStep); mapped != nil {
+			currentStep = mapped
+			currentStep.Kind = ret.CurrentStepKind
+			currentStep.State = ret.CurrentStepState
+		}
 	}
 	ret.RuntimeExecution = readmodelprojection.MapRuntimeExecutionState(stepViews, readmodelprojection.MapRuntimeCheckpoints(related.checkpoints), currentStep)
 	return ret

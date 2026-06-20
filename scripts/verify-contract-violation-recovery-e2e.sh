@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP_DIR="$(mktemp -d)"
+KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
+BASE_URL="${WORKORCH_CONTRACT_VIOLATION_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0.0.1:8080}}"
+MOCK_ADDR="${WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR:-127.0.0.1:18189}"
+MOCK_BASE_URL="http://$MOCK_ADDR/v1"
+VERIFY_SUFFIX="${WORKORCH_CONTRACT_VIOLATION_VERIFY_SUFFIX:-$$}"
+CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
+CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
+SCRIPT_TIMEOUT_SECONDS="${WORKORCH_CONTRACT_VIOLATION_VERIFY_TIMEOUT_SECONDS:-240}"
+RUN_WAIT_SECONDS="${WORKORCH_CONTRACT_VIOLATION_VERIFY_RUN_WAIT_SECONDS:-90}"
+PROVIDER_ID="verify-contract-violation-$VERIFY_SUFFIX"
+MOCK_PID=""
+WATCHDOG_PID=""
+MOCK_LOG="$TMP_DIR/llm-mock.log"
+
+curl() {
+  local status url arg
+  url=""
+  for arg in "$@"; do
+    if [[ "$arg" == http://* || "$arg" == https://* ]]; then
+      url="$arg"
+    fi
+  done
+  set +e
+  command curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "$@"
+  status=$?
+  set -e
+  if [[ $status -ne 0 ]]; then
+    echo "curl failed status=$status url=${url:-unknown} connect-timeout=${CURL_CONNECT_TIMEOUT}s max-time=${CURL_MAX_TIME}s" >&2
+  fi
+  return $status
+}
+
+json_path() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+current = data
+for part in sys.argv[2].split("."):
+    current = current[part]
+print(current)
+PY
+}
+
+timeout_failure() {
+  echo "contract violation recovery e2e verification timed out after ${SCRIPT_TIMEOUT_SECONDS}s for deployed workorch service $BASE_URL" >&2
+  if [[ -f "$MOCK_LOG" ]]; then
+    echo "--- llm-mock.log ---" >&2
+    tail -n 200 "$MOCK_LOG" >&2 || true
+  fi
+  exit 124
+}
+
+start_watchdog() {
+  if ! [[ "$SCRIPT_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [[ "$SCRIPT_TIMEOUT_SECONDS" -le 0 ]]; then
+    return
+  fi
+  local parent_pid="$$"
+  (
+    sleep "$SCRIPT_TIMEOUT_SECONDS"
+    echo "contract violation recovery e2e verification exceeded ${SCRIPT_TIMEOUT_SECONDS}s; terminating" >&2
+    kill -TERM "$parent_pid" >/dev/null 2>&1 || true
+  ) &
+  WATCHDOG_PID=$!
+}
+
+report_failure() {
+  local status=$?
+  if [[ $status -eq 0 ]]; then
+    return
+  fi
+  echo "contract violation recovery e2e verification failed for deployed workorch service $BASE_URL" >&2
+  if [[ -f "$MOCK_LOG" ]]; then
+    echo "--- llm-mock.log ---" >&2
+    tail -n 200 "$MOCK_LOG" >&2 || true
+  fi
+  for file in "$TMP_DIR"/*.json; do
+    [[ -f "$file" ]] || continue
+    echo "--- $file ---" >&2
+    python3 -m json.tool "$file" >&2 || cat "$file" >&2
+  done
+}
+
+cleanup() {
+  if [[ -n "$WATCHDOG_PID" ]]; then
+    kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
+    wait "$WATCHDOG_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
+    curl -fsS -H "Content-Type: application/json" -X PUT \
+      "$BASE_URL/api/v1/workorch/configuration/llm" \
+      -d @"$TMP_DIR/original-llm-update.json" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$MOCK_PID" ]]; then
+    kill "$MOCK_PID" >/dev/null 2>&1 || true
+    wait "$MOCK_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+    echo "keeping verification temp dir: $TMP_DIR" >&2
+  else
+    rm -rf "$TMP_DIR"
+  fi
+}
+
+start_mock_provider() {
+  python3 - "$MOCK_ADDR" >"$TMP_DIR/llm_mock_provider.py" <<'PY'
+import sys
+
+mock_addr = sys.argv[1]
+source = r'''
+import json
+import os
+import re
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+attempts = {}
+
+def merged_content(payload):
+    return "\n".join(str(item.get("content", "")) for item in (payload.get("messages") or []))
+
+def last_match(pattern, text):
+    matches = re.findall(pattern, text)
+    return matches[-1] if matches else ""
+
+def provider_request(payload):
+    merged = merged_content(payload)
+    workspace_id = last_match(r'"workspaceId"\s*:\s*"([^"]+)"', merged)
+    run_id = last_match(r'"runId"\s*:\s*"([^"]+)"', merged)
+    step_id = last_match(r'"stepId"\s*:\s*"([^"]+)"', merged)
+    return {
+        "workspaceId": workspace_id,
+        "runId": run_id,
+        "runKey": (workspace_id + "/" + run_id) if workspace_id and run_id else run_id,
+        "stepId": step_id,
+        "hasRecovery": "contractViolationRecovery" in merged,
+    }
+
+def complete_assessment(step_id):
+    evidence = [step_id or "contract-violation-recovery-step"]
+    return {
+        "thoughtSummary": "The corrected response satisfies the same runtime contract with traceable evidence.",
+        "completionState": "completed",
+        "dodAssessment": {
+            "satisfied": True,
+            "summary": "The neutral contract violation recovery path completed.",
+            "items": [
+                {
+                    "item": "contract violation recovery completes without manual replan",
+                    "state": "satisfied",
+                    "evidenceRefs": evidence,
+                }
+            ],
+            "goalCoverage": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "requirement": "verify recoverable contract violation is retried automatically",
+                        "state": "satisfied",
+                        "evidenceRefs": evidence,
+                    }
+                ],
+            },
+        },
+    }
+
+def violating_assessment():
+    return {
+        "thoughtSummary": "This intentionally violates the neutral evidence-ref contract.",
+        "completionState": "completed",
+        "dodAssessment": {
+            "satisfied": True,
+            "summary": "Goal coverage intentionally omits evidenceRefs.",
+            "items": [
+                {
+                    "item": "contract violation recovery completes without manual replan",
+                    "state": "satisfied",
+                    "evidenceRefs": ["initial-assessment-step"],
+                }
+            ],
+            "goalCoverage": {
+                "satisfied": True,
+                "items": [
+                    {
+                        "requirement": "verify recoverable contract violation is retried automatically",
+                        "state": "satisfied",
+                    }
+                ],
+            },
+        },
+    }
+
+def decision_payload(request):
+    if request.get("runId") == "probe":
+        return {"completionState": "failed", "thoughtSummary": "probe"}
+    key = request.get("runKey") or "global"
+    attempts[key] = attempts.get(key, 0) + 1
+    if request.get("hasRecovery"):
+        return complete_assessment(request.get("stepId"))
+    if attempts[key] == 1:
+        return violating_assessment()
+    return complete_assessment(request.get("stepId"))
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/v1/chat/completions":
+            self.send_response(404)
+            self.end_headers()
+            return
+        size = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(size))
+        request = provider_request(payload)
+        decision = decision_payload(request)
+        print("runId=%s stepId=%s recovery=%s state=%s" % (
+            request.get("runId", ""),
+            request.get("stepId", ""),
+            request.get("hasRecovery", False),
+            decision.get("completionState", ""),
+        ), flush=True)
+        content = json.dumps(decision, separators=(",", ":"))
+        response = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {
+                "prompt_tokens": 96,
+                "completion_tokens": 32,
+                "total_tokens": 128,
+            },
+        }
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, fmt, *args):
+        print(fmt % args, flush=True)
+
+host, port_text = os.environ.get("WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR", "127.0.0.1:18189").split(":", 1)
+ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
+'''
+open(sys.stdout.fileno(), "w", encoding="utf-8", closefd=False).write(source.replace("127.0.0.1:18189", mock_addr))
+PY
+  WORKORCH_CONTRACT_VIOLATION_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  MOCK_PID=$!
+}
+
+wait_mock() {
+  for _ in $(seq 1 50); do
+    if curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+      -H 'Content-Type: application/json' \
+      -d '{"messages":[{"role":"user","content":"{\"runId\":\"probe\",\"stepId\":\"probe\"}"}]}' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  curl -fsS -X POST "http://$MOCK_ADDR/v1/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -d '{"messages":[{"role":"user","content":"{\"runId\":\"probe\",\"stepId\":\"probe\"}"}]}' >/dev/null
+}
+
+wait_ready() {
+  for _ in $(seq 1 60); do
+    if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "workorch service did not become ready at $BASE_URL" >&2
+  exit 1
+}
+
+write_llm_update_payloads() {
+  python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" "$PROVIDER_ID" <<'PY'
+import json
+import sys
+
+config_path, original_path, update_path, mock_base_url, provider_id = sys.argv[1:]
+data = json.load(open(config_path, encoding="utf-8"))
+llm = data.get("configuration", {}).get("llm", {})
+providers = llm.get("providers") or []
+default_provider = llm.get("defaultProviderId") or provider_id
+default_embedding_provider = llm.get("defaultEmbeddingProviderId") or ""
+model_capabilities = llm.get("modelCapabilities") or []
+
+def clean_provider(item):
+    ret = {
+        "id": item.get("id", ""),
+        "provider": item.get("provider", ""),
+        "baseUrl": item.get("baseUrl", ""),
+        "model": item.get("model", ""),
+        "timeout": item.get("timeout", ""),
+        "disabled": bool(item.get("disabled", False)),
+        "chatCompletions": bool(item.get("chatCompletions", True)),
+        "streaming": bool(item.get("streaming", False)),
+        "nonChatOperations": item.get("nonChatOperations") or [],
+        "failoverEnabled": bool(item.get("failoverEnabled", False)),
+        "failoverProviders": item.get("failoverProviders") or [],
+    }
+    inference = item.get("inferenceProfile") or {}
+    context = item.get("contextProfile") or {}
+    if inference:
+        ret["inferenceProfile"] = {
+            key: inference[key]
+            for key in ("temperature", "maxOutputTokens", "reasoningEffort", "thinkingBudgetTokens")
+            if key in inference
+        }
+    if context:
+        ret["contextProfile"] = {
+            key: context[key]
+            for key in (
+                "profileMode",
+                "contextWindowTokens",
+                "maxInputTokens",
+                "reservedOutputTokens",
+                "safetyRatio",
+                "contextUtilizationRatio",
+                "bytesHardLimit",
+                "maxRequestBytes",
+                "estimatedTokensPerByte",
+            )
+            if key in context
+        }
+    return ret
+
+original = {
+    "defaultProviderId": default_provider,
+    "defaultEmbeddingProviderId": default_embedding_provider,
+    "modelCapabilities": model_capabilities,
+    "providers": [clean_provider(item) for item in providers if item.get("id")],
+}
+if not original["providers"]:
+    original["providers"].append({
+        "id": provider_id,
+        "provider": "compatible",
+        "baseUrl": mock_base_url,
+        "model": "verify-model",
+        "timeout": "60s",
+        "disabled": False,
+        "chatCompletions": True,
+        "streaming": False,
+        "nonChatOperations": [],
+    })
+    original["defaultProviderId"] = provider_id
+with open(original_path, "w", encoding="utf-8") as handle:
+    json.dump(original, handle, separators=(",", ":"))
+
+updated = [item for item in original["providers"] if item["id"] != provider_id]
+updated.append({
+    "id": provider_id,
+    "provider": "compatible",
+    "baseUrl": mock_base_url,
+    "apiKey": "verify-secret",
+    "model": "verify-model",
+    "timeout": "60s",
+    "disabled": False,
+    "chatCompletions": True,
+    "streaming": False,
+    "nonChatOperations": [],
+    "contextProfile": {
+        "profileMode": "manual",
+        "contextWindowTokens": 32768,
+        "maxInputTokens": 24000,
+        "reservedOutputTokens": 4096,
+        "safetyRatio": 0.8,
+        "contextUtilizationRatio": 0.8,
+        "bytesHardLimit": 262144,
+        "maxRequestBytes": 262144,
+        "estimatedTokensPerByte": 0.25,
+    },
+})
+update = {
+    "defaultProviderId": provider_id,
+    "defaultEmbeddingProviderId": original.get("defaultEmbeddingProviderId", ""),
+    "modelCapabilities": model_capabilities,
+    "providers": updated,
+}
+with open(update_path, "w", encoding="utf-8") as handle:
+    json.dump(update, handle, separators=(",", ":"))
+PY
+}
+
+wait_activation_run() {
+  local activation_file="$1"
+  local workspace_id="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + 45))
+  local run_id=""
+
+  run_id="$(python3 - "$activation_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+for path in [
+    ("activation", "run", "id"),
+    ("run", "id"),
+]:
+    current = data
+    for part in path:
+        if not isinstance(current, dict):
+            current = {}
+            break
+        current = current.get(part)
+    if current:
+        print(current)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+    echo "$run_id"
+    return 0
+  }
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"
+    run_id="$(python3 - "$output_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+runs = data.get("runs") or []
+if runs:
+    print(runs[-1].get("id") or "")
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+)" && {
+      echo "$run_id"
+      return 0
+    }
+    sleep 1
+  done
+
+  echo "activation accepted but run did not materialize for workspace $workspace_id" >&2
+  cat "$activation_file" >&2 || true
+  [[ -f "$output_file" ]] && cat "$output_file" >&2
+  return 1
+}
+
+wait_run_terminal() {
+  local run_id="$1"
+  local workspace_id="$2"
+  local output_file="$3"
+  local deadline=$((SECONDS + RUN_WAIT_SECONDS))
+  local state=""
+
+  while (( SECONDS <= deadline )); do
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$output_file"
+    state="$(python3 - "$output_file" <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print((data.get("status") or {}).get("state") or "")
+PY
+)"
+    case "$state" in
+      completed|failed|canceled|blocked_on_decision|blocked_on_approval)
+        echo "$state"
+        return 0
+        ;;
+    esac
+    sleep 1
+  done
+
+  echo "timeout waiting for run $run_id to reach terminal/blocking state" >&2
+  cat "$output_file" >&2 || true
+  return 1
+}
+
+validate_result() {
+  python3 - "$TMP_DIR/status.json" "$TMP_DIR/snapshot.json" "$TMP_DIR/events.json" "$MOCK_LOG" "$workspace_id" "$run_id" <<'PY'
+import json
+import pathlib
+import sys
+
+status_path, snapshot_path, events_path, mock_log_path, workspace_id, run_id = sys.argv[1:]
+status = json.load(open(status_path, encoding="utf-8")).get("status") or {}
+snapshot = json.load(open(snapshot_path, encoding="utf-8")).get("snapshot") or {}
+events = json.load(open(events_path, encoding="utf-8")).get("eventRecords") or []
+mock_log = pathlib.Path(mock_log_path).read_text(encoding="utf-8", errors="replace")
+errors = []
+
+if status.get("state") != "completed":
+    errors.append(f"status state = {status.get('state')!r}, want completed")
+run = snapshot.get("run") or {}
+if run.get("id") != run_id or run.get("workspaceId") != workspace_id:
+    errors.append(f"snapshot identity mismatch: {run}")
+if run.get("state") != "completed":
+    errors.append(f"snapshot run state = {run.get('state')!r}, want completed")
+
+topics = [item.get("topic") for item in events]
+for topic in [
+    "/orchestrator/contract_violation/recorded",
+    "/orchestrator/contract_violation/retry_requested",
+]:
+    if topic not in topics:
+        errors.append(f"event stream missing {topic}; present={sorted(set(topics))}")
+
+serialized_snapshot = json.dumps(snapshot, ensure_ascii=False)
+serialized_events = json.dumps(events, ensure_ascii=False)
+if "contract violation recovery completes without manual replan" not in serialized_snapshot:
+    errors.append("completed snapshot missing neutral DoD item")
+if "dod_assessment_missing_evidence_refs" not in serialized_events and "dod_assessment_missing_evidence_refs" not in serialized_snapshot:
+    errors.append("missing contract violation rule dod_assessment_missing_evidence_refs")
+if '"state":"blocked_on_decision"' in serialized_snapshot or '"state":"blocked_on_decision"' in serialized_events:
+    errors.append("recoverable contract violation entered blocked_on_decision")
+if mock_log.count("runId=") < 3:
+    errors.append(f"mock provider was called too few times: {mock_log}")
+if "recovery=True" not in mock_log:
+    errors.append(f"mock provider did not receive contractViolationRecovery prompt: {mock_log}")
+if "recovery=False" not in mock_log:
+    errors.append(f"mock provider did not record initial violating request: {mock_log}")
+
+if errors:
+    for item in errors:
+        print(item, file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+trap report_failure ERR
+trap timeout_failure TERM
+trap cleanup EXIT
+
+cd "$ROOT_DIR"
+start_watchdog
+start_mock_provider
+wait_mock
+wait_ready
+
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+write_llm_update_payloads
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
+grep '"apiKeyConfigured": true' "$TMP_DIR/configuration-updated.json" >/dev/null
+
+workspace_workdir="$TMP_DIR/workspace-deliverable"
+mkdir -p "$workspace_workdir"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
+  -d '{"title":"contract violation recovery e2e","description":"verify recoverable contract violation is retried automatically","deliverableDirectory":"'"$workspace_workdir"'","templateId":"generic-governed"}' >"$TMP_DIR/workspace.json"
+workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
+[[ -n "$workspace_id" ]]
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
+  -d '{"text":"verify recoverable contract violation is retried automatically"}' >"$TMP_DIR/goal.json"
+goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
+  -d '{"items":["contract violation recovery completes without manual replan"]}' >"$TMP_DIR/dod.json"
+dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
+
+python3 - "$TMP_DIR/activation-request.json" "$goal_id" "$dod_id" "$PROVIDER_ID" <<'PY'
+import json
+import sys
+
+path, goal_id, dod_id, provider_id = sys.argv[1:]
+payload = {
+    "goalId": goal_id,
+    "doDId": dod_id,
+    "llmProviderId": provider_id,
+    "priority": 1,
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, separators=(",", ":"))
+PY
+
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
+  -H 'Content-Type: application/json' \
+  -d @"$TMP_DIR/activation-request.json" >"$TMP_DIR/activation.json"
+run_id="$(wait_activation_run "$TMP_DIR/activation.json" "$workspace_id" "$TMP_DIR/activation-runs.json")"
+[[ -n "$run_id" ]]
+
+terminal_state="$(wait_run_terminal "$run_id" "$workspace_id" "$TMP_DIR/status.json")"
+if [[ "$terminal_state" != "completed" ]]; then
+  echo "run $run_id reached state $terminal_state, want completed" >&2
+  exit 1
+fi
+
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/status" >"$TMP_DIR/status.json"
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$run_id/snapshot" >"$TMP_DIR/snapshot.json"
+curl -fsS "$BASE_URL/api/v1/workorch/events?workspaceId=$workspace_id&runId=$run_id&limit=200" >"$TMP_DIR/events.json"
+validate_result
+
+echo "workorch contract violation recovery e2e verification passed for deployed workorch service $BASE_URL workspace=$workspace_id run=$run_id"

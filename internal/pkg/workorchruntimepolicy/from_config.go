@@ -4,8 +4,12 @@ import "github.com/muidea/workorch/internal/pkg/workorchconfig"
 
 func FromConfig(cfg workorchconfig.Config) RuntimePolicy {
 	return RuntimePolicy{
-		MaxRuntimeRepairAttempts: cfg.Runtime.MaxRuntimeRepairAttempts,
-		MaxProviderRetryAttempts: cfg.Runtime.MaxProviderRetryAttempts,
+		MaxRuntimeRepairAttempts:                     cfg.Runtime.MaxRuntimeRepairAttempts,
+		MaxProviderRetryAttempts:                     cfg.Runtime.MaxProviderRetryAttempts,
+		MaxContractViolationRetriesPerStep:           cfg.Runtime.MaxContractViolationRetriesPerStep,
+		MaxContractViolationRetriesPerRun:            cfg.Runtime.MaxContractViolationRetriesPerRun,
+		MaxRepeatedContractViolationSignature:        cfg.Runtime.MaxRepeatedContractViolationSignature,
+		MaxConsecutiveContractViolationNoShapeChange: cfg.Runtime.MaxConsecutiveContractViolationNoShapeChange,
 		LLMOutput: LLMOutputRuntimePolicy{
 			MaxPatchContentBytes:               cfg.Runtime.LLMOutput.MaxPatchContentBytes,
 			MaxGraphBytes:                      cfg.Runtime.LLMOutput.MaxGraphBytes,

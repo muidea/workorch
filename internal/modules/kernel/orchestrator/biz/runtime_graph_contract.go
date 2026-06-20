@@ -22,7 +22,7 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 		if graphIsConcreteFailureEvidenceAcquisitionGraph(step, graph) {
 			return nil
 		}
-		return fmt.Errorf("%w: concrete failure evidence acquisition must return bounded file/read, file/list, git/read, shell/command, or mcp/tool_call executionGraph without patch/apply or nested llm nodes", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "concrete failure evidence acquisition must return bounded file/read, file/list, git/read, shell/command, or mcp/tool_call executionGraph without patch/apply or nested llm nodes")
 	}
 	if graphHasStateChangingPatchNode(graph) {
 		return validateStateChangingExecutionGraph(graph)
@@ -43,10 +43,10 @@ func validateLLMFollowUpGraphStateChangingContract(run *runModel.Run, step *runM
 		return nil
 	}
 	if stage == runtimeStageVerification {
-		return fmt.Errorf("%w: validation follow-up llm step returned read-only executionGraph without concrete validation evidence", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationValidationEvidenceRequired, "validation follow-up llm step returned read-only executionGraph without concrete validation evidence")
 	}
 	if llmFollowUpGraphRequiresStateChangingPatch(step) {
-		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationRepairGraphWithoutPatchApply, "state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation")
 	}
 	return nil
 }
@@ -136,13 +136,13 @@ func graphHasStateChangingPatchNode(graph runtimemodel.BlockExecutionGraph) bool
 
 func validateStateChangingExecutionGraph(graph runtimemodel.BlockExecutionGraph) error {
 	if !graphHasStateChangingPatchNode(graph) {
-		return fmt.Errorf("%w: state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation; read-only or inspection-only graphs cannot satisfy the state-changing contract", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationRepairGraphWithoutPatchApply, "state-changing llm repair step returned executionGraph without patch/apply or declared auditable state-changing operation; read-only or inspection-only graphs cannot satisfy the state-changing contract")
 	}
 	if !graphHasUngatedStateChangingPatchNode(graph) {
-		return fmt.Errorf("%w: state-changing executionGraph patch/apply depends on llm/workspace_execution before patch", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationGraphDependsOnLLMBeforePatch, "state-changing executionGraph patch/apply depends on llm/workspace_execution before patch")
 	}
 	if graphHasPatchApplyDependingOnSameGraphRead(graph) {
-		return fmt.Errorf("%w: state-changing executionGraph patch/apply must not depend on same-graph file/read", common.ErrInvalidArgument)
+		return newRuntimeContractViolationError(contractViolationGraphDependsOnLLMBeforePatch, "state-changing executionGraph patch/apply must not depend on same-graph file/read")
 	}
 	return nil
 }

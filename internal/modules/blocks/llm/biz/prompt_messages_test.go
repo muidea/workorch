@@ -507,6 +507,59 @@ func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T)
 	}
 }
 
+func TestContractViolationRecoveryRendersInCurrentActionOnly(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-contract",
+		RunID:          "run-contract",
+		StepID:         "step-contract",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"stateChangingOutputRequired": true,
+			"repairObjective":             "produce_state_changing_output",
+			"contractViolationRecovery": map[string]any{
+				"violatedRule":     "state_changing_required_missing",
+				"recoverability":   "retry_same_contract",
+				"expectedContract": map[string]any{"stateChangingOutputRequired": true},
+				"actualOutputSummary": map[string]any{
+					"graphNodeKinds": []string{"file/read"},
+				},
+				"attempt":     1,
+				"maxAttempts": 2,
+			},
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"acceptedKinds": []string{"patch/apply"},
+				},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+	current, ok := promptContextSectionByID(context, "C4.current-action")
+	if !ok {
+		t.Fatalf("missing C4.current-action; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	for _, want := range []string{
+		"contractViolationRecovery",
+		"state_changing_required_missing",
+		"retry_same_contract",
+		"expectedContract",
+		"actualOutputSummary",
+	} {
+		if !strings.Contains(current.Content, want) {
+			t.Fatalf("current action missing %q: %s", want, current.Content)
+		}
+	}
+	prompt := buildProviderFacingPrompt(req)
+	if strings.Contains(prompt.StablePrefix, "contractViolationRecovery") ||
+		strings.Contains(prompt.StablePrefix, "state_changing_required_missing") {
+		t.Fatalf("stable prefix leaked contract violation recovery: %s", prompt.StablePrefix)
+	}
+}
+
 func TestProviderPromptDoesNotIncludeProjectionOnlyInputState(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-projection-guard",

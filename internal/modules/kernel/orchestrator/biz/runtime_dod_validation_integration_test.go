@@ -41,6 +41,13 @@ func TestValidatedCompletionDoDAssessmentRejectsMissingCurrentDoDCoverage(t *tes
 	if !errors.Is(err, common.ErrInvalidArgument) || !strings.Contains(err.Error(), "does not cover all current DoD items") || !strings.Contains(err.Error(), "error path covered") {
 		t.Fatalf("validatedCompletionDoDAssessment err = %v, want missing DoD coverage", err)
 	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) {
+		t.Fatalf("validatedCompletionDoDAssessment err = %T, want structured contract violation", err)
+	}
+	if violation.violationType != contractViolationCoverageMapIncomplete || violation.rule != contractViolationRuleCoverageMapIncomplete {
+		t.Fatalf("contract violation = %+v, want coverage map incomplete", violation)
+	}
 }
 
 func TestValidatedCompletionDoDAssessmentRejectsMissingGoalCoverage(t *testing.T) {
@@ -221,6 +228,13 @@ func TestValidatedCompletionDoDAssessmentRejectsGoalCoverageWithoutEvidenceRefs(
 	if !errors.Is(err, common.ErrInvalidArgument) ||
 		!strings.Contains(err.Error(), "satisfied dodAssessment.goalCoverage item requires evidenceRefs") {
 		t.Fatalf("validatedCompletionDoDAssessment err = %v, want goalCoverage evidenceRefs requirement", err)
+	}
+	var violation runtimeContractViolationError
+	if !errors.As(err, &violation) {
+		t.Fatalf("validatedCompletionDoDAssessment err = %T, want structured contract violation", err)
+	}
+	if violation.violationType != contractViolationDoDAssessmentEvidenceMissing || violation.rule != contractViolationRuleDoDAssessmentEvidenceMissing {
+		t.Fatalf("contract violation = %+v, want missing evidence refs", violation)
 	}
 }
 
