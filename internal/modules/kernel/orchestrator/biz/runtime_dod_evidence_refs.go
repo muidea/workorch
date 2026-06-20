@@ -432,6 +432,15 @@ func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, steps repository.
 			normalized["evidenceRefs"] = refs
 			changed = true
 		}
+		if refs, artifactRefs, ok := normalizeMisplacedArtifactEvidenceRefs(ctx, steps, evidence, catalog, normalized["evidenceRefs"], normalized["artifactRefs"]); ok {
+			normalized["evidenceRefs"] = refs
+			if len(artifactRefs) > 0 {
+				normalized["artifactRefs"] = artifactRefs
+			} else {
+				delete(normalized, "artifactRefs")
+			}
+			changed = true
+		}
 		state := strings.ToLower(strings.TrimSpace(stringFromMap(normalized, "state")))
 		itemFallbackRefs := fallbackRefs
 		if refs := completionEvidenceCandidateRefs(ctx, steps, evidence, catalog, normalized); len(refs) > 0 {
@@ -455,6 +464,59 @@ func normalizeAssessmentItemsEvidenceRefs(ctx context.Context, steps repository.
 		return items, false
 	}
 	return ret, true
+}
+
+func normalizeMisplacedArtifactEvidenceRefs(
+	ctx context.Context,
+	steps repository.StepRepository,
+	evidence RuntimeEvidenceRepositories,
+	catalog completionEvidenceRefCatalog,
+	evidenceValue any,
+	artifactValue any,
+) ([]string, []string, bool) {
+	artifactRefs := stringSliceFromValue(artifactValue)
+	if len(artifactRefs) == 0 {
+		return nil, nil, false
+	}
+	evidenceRefs := evidenceRefsFromValue(evidenceValue)
+	evidenceSeen := map[string]bool{}
+	for _, ref := range evidenceRefs {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			evidenceSeen[ref] = true
+		}
+	}
+	remainingArtifacts := make([]string, 0, len(artifactRefs))
+	artifactSeen := map[string]bool{}
+	changed := false
+	for _, raw := range artifactRefs {
+		ref := strings.TrimSpace(raw)
+		if ref == "" {
+			changed = true
+			continue
+		}
+		if canonical, ok := canonicalCompletionEvidenceRef(ctx, steps, evidence, catalog, ref); ok {
+			if !evidenceSeen[canonical] {
+				evidenceRefs = append(evidenceRefs, canonical)
+				evidenceSeen[canonical] = true
+			}
+			changed = true
+			continue
+		}
+		if artifactSeen[ref] {
+			changed = true
+			continue
+		}
+		artifactSeen[ref] = true
+		remainingArtifacts = append(remainingArtifacts, ref)
+		if ref != raw {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil, nil, false
+	}
+	return evidenceRefs, remainingArtifacts, true
 }
 
 func completionAssessmentStateAllowsEvidenceFallback(state string) bool {

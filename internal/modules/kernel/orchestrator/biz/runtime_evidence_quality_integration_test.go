@@ -596,6 +596,66 @@ func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraph(t *
 	}
 }
 
+func TestStateChangingRepairContractAcceptsProfileRequiredWriteEvidenceGraphFollowUp(t *testing.T) {
+	run := &runmodel.Run{ID: "run-profile-write-evidence-follow-up", InitialStepKind: llmWorkspaceExecutionStepKind}
+	step := &runmodel.Step{
+		ID:    "run-profile-write-evidence-follow-up/follow-up-001",
+		RunID: run.ID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{gitcommon.StepKindWrite, shellcommon.StepKindCommand},
+					"acceptedOperations":           []string{gitcommon.OperationCommit},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "stage-snapshot",
+					"kind": gitcommon.StepKindWrite,
+					"input": map[string]any{
+						"operation": gitcommon.OperationAdd,
+						"pathspecs": []string{"."},
+					},
+				},
+				{
+					"id":        "commit-snapshot",
+					"kind":      gitcommon.StepKindWrite,
+					"dependsOn": []string{"stage-snapshot"},
+					"input": map[string]any{
+						"operation": gitcommon.OperationCommit,
+						"message":   "record workspace snapshot",
+					},
+				},
+				{
+					"id":        "verify-snapshot",
+					"kind":      shellcommon.StepKindCommand,
+					"dependsOn": []string{"commit-snapshot"},
+					"input": map[string]any{
+						"command":           "verify",
+						"verificationScope": "snapshot evidence",
+						"targetRef":         "workspace",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want graph follow-up accepted for profile-required write evidence", err)
+	}
+}
+
 func TestStateChangingRepairContractRejectsSupplementaryWriteOnlyGraphWhenPrimaryStateChangeRequired(t *testing.T) {
 	run := &runmodel.Run{ID: "run-profile-write-evidence-mixed", InitialStepKind: llmWorkspaceExecutionStepKind}
 	step := &runmodel.Step{

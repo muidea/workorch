@@ -1099,6 +1099,101 @@ func TestNormalizeDoDAssessmentEvidenceRefsBackfillsEmptySatisfiedItemsFromConcr
 	}
 }
 
+func TestNormalizeDoDAssessmentEvidenceRefsMovesTraceableArtifactRefsIntoEvidenceRefs(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-assessment-artifact-evidence-normalize")
+	patchStepID := common.StepID(runID + "/graph-001/001-state-change")
+	verifyStepID := common.StepID(runID + "/graph-001/002-verify")
+	stepRepo := newCountingStepRepository()
+	for _, step := range []*runmodel.Step{
+		{
+			ID:    patchStepID,
+			RunID: runID,
+			Kind:  "patch/apply",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"coverageTargets": []string{"produced_asset"},
+			},
+			Output: map[string]any{
+				"status": "completed",
+			},
+		},
+		{
+			ID:    verifyStepID,
+			RunID: runID,
+			Kind:  "shell/command",
+			State: common.StepStateCompleted,
+			Input: map[string]any{
+				"coverageTargets": []string{"produced_asset"},
+			},
+			Output: map[string]any{
+				"status": "completed",
+			},
+		},
+	} {
+		if err := stepRepo.Create(ctx, step); err != nil {
+			t.Fatalf("Create step %s: %v", step.ID, err)
+		}
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-assessment-artifact-evidence-normalize",
+		DoDID:           "dod-assessment-artifact-evidence-normalize",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"scope":                 "deliverable",
+							"id":                    "produced_asset",
+							"acceptedStepKinds":     []string{"patch/apply"},
+							"requireDirectEvidence": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	catalog, err := completionEvidenceRefCatalogForRun(ctx, stepRepo, RuntimeEvidenceRepositories{}, run)
+	if err != nil {
+		t.Fatalf("completionEvidenceRefCatalogForRun: %v", err)
+	}
+	artifactRef := string(runID) + "/artifact/result-summary"
+	assessment := map[string]any{
+		"satisfied": true,
+		"summary":   "Requirements are satisfied.",
+		"deliverableCoverage": map[string]any{
+			"satisfied": true,
+			"items": []map[string]any{{
+				"id":           "produced_asset",
+				"state":        "satisfied",
+				"evidenceRefs": []string{string(verifyStepID)},
+				"artifactRefs": []string{string(patchStepID), artifactRef},
+			}},
+		},
+	}
+
+	normalized, changed := normalizeDoDAssessmentEvidenceRefs(ctx, stepRepo, RuntimeEvidenceRepositories{}, catalog, assessment)
+	if !changed {
+		t.Fatalf("normalizeDoDAssessmentEvidenceRefs changed=false, want misplaced artifact evidence normalization")
+	}
+	deliverableCoverage := mapFromValue(normalized["deliverableCoverage"])
+	items, ok := doDAssessmentItemMaps(deliverableCoverage["items"])
+	if !ok || len(items) != 1 {
+		t.Fatalf("deliverableCoverage.items = %+v, want one item", deliverableCoverage["items"])
+	}
+	if got := evidenceRefsFromValue(items[0]["evidenceRefs"]); !reflect.DeepEqual(got, []string{string(verifyStepID), string(patchStepID)}) {
+		t.Fatalf("evidenceRefs = %+v, want verification plus moved patch evidence", got)
+	}
+	if got := stringSliceFromValue(items[0]["artifactRefs"]); !reflect.DeepEqual(got, []string{artifactRef}) {
+		t.Fatalf("artifactRefs = %+v, want only true artifact refs preserved", got)
+	}
+	if err := validateDoDAssessmentEvidenceKindRequirements(ctx, stepRepo, nil, run, normalized); err != nil {
+		t.Fatalf("validateDoDAssessmentEvidenceKindRequirements: %v", err)
+	}
+}
+
 func TestNormalizeCompletionGateDoDAssessmentOutputUsesEvidenceCandidatesWhenRefsAreNotTraceable(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-goal-coverage-normalize-candidate",

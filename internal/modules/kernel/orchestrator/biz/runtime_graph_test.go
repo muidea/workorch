@@ -391,3 +391,103 @@ func TestConcreteEvidenceAcquisitionGateStopsGraphAndRestoresStateChange(t *test
 		t.Fatalf("graph evidence = %+v, want completed list evidence only", evidence)
 	}
 }
+
+func TestConcreteEvidenceAcquisitionGateDoesNotInterceptStateChangingGraph(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-evidence-acquisition-state-change-dispatch")
+	workspaceID := common.WorkspaceID("ws-evidence-acquisition-state-change-dispatch")
+	root := &runmodel.Step{
+		ID:     common.StepID(runID + "/repair-001"),
+		RunID:  runID,
+		Kind:   llmWorkspaceExecutionStepKind,
+		State:  common.StepStateCompleted,
+		Output: map[string]any{stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{ID: "list-root", Kind: "file/list"}}}},
+		Input: map[string]any{
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+			"coverageWorkItemContext": map[string]any{
+				"currentFocus": map[string]any{
+					"id":                    "coverage-item-1",
+					"status":                "missing",
+					"requiredEvidenceKinds": []string{"state_change"},
+					"missingEvidenceKinds":  []string{"state_change"},
+					"sourceScope":           "deliverable",
+				},
+			},
+			"repairActionPackage": map[string]any{
+				"coverageRepairRequired": true,
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+	}
+	listStep := &runmodel.Step{
+		ID:    graphScopedStepID(runID, 1, 1, "list-root"),
+		RunID: runID,
+		Kind:  "file/list",
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			stepInputKeyGraphRootStepID:       string(root.ID),
+			stepInputKeyGraphNodeID:           "list-root",
+			"concreteFailureEvidenceRequired": true,
+			"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		},
+		Output: map[string]any{
+			"stage":     "file_list",
+			"status":    "completed",
+			"path":      ".",
+			"entries":   []map[string]any{},
+			"truncated": false,
+		},
+	}
+	stateChangingGraph := runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
+		{
+			ID:   "write-deliverable",
+			Kind: "patch/apply",
+			Input: map[string]any{
+				"patchType":       "file_write",
+				"targetRef":       "deliverable.txt",
+				"content":         "implemented\n",
+				"coverageTargets": []string{"coverage-item-1"},
+			},
+		},
+	}}
+	followUp := &runmodel.Step{
+		ID:    common.StepID(runID + "/follow-up-graph-list-root"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateCompleted,
+		Input: map[string]any{
+			"graphFollowUp":                   true,
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			stepInputKeyGraphRootStepID:       string(root.ID),
+			"stateChangingOutputRequired":     true,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+				},
+			},
+		},
+		Output: map[string]any{
+			"status":                    "completed",
+			stepOutputKeyExecutionGraph: stateChangingGraph,
+		},
+	}
+	steps := []*runmodel.Step{root, listStep, followUp}
+	graphManager := &graphSubsystem{}
+
+	if input, ok := graphManager.concreteEvidenceAcquisitionFollowUpInputFromSteps(
+		&runmodel.Run{ID: runID, WorkspaceID: workspaceID, InitialStepKind: llmWorkspaceExecutionStepKind},
+		followUp,
+		steps,
+	); ok {
+		t.Fatalf("gate returned follow-up input = %+v, want state-changing graph to dispatch", input)
+	}
+	specs := graphManager.readyGraphStepSpecsFromSteps(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID}, followUp, stateChangingGraph, steps)
+	if len(specs) != 1 || specs[0].Kind != "patch/apply" || specs[0].ID != graphScopedStepID(runID, 2, 1, "write-deliverable") {
+		t.Fatalf("ready graph specs = %+v, want patch/apply state-changing node", specs)
+	}
+}

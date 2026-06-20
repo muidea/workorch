@@ -1480,6 +1480,14 @@ func (g *graphSubsystem) graphFollowUpStepInputFromSteps(run *runModel.Run, step
 }
 
 func (g *graphSubsystem) concreteEvidenceAcquisitionFollowUpInputFromSteps(run *runModel.Run, step *runModel.Step, steps []*runModel.Step) (map[string]any, bool) {
+	if step == nil {
+		return nil, false
+	}
+	if graph, ok := runtimeGraphSpecFromValue(step.Output[stepOutputKeyExecutionGraph]); ok &&
+		inputRequiresStateChangingOutput(step.Input) &&
+		graphIsConcreteStateChangingContinuation(graph) {
+		return nil, false
+	}
 	source := evidenceAcquisitionSourceStep(step, steps)
 	if !stepRequiresConcreteFailureEvidenceAcquisition(source) {
 		return nil, false
