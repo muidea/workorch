@@ -110,6 +110,7 @@ func repairActionPackageFromRepairInput(input map[string]any, rawFailedOutput ..
 	if context := coverageWorkItemContextFromInput(input); len(context) > 0 {
 		pkg[coverageWorkItemContextKey] = context
 	}
+	applyRepairCoverageFocusContract(input, pkg, requiredOutput)
 	if progress := mapFromValue(input["currentExecutionProgress"]); len(progress) > 0 {
 		pkg["currentExecutionProgress"] = compactLLMContextMap(progress, 0)
 	}
@@ -1403,6 +1404,7 @@ func ensureCoverageRepairTargetSet(input map[string]any) {
 		} else {
 			required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
 		}
+		applyRepairCoverageFocusContract(input, pkg, required)
 		pkg["requiredOutput"] = required
 		input["repairActionPackage"] = pkg
 	}

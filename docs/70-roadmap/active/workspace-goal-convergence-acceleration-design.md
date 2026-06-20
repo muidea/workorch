@@ -560,10 +560,10 @@ Implementation notes:
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-09 | Extend repairActionPackage with required focus binding | orchestrator | pending |
-| WGC-10 | Reject LLM graph outputs that do not bind to current focus | orchestrator graph gate | pending |
-| WGC-11 | Reject unrelated reports/scripts/fixtures when focus needs source_change | generic graph/evidence gate plus template policy | pending |
-| WGC-12 | Add tests for repair focus mismatch and unrelated repair output | tests | pending |
+| WGC-09 | Extend repairActionPackage with required focus binding | orchestrator | completed |
+| WGC-10 | Reject LLM graph outputs that do not bind to current focus | orchestrator graph gate | completed |
+| WGC-11 | Reject unrelated reports/scripts/fixtures when focus needs source_change | generic graph/evidence gate plus template policy | completed |
+| WGC-12 | Add tests for repair focus mismatch and unrelated repair output | tests | completed |
 
 Acceptance:
 
@@ -571,20 +571,34 @@ Acceptance:
 - Rejected repair output is visible as structured failure.
 - Runtime can still return `cannot_progress` when focus is genuinely blocked.
 
+Implementation notes:
+
+- `repairActionPackage` now carries a dynamic `coverageFocus` contract when the run input contains active focus data. `requiredOutput.mustBindCoverageFocus` declares the focus id and coverage work item ids the next repair output must bind to.
+- LLM execution output validation now rejects state-changing or validation repair graphs that do not bind actionable nodes to the current focus through generic fields: `coverageFocusId`, `focusId`, `coverageWorkItemIds`, `coverageWorkItemId`, `coverageTargets`, or matching target refs/tokens.
+- Structured blockers remain allowed: decision/approval blockers and `completionState` values such as `cannot_progress` are not rejected by the focus gate.
+- The software-dev template keeps source-change ordering and supplemental-evidence constraints in template data and Soul guidance. Core only enforces the generic focus/evidence binding contract and does not branch on `source_change`, file type, language, command, report, script, or fixture names.
+
 ### Phase 4: Context Compaction for Repair
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-13 | Add focus-scoped rejected evidence filtering | context builder | pending |
-| WGC-14 | Summarize old execution graphs by default | context builder | pending |
-| WGC-15 | Restrict memory recall to current-definition high-value items | memory/context | pending |
-| WGC-16 | Add stable-prefix regression tests for focus changes | llm/provider context tests | pending |
+| WGC-13 | Add focus-scoped rejected evidence filtering | context builder | completed |
+| WGC-14 | Summarize old execution graphs by default | context builder | completed |
+| WGC-15 | Restrict memory recall to current-definition high-value items | memory/context | completed |
+| WGC-16 | Add stable-prefix regression tests for focus changes | llm/provider context tests | completed |
 
 Acceptance:
 
 - Repair request bytes are materially reduced on large workspaces.
 - Current failure/focus/requiredOutput remain protected.
 - Cache stable prefix does not change because of dynamic repair state.
+
+Implementation notes:
+
+- Repair execution context package compaction is now focus-aware. The current focus keeps rejected evidence refs and by-kind detail; non-focus work items keep only summary counts and omission markers.
+- Historical step outputs no longer carry full `executionGraph` payloads into compact LLM context. They are replaced with `executionGraphSummary` containing node count, bounded node ids, and bounded kinds.
+- Selected memory context is filtered to current-definition-compatible, non-stale, non-low-value memories before it is attached to repair context. Revision mismatches are omitted with a `memoryCompaction` audit summary.
+- Provider cache regression tests prove that changing `coverageFocus` / focus-bound repair package state changes only the volatile tail hash, not the stable prefix, rendered stable prefix, workspace definition hash, capability contract hash, or cache key.
 
 ### Phase 5: Validation Failure Diagnostics
 

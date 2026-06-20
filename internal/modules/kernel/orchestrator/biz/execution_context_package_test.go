@@ -11,6 +11,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	memrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRunExecutionContextPackageIncludesCompactGoalDoDDefinitions(t *testing.T) {
@@ -1066,6 +1067,103 @@ func TestRemoveExcludedSelectedContextMemoriesDropsStaleStableMemories(t *testin
 	memories := mapSliceFromValue(got["memories"])
 	if len(memories) != 1 || memories[0]["id"] != "memory-selected" {
 		t.Fatalf("selectedContext.memories = %+v, want only selected non-excluded memory", memories)
+	}
+}
+
+func TestCompactCoverageWorkItemContextForRepairFocusKeepsOnlyFocusRejectedEvidenceDetails(t *testing.T) {
+	focus := map[string]any{
+		"id":                  "focus-cwi-primary",
+		"coverageWorkItemIds": []string{"cwi-primary"},
+		"targetRefs":          []string{"target-primary"},
+	}
+	context := map[string]any{
+		"schemaVersion":      coverageWorkItemContextSchema,
+		"definitionRevision": "rev-current",
+		"currentFocus": map[string]any{
+			"id":                   "cwi-primary",
+			"targetText":           "primary closure",
+			"rejectedEvidenceRefs": []string{"step://reject-primary"},
+		},
+		"unresolvedItems": []map[string]any{
+			{
+				"id":                   "cwi-primary",
+				"targetText":           "primary closure",
+				"targetRef":            "target-primary",
+				"rejectedEvidenceRefs": []string{"step://reject-primary"},
+				"rejectedEvidenceByKind": map[string][]string{
+					"validation": {"step://reject-primary"},
+				},
+			},
+			{
+				"id":                   "cwi-secondary",
+				"targetText":           "secondary closure",
+				"rejectedEvidenceRefs": []string{"step://reject-secondary-a", "step://reject-secondary-b"},
+				"rejectedEvidenceByKind": map[string][]string{
+					"validation": {"step://reject-secondary-a", "step://reject-secondary-b"},
+				},
+			},
+		},
+	}
+
+	got := compactCoverageWorkItemContextForRepairFocus(context, focus)
+	unresolved := mapSliceFromValue(got["unresolvedItems"])
+	if len(unresolved) != 2 {
+		t.Fatalf("unresolvedItems = %+v, want focus and one summarized non-focus item", unresolved)
+	}
+	if refs := stringSliceFromValue(unresolved[0]["rejectedEvidenceRefs"]); len(refs) != 1 || refs[0] != "step://reject-primary" {
+		t.Fatalf("focus rejected refs = %+v, want full focus refs", unresolved[0]["rejectedEvidenceRefs"])
+	}
+	if _, ok := unresolved[1]["rejectedEvidenceRefs"]; ok {
+		t.Fatalf("non-focus item leaked rejectedEvidenceRefs: %+v", unresolved[1])
+	}
+	if unresolved[1]["rejectedEvidenceCount"] != 2 || unresolved[1]["evidenceDetailOmitted"] != true {
+		t.Fatalf("non-focus summary = %+v, want rejected count and omission marker", unresolved[1])
+	}
+}
+
+func TestCompactSelectedContextForCurrentDefinitionDropsStaleAndOldRevisionMemories(t *testing.T) {
+	selected := map[string]any{
+		"memories": []map[string]any{
+			{"id": "memory-current", "summary": "current usable reference", "definitionRevision": "rev-current", "importance": 0.8, "confidence": 0.8},
+			{"id": "memory-old", "summary": "old definition reference", "definitionRevision": "rev-old", "importance": 0.9, "confidence": 0.9},
+			{"id": "memory-stale", "summary": "stale reference", "definitionRevision": "rev-current", "status": "stale", "importance": 0.9, "confidence": 0.9},
+			{"id": "memory-low", "summary": "low value reference", "definitionRevision": "rev-current", "importance": 0.1, "confidence": 0.9},
+		},
+		"memoryRetrieval": map[string]any{"selectedMemoryIds": []string{"memory-current", "memory-old", "memory-stale", "memory-low"}},
+	}
+
+	got := compactSelectedContextForCurrentDefinition(selected, "rev-current")
+	memories := mapSliceFromValue(got["memories"])
+	if len(memories) != 1 || memories[0]["id"] != "memory-current" {
+		t.Fatalf("selected memories = %+v, want only current high-value memory", memories)
+	}
+	compaction := mapFromValue(got["memoryCompaction"])
+	if compaction["policy"] != "current_definition_high_value_only" || compaction["omittedCount"] != 3 {
+		t.Fatalf("memoryCompaction = %+v, want current-definition omission summary", compaction)
+	}
+}
+
+func TestCompactStepOutputForLLMContextSummarizesExecutionGraph(t *testing.T) {
+	output := map[string]any{
+		"summary": "historical graph output",
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{{
+			ID:    "old-node",
+			Kind:  "patch/apply",
+			Input: map[string]any{"content": strings.Repeat("graph-noise ", 300)},
+		}}},
+	}
+
+	got := compactStepOutputForLLMContext(output)
+	if _, ok := got[stepOutputKeyExecutionGraph]; ok {
+		t.Fatalf("compact output leaked executionGraph: %+v", got)
+	}
+	summary := mapFromValue(got["executionGraphSummary"])
+	if summary["nodeCount"] != 1 {
+		t.Fatalf("executionGraphSummary = %+v, want one-node summary", summary)
+	}
+	encoded, _ := json.Marshal(got)
+	if strings.Contains(string(encoded), "graph-noise") {
+		t.Fatalf("compact output leaked graph node input: %s", encoded)
 	}
 }
 

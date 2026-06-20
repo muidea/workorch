@@ -868,6 +868,10 @@ func compactStepOutputForLLMContext(output map[string]any) map[string]any {
 		return stripRuntimeLLMBinding(compactLLMDecisionInvalidOutputForContext(output))
 	}
 	ret := compactLLMContextMap(output, 0)
+	if graph, ok := runtimeGraphSpecFromValue(output[stepOutputKeyExecutionGraph]); ok {
+		delete(ret, stepOutputKeyExecutionGraph)
+		ret["executionGraphSummary"] = rejectedGraphSummary(graph)
+	}
 	if chunk := mapFromValue(output["artifactChunk"]); len(chunk) > 0 {
 		ret["artifactChunk"] = compactArtifactChunkForLLMContext(chunk)
 	}
@@ -879,6 +883,10 @@ func compactStepOutputForLLMContext(output map[string]any) map[string]any {
 	}
 	if decision := mapFromValue(output[stepOutputKeyLLMDecision]); len(decision) > 0 {
 		compactDecision := compactLLMContextMap(decision, 0)
+		if graph, ok := runtimeGraphSpecFromValue(decision[stepOutputKeyExecutionGraph]); ok {
+			delete(compactDecision, stepOutputKeyExecutionGraph)
+			compactDecision["executionGraphSummary"] = rejectedGraphSummary(graph)
+		}
 		if chunk := mapFromValue(decision["artifactChunk"]); len(chunk) > 0 {
 			compactDecision["artifactChunk"] = compactArtifactChunkForLLMContext(chunk)
 		}

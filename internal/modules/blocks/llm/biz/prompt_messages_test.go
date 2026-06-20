@@ -365,6 +365,92 @@ func TestProviderCachePlanKeepsCacheablePrefixStableAcrossVolatileProgress(t *te
 	}
 }
 
+func TestProviderCachePlanKeepsStablePrefixAcrossCoverageFocusChanges(t *testing.T) {
+	baseInput := map[string]any{
+		"executionContextPackage": map[string]any{
+			"goal":               map[string]any{"text": "stable goal"},
+			"dod":                map[string]any{"items": []any{"stable dod"}},
+			"definitionRevision": "definition-stable",
+			"acceptance": map[string]any{
+				"activeSliceId": "slice-required",
+				"currentFocus": map[string]any{
+					"id":                  "focus-cwi-001",
+					"coverageWorkItemIds": []any{"cwi-001"},
+					"targetRefs":          []any{"target-a"},
+				},
+			},
+			"coverageFocus": map[string]any{
+				"id":                  "focus-cwi-001",
+				"coverageWorkItemIds": []any{"cwi-001"},
+				"targetRefs":          []any{"target-a"},
+			},
+		},
+		"currentRuntimeStage":     "repair",
+		"currentRuntimeStageMode": "strict_convergence",
+		"repairActionPackage": map[string]any{
+			"requiredOutput": map[string]any{"mustBindCoverageFocus": true, "coverageFocusId": "focus-cwi-001"},
+		},
+	}
+	changedInput := cloneMap(baseInput)
+	changedInput["executionContextPackage"] = map[string]any{
+		"goal":               map[string]any{"text": "stable goal"},
+		"dod":                map[string]any{"items": []any{"stable dod"}},
+		"definitionRevision": "definition-stable",
+		"acceptance": map[string]any{
+			"activeSliceId": "slice-required",
+			"currentFocus": map[string]any{
+				"id":                  "focus-cwi-002",
+				"coverageWorkItemIds": []any{"cwi-002"},
+				"targetRefs":          []any{"target-b"},
+			},
+		},
+		"coverageFocus": map[string]any{
+			"id":                  "focus-cwi-002",
+			"coverageWorkItemIds": []any{"cwi-002"},
+			"targetRefs":          []any{"target-b"},
+		},
+	}
+	changedInput["repairActionPackage"] = map[string]any{
+		"requiredOutput": map[string]any{"mustBindCoverageFocus": true, "coverageFocusId": "focus-cwi-002"},
+	}
+
+	base := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-cache-focus",
+		RunID:          "run-001",
+		StepID:         "step-001",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		RuntimeCapabilities: llmmodels.RuntimeCapabilities{
+			BlockKinds: []llmmodels.RuntimeBlockCapability{{Kind: "file/read", Description: "read file"}},
+		},
+		Input: baseInput,
+	}
+	changed := base
+	changed.Input = changedInput
+	base.PromptContext = buildPromptContextFromRequest(base)
+	changed.PromptContext = buildPromptContextFromRequest(changed)
+	attachProviderCachePlan(&base)
+	attachProviderCachePlan(&changed)
+
+	basePlan := base.ContextBudget.CachePlan
+	changedPlan := changed.ContextBudget.CachePlan
+	if basePlan == nil || changedPlan == nil {
+		t.Fatalf("cache plan missing: base=%+v changed=%+v", base.ContextBudget, changed.ContextBudget)
+	}
+	if basePlan.StablePrefixHash != changedPlan.StablePrefixHash ||
+		basePlan.RenderedStablePrefixHash != changedPlan.RenderedStablePrefixHash ||
+		basePlan.WorkspaceDefinitionHash != changedPlan.WorkspaceDefinitionHash ||
+		basePlan.CapabilityContractHash != changedPlan.CapabilityContractHash ||
+		basePlan.CacheKey != changedPlan.CacheKey {
+		t.Fatalf("cacheable prefix changed under focus change: base=%+v changed=%+v", basePlan, changedPlan)
+	}
+	if basePlan.VolatileTailHash == changedPlan.VolatileTailHash {
+		t.Fatalf("volatile tail hash unchanged across focus change: %q", basePlan.VolatileTailHash)
+	}
+}
+
 func TestBuildProviderFacingPromptGroupsStablePrefixAndDynamicTail(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-provider-prefix",

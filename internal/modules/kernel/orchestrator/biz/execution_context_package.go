@@ -371,6 +371,9 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 	if len(governanceHistory) > 0 {
 		ret["governanceHistory"] = compactGovernanceHistoryForRuntimeContext(governanceHistory, 6)
 	}
+	if shouldCompactExecutionContextPackageForRepair(step) {
+		ret = compactExecutionContextPackageForRepair(ret, step, executionContext)
+	}
 	return ret
 }
 
@@ -537,6 +540,310 @@ func removeExcludedSelectedContextMemories(selected map[string]any, retrieval ma
 	}
 	selected["memories"] = filtered
 	return selected
+}
+
+func shouldCompactExecutionContextPackageForRepair(step *runModel.Step) bool {
+	if step == nil || step.Input == nil {
+		return false
+	}
+	if len(mapFromValue(step.Input["repairActionPackage"])) == 0 {
+		return false
+	}
+	return runtimeStageFromStepInput(step.Input) == runtimeStageRepair ||
+		boolValue(step.Input[stepInputKeyRuntimeRepairFollowUp]) ||
+		boolValue(step.Input["stateChangingOutputRequired"])
+}
+
+func compactExecutionContextPackageForRepair(pkg map[string]any, step *runModel.Step, executionContext map[string]any) map[string]any {
+	if len(pkg) == 0 {
+		return pkg
+	}
+	focus := repairCoverageFocusFromInput(step.Input)
+	if len(focus) == 0 {
+		focus = mapFromValue(mapFromValue(pkg["acceptance"])["currentFocus"])
+	}
+	if len(focus) > 0 {
+		if context := mapFromValue(pkg[coverageWorkItemContextKey]); len(context) > 0 {
+			pkg[coverageWorkItemContextKey] = compactCoverageWorkItemContextForRepairFocus(context, focus)
+		}
+		if items := mapSliceFromValue(pkg[coverageWorkItemsKey]); len(items) > 0 {
+			pkg[coverageWorkItemsKey] = compactCoverageWorkItemsForRepairFocus(items, focus, 8)
+		}
+	}
+	if selected := mapFromValue(pkg["selectedContext"]); len(selected) > 0 {
+		revision := coverageDefinitionRevision(executionContext)
+		selected = compactSelectedContextForCurrentDefinition(selected, revision)
+		if len(selected) == 0 {
+			delete(pkg, "selectedContext")
+		} else {
+			pkg["selectedContext"] = selected
+		}
+	}
+	return pkg
+}
+
+func compactCoverageWorkItemContextForRepairFocus(context map[string]any, focus map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{"schemaVersion", "definitionRevision", "summary", "omittedCount", "excludedCount", "historicalCount", "omittedStatusDistribution", "omittedSourceScopeDistribution"} {
+		if value, ok := context[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if current := mapFromValue(context["currentFocus"]); len(current) > 0 {
+		ret["currentFocus"] = compactCoverageWorkItemForRepairFocus(current, focus, coverageWorkItemMatchesFocus(current, focus))
+	}
+	if currentItems := compactCoverageWorkItemsForRepairFocus(mapSliceFromValue(context["currentFocusItems"]), focus, 4); len(currentItems) > 0 {
+		ret["currentFocusItems"] = currentItems
+	}
+	if unresolved := compactCoverageWorkItemsForRepairFocus(mapSliceFromValue(context["unresolvedItems"]), focus, 8); len(unresolved) > 0 {
+		ret["unresolvedItems"] = unresolved
+	}
+	if ledger := compactCoverageWorkItemsForRepairFocus(mapSliceFromValue(context["ledgerSummary"]), focus, 8); len(ledger) > 0 {
+		ret["ledgerSummary"] = ledger
+	}
+	if historical := compactCoverageWorkItemsForRepairFocus(mapSliceFromValue(context["historicalItems"]), focus, 4); len(historical) > 0 {
+		ret["historicalItems"] = historical
+	}
+	ret["compactionPolicy"] = "current focus keeps evidence refs; non-focus items keep summary counts and omit rejected evidence details"
+	return ret
+}
+
+func compactCoverageWorkItemsForRepairFocus(items []map[string]any, focus map[string]any, limit int) []map[string]any {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	ret := make([]map[string]any, 0, min(len(items), limit))
+	added := map[string]bool{}
+	add := func(item map[string]any) {
+		if len(item) == 0 || len(ret) >= limit {
+			return
+		}
+		key := firstNonEmptyString(stringFromMap(item, "id"), stringFromMap(item, "normalizedSourceKey"), stringFromMap(item, "targetText"))
+		if key != "" && added[key] {
+			return
+		}
+		if key != "" {
+			added[key] = true
+		}
+		ret = append(ret, compactCoverageWorkItemForRepairFocus(item, focus, coverageWorkItemMatchesFocus(item, focus)))
+	}
+	for _, item := range items {
+		if coverageWorkItemMatchesFocus(item, focus) {
+			add(item)
+		}
+	}
+	for _, item := range items {
+		add(item)
+	}
+	return ret
+}
+
+func compactCoverageWorkItemForRepairFocus(item map[string]any, focus map[string]any, current bool) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	if current {
+		ret := compactLLMContextMap(item, 0)
+		ret["focusScoped"] = true
+		return ret
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"id",
+		"definitionRevision",
+		"source",
+		"sourceScope",
+		"sourceRequirementId",
+		"sourcePath",
+		"normalizedSourceKey",
+		"targetText",
+		"status",
+		"currentGap",
+		"requiredEvidenceKinds",
+		"missingEvidenceKinds",
+		"evidenceRole",
+	} {
+		if value, ok := item[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if count := len(stringSliceFromValue(item["acceptedEvidenceRefs"])); count > 0 {
+		ret["acceptedEvidenceCount"] = count
+	}
+	if count := len(stringSliceFromValue(item["rejectedEvidenceRefs"])); count > 0 {
+		ret["rejectedEvidenceCount"] = count
+	}
+	if byKind := mapStringSliceValue(item["acceptedEvidenceByKind"]); len(byKind) > 0 {
+		ret["acceptedEvidenceByKindCount"] = mapStringSliceCounts(byKind)
+	}
+	if byKind := mapStringSliceValue(item["rejectedEvidenceByKind"]); len(byKind) > 0 {
+		ret["rejectedEvidenceByKindCount"] = mapStringSliceCounts(byKind)
+	}
+	if len(ret) > 0 {
+		ret["focusScoped"] = false
+		ret["evidenceDetailOmitted"] = true
+	}
+	return ret
+}
+
+func coverageWorkItemMatchesFocus(item map[string]any, focus map[string]any) bool {
+	if len(item) == 0 || len(focus) == 0 {
+		return false
+	}
+	focusIDs := stringSet(stringSliceFromValue(focus["coverageWorkItemIds"]))
+	if id := strings.TrimSpace(stringFromMap(item, "id")); id != "" && focusIDs[id] {
+		return true
+	}
+	if id := strings.TrimSpace(stringFromMap(item, "coverageWorkItemId")); id != "" && focusIDs[id] {
+		return true
+	}
+	for _, focusRef := range stringSliceFromValue(focus["targetRefs"]) {
+		for _, key := range []string{"targetRef", "sourcePath", "targetText", "normalizedSourceKey", "sourceRequirementId"} {
+			if coverageRepairTokenMatches(focusRef, stringFromMap(item, key)) {
+				return true
+			}
+		}
+	}
+	for id := range focusIDs {
+		for _, key := range []string{"coverageWorkItemId", "id", "sourceRequirementId", "normalizedSourceKey"} {
+			if coverageRepairTokenMatches(id, stringFromMap(item, key)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mapStringSliceCounts(input map[string][]string) map[string]int {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := map[string]int{}
+	for key, values := range input {
+		if strings.TrimSpace(key) == "" || len(values) == 0 {
+			continue
+		}
+		ret[key] = len(values)
+	}
+	return ret
+}
+
+func compactSelectedContextForCurrentDefinition(selected map[string]any, currentRevision string) map[string]any {
+	if len(selected) == 0 {
+		return nil
+	}
+	ret := cloneStepPayload(selected)
+	memories := mapSliceFromValue(ret["memories"])
+	if len(memories) == 0 {
+		return ret
+	}
+	filtered := make([]map[string]any, 0, min(len(memories), stepInputMemoryLimit))
+	omitted := 0
+	for idx, memory := range memories {
+		if !selectedMemoryCompatibleWithCurrentDefinition(memory, currentRevision) {
+			omitted++
+			continue
+		}
+		filtered = append(filtered, compactSelectedMemoryForRepair(memory))
+		if len(filtered) >= stepInputMemoryLimit {
+			omitted += len(memories) - idx - 1
+			break
+		}
+	}
+	if len(filtered) == 0 {
+		delete(ret, "memories")
+	} else {
+		ret["memories"] = filtered
+	}
+	if omitted > 0 || strings.TrimSpace(currentRevision) != "" {
+		ret["memoryCompaction"] = map[string]any{
+			"policy":             "current_definition_high_value_only",
+			"definitionRevision": strings.TrimSpace(currentRevision),
+			"omittedCount":       omitted,
+		}
+	}
+	return ret
+}
+
+func selectedMemoryCompatibleWithCurrentDefinition(memory map[string]any, currentRevision string) bool {
+	if len(memory) == 0 {
+		return false
+	}
+	if selectedMemoryMarkedStale(memory) || selectedMemoryLowValue(memory) {
+		return false
+	}
+	revision := selectedMemoryDefinitionRevision(memory)
+	currentRevision = strings.TrimSpace(currentRevision)
+	if revision != "" && currentRevision != "" && revision != currentRevision {
+		return false
+	}
+	if value, ok := memory["currentDefinitionCompatible"]; ok && !boolValue(value) {
+		return false
+	}
+	return strings.TrimSpace(firstNonEmptyString(stringFromMap(memory, "summary"), stringFromMap(memory, "content"))) != ""
+}
+
+func compactSelectedMemoryForRepair(memory map[string]any) map[string]any {
+	ret := map[string]any{}
+	for _, key := range []string{
+		"id",
+		"memoryType",
+		"summary",
+		"content",
+		"tags",
+		"importance",
+		"confidence",
+		"visibility",
+		"vectorScore",
+		"definitionRevision",
+		"goalDoDRevision",
+		"sourceRef",
+		"runId",
+	} {
+		if value, ok := memory[key]; ok && value != nil {
+			ret[key] = compactLLMContextValue(value, 1)
+		}
+	}
+	if provenance := staticMemoryContextProvenance(memory); provenance != "" {
+		ret["provenance"] = provenance
+	}
+	return ret
+}
+
+func selectedMemoryDefinitionRevision(memory map[string]any) string {
+	for _, source := range []map[string]any{memory, mapFromValue(memory["metadata"]), mapFromValue(memory["context"])} {
+		for _, key := range []string{"definitionRevision", "goalDoDRevision", "goalRevision", "doDRevision", "revision"} {
+			if value := strings.TrimSpace(stringFromMap(source, key)); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func selectedMemoryMarkedStale(memory map[string]any) bool {
+	for _, key := range []string{"status", "state", "validity", "evidenceValidity", "cacheability"} {
+		switch strings.TrimSpace(strings.ToLower(stringFromMap(memory, key))) {
+		case "stale", "stale_or_rejected", "rejected", "superseded", "obsolete", "expired", "diagnostic_only", "provider_retry_noise":
+			return true
+		}
+	}
+	return false
+}
+
+func selectedMemoryLowValue(memory map[string]any) bool {
+	confidence := floatFromValue(memory["confidence"])
+	importance := floatFromValue(memory["importance"])
+	if confidence > 0 && confidence < 0.2 {
+		return true
+	}
+	if importance > 0 && importance < 0.2 {
+		return true
+	}
+	return false
 }
 
 func shouldCompactProcessEvidenceForStateChangingRepair(step *runModel.Step) bool {

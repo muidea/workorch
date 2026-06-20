@@ -26,6 +26,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 	if err := validateLLMNextStepPatchTargetRelevance(step, output); err != nil {
 		return err
 	}
+	if err := validateLLMRepairCoverageFocusBindingContract(step, output); err != nil {
+		return err
+	}
 	if err := validatePrimaryDiagnosticPatchOutputContract(step, output); err != nil {
 		return err
 	}
