@@ -36,6 +36,27 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 				"coverageWorkItemContext": map[string]any{
 					"summary": map[string]any{"open": float64(1)},
 				},
+				"acceptanceSlices": []any{map[string]any{
+					"id":                    "slice-001",
+					"title":                 "required slice",
+					"state":                 "active",
+					"coverageWorkItemIds":   []any{"cwi-001"},
+					"requiredEvidenceKinds": []any{"validation"},
+				}},
+				"activeSliceId": "slice-001",
+				"coverageFocus": map[string]any{
+					"id":                  "focus-001",
+					"sliceId":             "slice-001",
+					"coverageWorkItemIds": []any{"cwi-001"},
+					"failureClass":        "validation_failed",
+					"state":               "active",
+					"attempt":             float64(2),
+				},
+				"convergenceBudget": map[string]any{
+					"decision":              "continue",
+					"repairAttempts":        float64(2),
+					"noCoverageDeltaRounds": float64(1),
+				},
 			},
 		},
 		Steps: []*runmodel.Step{
@@ -66,6 +87,19 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 	}
 	if got.CoverageWorkItemContext["summary"] == nil {
 		t.Fatalf("CoverageWorkItemContext = %+v, want copied coverage context", got.CoverageWorkItemContext)
+	}
+	if got.Acceptance.ActiveSliceID != "slice-001" || got.Acceptance.Summary.ActiveSlices != 1 {
+		t.Fatalf("Acceptance = %+v, want active slice projection", got.Acceptance)
+	}
+	if got.Acceptance.CurrentFocus == nil || got.Acceptance.CurrentFocus.ID != "focus-001" || got.Acceptance.CurrentFocus.Attempt != 2 {
+		t.Fatalf("Acceptance.CurrentFocus = %+v, want projected focus", got.Acceptance.CurrentFocus)
+	}
+	if got.Acceptance.Budget == nil || got.Acceptance.Budget.RepairAttempts != 2 || got.Acceptance.Budget.NoCoverageDeltaRounds != 1 {
+		t.Fatalf("Acceptance.Budget = %+v, want projected budget", got.Acceptance.Budget)
+	}
+	observability := MapRunObservability(got)
+	if observability.Acceptance.ActiveSliceID != "slice-001" {
+		t.Fatalf("RunObservability.Acceptance = %+v, want run acceptance", observability.Acceptance)
 	}
 }
 

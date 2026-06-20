@@ -6,6 +6,7 @@ type RunObservability struct {
 	Progress             RunProgress             `json:"progress"`
 	TaskProgress         TaskProgress            `json:"taskProgress"`
 	RepairLoop           RepairLoop              `json:"repairLoop"`
+	Acceptance           AcceptanceProjection    `json:"acceptance"`
 	TaskDecompositions   []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	TaskPlans            []TaskPlan              `json:"taskPlans,omitempty"`
 	ExecutionSections    []ExecutionSection      `json:"executionSections,omitempty"`

@@ -18,6 +18,7 @@ type WorkspaceDeleteFormValues = helpers.WorkspaceDeleteFormValues;
 type WorkspaceSetupMode = helpers.WorkspaceSetupMode;
 
 const {
+  acceptanceCard,
   boundedParagraph, checkpointTypeLabel, compactJSON, compactTags, contextBundleCard,
   dodAssessmentItems, errorMessage, eventRecordState, eventRecordSubject, eventRecordSummary,
   evidenceCount, executionSectionsCard, goalOutcomeState, goalOutcomeSummary,
@@ -1583,6 +1584,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               runObservability?.taskProgress ?? runSnapshot?.taskProgress ?? snapshot.taskProgress,
               runObservability?.repairLoop ?? runSnapshot?.repairLoop
             )}
+          </ProCard>
+          <ProCard
+            title="Goal 收敛投影"
+            className="workorch-section"
+            extra={<Tag>{runObservability?.acceptance?.activeSliceId ?? runSnapshot?.acceptance?.activeSliceId ?? snapshot.acceptance?.activeSliceId ?? '未激活'}</Tag>}
+          >
+            {acceptanceCard(runObservability?.acceptance ?? runSnapshot?.acceptance ?? snapshot.acceptance)}
           </ProCard>
           <ProCard
             title="任务拆分图"

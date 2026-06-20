@@ -152,6 +152,11 @@ func (m *Manager) Metrics() Metrics {
 		ActiveRunHeartbeatAgeSecondsMax: heartbeatMetrics.ActiveRunHeartbeatAgeSecondsMax,
 		StalledRunTotal:                 heartbeatMetrics.StalledRunTotal,
 		IneffectiveRetryRunTotal:        heartbeatMetrics.IneffectiveRetryRunTotal,
+		ConvergenceActiveSlices:         heartbeatMetrics.ConvergenceActiveSlices,
+		ConvergenceOpenFocuses:          heartbeatMetrics.ConvergenceOpenFocuses,
+		ConvergenceRepairAttemptsTotal:  heartbeatMetrics.ConvergenceRepairAttemptsTotal,
+		ConvergenceNoDeltaRoundsTotal:   heartbeatMetrics.ConvergenceNoDeltaRoundsTotal,
+		ConvergenceBudgetEscalations:    heartbeatMetrics.ConvergenceBudgetEscalations,
 	}
 	if len(m.metrics.workspaceRebuilds) > 0 {
 		ids := make([]string, 0, len(m.metrics.workspaceRebuilds))

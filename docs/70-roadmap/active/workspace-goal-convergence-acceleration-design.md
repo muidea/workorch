@@ -510,16 +510,28 @@ For existing workspaces:
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-01 | Add `AcceptanceSlice` and `CoverageFocus` DTO/model definitions | core model | pending |
-| WGC-02 | Project slice/focus in workspace snapshot and run observability | appservice/readmodel | pending |
-| WGC-03 | Display active slice/focus in TUI/Web from projection only | product interface | pending |
-| WGC-04 | Add metrics for convergence state | workorchd/server | pending |
+| WGC-01 | Add `AcceptanceSlice` and `CoverageFocus` DTO/model definitions | core model | completed |
+| WGC-02 | Project slice/focus in workspace snapshot and run observability | appservice/readmodel | completed |
+| WGC-03 | Display active slice/focus in TUI/Web from projection only | product interface | completed |
+| WGC-04 | Add metrics for convergence state | workorchd/server | completed |
 
 Acceptance:
 
 - No behavior change to execution yet.
 - Existing runs still work.
 - Projection can render empty slice/focus for old runs.
+
+Implementation notes:
+
+- `readmodelcore.AcceptanceProjection` is now exposed on workspace snapshot, run snapshot and run observability.
+- Projection reads generic run execution context fields (`acceptanceSlices`, `activeSliceId`, `coverageFocus`, `convergenceBudget`) and the equivalent nested `acceptance` object. Missing fields render an empty summary for old runs.
+- TUI and Web display only the workorchd projection. They do not infer slice/focus state locally.
+- Metrics are projected from workspace read model snapshots:
+  - `workorch_convergence_active_slices`
+  - `workorch_convergence_open_focuses`
+  - `workorch_convergence_repair_attempts_total`
+  - `workorch_convergence_no_delta_rounds_total`
+  - `workorch_convergence_budget_escalations_total`
 
 ### Phase 2: Slice Generation and Selection
 

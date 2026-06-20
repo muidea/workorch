@@ -1004,6 +1004,67 @@ export type RuntimeCapability = {
   evidenceRefs?: string[];
 };
 
+export type AcceptanceSlice = {
+  id?: string;
+  title?: string;
+  state?: string;
+  priority?: number;
+  scope?: string;
+  coverageWorkItemIds?: string[];
+  requiredEvidenceKinds?: string[];
+  completionPolicy?: string;
+  resultPolicy?: string;
+  createdAt?: string;
+  activatedAt?: string;
+  closedAt?: string;
+};
+
+export type CoverageFocus = {
+  id?: string;
+  sliceId?: string;
+  coverageWorkItemIds?: string[];
+  failureClass?: string;
+  failureSignature?: string;
+  requiredEvidenceKinds?: string[];
+  acceptedEvidenceRefs?: string[];
+  rejectedEvidenceRefs?: string[];
+  targetRefs?: string[];
+  state?: string;
+  attempt?: number;
+};
+
+export type ConvergenceBudget = {
+  state?: string;
+  decision?: string;
+  maxRepairAttemptsPerFocus?: number;
+  maxLLMRoundsPerSlice?: number;
+  maxRepeatedFailureSignature?: number;
+  maxValidationOnlyRetries?: number;
+  maxNoCoverageDeltaRounds?: number;
+  maxContextBytesPerRepair?: number;
+  repairAttempts?: number;
+  llmRounds?: number;
+  repeatedFailureSignatures?: number;
+  validationOnlyRetries?: number;
+  noCoverageDeltaRounds?: number;
+  lastDecisionReason?: string;
+};
+
+export type AcceptanceSummary = {
+  acceptedSlices: number;
+  activeSlices: number;
+  openSlices: number;
+  failedSlices: number;
+};
+
+export type AcceptanceProjection = {
+  activeSliceId?: string;
+  slices?: AcceptanceSlice[];
+  currentFocus?: CoverageFocus;
+  budget?: ConvergenceBudget;
+  summary: AcceptanceSummary;
+};
+
 export type TaskProgress = {
   workspaceId: string;
   runId?: string;
@@ -1223,6 +1284,7 @@ export type RunObservability = {
   progress: RunProgress;
   taskProgress: TaskProgress;
   repairLoop: RepairLoop;
+  acceptance: AcceptanceProjection;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   memoryRecallTraces?: MemoryRecallTrace[];
@@ -1244,6 +1306,7 @@ export type RunSnapshot = {
   taskProgress: TaskProgress;
   runHeartbeat?: RunHeartbeat;
   repairLoop: RepairLoop;
+  acceptance: AcceptanceProjection;
   runtimeExecution?: RuntimeExecution;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
@@ -1275,6 +1338,7 @@ export type WorkspaceSnapshot = {
   runtimeExecution?: RuntimeExecution;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
+  acceptance: AcceptanceProjection;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
   goals?: Goal[];

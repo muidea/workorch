@@ -14,6 +14,7 @@ type WorkspaceSnapshot struct {
 	SchedulerDiagnostics  *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle         *ContextBundle          `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any          `json:"coverageSummary,omitempty"`
+	Acceptance            AcceptanceProjection    `json:"acceptance"`
 	TaskDecompositions    []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	ExecutionSections     []ExecutionSection      `json:"executionSections,omitempty"`
 	MemoryRecallTraces    []MemoryRecallTrace     `json:"memoryRecallTraces,omitempty"`

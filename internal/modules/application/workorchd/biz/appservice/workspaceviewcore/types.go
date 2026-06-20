@@ -43,6 +43,11 @@ type Metrics struct {
 	ActiveRunHeartbeatAgeSecondsMax int64
 	StalledRunTotal                 int
 	IneffectiveRetryRunTotal        int
+	ConvergenceActiveSlices         int
+	ConvergenceOpenFocuses          int
+	ConvergenceRepairAttemptsTotal  int
+	ConvergenceNoDeltaRoundsTotal   int
+	ConvergenceBudgetEscalations    int
 }
 
 type WorkspaceRebuildMetrics struct {

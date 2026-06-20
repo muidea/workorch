@@ -5800,6 +5800,11 @@ func TestMetricsEndpointReportsCounters(t *testing.T) {
 		`workorch_workspace_projection_active_run_heartbeat_age_seconds_max`,
 		`workorch_workspace_projection_stalled_runs`,
 		`workorch_workspace_projection_ineffective_retry_runs`,
+		`workorch_convergence_active_slices`,
+		`workorch_convergence_open_focuses`,
+		`workorch_convergence_repair_attempts_total`,
+		`workorch_convergence_no_delta_rounds_total`,
+		`workorch_convergence_budget_escalations_total`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\nbody:\n%s", want, body)

@@ -54,6 +54,9 @@ func TestWorkspaceSnapshotFromModelsProjectsBaseWorkspaceView(t *testing.T) {
 	if got.Outcome.State == "" {
 		t.Fatalf("Outcome = %+v, want populated outcome", got.Outcome)
 	}
+	if got.Acceptance.Summary.AcceptedSlices != 0 || got.Acceptance.Summary.ActiveSlices != 0 || got.Acceptance.CurrentFocus != nil {
+		t.Fatalf("Acceptance = %+v, want empty projection for run without slices", got.Acceptance)
+	}
 }
 
 func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
@@ -81,6 +84,7 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			State: string(common.StepStateCompleted),
 		},
 		TaskProgress:       readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
+		Acceptance:         readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
 		RuntimeExecution:   &readmodelcore.RuntimeExecutionState{StepID: "step-current", RequestID: "request-current", Pending: true, Gap: "runtime_terminal_not_finalized"},
 		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
@@ -121,6 +125,9 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	if got.Result == nil || got.Result.ID != "result-run" {
 		t.Fatalf("Result = %+v, want primary run result", got.Result)
+	}
+	if got.Acceptance.ActiveSliceID != "slice-run" || got.Acceptance.Summary.ActiveSlices != 1 {
+		t.Fatalf("Acceptance = %+v, want merged run acceptance", got.Acceptance)
 	}
 	if len(got.Patches) != 3 || got.Patches[0].State != string(common.PatchStateFailed) {
 		t.Fatalf("Patches = %+v, want merged run patch override", got.Patches)

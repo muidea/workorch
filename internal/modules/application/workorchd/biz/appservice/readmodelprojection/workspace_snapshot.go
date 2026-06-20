@@ -21,6 +21,7 @@ func WorkspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	}
 	ret.LLMUsageTraces = MapLLMUsageTracesFromEventRecords(MapEventRecords(input.LLMUsageEventRecords), "")
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
+	ret.Acceptance = MapWorkspaceAcceptanceProjection(ret)
 	ret.TaskProgress = MapLocalizedWorkspaceTaskProgress(ret)
 	ret.Outcome = MapWorkspaceOutcome(ret)
 	ret.RunHeartbeat = MapRunHeartbeat(ret)

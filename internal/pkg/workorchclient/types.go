@@ -63,6 +63,67 @@ type Run struct {
 	FailureReason      string         `json:"failureReason,omitempty"`
 }
 
+type AcceptanceSlice struct {
+	ID                    string   `json:"id,omitempty"`
+	Title                 string   `json:"title,omitempty"`
+	State                 string   `json:"state,omitempty"`
+	Priority              int      `json:"priority,omitempty"`
+	Scope                 string   `json:"scope,omitempty"`
+	CoverageWorkItemIDs   []string `json:"coverageWorkItemIds,omitempty"`
+	RequiredEvidenceKinds []string `json:"requiredEvidenceKinds,omitempty"`
+	CompletionPolicy      string   `json:"completionPolicy,omitempty"`
+	ResultPolicy          string   `json:"resultPolicy,omitempty"`
+	CreatedAt             string   `json:"createdAt,omitempty"`
+	ActivatedAt           string   `json:"activatedAt,omitempty"`
+	ClosedAt              string   `json:"closedAt,omitempty"`
+}
+
+type CoverageFocus struct {
+	ID                    string   `json:"id,omitempty"`
+	SliceID               string   `json:"sliceId,omitempty"`
+	CoverageWorkItemIDs   []string `json:"coverageWorkItemIds,omitempty"`
+	FailureClass          string   `json:"failureClass,omitempty"`
+	FailureSignature      string   `json:"failureSignature,omitempty"`
+	RequiredEvidenceKinds []string `json:"requiredEvidenceKinds,omitempty"`
+	AcceptedEvidenceRefs  []string `json:"acceptedEvidenceRefs,omitempty"`
+	RejectedEvidenceRefs  []string `json:"rejectedEvidenceRefs,omitempty"`
+	TargetRefs            []string `json:"targetRefs,omitempty"`
+	State                 string   `json:"state,omitempty"`
+	Attempt               int      `json:"attempt,omitempty"`
+}
+
+type ConvergenceBudget struct {
+	State                       string `json:"state,omitempty"`
+	Decision                    string `json:"decision,omitempty"`
+	MaxRepairAttemptsPerFocus   int    `json:"maxRepairAttemptsPerFocus,omitempty"`
+	MaxLLMRoundsPerSlice        int    `json:"maxLLMRoundsPerSlice,omitempty"`
+	MaxRepeatedFailureSignature int    `json:"maxRepeatedFailureSignature,omitempty"`
+	MaxValidationOnlyRetries    int    `json:"maxValidationOnlyRetries,omitempty"`
+	MaxNoCoverageDeltaRounds    int    `json:"maxNoCoverageDeltaRounds,omitempty"`
+	MaxContextBytesPerRepair    int    `json:"maxContextBytesPerRepair,omitempty"`
+	RepairAttempts              int    `json:"repairAttempts,omitempty"`
+	LLMRounds                   int    `json:"llmRounds,omitempty"`
+	RepeatedFailureSignatures   int    `json:"repeatedFailureSignatures,omitempty"`
+	ValidationOnlyRetries       int    `json:"validationOnlyRetries,omitempty"`
+	NoCoverageDeltaRounds       int    `json:"noCoverageDeltaRounds,omitempty"`
+	LastDecisionReason          string `json:"lastDecisionReason,omitempty"`
+}
+
+type AcceptanceSummary struct {
+	AcceptedSlices int `json:"acceptedSlices"`
+	ActiveSlices   int `json:"activeSlices"`
+	OpenSlices     int `json:"openSlices"`
+	FailedSlices   int `json:"failedSlices"`
+}
+
+type AcceptanceProjection struct {
+	ActiveSliceID string             `json:"activeSliceId,omitempty"`
+	Slices        []AcceptanceSlice  `json:"slices,omitempty"`
+	CurrentFocus  *CoverageFocus     `json:"currentFocus,omitempty"`
+	Budget        *ConvergenceBudget `json:"budget,omitempty"`
+	Summary       AcceptanceSummary  `json:"summary"`
+}
+
 type Step struct {
 	ID     string         `json:"id"`
 	RunID  string         `json:"runId"`
@@ -620,6 +681,7 @@ type WorkspaceSnapshot struct {
 	SchedulerDiagnostics  *SchedulerDiagnostics  `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle         map[string]any         `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
+	Acceptance            AcceptanceProjection   `json:"acceptance"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
 	DoDs                  []DoD                  `json:"dods,omitempty"`
 	Runs                  []Run                  `json:"runs,omitempty"`
@@ -684,6 +746,7 @@ type RunSnapshot struct {
 	LLMUsageSummary         LLMUsageSummary        `json:"llmUsageSummary"`
 	CoverageWorkItems       []map[string]any       `json:"coverageWorkItems,omitempty"`
 	CoverageWorkItemContext map[string]any         `json:"coverageWorkItemContext,omitempty"`
+	Acceptance              AcceptanceProjection   `json:"acceptance"`
 	EventRecords            []EventRecord          `json:"eventRecords,omitempty"`
 }
 
@@ -699,13 +762,14 @@ type WorkspaceSnapshotProjection struct {
 }
 
 type RunObservability struct {
-	Run             Run             `json:"run"`
-	Outcome         RunOutcome      `json:"outcome"`
-	TaskProgress    TaskProgress    `json:"taskProgress"`
-	RepairLoop      RepairLoop      `json:"repairLoop"`
-	LLMUsageTraces  []LLMUsageTrace `json:"llmUsageTraces,omitempty"`
-	LLMUsageSummary LLMUsageSummary `json:"llmUsageSummary"`
-	Timeline        []TimelineEntry `json:"timeline,omitempty"`
+	Run             Run                  `json:"run"`
+	Outcome         RunOutcome           `json:"outcome"`
+	TaskProgress    TaskProgress         `json:"taskProgress"`
+	RepairLoop      RepairLoop           `json:"repairLoop"`
+	Acceptance      AcceptanceProjection `json:"acceptance"`
+	LLMUsageTraces  []LLMUsageTrace      `json:"llmUsageTraces,omitempty"`
+	LLMUsageSummary LLMUsageSummary      `json:"llmUsageSummary"`
+	Timeline        []TimelineEntry      `json:"timeline,omitempty"`
 }
 
 type LLMUsageTrace struct {

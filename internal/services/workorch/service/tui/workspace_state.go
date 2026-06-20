@@ -24,6 +24,7 @@ type workspaceDisplayState struct {
 	MemoryRecalls         []backend.MemoryRecallTraceInfo
 	LLMUsage              backend.LLMUsageSummaryInfo
 	LLMContext            map[string]any
+	Acceptance            backend.AcceptanceProjectionInfo
 	RunHeartbeat          backend.RunHeartbeatInfo
 	RuntimeExecution      *backend.RuntimeExecutionInfo
 	RuntimeEvents         []string
@@ -635,6 +636,7 @@ func (m *AppModel) applyWorkspaceContext(msg WorkspaceContextMsg) {
 		m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), msg.Snapshot.MemoryRecallTraces...)
 		m.llmUsage = msg.Snapshot.LLMUsageSummary
 		m.llmContext = latestLLMContextBudget(msg.Snapshot.LLMUsageTraces)
+		m.acceptance = msg.Snapshot.Acceptance
 		m.applyRunHeartbeat(msg.Snapshot.RunHeartbeat)
 		m.applyRuntimeExecution(msg.Snapshot.RuntimeExecution)
 		m.applySchedulerDiagnostics(msg.Snapshot.SchedulerDiagnostics)
@@ -688,6 +690,7 @@ func (m *AppModel) clearRunProjectionState() {
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runtimeExecution = nil
 	m.repairLoop = ""
@@ -814,6 +817,7 @@ func (m *AppModel) resetWorkspaceView() {
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runHeartbeat = backend.RunHeartbeatInfo{}
 	m.runtimeExecution = nil
 	m.schedulerDiagnostics = nil
@@ -854,6 +858,7 @@ func (m *AppModel) saveActiveWorkspaceDisplayState() {
 		MemoryRecalls:         append([]backend.MemoryRecallTraceInfo(nil), m.memoryRecalls...),
 		LLMUsage:              m.llmUsage,
 		LLMContext:            clonePayloadMap(m.llmContext),
+		Acceptance:            m.acceptance,
 		RunHeartbeat:          m.runHeartbeat,
 		RuntimeExecution:      cloneRuntimeExecutionInfoPtr(m.runtimeExecution),
 		RuntimeEvents:         append([]string(nil), m.runtimeEvents...),
@@ -880,6 +885,7 @@ func (m *AppModel) restoreWorkspaceDisplayState(workspaceID string) bool {
 	m.memoryRecalls = append([]backend.MemoryRecallTraceInfo(nil), cached.MemoryRecalls...)
 	m.llmUsage = cached.LLMUsage
 	m.llmContext = clonePayloadMap(cached.LLMContext)
+	m.acceptance = cached.Acceptance
 	m.runHeartbeat = cached.RunHeartbeat
 	m.runtimeExecution = cloneRuntimeExecutionInfoPtr(cached.RuntimeExecution)
 	m.schedulerDiagnostics = nil

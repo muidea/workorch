@@ -234,6 +234,19 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 				Stalled:                   true,
 				IneffectiveRetry:          true,
 			},
+			Acceptance: readmodelcore.AcceptanceProjection{
+				Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1},
+				CurrentFocus: &readmodelcore.CoverageFocus{
+					ID:      "focus-active",
+					State:   "active",
+					Attempt: 2,
+				},
+				Budget: &readmodelcore.ConvergenceBudget{
+					Decision:              "decision_required",
+					RepairAttempts:        3,
+					NoCoverageDeltaRounds: 1,
+				},
+			},
 		},
 		"ws-terminal": {
 			Workspace: readmodelcore.Workspace{ID: "ws-terminal", State: "completed"},
@@ -258,6 +271,13 @@ func TestStoreRunHeartbeatMetricsCountsActiveProblemSignals(t *testing.T) {
 	}
 	if metrics.StalledRunTotal != 1 || metrics.IneffectiveRetryRunTotal != 1 {
 		t.Fatalf("problem signal totals = stalled %d ineffective %d, want 1/1", metrics.StalledRunTotal, metrics.IneffectiveRetryRunTotal)
+	}
+	if metrics.ConvergenceActiveSlices != 1 ||
+		metrics.ConvergenceOpenFocuses != 1 ||
+		metrics.ConvergenceRepairAttemptsTotal != 3 ||
+		metrics.ConvergenceNoDeltaRoundsTotal != 1 ||
+		metrics.ConvergenceBudgetEscalations != 1 {
+		t.Fatalf("convergence metrics = %+v, want active/open/repair/no-delta/escalation 1/1/3/1/1", metrics)
 	}
 }
 

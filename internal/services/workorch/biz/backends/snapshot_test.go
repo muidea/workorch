@@ -80,6 +80,46 @@ func TestDecodeSnapshotInfoPreservesRunHeartbeat(t *testing.T) {
 	}
 }
 
+func TestDecodeSnapshotInfoPreservesAcceptanceProjection(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-acceptance", "state": "running"},
+		"acceptance": map[string]any{
+			"activeSliceId": "slice-001",
+			"summary": map[string]any{
+				"acceptedSlices": float64(1),
+				"activeSlices":   float64(1),
+				"openSlices":     float64(2),
+				"failedSlices":   float64(0),
+			},
+			"currentFocus": map[string]any{
+				"id":                  "focus-001",
+				"sliceId":             "slice-001",
+				"coverageWorkItemIds": []any{"cwi-001"},
+				"failureClass":        "validation_failed",
+				"state":               "active",
+				"attempt":             float64(3),
+			},
+			"budget": map[string]any{
+				"decision":              "narrow_focus",
+				"repairAttempts":        float64(3),
+				"noCoverageDeltaRounds": float64(1),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.Acceptance.ActiveSliceID != "slice-001" || snapshot.Acceptance.Summary.OpenSlices != 2 {
+		t.Fatalf("acceptance = %+v, want decoded summary", snapshot)
+	}
+	if snapshot.Acceptance.CurrentFocus == nil || snapshot.Acceptance.CurrentFocus.ID != "focus-001" || snapshot.Acceptance.CurrentFocus.Attempt != 3 {
+		t.Fatalf("current focus = %+v, want decoded focus", snapshot.Acceptance.CurrentFocus)
+	}
+	if snapshot.Acceptance.Budget == nil || snapshot.Acceptance.Budget.Decision != "narrow_focus" || snapshot.Acceptance.Budget.RepairAttempts != 3 {
+		t.Fatalf("budget = %+v, want decoded budget", snapshot.Acceptance.Budget)
+	}
+}
+
 func TestDecodeSnapshotInfoPreservesWorkspaceGoalsAndDoDs(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
 		"workspace": map[string]any{"id": "ws-1", "state": "active"},

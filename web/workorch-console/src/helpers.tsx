@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels } from './utils/constants';
 
@@ -349,6 +349,73 @@ export function taskProgressStepStatus(state?: string) {
     return 'process' as const;
   }
   return 'wait' as const;
+}
+
+export function acceptanceCard(acceptance?: AcceptanceProjection) {
+  if (!acceptance || acceptanceProjectionEmpty(acceptance)) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无收敛投影" />;
+  }
+  const summary = acceptance.summary ?? { acceptedSlices: 0, activeSlices: 0, openSlices: 0, failedSlices: 0 };
+  const focus = acceptance.currentFocus;
+  const budget = acceptance.budget;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap>
+        <Tag color="green">accepted {summary.acceptedSlices}</Tag>
+        <Tag color="blue">active {summary.activeSlices}</Tag>
+        <Tag color="gold">open {summary.openSlices}</Tag>
+        <Tag color="red">failed {summary.failedSlices}</Tag>
+      </Space>
+      <Descriptions
+        column={{ xs: 1, md: 2 }}
+        size="small"
+        items={[
+          { key: 'activeSlice', label: 'Active Slice', children: acceptance.activeSliceId || '-' },
+          { key: 'sliceTotal', label: 'Slice Total', children: acceptance.slices?.length ?? 0 },
+          { key: 'focus', label: 'Current Focus', children: focus?.id || '-' },
+          { key: 'focusState', label: 'Focus State', children: focus?.state ? stateTag(focus.state) : '-' },
+          { key: 'focusFailure', label: 'Focus Failure', children: [focus?.failureClass, focus?.failureSignature].filter(Boolean).join(' / ') || '-' },
+          { key: 'focusAttempt', label: 'Focus Attempt', children: focus?.attempt || '-' },
+          { key: 'requiredEvidence', label: 'Required Evidence', children: compactTags(focus?.requiredEvidenceKinds ?? [], 4) },
+          { key: 'targetRefs', label: 'Target Refs', children: compactTags(focus?.targetRefs ?? [], 4) },
+          { key: 'budgetDecision', label: 'Budget Decision', children: budget?.decision || budget?.state || '-' },
+          { key: 'budgetReason', label: 'Budget Reason', children: budget?.lastDecisionReason || '-' },
+          { key: 'repairAttempts', label: 'Repair Attempts', children: budget?.repairAttempts || '-' },
+          { key: 'noDeltaRounds', label: 'No Delta Rounds', children: budget?.noCoverageDeltaRounds || '-' }
+        ]}
+      />
+      {acceptance.slices?.length ? (
+        <ProTable<AcceptanceSlice>
+          rowKey="id"
+          search={false}
+          options={false}
+          pagination={{ pageSize: 5 }}
+          size="small"
+          columns={[
+            { title: 'Slice', dataIndex: 'id', ellipsis: true },
+            { title: 'Title', dataIndex: 'title', ellipsis: true },
+            { title: 'State', dataIndex: 'state', width: 120, render: (_, item) => stateTag(item.state) },
+            { title: 'Priority', dataIndex: 'priority', width: 90 },
+            { title: 'Scope', dataIndex: 'scope', ellipsis: true },
+            { title: 'Evidence', dataIndex: 'requiredEvidenceKinds', ellipsis: true, render: (_, item) => compactTags(item.requiredEvidenceKinds ?? [], 3) }
+          ]}
+          dataSource={acceptance.slices}
+        />
+      ) : null}
+    </Space>
+  );
+}
+
+function acceptanceProjectionEmpty(acceptance: AcceptanceProjection) {
+  const summary = acceptance.summary ?? { acceptedSlices: 0, activeSlices: 0, openSlices: 0, failedSlices: 0 };
+  return !acceptance.activeSliceId &&
+    !acceptance.currentFocus &&
+    !acceptance.budget &&
+    !(acceptance.slices?.length) &&
+    summary.acceptedSlices === 0 &&
+    summary.activeSlices === 0 &&
+    summary.openSlices === 0 &&
+    summary.failedSlices === 0;
 }
 
 export function taskProgressCard(progress?: TaskProgress, repairLoopOverride?: RepairLoop) {

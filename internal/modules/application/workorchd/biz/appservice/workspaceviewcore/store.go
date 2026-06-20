@@ -497,6 +497,7 @@ func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {
 		if entry == nil || !entry.HasSnapshot {
 			continue
 		}
+		addConvergenceMetrics(&ret, entry.Snapshot.Acceptance)
 		heartbeat := entry.Snapshot.RunHeartbeat
 		if strings.TrimSpace(heartbeat.RunID) == "" || !activeRunHeartbeatState(heartbeat.State) {
 			continue
@@ -513,6 +514,41 @@ func (s *Store) RunHeartbeatMetrics(now time.Time) Metrics {
 		}
 	}
 	return ret
+}
+
+func addConvergenceMetrics(ret *Metrics, acceptance readmodelcore.AcceptanceProjection) {
+	if ret == nil {
+		return
+	}
+	ret.ConvergenceActiveSlices += acceptance.Summary.ActiveSlices
+	if acceptance.CurrentFocus != nil && activeCoverageFocusState(acceptance.CurrentFocus.State) {
+		ret.ConvergenceOpenFocuses++
+	}
+	if acceptance.Budget != nil {
+		ret.ConvergenceRepairAttemptsTotal += acceptance.Budget.RepairAttempts
+		ret.ConvergenceNoDeltaRoundsTotal += acceptance.Budget.NoCoverageDeltaRounds
+		if convergenceBudgetEscalated(acceptance.Budget.Decision) {
+			ret.ConvergenceBudgetEscalations++
+		}
+		return
+	}
+	if acceptance.CurrentFocus != nil {
+		ret.ConvergenceRepairAttemptsTotal += acceptance.CurrentFocus.Attempt
+	}
+}
+
+func activeCoverageFocusState(state string) bool {
+	state = strings.TrimSpace(state)
+	return state == "" || state == "active" || state == "pending" || state == "blocked"
+}
+
+func convergenceBudgetEscalated(decision string) bool {
+	switch strings.TrimSpace(decision) {
+	case "", "continue":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *Store) cloneEntryForReplace(workspaceID string) *workspaceProjectionEntry {

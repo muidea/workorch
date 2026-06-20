@@ -32,6 +32,7 @@ type RunSnapshot struct {
 	LLMUsageSummary         LLMUsageSummary          `json:"llmUsageSummary"`
 	CoverageWorkItems       []map[string]any         `json:"coverageWorkItems,omitempty"`
 	CoverageWorkItemContext map[string]any           `json:"coverageWorkItemContext,omitempty"`
+	Acceptance              AcceptanceProjection     `json:"acceptance"`
 	MemoryRecallTraces      []MemoryRecallTrace      `json:"memoryRecallTraces,omitempty"`
 	SelectedCapabilities    []RuntimeCapability      `json:"selectedCapabilities,omitempty"`
 	UsedCapabilities        []RuntimeCapability      `json:"usedCapabilities,omitempty"`

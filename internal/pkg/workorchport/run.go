@@ -46,6 +46,7 @@ type RunStatusInfo struct {
 	FailureReason        string
 	RuntimeExecution     *RuntimeExecutionInfo
 	SchedulerDiagnostics *SchedulerDiagnosticsInfo
+	Acceptance           AcceptanceProjectionInfo
 }
 
 type RuntimeExecutionInfo struct {

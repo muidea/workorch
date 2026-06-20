@@ -87,6 +87,7 @@ type AppModel struct {
 	memoryRecalls          []backend.MemoryRecallTraceInfo
 	llmUsage               backend.LLMUsageSummaryInfo
 	llmContext             map[string]any
+	acceptance             backend.AcceptanceProjectionInfo
 	runHeartbeat           backend.RunHeartbeatInfo
 	runtimeExecution       *backend.RuntimeExecutionInfo
 	schedulerDiagnostics   *backend.SchedulerDiagnosticsInfo
@@ -771,6 +772,7 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		m.patches = nil
 		m.llmUsage = backend.LLMUsageSummaryInfo{}
 		m.llmContext = nil
+		m.acceptance = backend.AcceptanceProjectionInfo{}
 		m.runtimeEvents = nil
 		m.failureReason = ""
 		m.lastError = nil
@@ -2440,6 +2442,7 @@ func (m *AppModel) clearRunDisplayState() {
 	m.memoryRecalls = nil
 	m.llmUsage = backend.LLMUsageSummaryInfo{}
 	m.llmContext = nil
+	m.acceptance = backend.AcceptanceProjectionInfo{}
 	m.runtimeEvents = nil
 	m.repairLoop = ""
 	m.failureReason = ""

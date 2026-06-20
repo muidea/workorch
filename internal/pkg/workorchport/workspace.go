@@ -42,6 +42,67 @@ type ProjectionInfo struct {
 	Error                   string
 }
 
+type AcceptanceSliceInfo struct {
+	ID                    string
+	Title                 string
+	State                 string
+	Priority              int
+	Scope                 string
+	CoverageWorkItemIDs   []string
+	RequiredEvidenceKinds []string
+	CompletionPolicy      string
+	ResultPolicy          string
+	CreatedAt             string
+	ActivatedAt           string
+	ClosedAt              string
+}
+
+type CoverageFocusInfo struct {
+	ID                    string
+	SliceID               string
+	CoverageWorkItemIDs   []string
+	FailureClass          string
+	FailureSignature      string
+	RequiredEvidenceKinds []string
+	AcceptedEvidenceRefs  []string
+	RejectedEvidenceRefs  []string
+	TargetRefs            []string
+	State                 string
+	Attempt               int
+}
+
+type ConvergenceBudgetInfo struct {
+	State                       string
+	Decision                    string
+	MaxRepairAttemptsPerFocus   int
+	MaxLLMRoundsPerSlice        int
+	MaxRepeatedFailureSignature int
+	MaxValidationOnlyRetries    int
+	MaxNoCoverageDeltaRounds    int
+	MaxContextBytesPerRepair    int
+	RepairAttempts              int
+	LLMRounds                   int
+	RepeatedFailureSignatures   int
+	ValidationOnlyRetries       int
+	NoCoverageDeltaRounds       int
+	LastDecisionReason          string
+}
+
+type AcceptanceSummaryInfo struct {
+	AcceptedSlices int
+	ActiveSlices   int
+	OpenSlices     int
+	FailedSlices   int
+}
+
+type AcceptanceProjectionInfo struct {
+	ActiveSliceID string
+	Slices        []AcceptanceSliceInfo
+	CurrentFocus  *CoverageFocusInfo
+	Budget        *ConvergenceBudgetInfo
+	Summary       AcceptanceSummaryInfo
+}
+
 type WorkspaceOutcomeInfo struct {
 	WorkspaceID  common.WorkspaceID
 	State        string
@@ -65,6 +126,7 @@ type WorkspaceSnapshotInfo struct {
 	SchedulerDiagnostics  *SchedulerDiagnosticsInfo
 	ContextBundle         map[string]any
 	CoverageSummary       map[string]any
+	Acceptance            AcceptanceProjectionInfo
 	TaskDecompositions    []TaskDecompositionInfo
 	Goals                 []GoalInfo
 	DoDs                  []DoDInfo

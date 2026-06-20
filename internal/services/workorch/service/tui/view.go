@@ -161,6 +161,9 @@ func (m AppModel) renderMain(width, height int) string {
 	if len(m.dodItems) > 0 {
 		b.WriteString(renderDoDItems(m.dodItems, width-2, 4))
 	}
+	if section := renderAcceptanceCompact(m.acceptance, width-2); section != "" {
+		b.WriteString(section)
+	}
 	if section := renderTaskDecompositionSummary(m.taskDecomp, width-2, 3); section != "" {
 		b.WriteString(section)
 	}
@@ -325,6 +328,61 @@ func (m AppModel) visiblePatches() []backend.PatchInfo {
 		return m.patches
 	}
 	return m.patches[len(m.patches)-8:]
+}
+
+func renderAcceptanceCompact(item backend.AcceptanceProjectionInfo, width int) string {
+	if acceptanceProjectionEmpty(item) || width <= 0 {
+		return ""
+	}
+	parts := []string{
+		fmt.Sprintf("accepted=%d", item.Summary.AcceptedSlices),
+		fmt.Sprintf("active=%d", item.Summary.ActiveSlices),
+		fmt.Sprintf("open=%d", item.Summary.OpenSlices),
+		fmt.Sprintf("failed=%d", item.Summary.FailedSlices),
+	}
+	if item.ActiveSliceID != "" {
+		parts = append(parts, "slice="+item.ActiveSliceID)
+	}
+	if item.CurrentFocus != nil {
+		focusParts := compactStrings([]string{item.CurrentFocus.ID, item.CurrentFocus.State, item.CurrentFocus.FailureClass})
+		if len(focusParts) > 0 {
+			parts = append(parts, "focus="+strings.Join(focusParts, "/"))
+		}
+	}
+	if item.Budget != nil {
+		budgetParts := compactStrings([]string{item.Budget.Decision, item.Budget.LastDecisionReason})
+		if len(budgetParts) > 0 {
+			parts = append(parts, "budget="+strings.Join(budgetParts, "/"))
+		}
+	}
+	return truncateDisplay("Acceptance: "+strings.Join(parts, " | "), width) + "\n"
+}
+
+func acceptanceProgressText(item backend.AcceptanceProjectionInfo) string {
+	if acceptanceProjectionEmpty(item) {
+		return ""
+	}
+	if item.CurrentFocus != nil {
+		parts := compactStrings([]string{item.CurrentFocus.ID, item.CurrentFocus.State, item.CurrentFocus.FailureClass})
+		if len(parts) > 0 {
+			return "focus " + strings.Join(parts, "/")
+		}
+	}
+	if item.ActiveSliceID != "" {
+		return "slice " + item.ActiveSliceID
+	}
+	return ""
+}
+
+func acceptanceProjectionEmpty(item backend.AcceptanceProjectionInfo) bool {
+	return item.ActiveSliceID == "" &&
+		len(item.Slices) == 0 &&
+		item.CurrentFocus == nil &&
+		item.Budget == nil &&
+		item.Summary.AcceptedSlices == 0 &&
+		item.Summary.ActiveSlices == 0 &&
+		item.Summary.OpenSlices == 0 &&
+		item.Summary.FailedSlices == 0
 }
 
 func renderTaskDecompositionSummary(items []backend.TaskDecompositionInfo, width int, limit int) string {
@@ -702,6 +760,9 @@ func (m AppModel) renderProgress(width int) string {
 	}
 	if m.repairLoop != "" {
 		label += " | " + m.repairLoop
+	}
+	if focus := acceptanceProgressText(m.acceptance); focus != "" {
+		label += " | " + focus
 	}
 	label = truncateDisplay(label, width-2)
 	switch m.progress {

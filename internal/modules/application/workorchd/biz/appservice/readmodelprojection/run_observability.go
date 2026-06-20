@@ -10,6 +10,7 @@ func MapRunObservability(snapshot readmodelcore.RunSnapshot) readmodelcore.RunOb
 		Progress:             MapRuntimeProgress(snapshot),
 		TaskProgress:         snapshot.TaskProgress,
 		RepairLoop:           snapshot.RepairLoop,
+		Acceptance:           snapshot.Acceptance,
 		TaskDecompositions:   snapshot.TaskDecompositions,
 		TaskPlans:            snapshot.TaskPlans,
 		ExecutionSections:    snapshot.ExecutionSections,

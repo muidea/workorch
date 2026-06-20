@@ -28,6 +28,7 @@ func baseRunSnapshotFromModels(input RunSnapshotModelInput, stepViews []presente
 	}
 	ret.RuntimeExecution = MapRuntimeExecutionState(ret.Steps, ret.RuntimeCheckpoints, ret.Step)
 	ret.LLMUsageSummary = SummarizeLLMUsage(ret.LLMUsageTraces)
+	ret.Acceptance = MapAcceptanceProjection(ret.Run)
 	ret.Outcome = MapRunOutcome(ret)
 	return ret
 }

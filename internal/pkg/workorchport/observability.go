@@ -182,6 +182,13 @@ type TaskProgressInfo struct {
 	RepairLoop  RepairLoopInfo
 }
 
+type RunObservabilityInfo struct {
+	Run          RunInfo
+	TaskProgress TaskProgressInfo
+	RepairLoop   RepairLoopInfo
+	Acceptance   AcceptanceProjectionInfo
+}
+
 type TaskDecompositionNodeInfo struct {
 	ID           string
 	Kind         string

@@ -71,6 +71,10 @@ func (m AppModel) renderInspectStatus() string {
 		b.WriteString(m.repairLoop)
 		b.WriteString("\n")
 	}
+	if section := renderInspectAcceptance(m.acceptance); section != "" {
+		b.WriteString(section)
+		b.WriteString("\n")
+	}
 	if decision := m.activeBlockingDecision(); decision != nil {
 		b.WriteString("- decision: ")
 		b.WriteString(blockingDecisionLabel(decision))
@@ -123,7 +127,7 @@ func schedulerDiagnosticsStatusText(item *backend.SchedulerDiagnosticsInfo) stri
 }
 
 func (m AppModel) renderInspectCoverage() string {
-	if len(m.dodItems) == 0 && m.repairLoop == "" {
+	if len(m.dodItems) == 0 && m.repairLoop == "" && acceptanceProjectionEmpty(m.acceptance) {
 		return "No DoD coverage data is available for the current workspace."
 	}
 	var b strings.Builder
@@ -139,6 +143,67 @@ func (m AppModel) renderInspectCoverage() string {
 		}
 		b.WriteString("Repair loop: ")
 		b.WriteString(m.repairLoop)
+		b.WriteString("\n")
+	}
+	if section := renderInspectAcceptance(m.acceptance); section != "" {
+		if len(m.dodItems) > 0 || m.repairLoop != "" {
+			b.WriteString("\n")
+		}
+		b.WriteString(section)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderInspectAcceptance(item backend.AcceptanceProjectionInfo) string {
+	if acceptanceProjectionEmpty(item) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Acceptance\n")
+	b.WriteString(fmt.Sprintf("- slices: accepted=%d active=%d open=%d failed=%d\n",
+		item.Summary.AcceptedSlices,
+		item.Summary.ActiveSlices,
+		item.Summary.OpenSlices,
+		item.Summary.FailedSlices,
+	))
+	if item.ActiveSliceID != "" {
+		b.WriteString("- active slice: ")
+		b.WriteString(item.ActiveSliceID)
+		b.WriteString("\n")
+	}
+	if item.CurrentFocus != nil {
+		b.WriteString("- current focus: ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+			item.CurrentFocus.ID,
+			item.CurrentFocus.State,
+			item.CurrentFocus.FailureClass,
+			item.CurrentFocus.FailureSignature,
+		}), " | ")))
+		if item.CurrentFocus.Attempt > 0 {
+			b.WriteString(fmt.Sprintf(" | attempt=%d", item.CurrentFocus.Attempt))
+		}
+		b.WriteString("\n")
+		if len(item.CurrentFocus.CoverageWorkItemIDs) > 0 {
+			b.WriteString("- focus coverage items: ")
+			b.WriteString(strings.Join(item.CurrentFocus.CoverageWorkItemIDs, ", "))
+			b.WriteString("\n")
+		}
+		if len(item.CurrentFocus.RequiredEvidenceKinds) > 0 {
+			b.WriteString("- required evidence: ")
+			b.WriteString(strings.Join(item.CurrentFocus.RequiredEvidenceKinds, ", "))
+			b.WriteString("\n")
+		}
+	}
+	if item.Budget != nil {
+		b.WriteString("- budget: ")
+		b.WriteString(strings.TrimSpace(strings.Join(compactStrings([]string{
+			item.Budget.Decision,
+			item.Budget.LastDecisionReason,
+		}), " | ")))
+		if item.Budget.RepairAttempts > 0 || item.Budget.NoCoverageDeltaRounds > 0 {
+			b.WriteString(fmt.Sprintf(" | repairs=%d noDelta=%d", item.Budget.RepairAttempts, item.Budget.NoCoverageDeltaRounds))
+		}
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")

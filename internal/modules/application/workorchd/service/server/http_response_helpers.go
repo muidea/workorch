@@ -157,6 +157,16 @@ func renderWorkspaceProjectionMetrics(projection *workspaceProjectionManager) st
 	b.WriteString(fmt.Sprintf("workorch_workspace_projection_stalled_runs %d\n", metrics.StalledRunTotal))
 	b.WriteString("# TYPE workorch_workspace_projection_ineffective_retry_runs gauge\n")
 	b.WriteString(fmt.Sprintf("workorch_workspace_projection_ineffective_retry_runs %d\n", metrics.IneffectiveRetryRunTotal))
+	b.WriteString("# TYPE workorch_convergence_active_slices gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_convergence_active_slices %d\n", metrics.ConvergenceActiveSlices))
+	b.WriteString("# TYPE workorch_convergence_open_focuses gauge\n")
+	b.WriteString(fmt.Sprintf("workorch_convergence_open_focuses %d\n", metrics.ConvergenceOpenFocuses))
+	b.WriteString("# TYPE workorch_convergence_repair_attempts_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_convergence_repair_attempts_total %d\n", metrics.ConvergenceRepairAttemptsTotal))
+	b.WriteString("# TYPE workorch_convergence_no_delta_rounds_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_convergence_no_delta_rounds_total %d\n", metrics.ConvergenceNoDeltaRoundsTotal))
+	b.WriteString("# TYPE workorch_convergence_budget_escalations_total counter\n")
+	b.WriteString(fmt.Sprintf("workorch_convergence_budget_escalations_total %d\n", metrics.ConvergenceBudgetEscalations))
 	return b.String()
 }
 
