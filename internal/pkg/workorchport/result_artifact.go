@@ -11,6 +11,7 @@ type ResultSummaryInfo struct {
 	KnownLimitations      []string
 	ResidualRisks         []string
 	NextActions           []string
+	Diagnostics           map[string]any
 }
 
 type ResultInfo struct {

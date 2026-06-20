@@ -24,6 +24,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/events"
 	memory "github.com/muidea/workorch/internal/pkg/repository/memory"
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestRuntimeOrchestrator_CompletesLLMRunWithSatisfiedDoDAssessment(t *testing.T) {
@@ -281,6 +282,116 @@ func TestResultSubsystemRecordsAcceptedSliceResultWithoutFinalCompletion(t *test
 	}
 	if err := coverage.validateReadyForAcceptance(run); err != nil {
 		t.Fatalf("validateReadyForAcceptance after all slices accepted: %v", err)
+	}
+}
+
+func TestRuntimeOrchestratorRecordsSliceResultBeforeFinalCompletionGate(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	toolCallRepo := memory.NewToolCallRepository()
+	resultRepo := memory.NewResultRepository()
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		&stubRuntimeAdapter{},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		nil,
+		approvalRepo,
+		RuntimeEvidenceRepositories{
+			ToolCalls:          toolCallRepo,
+			Results:            resultRepo,
+			RuntimeCheckpoints: memory.NewRuntimeCheckpointRepository(),
+		},
+		events.NewMemoryHub(),
+	)
+
+	workspaceID := common.WorkspaceID("ws-partial-slice-mainline")
+	runID := common.RunID("run-partial-slice-mainline")
+	stepID := common.StepID("run-partial-slice-mainline/step-1")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "ws", State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     workspaceID,
+		GoalID:          "goal-partial-slice-mainline",
+		DoDID:           "dod-partial-slice-mainline",
+		State:           common.RunStateRunning,
+		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "first required item\nsecond required item"},
+			"dod":  map[string]any{"items": []string{"first required item", "second required item"}},
+			"executionContract": map[string]any{
+				"acceptanceSlicePolicy": map[string]any{
+					"maxWorkItems": 1,
+					"resultPolicy": "slice_result_allowed",
+				},
+			},
+		},
+	}
+	newCoverageSubsystem().ensure(run)
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := stepRepo.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: llmcommon.StepKindWorkspaceExecution, State: common.StepStateDispatched, Input: map[string]any{}}); err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	if err := toolCallRepo.Create(ctx, &runmodel.ToolCall{ID: common.ToolCallID(string(stepID) + "/tool-call/runtime-execute"), WorkspaceID: workspaceID, RunID: runID, StepID: stepID, ToolName: string(llmcommon.StepKindWorkspaceExecution), State: common.ToolCallStateRunning}); err != nil {
+		t.Fatalf("seed tool call: %v", err)
+	}
+
+	output := map[string]any{
+		"status": "completed",
+		"dodAssessment": map[string]any{
+			"satisfied": false,
+			"summary":   "First acceptance slice is satisfied; second slice remains open.",
+			"items": []map[string]any{
+				{"item": "first required item", "state": "satisfied", "evidenceRefs": []string{string(stepID)}},
+				{"item": "second required item", "state": "failed", "reason": "second slice remains open"},
+			},
+			"goalCoverage": map[string]any{
+				"satisfied": false,
+				"items": []map[string]any{
+					{"requirement": "first required item", "state": "satisfied", "evidenceRefs": []string{string(stepID)}},
+					{"requirement": "second required item", "state": "failed", "reason": "second slice remains open"},
+				},
+			},
+		},
+	}
+	if err := orch.FinalizeRuntimeStepResult(ctx, runID, stepID, runtimemodel.StepExecutionResult{Output: output}, nil); err != nil {
+		t.Fatalf("finalize partial completion result: %v", err)
+	}
+
+	results, err := resultRepo.ListByRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("list results: %v", err)
+	}
+	var sliceResults, finalAcceptedResults int
+	for _, result := range results {
+		if result.SourceType == resultcommon.SourceTypeAcceptanceSlice && result.State == common.ResultStateAccepted {
+			sliceResults++
+		}
+		if acceptedCompletionResultMatchesRun(result, run) {
+			finalAcceptedResults++
+		}
+	}
+	if sliceResults < 1 {
+		t.Fatalf("results = %+v, want at least one accepted slice result", results)
+	}
+	if finalAcceptedResults != 0 {
+		t.Fatalf("results = %+v, want no final accepted DoD result", results)
+	}
+	storedRun, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if err := newCoverageSubsystem().validateReadyForAcceptance(storedRun); err == nil {
+		t.Fatal("coverage ready for acceptance after partial slice, want final gate blocked")
 	}
 }
 

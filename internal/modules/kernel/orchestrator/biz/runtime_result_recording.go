@@ -272,6 +272,31 @@ func (r *resultSubsystem) recordRunResultFromValidatedDoDAssessment(
 	return r.publishResultAccepted(ctx, item)
 }
 
+func (o *RuntimeOrchestrator) recordCoverageProgressFromCompletionAssessment(ctx context.Context, run *runModel.Run, step *runModel.Step, output map[string]any) error {
+	if o == nil || run == nil || step == nil || !requiresDoDAssessmentCompletionGate(run) {
+		return nil
+	}
+	assessment := doDAssessmentFromOutput(output)
+	if len(assessment) == 0 {
+		return nil
+	}
+	if _, _, err := validatedCompletionDoDAssessment(run, output); err == nil {
+		return nil
+	}
+	if err := validateDoDAssessmentItems(assessment["items"]); err != nil {
+		return nil
+	}
+	if err := validateDoDAssessmentEvidenceQuality(ctx, o.steps, o.evidence, run, assessment); err != nil {
+		return err
+	}
+	if o.coverageLedger().updateFromAssessment(run, step, assessment) && o.runs != nil {
+		if err := o.runs.Update(ctx, run); err != nil {
+			return err
+		}
+	}
+	return o.resultManager().recordAcceptedSliceResultsFromRun(ctx, run, step)
+}
+
 func (r *resultSubsystem) recordAcceptedSliceResultsFromRun(ctx context.Context, run *runModel.Run, step *runModel.Step) error {
 	if r == nil || run == nil || step == nil || r.evidence.Results == nil {
 		return nil

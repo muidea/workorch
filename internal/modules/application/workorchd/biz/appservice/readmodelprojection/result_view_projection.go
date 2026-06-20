@@ -36,6 +36,7 @@ func cloneResultViewSummary(item *readmodelcore.ResultSummary) *readmodelcore.Re
 		KnownLimitations:      cloneReadModelStringSlice(item.KnownLimitations),
 		ResidualRisks:         cloneReadModelStringSlice(item.ResidualRisks),
 		NextActions:           cloneReadModelStringSlice(item.NextActions),
+		Diagnostics:           cloneReadModelMap(item.Diagnostics),
 	}
 	if len(item.DoDItems) > 0 {
 		ret.DoDItems = make([]readmodelcore.DoDAssessmentItem, 0, len(item.DoDItems))

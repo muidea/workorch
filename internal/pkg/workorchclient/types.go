@@ -561,6 +561,7 @@ type ResultSummary struct {
 	KnownLimitations      []string            `json:"knownLimitations,omitempty"`
 	ResidualRisks         []string            `json:"residualRisks,omitempty"`
 	NextActions           []string            `json:"nextActions,omitempty"`
+	Diagnostics           map[string]any      `json:"diagnostics,omitempty"`
 }
 
 type Result struct {

@@ -14,7 +14,8 @@ func mapResultSummary(item resultmodel.ResultSummary) *readmodelcore.ResultSumma
 		len(item.ArtifactRefs) == 0 &&
 		len(item.KnownLimitations) == 0 &&
 		len(item.ResidualRisks) == 0 &&
-		len(item.NextActions) == 0 {
+		len(item.NextActions) == 0 &&
+		len(item.Diagnostics) == 0 {
 		return nil
 	}
 	ret := &readmodelcore.ResultSummary{
@@ -26,6 +27,7 @@ func mapResultSummary(item resultmodel.ResultSummary) *readmodelcore.ResultSumma
 		KnownLimitations:      cloneReadModelStringSlice(item.KnownLimitations),
 		ResidualRisks:         cloneReadModelStringSlice(item.ResidualRisks),
 		NextActions:           cloneReadModelStringSlice(item.NextActions),
+		Diagnostics:           cloneReadModelMap(item.Diagnostics),
 	}
 	ret.DoDItems = resultSummaryDoDItems(item)
 	return ret

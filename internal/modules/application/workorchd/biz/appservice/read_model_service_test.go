@@ -1256,6 +1256,7 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 			ArtifactRefs:          []common.ArtifactID{"artifact-evidence-snapshot"},
 			ResidualRisks:         []string{"none reported"},
 			NextActions:           []string{"review artifact"},
+			Diagnostics:           map[string]any{"resultScope": "acceptance_slice", "sliceId": "slice-001"},
 		},
 	}); err != nil {
 		t.Fatalf("create result: %v", err)
@@ -1323,7 +1324,9 @@ func TestReadRunSnapshotWithBackendReturnsExecutionEvidence(t *testing.T) {
 	}
 	if first.Results[0].SummaryDetail == nil ||
 		first.Results[0].SummaryDetail.ImplementationSummary != "implemented requested changes" ||
-		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []string{"artifact-evidence-snapshot"}) {
+		!reflect.DeepEqual(first.Results[0].SummaryDetail.ArtifactRefs, []string{"artifact-evidence-snapshot"}) ||
+		first.Results[0].SummaryDetail.Diagnostics["resultScope"] != "acceptance_slice" ||
+		first.Results[0].SummaryDetail.Diagnostics["sliceId"] != "slice-001" {
 		t.Fatalf("result summary detail = %+v, want structured summary detail", first.Results[0].SummaryDetail)
 	}
 	if len(first.Artifacts) != 1 || first.Artifacts[0].ResultID != string(resultID) || first.Artifacts[0].Category != "final_summary" || first.Artifacts[0].Metadata["format"] != "markdown" {

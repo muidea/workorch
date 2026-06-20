@@ -366,7 +366,13 @@ wait_run_completed() {
   local run_id="$1"
   for _ in $(seq 1 120); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$WORKSPACE_ID/runs/$run_id/status" >"$TMP_DIR/run-status.json"
-    if grep -E '"state"[[:space:]]*:[[:space:]]*"completed"' "$TMP_DIR/run-status.json" >/dev/null; then
+    if python3 - "$TMP_DIR/run-status.json" <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+raise SystemExit(0 if ((data.get("status") or {}).get("state") == "completed") else 1)
+PY
+    then
       return 0
     fi
     sleep 0.5
@@ -376,11 +382,12 @@ wait_run_completed() {
 }
 
 validate_results() {
-  python3 - "$TMP_DIR/results.json" <<'PY'
+  python3 - "$TMP_DIR/results.json" "$TMP_DIR/run-snapshot.json" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
+snapshot = json.load(open(sys.argv[2], encoding="utf-8"))
 results = data.get("results") or []
 slice_results = [item for item in results if item.get("sourceType") == "acceptance_slice" and item.get("state") == "accepted"]
 final_results = [item for item in results if item.get("sourceType") == "dod_assessment" and item.get("state") == "accepted"]
@@ -388,10 +395,17 @@ if len(slice_results) < 1:
     raise SystemExit(f"missing accepted acceptance_slice result: {results!r}")
 if len(final_results) != 1:
     raise SystemExit(f"missing exactly one final accepted dod_assessment result: {results!r}")
-diagnostics = ((slice_results[0].get("summaryDetail") or {}).get("diagnostics") or {})
+snapshot_results = ((snapshot.get("snapshot") or {}).get("results") or snapshot.get("results") or [])
+snapshot_slice_results = [item for item in snapshot_results if item.get("sourceType") == "acceptance_slice" and item.get("state") == "accepted"]
+if not snapshot_slice_results:
+    raise SystemExit(f"missing accepted acceptance_slice result in snapshot detail: {snapshot_results!r}")
+diagnostics = ((snapshot_slice_results[0].get("summaryDetail") or {}).get("diagnostics") or {})
 if diagnostics.get("resultScope") != "acceptance_slice" or diagnostics.get("finalCompletionGateState") != "not_final_result":
     raise SystemExit(f"slice diagnostics not projected: {diagnostics!r}")
-assessment = final_results[0].get("doDAssessment") or {}
+snapshot_final_results = [item for item in snapshot_results if item.get("sourceType") == "dod_assessment" and item.get("state") == "accepted"]
+if len(snapshot_final_results) != 1:
+    raise SystemExit(f"missing exactly one final accepted dod_assessment result in snapshot detail: {snapshot_results!r}")
+assessment = snapshot_final_results[0].get("doDAssessment") or {}
 items = assessment.get("items") or []
 if not assessment.get("satisfied") or len(items) < 2:
     raise SystemExit(f"final assessment incomplete: {assessment!r}")
