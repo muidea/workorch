@@ -2235,6 +2235,124 @@ func TestValidateLLMExecutionOutputContractAllowsConcreteValidationShellDevNullR
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteMktempFileRedirection(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-controlled-substitute-mktemp-file",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-controlled-substitute-mktemp-file/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`LOG="$(mktemp)"`,
+						`trap 'rm -f "$LOG"' EXIT`,
+						`if ! verify-command >"$LOG" 2>&1; then`,
+						`  cat "$LOG"`,
+						`  exit 1`,
+						`fi`,
+						`cat "$LOG"`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "controlled_substitute",
+						"observationType": "controlled_substitute_observation",
+						"substituteFor":   "validation command output capture",
+						"substitute":      "temporary log file created with mktemp",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want mktemp log redirection allowed", err)
+	}
+}
+
+func TestValidateLLMExecutionOutputContractAllowsDynamicExecutionTempCacheWrites(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-evidence-repair-dynamic-temp-cache",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-evidence-repair-dynamic-temp-cache/repair-001-of-verify",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:    runtimeStageVerification,
+			"repairObjective":           repairObjectiveConcreteValidationEvidence,
+			"boundedValidationRequired": true,
+			"evidenceRepairRequired":    true,
+			"repairActionPackage": map[string]any{
+				"requiredOutput": map[string]any{
+					"mustProduceConcreteValidationEvidence":    true,
+					"mustDeclareValidationEvidenceMode":        true,
+					"mustDeclareValidationEvidenceObservation": true,
+					"acceptedKinds": []string{"shell/command", "mcp/tool_call"},
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{{
+				"id":   "verify",
+				"kind": shellcommon.StepKindCommand,
+				"input": map[string]any{
+					"command": "sh",
+					"args": []string{"-c", strings.Join([]string{
+						`set -eu`,
+						`tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/verify-dynamic.XXXXXX")"`,
+						`cleanup() {`,
+						`  chmod -R u+w "$tmpdir" 2>/dev/null || true`,
+						`  rm -rf "$tmpdir" 2>/dev/null || true`,
+						`}`,
+						`trap cleanup EXIT INT TERM`,
+						`export GOCACHE="$tmpdir/gocache"`,
+						`export GOMODCACHE="$tmpdir/gomodcache"`,
+						`mkdir -p "$GOCACHE" "$GOMODCACHE"`,
+						`printf ok > "$tmpdir/validation.out"`,
+						`cat "$tmpdir/validation.out"`,
+					}, "\n")},
+					"validationEvidence": map[string]any{
+						"mode":            "dynamic_execution",
+						"observationType": "dynamic_execution_observation",
+						"substitute":      "tool caches and captured output are isolated under mktemp",
+					},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want dynamic execution temp writes allowed", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractAllowsControlledSubstituteTempWorkspaceWrites(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-evidence-repair-controlled-substitute-temp-writes",

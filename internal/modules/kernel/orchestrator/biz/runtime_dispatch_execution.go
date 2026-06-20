@@ -37,7 +37,14 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		}
 	}
 	kind = canonicalLLMWorkspaceStepKind(kind)
+	var unlockLLMDispatch func()
 	if kind == llmWorkspaceExecutionStepKind {
+		unlockLLMDispatch = o.lockRunLLMDispatch(run.ID)
+		defer func() {
+			if unlockLLMDispatch != nil {
+				unlockLLMDispatch()
+			}
+		}()
 		if active, err := o.hasOtherActiveLLMWorkspaceExecution(ctx, run.ID, stepID); err != nil {
 			return err
 		} else if active {
@@ -89,6 +96,10 @@ func (o *RuntimeOrchestrator) dispatchStepWithWorkspace(
 		if err := o.steps.Update(ctx, step); err != nil {
 			return err
 		}
+	}
+	if unlockLLMDispatch != nil {
+		unlockLLMDispatch()
+		unlockLLMDispatch = nil
 	}
 	if workspace == nil {
 		workspace, err = o.workspaces.Get(ctx, run.WorkspaceID)
@@ -526,6 +537,21 @@ func (o *RuntimeOrchestrator) lockRuntimeStepFinalize(stepID common.StepID) func
 	return func() {
 		mu.Unlock()
 		o.finalizeMu.Delete(stepID)
+	}
+}
+
+func (o *RuntimeOrchestrator) lockRunLLMDispatch(runID common.RunID) func() {
+	if o == nil || runID == "" {
+		return func() {}
+	}
+	value, _ := o.llmDispatchMu.LoadOrStore(runID, &sync.Mutex{})
+	mu, _ := value.(*sync.Mutex)
+	if mu == nil {
+		return func() {}
+	}
+	mu.Lock()
+	return func() {
+		mu.Unlock()
 	}
 }
 

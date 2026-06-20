@@ -124,6 +124,7 @@ type RuntimeOrchestrator struct {
 	runState            *runStateSubsystem
 	decision            *decisionResumeSubsystem
 	finalizeMu          sync.Map
+	llmDispatchMu       sync.Map
 }
 
 func (o *RuntimeOrchestrator) RuntimePolicy() RuntimePolicy {

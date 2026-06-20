@@ -865,7 +865,8 @@ func providerInputRequiresRepairActionPackageRequiredOutput(input map[string]any
 	contract := recordFromAny(input["convergenceContract"])
 	if boolValue(input["assessmentOnly"]) ||
 		stringValue(input["repairObjective"]) == "complete_dod_goal_coverage_assessment" ||
-		stringValue(contract["state"]) == "need_assessment" {
+		stringValue(contract["state"]) == "need_assessment" ||
+		stringValue(contract["state"]) == "need_governance" {
 		return false
 	}
 	return boolValue(input["runtimeRepairFollowUp"]) ||

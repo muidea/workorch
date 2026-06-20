@@ -182,12 +182,21 @@ func validateConcreteValidationGraphShellSafety(graph runtimemodel.BlockExecutio
 		if shellCommandLineStartsDetachedProcess(commandLine) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not start detached or background processes; use a bounded foreground command, timeout-controlled harness, or controlled substitute", common.ErrInvalidArgument)
 		}
-		allowIsolatedWrites := nodeValidationEvidenceMode(node) == "controlled_substitute"
+		allowIsolatedWrites := validationEvidenceModeAllowsIsolatedTempWrites(nodeValidationEvidenceMode(node))
 		if shellCommandLineContainsWorkspaceFileMutation(commandLine, allowIsolatedWrites) {
 			return fmt.Errorf("%w: concrete validation evidence graph must not mutate workspace files through shell/command; use patch/apply for file state changes and keep validation shell commands read-only or externally bounded", common.ErrInvalidArgument)
 		}
 	}
 	return nil
+}
+
+func validationEvidenceModeAllowsIsolatedTempWrites(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case "controlled_substitute", "dynamic_execution", "executable_contract", "runtime_behavior":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateExecutionGraphShellSafety(graph runtimemodel.BlockExecutionGraph, scope string) error {
@@ -256,7 +265,7 @@ func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowIsol
 	if lower == "" {
 		return false
 	}
-	if allowIsolatedControlledSubstitute && shellCommandLineUsesIsolatedTemporaryWorkspace(lower) {
+	if allowIsolatedControlledSubstitute && shellCommandLineUsesTemporaryTarget(lower) {
 		return shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(lower)
 	}
 	padded := " " + lower + " "
@@ -291,6 +300,10 @@ func shellCommandLineContainsWorkspaceFileMutation(commandLine string, allowIsol
 
 func shellCommandLineUsesIsolatedTemporaryWorkspace(commandLine string) bool {
 	return strings.Contains(commandLine, "mktemp -d") && shellCommandLineSegmentReferencesTemp(commandLine)
+}
+
+func shellCommandLineUsesTemporaryTarget(commandLine string) bool {
+	return strings.Contains(commandLine, "mktemp") && shellCommandLineSegmentReferencesTemp(commandLine)
 }
 
 func shellCommandLineContainsWorkspaceFileMutationOutsideIsolatedTemp(commandLine string) bool {

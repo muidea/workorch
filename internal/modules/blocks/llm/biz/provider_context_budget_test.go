@@ -259,6 +259,61 @@ func TestProviderContextBudgetRequiresExecutableRepairPackageRequiredOutput(t *t
 	}
 }
 
+func TestProviderContextBudgetAllowsGovernancePackageWithoutRequiredOutput(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID: "ws-governance-budget",
+		RunID:       "run-governance-budget",
+		StepID:      "run-governance-budget/decision-001",
+		Kind:        "llm/workspace_execution",
+		Model:       "model",
+		Schema:      decisionSchemaName,
+		Input: map[string]any{
+			"goal":                  map[string]any{"text": "goal"},
+			"dod":                   map[string]any{"items": []any{"dod"}},
+			"runtimeRepairFollowUp": true,
+			"runtimeStage":          "decision",
+			"runtimeStageMode":      "structured_governance",
+			"convergenceContract": map[string]any{
+				"state":            "need_governance",
+				"runtimeStage":     "decision",
+				"runtimeStageMode": "structured_governance",
+			},
+			"repairActionPackage": map[string]any{
+				"currentFailure": map[string]any{
+					"failedStepId": "run-governance-budget/graph-001/action",
+					"reason":       "operator decision required",
+				},
+				"coverageTargetSet": []map[string]any{{
+					"sourceRequirementId": "goal-leaf-001",
+					"targetText":          "goal leaf",
+				}},
+			},
+		},
+		Config: llmmodels.RedactedProviderConfig{
+			ContextProfile: llmmodels.ProviderContextProfile{
+				ContextWindowTokens:    8192,
+				MaxInputTokens:         4096,
+				ReservedOutputTokens:   1024,
+				SafetyRatio:            0.8,
+				BytesHardLimit:         64 * 1024,
+				EstimatedTokensPerByte: 0.25,
+			},
+		},
+	}
+
+	got := enforceProviderRequestBudget(req)
+
+	if got.ContextBudget == nil {
+		t.Fatalf("contextBudget = nil, want metadata")
+	}
+	if stringSliceContains(got.ContextBudget.IntegrityWarnings, "repair_action_package_required_output_missing") {
+		t.Fatalf("integrityWarnings = %+v, want no requiredOutput warning for governance", got.ContextBudget.IntegrityWarnings)
+	}
+	if got.ContextBudget.ContextGateReason == "repair_action_package_required_output_missing" {
+		t.Fatalf("contextGateReason = %q, want governance package without executable output allowed", got.ContextBudget.ContextGateReason)
+	}
+}
+
 func TestProviderCoverageWorkItemWarningsAcceptCurrentFocusItems(t *testing.T) {
 	input := map[string]any{
 		"coverageWorkItemContext": map[string]any{

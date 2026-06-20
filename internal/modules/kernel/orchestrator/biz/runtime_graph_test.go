@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
@@ -153,6 +155,35 @@ func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceE
 	}
 	if _, err := stepRepo.Get(ctx, secondStepID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("second LLM step err = %v, want not created while %s is active", err, activeStepID)
+	}
+}
+
+func TestRuntimeOrchestrator_RunLLMDispatchLockSerializesSameRun(t *testing.T) {
+	runID := common.RunID("run-llm-dispatch-lock")
+	orch := &RuntimeOrchestrator{}
+	unlockFirst := orch.lockRunLLMDispatch(runID)
+	var secondEntered atomic.Bool
+	secondDone := make(chan struct{})
+	go func() {
+		unlockSecond := orch.lockRunLLMDispatch(runID)
+		secondEntered.Store(true)
+		unlockSecond()
+		close(secondDone)
+	}()
+
+	select {
+	case <-secondDone:
+		t.Fatal("second lock entered before first lock released")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if secondEntered.Load() {
+		t.Fatal("second lock marked entered before first lock released")
+	}
+	unlockFirst()
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second lock did not enter after first lock released")
 	}
 }
 

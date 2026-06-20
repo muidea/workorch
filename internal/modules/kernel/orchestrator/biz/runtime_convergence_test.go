@@ -963,6 +963,60 @@ func TestBuildConvergenceContractProfilePrimaryTargetDoesNotDependOnCurrentFocus
 	}
 }
 
+func TestApplyConvergenceContractNeedGovernanceClearsExecutableRepairFollowUp(t *testing.T) {
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"runtimeRepairFollowUp":           true,
+		stepInputKeyProviderRetryFollowUp: true,
+		"repairObjective":                 repairObjectiveStateChangingOutput,
+		"stateChangingOutputRequired":     true,
+		"boundedValidationRequired":       true,
+		"repairActionPackage": map[string]any{
+			"currentFailure": map[string]any{
+				"failedStepId": "run-governance/graph-001/action",
+				"reason":       "operator decision required",
+			},
+			"coverageTargetSet": []map[string]any{{
+				"sourceRequirementId": "goal-leaf-001",
+				"targetText":          "goal leaf",
+			}},
+		},
+	}
+	contract := ConvergenceContract{
+		State:            convergenceStateNeedGovernance,
+		RuntimeStage:     runtimeStageDecision,
+		RuntimeStageMode: "structured_governance",
+		GovernanceReason: "operator decision required",
+	}
+
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	pkg := mapFromValue(applied["repairActionPackage"])
+
+	for _, key := range []string{
+		"runtimeRepairFollowUp",
+		stepInputKeyProviderRetryFollowUp,
+		"repairObjective",
+		"stateChangingOutputRequired",
+		"concreteFailureEvidenceRequired",
+		"boundedValidationRequired",
+		"evidenceRepairRequired",
+	} {
+		if _, ok := applied[key]; ok {
+			t.Fatalf("applied[%q] still present in governance input: %+v", key, applied)
+		}
+	}
+	if len(mapFromValue(pkg["requiredOutput"])) > 0 {
+		t.Fatalf("repairActionPackage.requiredOutput = %+v, want stripped for governance", pkg["requiredOutput"])
+	}
+	if len(mapFromValue(pkg["currentFailure"])) == 0 {
+		t.Fatalf("repairActionPackage = %+v, want current failure context preserved", pkg)
+	}
+	if applied["governanceRequired"] != true || applied["governanceReason"] != "operator decision required" {
+		t.Fatalf("governance fields = required:%v reason:%v", applied["governanceRequired"], applied["governanceReason"])
+	}
+}
+
 func TestRuntimeRepairFollowUpProfileEvidenceKindFailurePreemptsAssessmentOnly(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-profile-evidence-kind-gap",

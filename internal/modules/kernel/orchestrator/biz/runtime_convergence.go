@@ -1459,6 +1459,8 @@ func ApplyConvergenceContract(input map[string]any, contract ConvergenceContract
 		input[stepInputKeySoulStage] = soulStageDecision
 		delete(input, stepInputKeyAssessmentOnly)
 		delete(input, "assessmentOnlyReason")
+		delete(input, "runtimeRepairFollowUp")
+		delete(input, stepInputKeyProviderRetryFollowUp)
 		delete(input, "repairObjective")
 		delete(input, "stateChangingOutputRequired")
 		delete(input, "concreteFailureEvidenceRequired")
