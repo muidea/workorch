@@ -110,11 +110,7 @@ func (b *eventHubBackend) sendCommand(ctx context.Context, command string, wsID 
 		RunID:        string(runID),
 		Payload:      events.CLICommandPayloadMap(cmd),
 	}
-	if asyncHub, ok := b.eventHub.(events.AsyncHub); ok {
-		if err := asyncHub.PublishAsync(ctx, commandEnvelope); err != nil {
-			return events.CLIResultPayload{}, err
-		}
-	} else if err := b.eventHub.Publish(ctx, commandEnvelope); err != nil {
+	if err := b.eventHub.Publish(ctx, commandEnvelope); err != nil {
 		if responseEnvelope, ok := events.ResponseEnvelope(err); ok {
 			result, ok := events.DecodeCLIResultPayload(responseEnvelope.Payload)
 			if !ok || result.CorrelationID != correlationID {

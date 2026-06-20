@@ -55,8 +55,11 @@ func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
 			}
 		}
 	}
-	if !sawCommand || !sawResult {
-		t.Fatalf("published command=%v result=%v, want both", sawCommand, sawResult)
+	if !sawCommand {
+		t.Fatalf("published command=%v, want workspace create command", sawCommand)
+	}
+	if sawResult {
+		t.Fatalf("published result=%v, want synchronous response without duplicate CLI result event", sawResult)
 	}
 }
 

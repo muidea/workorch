@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -141,9 +142,42 @@ func (a *RuntimeAdapter) ExecuteRuntimeStep(ctx context.Context, request runtime
 	}
 	if err != nil {
 		output["status"] = "failed"
+		attachShellCommandFailureDiagnostics(output, execCommand, err)
 		return runtimemodel.StepExecutionResult{Output: output}, err
 	}
 	return runtimemodel.StepExecutionResult{Output: output}, nil
+}
+
+func attachShellCommandFailureDiagnostics(output map[string]any, execCommand string, err error) {
+	if output == nil || err == nil {
+		return
+	}
+	if !shellCommandNotFound(err) {
+		return
+	}
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(execCommand)
+	}
+	output["failureReason"] = "command_not_found"
+	output["unavailableCommand"] = command
+	output["capabilityUnavailable"] = true
+	output["runtimeDiagnostics"] = map[string]any{
+		"kind":               "runtime_capability_unavailable",
+		"failureReason":      "command_not_found",
+		"unavailableCommand": command,
+	}
+}
+
+func shellCommandNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return true
+	}
+	var execErr *exec.Error
+	return errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound)
 }
 
 type limitedOutputBuffer struct {

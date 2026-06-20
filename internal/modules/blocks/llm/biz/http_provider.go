@@ -1173,6 +1173,7 @@ func capabilityContractPrompt(request llmmodels.ProviderRequest) string {
 	if requestHasBlockKind(request, "shell/command") {
 		lines = append(lines,
 			"- Shell command names must be real commands available in the local process environment. Do not use a command named workorch.",
+			"- Convenience commands that are not declared runtime blocks are optional local tools; check availability with a bounded command such as command -v before depending on them, or use a portable fallback.",
 			"- shell/command always executes with its working directory set by the runtime to the workspace deliverable directory. Use relative paths from that directory; do not hard-code cd into absolute workspace paths such as /home/user/workspace or generated workspace directories.",
 			"- Shell command arguments must be encoded only as args arrays. For example use {\"command\":\"find\",\"args\":[\".\",\"-maxdepth\",\"3\"]}; never place positional arguments as object properties after command.",
 			"- shell/command.command must contain only the executable name or path. For shell syntax such as redirection, heredoc, cd, pipes, &&, ||, or multi-line scripts, use {\"command\":\"sh\",\"args\":[\"-c\",\"...\"]} or use patchRequests to write files.",

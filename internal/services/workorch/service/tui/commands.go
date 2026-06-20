@@ -78,7 +78,10 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 		}
 		if snapshot != nil {
 			liveRunID := snapshot.Workspace.ActiveRunID
-			activeRun := selectWorkspaceRun(liveRunID, snapshot.Runs)
+			var activeRun *backend.RunInfo
+			if liveRunID != "" {
+				activeRun = selectWorkspaceRun(liveRunID, snapshot.Runs)
+			}
 			displayRun := activeRun
 			if displayRun == nil && snapshot.Outcome.RunID != "" {
 				displayRun = selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
@@ -86,6 +89,8 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 			status := runStatusFromWorkspaceSnapshot(snapshot, displayRun)
 			goal := resolveWorkspaceContextGoal(snapshot, displayRun, nil)
 			dod := resolveWorkspaceContextDoD(snapshot, displayRun, nil)
+			decisions := filterSnapshotDecisionsForRun(snapshot, displayRun)
+			approvals := filterSnapshotApprovalsForRun(snapshot, displayRun)
 			return WorkspaceContextMsg{
 				RequestSeq:        requestSeq,
 				WorkspaceID:       workspaceID,
@@ -99,8 +104,8 @@ func fetchWorkspaceContext(be backend.Backend, workspaceID string, resetMainView
 				Status:            status,
 				Goal:              goal,
 				DoD:               dod,
-				Decisions:         snapshot.Decisions,
-				Approvals:         snapshot.Approvals,
+				Decisions:         decisions,
+				Approvals:         approvals,
 				WorkspaceHasLive:  snapshot.Workspace.ActiveRunID != "",
 			}
 		}
@@ -137,7 +142,7 @@ func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 		}
 		var items []backend.DecisionInfo
 		if snapshot != nil {
-			items = snapshot.Decisions
+			items = filterSnapshotDecisionsForRun(snapshot, selectSnapshotDisplayRun(snapshot))
 		}
 		return DecisionListMsg{WorkspaceID: workspaceID, Decisions: items, Error: err}
 	}
@@ -230,6 +235,51 @@ func selectWorkspaceRun(activeRunID common.RunID, runs []backend.RunInfo) *backe
 	return &runs[len(runs)-1]
 }
 
+func selectSnapshotDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *backend.RunInfo {
+	if snapshot == nil {
+		return nil
+	}
+	if snapshot.Workspace.ActiveRunID != "" {
+		return selectWorkspaceRun(snapshot.Workspace.ActiveRunID, snapshot.Runs)
+	}
+	if snapshot.Outcome.RunID != "" {
+		return selectWorkspaceRun(snapshot.Outcome.RunID, snapshot.Runs)
+	}
+	return nil
+}
+
+func filterSnapshotDecisionsForRun(snapshot *backend.WorkspaceSnapshotInfo, run *backend.RunInfo) []backend.DecisionInfo {
+	items := make([]backend.DecisionInfo, 0)
+	if snapshot == nil || run == nil || run.ID == "" {
+		return items
+	}
+	for _, item := range snapshot.Decisions {
+		if item.WorkspaceID != "" && item.WorkspaceID != snapshot.Workspace.ID {
+			continue
+		}
+		if item.RunID == run.ID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func filterSnapshotApprovalsForRun(snapshot *backend.WorkspaceSnapshotInfo, run *backend.RunInfo) []backend.ApprovalInfo {
+	items := make([]backend.ApprovalInfo, 0)
+	if snapshot == nil || run == nil || run.ID == "" {
+		return items
+	}
+	for _, item := range snapshot.Approvals {
+		if item.WorkspaceID != "" && item.WorkspaceID != snapshot.Workspace.ID {
+			continue
+		}
+		if item.RunID == run.ID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
 func FetchDecision(be backend.Backend, workspaceID string, ticketID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -260,7 +310,7 @@ func FetchApprovals(be backend.Backend, workspaceID string) tea.Cmd {
 		}
 		var items []backend.ApprovalInfo
 		if snapshot != nil {
-			items = snapshot.Approvals
+			items = filterSnapshotApprovalsForRun(snapshot, selectSnapshotDisplayRun(snapshot))
 		}
 		return ApprovalListMsg{WorkspaceID: workspaceID, Approvals: items, Error: err}
 	}

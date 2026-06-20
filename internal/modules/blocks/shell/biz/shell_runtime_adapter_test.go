@@ -152,6 +152,36 @@ func TestRuntimeAdapter_ExecuteRuntimeStepReturnsOutputForNonZeroExit(t *testing
 	}
 }
 
+func TestRuntimeAdapter_ExecuteRuntimeStepClassifiesUnavailableCommand(t *testing.T) {
+	adapter := NewRuntimeAdapter()
+	deliverableDirectory := t.TempDir()
+	command := "workorch-command-that-should-not-exist"
+
+	result, err := adapter.ExecuteRuntimeStep(context.Background(), runtimemodel.StepExecutionRequest{
+		WorkspaceDeliverableDirectory: deliverableDirectory,
+		Kind:                          "shell/command",
+		Input: map[string]any{
+			"command": command,
+		},
+	})
+	if err == nil {
+		t.Fatal("ExecuteRuntimeStep err = nil, want command lookup failure")
+	}
+	if result.Output["status"] != "failed" {
+		t.Fatalf("status = %v, want failed", result.Output["status"])
+	}
+	if result.Output["failureReason"] != "command_not_found" || result.Output["unavailableCommand"] != command || result.Output["capabilityUnavailable"] != true {
+		t.Fatalf("output = %+v, want command-not-found metadata", result.Output)
+	}
+	diagnostics, ok := result.Output["runtimeDiagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtimeDiagnostics = %T, want map", result.Output["runtimeDiagnostics"])
+	}
+	if diagnostics["kind"] != "runtime_capability_unavailable" || diagnostics["unavailableCommand"] != command {
+		t.Fatalf("runtimeDiagnostics = %+v, want runtime capability unavailable", diagnostics)
+	}
+}
+
 func TestRuntimeAdapter_ExecuteRuntimeStepBoundsCommandOutput(t *testing.T) {
 	adapter := NewRuntimeAdapter()
 	deliverableDirectory := t.TempDir()

@@ -196,6 +196,47 @@ func TestMagicHubPublishCanReturnHandlerResponse(t *testing.T) {
 	}
 }
 
+func TestMagicHubPublishedDoesNotRetainHeavyCLIResultPayload(t *testing.T) {
+	hub := NewMagicHub()
+	defer hub.Terminate(context.Background())
+
+	large := strings.Repeat("x", 1024*1024)
+	err := hub.Publish(context.Background(), Envelope{
+		Topic:       workorchdevents.TopicCLIResult,
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Payload: map[string]any{
+			"correlationId": "corr-1",
+			"commandId":     "cmd-1",
+			"ok":            true,
+			"occurredAt":    time.Now().UTC().Format(time.RFC3339Nano),
+			"workspaceId":   "ws-1",
+			"runId":         "run-1",
+			"resource":      map[string]any{"large": large},
+			"resources":     []map[string]any{{"large": large}},
+			"snapshot":      map[string]any{"large": large},
+		},
+	})
+	if err != nil {
+		t.Fatalf("publish CLI result: %v", err)
+	}
+
+	published := hub.Published()
+	if len(published) != 1 {
+		t.Fatalf("published count = %d, want 1", len(published))
+	}
+	payload := published[0].Payload
+	if payload["resource"] != nil || payload["resources"] != nil || payload["snapshot"] != nil {
+		t.Fatalf("published payload retained heavy result fields: %+v", payload)
+	}
+	if payload["correlationId"] != "corr-1" || payload["commandId"] != "cmd-1" || payload["ok"] != true {
+		t.Fatalf("published payload lost audit fields: %+v", payload)
+	}
+	if payload["resourceSummary"] == nil || payload["resourcesSummary"] == nil || payload["snapshotSummary"] == nil {
+		t.Fatalf("published payload missing result summaries: %+v", payload)
+	}
+}
+
 func TestMagicHubWildcardObserverDoesNotSwallowHandlerResponse(t *testing.T) {
 	hub := NewMagicHub()
 	defer hub.Terminate(context.Background())

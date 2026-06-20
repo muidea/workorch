@@ -21,6 +21,7 @@ const (
 	magicWildcardTopic                = "/#"
 	magicWorkorchObserverDestination  = "/_workorch_observer/#"
 	defaultMagicHubOwner              = "workorch/events"
+	cliResultTopic                    = "/cli/result"
 )
 
 type MagicHub struct {
@@ -95,7 +96,7 @@ func (h *MagicHub) Publish(ctx context.Context, envelope Envelope) error {
 
 	h.mu.Lock()
 	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
-	h.published = append(h.published, cloneEnvelope(envelope))
+	h.recordPublishedEnvelopeLocked(envelope)
 	h.mu.Unlock()
 	if err := h.dispatchLocalWildcard(ctx, envelope); err != nil {
 		return err
@@ -140,7 +141,7 @@ func (h *MagicHub) PublishAsync(ctx context.Context, envelope Envelope) error {
 
 	h.mu.Lock()
 	envelope.Revision = h.nextWorkspaceRevisionLocked(envelope.WorkspaceID)
-	h.published = append(h.published, cloneEnvelope(envelope))
+	h.recordPublishedEnvelopeLocked(envelope)
 	h.mu.Unlock()
 	if err := h.dispatchLocalWildcard(ctx, envelope); err != nil {
 		return err
@@ -164,6 +165,58 @@ func (h *MagicHub) nextWorkspaceRevisionLocked(workspaceID string) int64 {
 		return 0
 	}
 	return h.revisionState.next(workspaceID)
+}
+
+func (h *MagicHub) recordPublishedEnvelopeLocked(envelope Envelope) {
+	if h == nil {
+		return
+	}
+	h.published = append(h.published, publishedEnvelopeForAudit(envelope))
+}
+
+func publishedEnvelopeForAudit(envelope Envelope) Envelope {
+	envelope = cloneEnvelope(envelope)
+	if envelope.Topic == cliResultTopic {
+		envelope.Payload = cliResultPayloadForAudit(envelope.Payload)
+	}
+	return envelope
+}
+
+func cliResultPayloadForAudit(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	ret := map[string]any{}
+	for _, key := range []string{
+		"correlationId",
+		"commandId",
+		"ok",
+		"error",
+		"occurredAt",
+		"workspaceId",
+		"runId",
+	} {
+		if value, ok := payload[key]; ok {
+			ret[key] = value
+		}
+	}
+	if resource, ok := payload["resource"].(map[string]any); ok && len(resource) > 0 {
+		ret["resourceSummary"] = map[string]any{"fieldCount": len(resource)}
+	}
+	switch resources := payload["resources"].(type) {
+	case []map[string]any:
+		if len(resources) > 0 {
+			ret["resourcesSummary"] = map[string]any{"count": len(resources)}
+		}
+	case []any:
+		if len(resources) > 0 {
+			ret["resourcesSummary"] = map[string]any{"count": len(resources)}
+		}
+	}
+	if snapshot, ok := payload["snapshot"].(map[string]any); ok && len(snapshot) > 0 {
+		ret["snapshotSummary"] = map[string]any{"fieldCount": len(snapshot)}
+	}
+	return ret
 }
 
 func (s *workspaceRevisionState) next(workspaceID string) int64 {

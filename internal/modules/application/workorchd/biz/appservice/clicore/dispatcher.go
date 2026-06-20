@@ -57,10 +57,5 @@ func (d *Dispatcher) handleEnvelope(ctx context.Context, envelope events.Envelop
 		RunID:        string(cmd.RunID),
 		Payload:      events.CLIResultPayloadMap(result),
 	}
-	if asyncHub, ok := d.eventHub.(events.AsyncHub); ok {
-		_ = asyncHub.PublishAsync(context.Background(), resultEnvelope)
-	} else {
-		_ = d.eventHub.Publish(context.Background(), resultEnvelope)
-	}
 	return events.Response(resultEnvelope)
 }

@@ -17,7 +17,8 @@
 ## LSP 使用约束
 - LSP 只是语义定位辅助；不能替代 Goal/DoD gap analysis，也不能作为 DoD satisfied 的充分证据
 - lsp_references 返回 truncated=true 时，只能把返回项作为局部引用集合，不能声称已完成全量影响面分析
-- LSP 初始化失败、查询超时或返回空结果时，回退到 file/read、rg、build/test 输出，不要因此进入 blocked_on_decision
+- LSP 初始化失败、查询超时或返回空结果时，回退到 file/list、file/read、可用的文本搜索工具、build/test 输出，不要因此进入 blocked_on_decision
+- `rg` 只是可选搜索加速工具；只有在 shell runtime 可用性已确认或 `command -v rg` 成功时才规划直接使用。若不可用，必须回退到 `grep`/`find`、file/list + file/read、LSP/MCP 只读能力或构建测试诊断，不要因为缺少 `rg` 停止推进。
 
 ## 计划输出要求
 - 计划必须包含 DoD-to-test 映射：每个关键 DoD 条目对应的测试类型、验证命令和预期 evidenceRefs
