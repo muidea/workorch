@@ -71,6 +71,54 @@
     },
     "contextHints": {
       "stateChangePolicy": "must_produce_state_change",
+      "acceptanceSlicePolicy": {
+        "schemaVersion": "workorch.acceptance_slice_policy.v1",
+        "maxWorkItems": 4,
+        "completionPolicy": "all_required_items_accepted",
+        "resultPolicy": "slice_result_allowed",
+        "groups": [
+          {
+            "id": "slice-primary-state-change",
+            "title": "Primary state change",
+            "scope": "primary_state_change",
+            "priority": 10,
+            "maxWorkItems": 2,
+            "match": {
+              "evidenceRoles": ["primary_state_change"]
+            }
+          },
+          {
+            "id": "slice-direct-validation",
+            "title": "Direct validation evidence",
+            "scope": "direct_validation",
+            "priority": 20,
+            "maxWorkItems": 4,
+            "match": {
+              "missingEvidenceKinds": ["validation"]
+            }
+          },
+          {
+            "id": "slice-supplemental-evidence",
+            "title": "Supplemental evidence",
+            "scope": "supplemental_evidence",
+            "priority": 30,
+            "maxWorkItems": 4,
+            "match": {
+              "evidenceRoles": ["supplemental_evidence"]
+            }
+          },
+          {
+            "id": "slice-remaining-acceptance",
+            "title": "Remaining acceptance",
+            "scope": "remaining_acceptance",
+            "priority": 90,
+            "maxWorkItems": 4,
+            "match": {
+              "all": true
+            }
+          }
+        ]
+      },
       "runtimeRepair": {
         "prerequisiteManifestTargetPatterns": [
           "go.mod",

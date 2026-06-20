@@ -203,6 +203,55 @@ func TestBuildPromptContextUsesCacheAwareSectionMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildPromptContextIncludesAcceptanceFocusAsVolatileTail(t *testing.T) {
+	req := llmmodels.ProviderRequest{
+		WorkspaceID:    "ws-acceptance",
+		RunID:          "run-acceptance",
+		StepID:         "step-acceptance",
+		Kind:           llmcommon.StepKindWorkspaceExecution,
+		Model:          "model",
+		Schema:         decisionSchemaName,
+		DialogLanguage: "English",
+		Input: map[string]any{
+			"executionContext": map[string]any{
+				"goal": map[string]any{"text": "goal text"},
+				"dod":  map[string]any{"items": []any{"dod item"}},
+			},
+			"acceptance": map[string]any{
+				"activeSliceId": "slice-001",
+				"activeSlice": map[string]any{
+					"id":                  "slice-001",
+					"coverageWorkItemIds": []any{"cwi-001"},
+				},
+				"currentFocus": map[string]any{
+					"id":                  "focus-cwi-001",
+					"coverageWorkItemIds": []any{"cwi-001"},
+				},
+			},
+		},
+	}
+
+	context := buildPromptContextFromRequest(req)
+
+	section, ok := promptContextSectionByID(context, "C4.acceptance-focus")
+	if !ok {
+		t.Fatalf("missing C4.acceptance-focus; sections=%+v", promptContextSectionIDsForTest(context))
+	}
+	if section.Cacheability != "volatile_tail" {
+		t.Fatalf("acceptance focus cacheability=%q, want volatile_tail", section.Cacheability)
+	}
+	if !strings.Contains(section.Content, "slice-001") || !strings.Contains(section.Content, "focus-cwi-001") {
+		t.Fatalf("acceptance focus content = %s, want active slice and focus", section.Content)
+	}
+	c0, ok := promptContextSectionByID(context, "C0.system")
+	if !ok {
+		t.Fatalf("missing C0.system")
+	}
+	if strings.Contains(c0.Content, "focus-cwi-001") || strings.Contains(c0.Content, "slice-001") {
+		t.Fatalf("C0 leaked dynamic acceptance focus: %s", c0.Content)
+	}
+}
+
 func TestBuildPromptContextKeepsCacheableSectionsAsContiguousPrefix(t *testing.T) {
 	req := llmmodels.ProviderRequest{
 		WorkspaceID:    "ws-cache-prefix",

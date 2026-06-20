@@ -236,6 +236,9 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 	if context := mapFromValue(executionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		ret[coverageWorkItemContextKey] = context
 	}
+	if acceptance := runtimeAcceptanceSignalFromExecutionContext(executionContext); len(acceptance) > 0 {
+		ret["acceptance"] = acceptance
+	}
 	if items := mapSliceFromValue(executionContext[coverageWorkItemsKey]); len(items) > 0 {
 		ret[coverageWorkItemsKey] = items
 	}

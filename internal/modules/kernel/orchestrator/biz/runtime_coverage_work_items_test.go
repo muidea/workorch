@@ -76,6 +76,152 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	}
 }
 
+func TestEnsureRunCoverageWorkItemsBuildsAcceptanceSlicesFromGenericPolicy(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-acceptance-slices",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-acceptance-slices",
+				"text": "- first leaf\n- second leaf\n- third leaf",
+			},
+			"executionContract": map[string]any{
+				"acceptanceSlicePolicy": map[string]any{
+					"schemaVersion": "workorch.acceptance_slice_policy.v1",
+					"maxWorkItems":  2,
+					"groups": []map[string]any{{
+						"id":           "slice-goals",
+						"title":        "Goal leaves",
+						"scope":        "goal_leaf",
+						"priority":     10,
+						"maxWorkItems": 2,
+						"match": map[string]any{
+							"sourceScopes": []string{"goal_leaf"},
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want acceptance projection")
+	}
+	slices := mapSliceFromValue(run.ExecutionContext[acceptanceSlicesKey])
+	if len(slices) != 2 {
+		t.Fatalf("acceptanceSlices = %+v, want two bounded slices", slices)
+	}
+	if got := stringFromMap(slices[0], "id"); got != "slice-goals-001" {
+		t.Fatalf("first slice id = %q, want policy chunk id", got)
+	}
+	if ids := stringSliceFromValue(slices[0]["coverageWorkItemIds"]); len(ids) != 2 || ids[0] != "cwi-001" || ids[1] != "cwi-002" {
+		t.Fatalf("first slice coverage ids = %+v, want first two work items", ids)
+	}
+	if active := stringFromMap(run.ExecutionContext, activeSliceIDKey); active != "slice-goals-001" {
+		t.Fatalf("activeSliceId = %q, want first pending slice", active)
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	if stringFromMap(focus, "id") != "focus-cwi-001" || stringFromMap(focus, "sliceId") != "slice-goals-001" {
+		t.Fatalf("coverageFocus = %+v, want first item in active slice", focus)
+	}
+	input := initialStepInput(run)
+	acceptance := mapFromValue(input["acceptance"])
+	if stringFromMap(acceptance, "activeSliceId") != "slice-goals-001" {
+		t.Fatalf("input.acceptance = %+v, want active slice", acceptance)
+	}
+	if inputFocus := mapFromValue(input[coverageFocusKey]); stringFromMap(inputFocus, "id") != "focus-cwi-001" {
+		t.Fatalf("input.coverageFocus = %+v, want current focus", inputFocus)
+	}
+}
+
+func TestEnsureRunCoverageWorkItemsBuildsBoundedDefaultAcceptanceSlices(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-acceptance-default-slices",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": strings.Join([]string{
+					"- one",
+					"- two",
+					"- three",
+					"- four",
+					"- five",
+					"- six",
+				}, "\n"),
+			},
+		},
+	}
+
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want default acceptance slices")
+	}
+	slices := mapSliceFromValue(run.ExecutionContext[acceptanceSlicesKey])
+	if len(slices) != 2 {
+		t.Fatalf("acceptanceSlices = %+v, want default chunks of five work items", slices)
+	}
+	if ids := stringSliceFromValue(slices[0]["coverageWorkItemIds"]); len(ids) != 5 {
+		t.Fatalf("first default slice ids = %+v, want five work items", ids)
+	}
+	if active := stringFromMap(run.ExecutionContext, activeSliceIDKey); active != "slice-required-001" {
+		t.Fatalf("activeSliceId = %q, want first default slice", active)
+	}
+}
+
+func TestEnsureRunCoverageWorkItemsUsesPolicyDataWithoutTemplateBranching(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-acceptance-policy-neutral",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{"text": "produce stateful output"},
+			"executionContract": map[string]any{
+				"acceptanceSlicePolicy": map[string]any{
+					"groups": []map[string]any{{
+						"id":       "slice-primary",
+						"title":    "Primary outputs",
+						"scope":    "primary",
+						"priority": 5,
+						"match": map[string]any{
+							"evidenceRoles": []string{"primary_state_change"},
+						},
+					}},
+				},
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":           "stateful-output",
+							"required":     true,
+							"evidenceRole": "primary_state_change",
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	if !newCoverageSubsystem().ensure(run) {
+		t.Fatalf("coverage.ensure changed = false, want acceptance projection")
+	}
+	slices := mapSliceFromValue(run.ExecutionContext[acceptanceSlicesKey])
+	if len(slices) == 0 || stringFromMap(slices[0], "id") != "slice-primary" {
+		t.Fatalf("acceptanceSlices = %+v, want policy-declared primary slice", slices)
+	}
+	focus := mapFromValue(run.ExecutionContext[coverageFocusKey])
+	focusIDs := stringSliceFromValue(focus["coverageWorkItemIds"])
+	if len(focusIDs) != 1 {
+		t.Fatalf("coverageFocus = %+v, want one focused work item", focus)
+	}
+	var focusItem map[string]any
+	for _, item := range mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey]) {
+		if stringFromMap(item, "id") == focusIDs[0] {
+			focusItem = item
+			break
+		}
+	}
+	if role := stringFromMap(focusItem, "evidenceRole"); role != "primary_state_change" {
+		t.Fatalf("coverageFocus item = %+v, want primary_state_change evidence role", focusItem)
+	}
+	if stringFromMap(focus, "sliceId") != "slice-primary" {
+		t.Fatalf("coverageFocus = %+v, want focus bound to policy slice", focus)
+	}
+}
+
 func TestCoverageWorkItemsUseSameGoalLeavesAsDoDAssessmentGate(t *testing.T) {
 	goalText := strings.Join([]string{
 		"### Capability Table",

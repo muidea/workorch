@@ -706,6 +706,12 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		input[coverageWorkItemContextKey] = context
 	}
+	if acceptance := runtimeAcceptanceSignalFromExecutionContext(run.ExecutionContext); len(acceptance) > 0 {
+		input["acceptance"] = acceptance
+		if focus := mapFromValue(run.ExecutionContext[coverageFocusKey]); len(focus) > 0 {
+			input[coverageFocusKey] = focus
+		}
+	}
 	return input
 }
 
@@ -774,6 +780,9 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	}
 	if value := mapFromValue(executionContext[coverageWorkItemContextKey]); len(value) > 0 {
 		ret[coverageWorkItemContextKey] = value
+	}
+	if acceptance := runtimeAcceptanceSignalFromExecutionContext(executionContext); len(acceptance) > 0 {
+		ret["acceptance"] = acceptance
 	}
 	return ret
 }

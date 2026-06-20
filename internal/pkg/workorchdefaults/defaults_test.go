@@ -68,6 +68,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	}
 	assertStringListContains(t, semanticNavigation["defaultMCPServerIds"].([]any), "mcp-lsp-bridge")
 	assertStringListContains(t, semanticNavigation["defaultCapabilityIds"].([]any), "mcp-lsp-bridge:tool:lsp_diagnostics")
+	assertSoftwareDevAcceptanceSlicePolicy(t, item.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, item.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, item.ContextHints)
 	if len(item.EvidencePolicies) == 0 {
@@ -357,6 +358,7 @@ func TestEnsureBuiltinDefaultsUpsertsEmbeddedSoulsAndTemplates(t *testing.T) {
 	if template.ContextHints["stateChangePolicy"] != "must_produce_state_change" {
 		t.Fatalf("software-dev contextHints = %+v, want must_produce_state_change", template.ContextHints)
 	}
+	assertSoftwareDevAcceptanceSlicePolicy(t, template.ContextHints)
 	assertSoftwareDevAcceptanceDimensions(t, template.ContextHints)
 	assertSoftwareDevCapabilityUsagePolicies(t, template.ContextHints)
 	assertContainsAnyDoDItem(t, template.DoDItems, "evidenceRefs")
@@ -707,6 +709,58 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	}
 	if !sourceChangeEvidenceFound {
 		t.Fatalf("software-dev evidenceRequirements missing source_change in %+v", requirements)
+	}
+}
+
+func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) {
+	t.Helper()
+	policy, ok := hints["acceptanceSlicePolicy"].(map[string]any)
+	if !ok {
+		t.Fatalf("software-dev acceptanceSlicePolicy = %+v, want map", hints["acceptanceSlicePolicy"])
+	}
+	if policy["schemaVersion"] != "workorch.acceptance_slice_policy.v1" {
+		t.Fatalf("acceptanceSlicePolicy schemaVersion = %q", policy["schemaVersion"])
+	}
+	groups, ok := policy["groups"].([]any)
+	if !ok || len(groups) < 4 {
+		t.Fatalf("acceptanceSlicePolicy groups = %+v, want declared groups", policy["groups"])
+	}
+	want := map[string]bool{
+		"slice-primary-state-change":  false,
+		"slice-direct-validation":     false,
+		"slice-supplemental-evidence": false,
+		"slice-remaining-acceptance":  false,
+	}
+	for _, raw := range groups {
+		group, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("acceptanceSlicePolicy group = %+v, want map", raw)
+		}
+		id := testStringFromAny(group["id"])
+		if _, ok := want[id]; ok {
+			want[id] = true
+		}
+		match, ok := group["match"].(map[string]any)
+		if !ok {
+			t.Fatalf("acceptanceSlicePolicy group %q match = %+v, want map", id, group["match"])
+		}
+		switch id {
+		case "slice-primary-state-change":
+			assertStringListContains(t, match["evidenceRoles"].([]any), "primary_state_change")
+		case "slice-direct-validation":
+			assertStringListContains(t, match["missingEvidenceKinds"].([]any), "validation")
+		case "slice-supplemental-evidence":
+			assertStringListContains(t, match["evidenceRoles"].([]any), "supplemental_evidence")
+		case "slice-remaining-acceptance":
+			if match["all"] != true {
+				t.Fatalf("remaining acceptance match = %+v, want all=true", match)
+			}
+		}
+	}
+	for id, seen := range want {
+		if !seen {
+			t.Fatalf("acceptanceSlicePolicy missing group %q in %+v", id, groups)
+		}
 	}
 }
 

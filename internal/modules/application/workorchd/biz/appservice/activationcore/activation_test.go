@@ -20,6 +20,21 @@ func (f fakeEventRecordLister) List(context.Context, repository.EventRecordQuery
 	return append([]*eventstreammodel.EventRecord(nil), f.items...), nil
 }
 
+type fakeWorkspaceTemplateReader struct {
+	item *repository.WorkspaceTemplate
+}
+
+func (f fakeWorkspaceTemplateReader) Get(context.Context, string) (*repository.WorkspaceTemplate, error) {
+	return f.item, nil
+}
+
+func (f fakeWorkspaceTemplateReader) List(context.Context) ([]*repository.WorkspaceTemplate, error) {
+	if f.item == nil {
+		return nil, nil
+	}
+	return []*repository.WorkspaceTemplate{f.item}, nil
+}
+
 func TestOrderedWorkspaceGoalsUsesLatestEventOrder(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := common.WorkspaceID("ws-001")
@@ -218,6 +233,42 @@ func TestWorkspaceExecutionContextBaseContextBuildsDefinitionContext(t *testing.
 	storedPolicies, _ := contextData["evidencePolicies"].([]map[string]any)
 	if len(storedPolicies) != 1 || storedPolicies[0]["kind"] != "validation" {
 		t.Fatalf("evidence policies were not cloned: %+v", storedPolicies)
+	}
+}
+
+func TestWorkspaceExecutionContractIncludesAcceptanceSlicePolicyFromHints(t *testing.T) {
+	workspace := &workspacemodel.Workspace{
+		ID:         "ws-policy",
+		TemplateID: "template-policy",
+	}
+	reader := fakeWorkspaceTemplateReader{item: &repository.WorkspaceTemplate{
+		ID: "template-policy",
+		ContextHints: map[string]any{
+			"acceptanceSlicePolicy": map[string]any{
+				"schemaVersion": "workorch.acceptance_slice_policy.v1",
+				"groups": []any{map[string]any{
+					"id": "slice-neutral",
+					"match": map[string]any{
+						"sourceScopes": []any{"goal_leaf"},
+					},
+				}},
+			},
+		},
+	}}
+
+	contract := WorkspaceExecutionContract(context.Background(), reader, workspace)
+
+	policy, ok := contract["acceptanceSlicePolicy"].(map[string]any)
+	if !ok {
+		t.Fatalf("executionContract.acceptanceSlicePolicy = %+v, want map", contract["acceptanceSlicePolicy"])
+	}
+	groups, ok := policy["groups"].([]any)
+	if !ok || len(groups) != 1 {
+		t.Fatalf("acceptanceSlicePolicy.groups = %+v, want one group", policy["groups"])
+	}
+	group := groups[0].(map[string]any)
+	if group["id"] != "slice-neutral" {
+		t.Fatalf("acceptance slice group = %+v, want template policy group", group)
 	}
 }
 

@@ -537,16 +537,24 @@ Implementation notes:
 
 | ID | Task | Owner Area | Status |
 | --- | --- | --- | --- |
-| WGC-05 | Generate slices from coverage work items using generic policy fields | orchestrator | pending |
-| WGC-06 | Persist active slice in run execution context | orchestrator/run | pending |
-| WGC-07 | Select current focus inside active slice | orchestrator | pending |
-| WGC-08 | Add software-dev default slice policy in template/profile | template | pending |
+| WGC-05 | Generate slices from coverage work items using generic policy fields | orchestrator | completed |
+| WGC-06 | Persist active slice in run execution context | orchestrator/run | completed |
+| WGC-07 | Select current focus inside active slice | orchestrator | completed |
+| WGC-08 | Add software-dev default slice policy in template/profile | template | completed |
 
 Acceptance:
 
 - Large DoD no longer presents all work items as one active focus.
 - Current LLM input includes active slice/focus.
 - Core remains template-neutral.
+
+Implementation notes:
+
+- `coverageSubsystem.ensure` now synchronizes `acceptanceSlices`, `activeSliceId`, `coverageFocus`, and optional `convergenceBudget` from the existing coverage work item ledger.
+- The orchestrator consumes only generic `executionContract.acceptanceSlicePolicy` fields: group id/title/scope/priority, max work items, structured match predicates, completion policy, result policy, and budget defaults.
+- Without template policy, core falls back to bounded generic required-acceptance slices instead of a single unbounded slice.
+- `runExecutionInput` and `executionContextPackage` expose a compact dynamic `acceptance` signal and top-level `coverageFocus`; prompt rendering emits it only as `C4.acceptance-focus`.
+- `software-dev` declares its default slice policy in `defaults/templates.json` under `contextHints.acceptanceSlicePolicy`; core does not branch on `software-dev` or language/tool names.
 
 ### Phase 3: Focus-Locked Repair
 

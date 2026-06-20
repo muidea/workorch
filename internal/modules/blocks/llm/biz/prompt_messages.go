@@ -773,6 +773,9 @@ func executionSignalPromptEvents(request llmmodels.ProviderRequest) []executionS
 	if coverageWorkItems := coverageWorkItemSignalPayload(request.Input); len(coverageWorkItems) > 0 {
 		appendEvent("C4.coverage-work-items", "Coverage Work Item Signal", coverageWorkItems)
 	}
+	if acceptance := acceptanceFocusSignalPayload(request.Input); len(acceptance) > 0 {
+		appendEvent("C4.acceptance-focus", "Acceptance Slice Focus Signal", acceptance)
+	}
 	if timeline := processEvidenceTimelineSignalPayload(request.Input); len(timeline) > 0 {
 		appendEvent("C4.process-evidence-timeline", "Process Evidence Timeline", timeline)
 	}
@@ -1105,6 +1108,39 @@ func coverageWorkItemSignalPayload(input map[string]any) map[string]any {
 		return nil
 	}
 	payload["projectionPolicy"] = "dynamic C4 context; use currentFocus and unresolvedItems as convergence targets, do not rewrite formal Goal or DoD; missing evidence binding means the runtime ledger still needs accepted evidence refs, not that matching evidence is absent from history or memory"
+	return payload
+}
+
+func acceptanceFocusSignalPayload(input map[string]any) map[string]any {
+	acceptance := recordFromAny(input["acceptance"])
+	if len(acceptance) == 0 {
+		acceptance = recordFromAny(recordFromAny(input["executionContext"])["acceptance"])
+	}
+	if len(acceptance) == 0 {
+		acceptance = recordFromAny(recordFromAny(input["executionContextPackage"])["acceptance"])
+	}
+	if len(acceptance) == 0 {
+		return nil
+	}
+	payload := map[string]any{}
+	for _, key := range []string{"activeSliceId", "projectionPolicy"} {
+		if value, ok := acceptance[key]; ok && value != nil {
+			payload[key] = value
+		}
+	}
+	if active := recordFromAny(acceptance["activeSlice"]); len(active) > 0 {
+		payload["activeSlice"] = budgetProviderValue(active, 0, 1024, 8, 16, 3)
+	}
+	if focus := recordFromAny(acceptance["currentFocus"]); len(focus) > 0 {
+		payload["currentFocus"] = budgetProviderValue(focus, 0, 1024, 8, 16, 3)
+	}
+	if budget := recordFromAny(acceptance["budget"]); len(budget) > 0 {
+		payload["budget"] = budgetProviderValue(budget, 0, 768, 6, 12, 2)
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	payload["focusContract"] = "next output must address currentFocus within activeSlice, or return structured cannot_progress with blocker evidence"
 	return payload
 }
 

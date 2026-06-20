@@ -60,6 +60,7 @@ func (c *coverageSubsystem) ensure(run *runModel.Run) bool {
 	currentItems := mapSliceFromValue(run.ExecutionContext[coverageWorkItemsKey])
 	currentContext := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey])
 	if len(items) == 0 && len(context) == 0 {
+		acceptanceChanged := synchronizeAcceptanceProjection(run.ExecutionContext, nil, nil)
 		if _, ok := run.ExecutionContext[coverageWorkItemsKey]; ok {
 			delete(run.ExecutionContext, coverageWorkItemsKey)
 			delete(run.ExecutionContext, coverageWorkItemContextKey)
@@ -69,14 +70,21 @@ func (c *coverageSubsystem) ensure(run *runModel.Run) bool {
 			delete(run.ExecutionContext, coverageWorkItemContextKey)
 			return true
 		}
-		return false
+		return acceptanceChanged
 	}
+	acceptanceContext := cloneStepPayload(run.ExecutionContext)
+	if acceptanceContext == nil {
+		acceptanceContext = map[string]any{}
+	}
+	acceptanceChanged := synchronizeAcceptanceProjection(acceptanceContext, items, context)
 	if stableCoverageJSON(currentItems) == stableCoverageJSON(items) &&
-		stableCoverageJSON(currentContext) == stableCoverageJSON(context) {
+		stableCoverageJSON(currentContext) == stableCoverageJSON(context) &&
+		!acceptanceChanged {
 		return false
 	}
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = context
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, context)
 	return true
 }
 
@@ -118,6 +126,7 @@ func (c *coverageSubsystem) updateFromCompletedStep(run *runModel.Run, step *run
 	revision := coverageDefinitionRevision(run.ExecutionContext)
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	return true
 }
 
@@ -151,6 +160,7 @@ func (c *coverageSubsystem) updateFromFailedStep(run *runModel.Run, step *runMod
 	revision := coverageDefinitionRevision(run.ExecutionContext)
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	return true
 }
 
@@ -197,6 +207,7 @@ func (c *coverageSubsystem) updateFromAssessment(run *runModel.Run, step *runMod
 	revision := coverageDefinitionRevision(run.ExecutionContext)
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	return true
 }
 
@@ -229,6 +240,7 @@ func (c *coverageSubsystem) updateFromGovernanceEvidence(run *runModel.Run, deci
 	revision := coverageDefinitionRevision(run.ExecutionContext)
 	run.ExecutionContext[coverageWorkItemsKey] = items
 	run.ExecutionContext[coverageWorkItemContextKey] = coverageWorkItemContextFromItems(revision, items, coverageExcludedSourcesFromContext(run.ExecutionContext), coverageHistoricalItemsFromContext(run.ExecutionContext))
+	synchronizeAcceptanceProjection(run.ExecutionContext, items, mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]))
 	return true
 }
 
