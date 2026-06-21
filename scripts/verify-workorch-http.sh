@@ -59,7 +59,7 @@ grep '服务状态' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '创建工作空间' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '定义目标' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '定义验收标准' "$TMP_DIR/workorch-console-all.js" >/dev/null
-grep '启动执行' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '提交执行' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '运行摘要' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '当前运行' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '失败目标' "$TMP_DIR/workorch-console-all.js" >/dev/null

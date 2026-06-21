@@ -20,6 +20,7 @@ func WorkspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshot, 
 	ret.TaskProgress = runSnapshot.TaskProgress
 	ret.RuntimeExecution = runSnapshot.RuntimeExecution
 	ret.CoverageSummary = CoverageSummaryFromRunSnapshot(*runSnapshot)
+	ret.GapBaseline = runSnapshot.GapBaseline
 	ret.Acceptance = runSnapshot.Acceptance
 	ret.TaskDecompositions = runSnapshot.TaskDecompositions
 	ret.ExecutionSections = runSnapshot.ExecutionSections

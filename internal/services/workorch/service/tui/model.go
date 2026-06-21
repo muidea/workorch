@@ -235,7 +235,7 @@ func (m AppModel) Init() tea.Cmd {
 	}
 	if m.initialGoal != "" && m.activeWorkspaceID != "" {
 		if isRunControlIntent(m.initialGoal) {
-			cmds = append(cmds, ContinueRun(m.be, m.activeWorkspaceID, "", ""))
+			cmds = append(cmds, ResumeRun(m.be, m.activeWorkspaceID, "", ""))
 		} else {
 			cmds = append(cmds, SubmitGoal(m.be, m.activeWorkspaceID, m.initialGoal, m.dodItems))
 		}
@@ -709,7 +709,7 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.lastError = fmt.Errorf("no active workspace")
 		return m, nil
 	}
-	if cmd := m.blockActiveWorkspaceContinue(""); cmd != nil {
+	if cmd := m.blockActiveWorkspaceResume(""); cmd != nil {
 		m.lastError = nil
 		return m, cmd
 	}
@@ -720,8 +720,8 @@ func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 		m.clearRunDisplayState()
 		m.appendTranscript("Input", text)
 		m.progress = progressSubmitting
-		m.progressText = "Continuing active run"
-		return m, ContinueRun(m.be, m.activeWorkspaceID, runID, text)
+		m.progressText = "Resuming active run"
+		return m, ResumeRun(m.be, m.activeWorkspaceID, runID, text)
 	}
 	m.cancelWorkspaceSelection()
 	return m.submitGoalText(text)
@@ -808,10 +808,10 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
 		subcommand, rest := splitSlashSubcommand(args)
 		switch subcommand {
-		case "continue":
+		case "resume":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
-			if cmd := m.blockActiveWorkspaceContinue(""); cmd != nil {
+			if cmd := m.blockActiveWorkspaceResume(""); cmd != nil {
 				m.lastError = nil
 				return m, cmd, true
 			}
@@ -820,11 +820,11 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 			runID := m.activeWorkspaceRunID()
 			m.progress = progressSubmitting
 			if runID != "" {
-				m.progressText = "Continuing active run"
+				m.progressText = "Resuming active run"
 			} else {
 				m.progressText = "Checking workspace run state"
 			}
-			return m, ContinueRun(m.be, m.activeWorkspaceID, runID, rest), true
+			return m, ResumeRun(m.be, m.activeWorkspaceID, runID, rest), true
 		case "restart":
 			m.clearInput()
 			m.cancelWorkspaceSelection()
@@ -2404,7 +2404,7 @@ func (m *AppModel) applyRunControlState(run *backend.RunInfo, message string) {
 	default:
 		m.running = true
 		m.progress = progressRunning
-		m.progressText = nonEmpty(message, "Continuing active run")
+		m.progressText = nonEmpty(message, "Resuming active run")
 	}
 }
 
@@ -2427,7 +2427,7 @@ func (m *AppModel) applyRunStarted(run *backend.RunInfo) {
 	default:
 		if m.progress == progressIdle || m.progress == progressSubmitting {
 			m.progress = progressRunning
-			if strings.TrimSpace(m.progressText) == "" || strings.HasPrefix(m.progressText, "Continuing active run") {
+			if strings.TrimSpace(m.progressText) == "" || strings.HasPrefix(m.progressText, "Resuming active run") {
 				m.progressText = "Run started; waiting for progress or final result"
 			}
 		}
@@ -2472,7 +2472,7 @@ func (m *AppModel) syncMainViewportToCurrentContent() {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run continue  Resume active run\n  /exit          Quit"
+		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --dir <path>\n  /workspace create <title> --template generic-governed --dir <path>\n  /workspace create <title> --template software-dev --dir <path>\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /exit          Quit"
 	}
 	switch m.progress {
 	case progressSubmitting:

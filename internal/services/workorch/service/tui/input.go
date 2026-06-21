@@ -383,8 +383,8 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 		{Command: "/artifacts", Description: "show artifacts"},
 		{Command: "/memory", Description: "show memory recall"},
 		{Command: "/result", Description: "refresh result"},
-		{Command: "/run continue", Description: "continue current run"},
-		{Command: "/run restart", Insert: "/run restart ", Description: "restart current workspace"},
+		{Command: "/run resume", Description: "resume current run"},
+		{Command: "/run restart", Insert: "/run restart ", Description: "start a replacement run"},
 		{Command: "/exit", Description: "quit TUI"},
 	}
 }
@@ -408,8 +408,8 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 		}
 	case m.activeRunID != "":
 		return []slashCommandSuggestion{
-			{Command: "/run continue", Description: "continue current run", Contextual: true},
-			{Command: "/run restart", Insert: "/run restart ", Description: "restart current workspace", Contextual: true},
+			{Command: "/run resume", Description: "resume current run", Contextual: true},
+			{Command: "/run restart", Insert: "/run restart ", Description: "start a replacement run", Contextual: true},
 			{Command: "/status", Description: "show workspace and run status", Contextual: true},
 			{Command: "/coverage", Description: "show DoD coverage progress", Contextual: true},
 			{Command: "/steps", Description: "show recent step summary", Contextual: true},
@@ -438,7 +438,7 @@ func isRunControlIntent(input string) bool {
 		"继续": {}, "继续处理": {}, "继续执行": {}, "继续推进": {}, "继续收口": {}, "继续修复": {}, "继续运行": {}, "继续工作": {},
 		"恢复": {}, "恢复执行": {}, "恢复运行": {}, "恢复处理": {},
 		"接着处理": {}, "接着执行": {}, "接着推进": {}, "接着修复": {},
-		"continue": {}, "resume": {}, "goon": {}, "proceed": {}, "keeprunning": {}, "continuerun": {}, "resumerun": {}, "resumeexecution": {}, "continueexecution": {},
+		"resume": {}, "goon": {}, "proceed": {}, "keeprunning": {}, "resumerun": {}, "resumeexecution": {},
 	}
 	if _, ok := exact[normalized]; ok {
 		return true
@@ -448,7 +448,7 @@ func isRunControlIntent(input string) bool {
 			return true
 		}
 	}
-	for _, prefix := range []string{"continue", "resume"} {
+	for _, prefix := range []string{"resume"} {
 		if strings.HasPrefix(normalized, prefix) && hasASCIIRunControlCue(strings.TrimPrefix(normalized, prefix)) {
 			return true
 		}

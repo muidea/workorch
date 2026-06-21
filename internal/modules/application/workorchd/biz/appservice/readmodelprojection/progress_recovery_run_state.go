@@ -23,12 +23,12 @@ func applyRunStateRecovery(ret *readmodelcore.RecoveryPlan, snapshot readmodelco
 		ret.NextAction = "start_new_run"
 		ret.Reason = "run is terminal but not completed"
 	case common.RunStateValidating:
-		ret.Mode = "continue"
-		ret.NextAction = "continue_validation"
+		ret.Mode = "resume"
+		ret.NextAction = "resume_validation"
 		ret.Reason = "run is validating"
 	default:
-		ret.Mode = "continue"
-		ret.NextAction = "continue_run"
+		ret.Mode = "resume"
+		ret.NextAction = "resume_run"
 		ret.Reason = "run is not terminal"
 	}
 }

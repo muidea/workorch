@@ -76,6 +76,7 @@ func workspaceSnapshotResourceMap(snapshot readmodelcore.WorkspaceSnapshot) map[
 		"taskProgress":          snapshot.TaskProgress,
 		"runHeartbeat":          snapshot.RunHeartbeat,
 		"coverageSummary":       CloneResultValue(snapshot.CoverageSummary, 0),
+		"gapBaseline":           CloneResultValue(snapshot.GapBaseline, 0),
 		"taskDecompositions":    snapshot.TaskDecompositions,
 		"goals":                 snapshot.Goals,
 		"dods":                  snapshot.DoDs,

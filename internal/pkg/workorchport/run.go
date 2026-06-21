@@ -29,7 +29,35 @@ type ActivateRunRequest struct {
 	SkillIDs              []common.SkillID
 	MCPServerIDs          []common.MCPServerID
 	Priority              int
+	RequestID             string
+	Reason                string
+	Source                string
+	DefinitionRevision    string
+	DecisionID            common.TicketID
 	ExecutionContextPatch map[string]any
+}
+
+type RunCommandIntent string
+
+const (
+	RunCommandIntentResume  RunCommandIntent = "resume"
+	RunCommandIntentRestart RunCommandIntent = "restart"
+	RunCommandIntentReplan  RunCommandIntent = "replan"
+	RunCommandIntentRecover RunCommandIntent = "recover"
+)
+
+type WorkspaceRunCommand struct {
+	WorkspaceID           common.WorkspaceID
+	ExpectedRunID         common.RunID
+	Intent                RunCommandIntent
+	Reason                string
+	Source                string
+	RequestID             string
+	DefinitionRevision    string
+	DecisionID            common.TicketID
+	Priority              int
+	ExecutionContextPatch map[string]any
+	Activation            ActivateRunRequest
 }
 
 type RunStatusInfo struct {
@@ -76,9 +104,7 @@ type RuntimeExecutionInfo struct {
 }
 
 type RunBackend interface {
-	Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error)
-	Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error)
-	Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error)
+	Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error)
 	Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error)
 	List(ctx context.Context, wsID common.WorkspaceID) ([]RunInfo, error)
 	Status(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunStatusInfo, error)

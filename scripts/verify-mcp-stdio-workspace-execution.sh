@@ -200,42 +200,23 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + 120))
 
-  run_id="$(python3 - "$activation_file" <<'PY'
+  python3 - "$activation_file" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-for path in [
-    ("activation", "run", "id"),
-    ("run", "id"),
-]:
-    current = data
-    for part in path:
-        if not isinstance(current, dict):
-            current = {}
-            break
-        current = current.get(part)
-    if current:
-        print(current)
-        raise SystemExit(0)
-raise SystemExit(1)
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if not str(data.get("requestId") or "").strip():
+    errors.append("requestId is empty")
+if data.get("reason") != "e2e_resume":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if errors:
+    raise SystemExit("\n".join(errors))
 PY
-)" && {
-    python3 - "$activation_file" "$output_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-run = ((data.get("activation") or {}).get("run") or data.get("run") or {})
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-PY
-    echo "$run_id"
-    return 0
-  }
 
   while (( SECONDS <= deadline )); do
     if get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$runs_file"; then
@@ -729,7 +710,7 @@ dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
 get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$TMP_DIR/activation-before-runs.json"
 post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
+  '{"intent":"resume","requestId":"mcp-stdio-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"verify","mcpServerIds":["'"$MCP_SERVER_ID"'"],"capabilityIds":["'"$MCP_CAPABILITY_ID"'"]}' \
   "$TMP_DIR/activation.json"
 run_id="$(wait_activation_run "$workspace_id" "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]

@@ -97,6 +97,164 @@ func TestRuntimeRepairInputIncludesContractViolationRecovery(t *testing.T) {
 	}
 }
 
+func TestContractViolationRetryPreservesStateChangingExpectedContract(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-state-contract")
+	run := &runmodel.Run{ID: runID, WorkspaceID: "ws-contract-violation-state-contract", InitialStepKind: llmWorkspaceExecutionStepKind}
+	coverageContext := coverageWorkItemContextFromItems("rev-contract-retry", []map[string]any{{
+		"id":                    "cwi-001",
+		"definitionRevision":    "rev-contract-retry",
+		"source":                "goal",
+		"sourceScope":           "goal_leaf",
+		"sourceRequirementId":   "goal-req-001",
+		"sourcePath":            "goal.leaves[0]",
+		"targetText":            "must keep repairing the rejected state-changing output",
+		"requiredEvidenceKinds": []string{"validation"},
+		"missingEvidenceKinds":  []string{"validation"},
+		"rejectedEvidenceRefs":  []string{"run/graph/verify"},
+		"status":                "failed",
+	}}, nil, nil)
+	failed := &runmodel.Step{
+		ID:    common.StepID(string(runID) + "/repair-001"),
+		RunID: runID,
+		Kind:  llmWorkspaceExecutionStepKind,
+		State: common.StepStateFailed,
+		Input: map[string]any{
+			stepInputKeyRuntimeStage:      runtimeStageRepair,
+			stepInputKeyRuntimeStageMode:  "strict_convergence",
+			"repairObjective":             repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired": true,
+			coverageWorkItemContextKey:    coverageContext,
+			"repairActionPackage": map[string]any{
+				coverageWorkItemContextKey: coverageContext,
+				"targetSnapshots": []map[string]any{{
+					"targetRef":        "target.txt",
+					"content":          "old content",
+					"contentComplete":  true,
+					"safeForFileWrite": true,
+				}},
+				"requiredOutput": map[string]any{
+					"mustIncludeStateChangingNode": true,
+					"acceptedKinds":                []string{"patch/apply"},
+				},
+			},
+		},
+		Output: map[string]any{
+			"stage":                        "llm_execution_graph_plan",
+			"error":                        "runtime repair patch/apply file_write cannot replace existing target \"target.txt\" when current repair context is available; use a minimal unified_diff or exact replacement against the current snapshot",
+			outputKeyContractViolationType: contractViolationPatchDispatchInvalid,
+			failureOutputKeyClass:          failureClassRuntime,
+			failureOutputKeySignature:      "class=runtime_failed|stage=llm_execution_graph_plan|error=patch_dispatch_invalid",
+		},
+	}
+	attachContractViolationDiagnostics(run, failed, common.ErrInvalidArgument)
+	orch := &RuntimeOrchestrator{
+		steps:  memory.NewStepRepository(),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
+
+	if got := stringFromMap(input, "repairObjective"); got != repairObjectiveStateChangingOutput {
+		t.Fatalf("repairObjective = %q, want %s; input=%+v", got, repairObjectiveStateChangingOutput, input)
+	}
+	if input["stateChangingOutputRequired"] != true {
+		t.Fatalf("stateChangingOutputRequired = %v, want true", input["stateChangingOutputRequired"])
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want state-changing retry contract", contract)
+	}
+	required := mapFromValue(mapFromValue(input["repairActionPackage"])["requiredOutput"])
+	if required["mustIncludeStateChangingNode"] != true {
+		t.Fatalf("requiredOutput = %+v, want state-changing output", required)
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	expected := mapFromValue(recovery["expectedContract"])
+	if expected["stateChangingOutputRequired"] != true {
+		t.Fatalf("contractViolationRecovery.expectedContract = %+v, want original state-changing contract", expected)
+	}
+}
+
+func TestContractViolationRetryInputPreservesGapBaselineFromFailedStep(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-gap-baseline")
+	baseline := map[string]any{
+		"schemaVersion":    gapBaselineSchema,
+		"workspaceId":      "ws-contract-violation-gap-baseline",
+		"runId":            string(runID),
+		"baselineRevision": "gap-from-failed-step",
+		"todoItems": []map[string]any{{
+			"id":     "todo-001",
+			"status": "open",
+		}},
+		"nextAction": map[string]any{"kind": "schedule_step"},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-contract-violation-gap-baseline",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	failed := contractViolationFailedStep(runID, "failed-gap-baseline")
+	failed.Input[gapBaselineKey] = baseline
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+	orch := &RuntimeOrchestrator{
+		steps:  memory.NewStepRepository(),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
+
+	got := mapFromValue(input[gapBaselineKey])
+	if stringFromMap(got, "baselineRevision") != "gap-from-failed-step" {
+		t.Fatalf("gapBaseline = %+v, want failed-step baseline", got)
+	}
+	if todos := mapSliceFromValue(got["todoItems"]); len(todos) != 1 || stringFromMap(todos[0], "id") != "todo-001" {
+		t.Fatalf("gapBaseline.todoItems = %+v, want failed-step todo", got["todoItems"])
+	}
+}
+
+func TestContractViolationRetryInputKeepsLatestRunGapBaseline(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-contract-violation-run-gap-baseline")
+	runBaseline := map[string]any{
+		"schemaVersion":    gapBaselineSchema,
+		"workspaceId":      "ws-contract-violation-run-gap-baseline",
+		"runId":            string(runID),
+		"baselineRevision": "gap-from-run",
+		"nextAction":       map[string]any{"kind": "schedule_step"},
+	}
+	stepBaseline := map[string]any{
+		"schemaVersion":    gapBaselineSchema,
+		"workspaceId":      "ws-contract-violation-run-gap-baseline",
+		"runId":            string(runID),
+		"baselineRevision": "gap-from-failed-step",
+		"nextAction":       map[string]any{"kind": "schedule_step"},
+	}
+	run := &runmodel.Run{
+		ID:              runID,
+		WorkspaceID:     "ws-contract-violation-run-gap-baseline",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+		ExecutionContext: map[string]any{
+			gapBaselineKey: runBaseline,
+		},
+	}
+	failed := contractViolationFailedStep(runID, "failed-run-gap-baseline")
+	failed.Input[gapBaselineKey] = stepBaseline
+	attachContractViolationDiagnostics(run, failed, errors.New("state-changing llm repair step returned no state-changing output"))
+	orch := &RuntimeOrchestrator{
+		steps:  memory.NewStepRepository(),
+		policy: NormalizeRuntimePolicy(RuntimePolicy{}),
+	}
+
+	input := orch.runtimeRepairFollowUpStepInput(ctx, run, failed, 1, common.ErrInvalidArgument)
+
+	got := mapFromValue(input[gapBaselineKey])
+	if stringFromMap(got, "baselineRevision") != "gap-from-run" {
+		t.Fatalf("gapBaseline = %+v, want latest run baseline", got)
+	}
+}
+
 func TestContractViolationEventsAreRegisteredAsStateNotifications(t *testing.T) {
 	contracts := orchestratorevents.Contracts()
 	for _, topic := range []string{

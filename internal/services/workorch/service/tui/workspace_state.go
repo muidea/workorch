@@ -503,7 +503,7 @@ func (m *AppModel) restoreActiveWorkspaceBlockerFromOverview() bool {
 	}
 }
 
-func (m *AppModel) blockActiveWorkspaceContinue(reason string) tea.Cmd {
+func (m *AppModel) blockActiveWorkspaceResume(reason string) tea.Cmd {
 	blockerProgress, ok := m.activeWorkspaceBlockerProgress()
 	if !ok {
 		return nil

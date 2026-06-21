@@ -391,7 +391,7 @@ func runtimeGapRecoveryPatch(cmd runcontracts.RecoverRuntimeGapCommand) map[stri
 	}
 	recovery := map[string]any{
 		"mode":        "runtime_gap_recovery",
-		"nextAction":  "continue_run",
+		"nextAction":  "resume_run",
 		"workspaceId": string(cmd.WorkspaceID),
 		"runId":       string(cmd.RunID),
 		"stepId":      string(cmd.StepID),

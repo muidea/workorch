@@ -735,38 +735,42 @@ PY
 activate_workspace_execution() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"memoryIds":["'"$MEMORY_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_without_memory() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_auto_memory() {
   local output_file="$1"
   local activation_dod_id="${2:-$dod_id}"
+  local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"verify","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 activate_workspace_execution_with_provider() {
   local output_file="$1"
   local provider_id="$2"
   local activation_dod_id="${3:-$dod_id}"
+  local request_id="llm-e2e-$(basename "${output_file%.json}")"
   capture_runs_before_activation "$output_file"
   curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d '{"goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
+    -d '{"intent":"resume","requestId":"'"$request_id"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$activation_dod_id"'","llmProviderId":"'"$provider_id"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":2}' >"$output_file"
 }
 
 capture_runs_before_activation() {
@@ -784,42 +788,23 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
 
-  run_id="$(python3 - "$activation_file" <<'PY'
+  python3 - "$activation_file" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-for path in [
-    ("activation", "run", "id"),
-    ("run", "id"),
-]:
-    current = data
-    for part in path:
-        if not isinstance(current, dict):
-            current = {}
-            break
-        current = current.get(part)
-    if current:
-        print(current)
-        raise SystemExit(0)
-raise SystemExit(1)
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if not str(data.get("requestId") or "").strip():
+    errors.append("requestId is empty")
+if data.get("reason") != "e2e_resume":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if errors:
+    raise SystemExit("\n".join(errors))
 PY
-)" && {
-    python3 - "$activation_file" "$output_file" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-run = ((data.get("activation") or {}).get("run") or data.get("run") or {})
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
-PY
-    echo "$run_id"
-    return 0
-  }
 
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$snapshot_file"; then

@@ -107,5 +107,27 @@ func (o *RuntimeOrchestrator) DispatchRequestedStep(ctx context.Context, cmd orc
 	if err != nil {
 		return err
 	}
+	if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+		return err
+	}
+	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
+		return err
+	}
+	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
+		if cmd.Input == nil {
+			cmd.Input = map[string]any{}
+		}
+		if _, ok := cmd.Input[coverageWorkItemContextKey]; !ok {
+			cmd.Input[coverageWorkItemContextKey] = context
+		}
+	}
+	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
+		if cmd.Input == nil {
+			cmd.Input = map[string]any{}
+		}
+		if _, ok := cmd.Input[gapBaselineKey]; !ok {
+			cmd.Input[gapBaselineKey] = baseline
+		}
+	}
 	return o.dispatchStepWithWorkspace(ctx, run, cmd.StepID, cmd.Kind, cloneStepPayload(cmd.Input), workspace)
 }

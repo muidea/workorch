@@ -62,6 +62,7 @@ const (
 	contractViolationFileEditConflict               = "file_edit_conflict"
 	contractViolationDoDAssessmentEvidenceMissing   = "dod_assessment_missing_evidence_refs"
 	contractViolationCoverageMapIncomplete          = "coverage_map_incomplete"
+	contractViolationAssessmentOnlyExecutableOutput = "assessment_only_executable_output"
 )
 
 func runtimeFailureOutput(output map[string]any, execErr error) map[string]any {

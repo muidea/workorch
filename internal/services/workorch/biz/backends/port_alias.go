@@ -21,6 +21,9 @@ type LLMUsageProviderModelBreakdownInfo = port.LLMUsageProviderModelBreakdownInf
 type WebSourceInfo = port.WebSourceInfo
 type FetchedWebSourceInfo = port.FetchedWebSourceInfo
 type WorkspaceSnapshotInfo = port.WorkspaceSnapshotInfo
+type GapBaselineInfo = port.GapBaselineInfo
+type GapTodoItemInfo = port.GapTodoItemInfo
+type GapNextActionInfo = port.GapNextActionInfo
 type EventRecordInfo = port.EventRecordInfo
 type RecoveryPlanInfo = port.RecoveryPlanInfo
 type RepairLoopInfo = port.RepairLoopInfo
@@ -34,6 +37,16 @@ type DoDInfo = port.DoDInfo
 type DoDBackend = port.DoDBackend
 type RunInfo = port.RunInfo
 type ActivateRunRequest = port.ActivateRunRequest
+type RunCommandIntent = port.RunCommandIntent
+type WorkspaceRunCommand = port.WorkspaceRunCommand
+
+const (
+	RunCommandIntentResume  = port.RunCommandIntentResume
+	RunCommandIntentRestart = port.RunCommandIntentRestart
+	RunCommandIntentReplan  = port.RunCommandIntentReplan
+	RunCommandIntentRecover = port.RunCommandIntentRecover
+)
+
 type RunStatusInfo = port.RunStatusInfo
 type RuntimeExecutionInfo = port.RuntimeExecutionInfo
 type ContinuationDiagnosticInfo = port.ContinuationDiagnosticInfo

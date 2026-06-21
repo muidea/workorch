@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"testing"
+
+	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
 
 func TestDecodeSnapshotInfoPreservesRunExecutionContext(t *testing.T) {
 	snapshot, err := decodeSnapshotInfo(map[string]any{
@@ -58,6 +62,59 @@ func TestDecodeSnapshotInfoPreservesLLMContextBudget(t *testing.T) {
 	}
 	if budget["maxTokens"] != float64(4096) {
 		t.Fatalf("contextBudget = %+v, want maxTokens preserved", budget)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesGapBaselineEvidenceRefs(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-gap-baseline", "state": "running"},
+		"gapBaseline": map[string]any{
+			"workspaceId":          "ws-gap-baseline",
+			"runId":                "run-gap-baseline",
+			"baselineRevision":     "gap-revision",
+			"acceptedEvidenceRefs": []any{"evidence-accepted"},
+			"rejectedEvidenceRefs": []any{"evidence-rejected"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.GapBaseline == nil {
+		t.Fatalf("snapshot = %+v, want gap baseline", snapshot)
+	}
+	if len(snapshot.GapBaseline.AcceptedEvidenceRefs) != 1 || snapshot.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-accepted" {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want decoded accepted refs", snapshot.GapBaseline.AcceptedEvidenceRefs)
+	}
+	if len(snapshot.GapBaseline.RejectedEvidenceRefs) != 1 || snapshot.GapBaseline.RejectedEvidenceRefs[0] != "evidence-rejected" {
+		t.Fatalf("rejectedEvidenceRefs = %+v, want decoded rejected refs", snapshot.GapBaseline.RejectedEvidenceRefs)
+	}
+}
+
+func TestDecodeSnapshotInfoPreservesRuntimeExecutionContractViolation(t *testing.T) {
+	snapshot, err := decodeSnapshotInfo(map[string]any{
+		"workspace": map[string]any{"id": "ws-contract-violation", "state": "running"},
+		"runtimeExecution": map[string]any{
+			"stepId":    "step-contract-violation",
+			"stepKind":  "llm/workspace_execution",
+			"stepState": "failed",
+			"contractViolation": map[string]any{
+				"id":               "violation-remote",
+				"violatedRule":     "state_changing_required_missing",
+				"recoverability":   runtimemodel.ContractViolationRecoverabilityRetrySameContract,
+				"failureSignature": "class=runtime_failed|rule=state_changing_required_missing",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodeSnapshotInfo: %v", err)
+	}
+	if snapshot == nil || snapshot.RuntimeExecution == nil || snapshot.RuntimeExecution.ContractViolation == nil {
+		t.Fatalf("snapshot = %+v, want runtime execution contract violation", snapshot)
+	}
+	if snapshot.RuntimeExecution.ContractViolation.ID != "violation-remote" ||
+		snapshot.RuntimeExecution.ContractViolation.ViolatedRule != "state_changing_required_missing" ||
+		snapshot.RuntimeExecution.ContractViolation.Recoverability != runtimemodel.ContractViolationRecoverabilityRetrySameContract {
+		t.Fatalf("contractViolation = %+v, want decoded violation", snapshot.RuntimeExecution.ContractViolation)
 	}
 }
 

@@ -311,6 +311,168 @@ func TestRemoteRunStatusMapsCurrentStepFields(t *testing.T) {
 	}
 }
 
+func TestRemoteRunCommandFirstResumeSendsWorkspaceCommandMetadata(t *testing.T) {
+	requestBody := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/execution-activations" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:        "ws-remote",
+		Intent:             RunCommandIntentResume,
+		RequestID:          "request-first-resume",
+		Reason:             "user_requested",
+		Source:             "test",
+		DefinitionRevision: "rev-first-resume",
+		Activation: ActivateRunRequest{
+			GoalID: "goal-remote",
+			DoDID:  "dod-remote",
+		},
+	})
+	if err != nil {
+		t.Fatalf("remote first resume command: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	}
+	select {
+	case body := <-requestBody:
+		if body["intent"] != string(RunCommandIntentResume) ||
+			body["requestId"] != "request-first-resume" ||
+			body["reason"] != "user_requested" ||
+			body["source"] != "test" ||
+			body["definitionRevision"] != "rev-first-resume" {
+			t.Fatalf("request body = %+v, want resume command metadata", body)
+		}
+		if body["goalId"] != "goal-remote" || body["doDId"] != "dod-remote" {
+			t.Fatalf("request body = %+v, want activation goal/dod payload preserved", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote server did not receive first resume request")
+	}
+}
+
+func TestRemoteRunCommandResumeSendsRequestID(t *testing.T) {
+	requestBody := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/resume" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:        "ws-remote",
+		ExpectedRunID:      "run-001",
+		Intent:             RunCommandIntentResume,
+		RequestID:          "request-remote-resume",
+		Reason:             "test_remote_resume",
+		Source:             "test",
+		DefinitionRevision: "rev-remote-resume",
+		DecisionID:         "ticket-remote-resume",
+		ExecutionContextPatch: map[string]any{
+			"latestOperatorInput": map[string]any{"content": "resume"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("remote run command: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	}
+	select {
+	case body := <-requestBody:
+		if body["requestId"] != "request-remote-resume" ||
+			body["reason"] != "test_remote_resume" ||
+			body["source"] != "test" ||
+			body["definitionRevision"] != "rev-remote-resume" ||
+			body["decisionId"] != "ticket-remote-resume" {
+			t.Fatalf("request body = %+v, want request id, reason, source, definition revision, and decision id", body)
+		}
+		if patch, _ := body["executionContextPatch"].(map[string]any); len(patch) == 0 {
+			t.Fatalf("request body = %+v, want execution context patch", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote server did not receive resume request")
+	}
+}
+
+func TestRemoteRunCommandReplanSendsUnifiedIntent(t *testing.T) {
+	requestBody := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/resume" {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"accepted":true}`)
+	}))
+	defer server.Close()
+
+	be := NewRemote(server.URL)
+	run, err := be.Run().Command(context.Background(), WorkspaceRunCommand{
+		WorkspaceID:        "ws-remote",
+		ExpectedRunID:      "run-001",
+		Intent:             RunCommandIntentReplan,
+		RequestID:          "request-remote-replan",
+		Reason:             "decision_replan_resolved",
+		Source:             "tui",
+		DefinitionRevision: "rev-remote-replan",
+		DecisionID:         "ticket-remote-replan",
+	})
+	if err != nil {
+		t.Fatalf("remote run command replan: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want accepted-only nil run", run)
+	}
+	select {
+	case body := <-requestBody:
+		if body["intent"] != string(RunCommandIntentReplan) ||
+			body["requestId"] != "request-remote-replan" ||
+			body["reason"] != "decision_replan_resolved" ||
+			body["source"] != "tui" ||
+			body["definitionRevision"] != "rev-remote-replan" ||
+			body["decisionId"] != "ticket-remote-replan" {
+			t.Fatalf("request body = %+v, want unified replan intent and command metadata", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote server did not receive replan request")
+	}
+}
+
 func TestRemoteRunStatusUsesWorkspaceScopedPathWhenContextCarriesWorkspace(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/workorch/workspaces/ws-remote/runs/run-001/status" {

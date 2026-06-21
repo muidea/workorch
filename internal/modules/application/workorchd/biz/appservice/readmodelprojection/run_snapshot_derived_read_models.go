@@ -11,6 +11,7 @@ func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshot, input Run
 	ret.WebSources = MapWebSourceTraces(stepViews)
 	ret.CoverageWorkItems = MapSliceValue(input.Run.ExecutionContext["coverageWorkItems"])
 	ret.CoverageWorkItemContext = CloneMap(MapValue(input.Run.ExecutionContext["coverageWorkItemContext"]))
+	ret.GapBaseline = GapBaselineFromRunSnapshot(*ret)
 	ret.Observed = presenter.MapObserved(observedItems)
 	capabilityCatalog := RuntimeCapabilityCatalogFromItems(ret.Run.ExecutionContext, ret.ToolCalls, input.MCPCapabilities)
 	ret.SelectedCapabilities = SelectedRuntimeCapabilities(ret.Run.ExecutionContext, capabilityCatalog)

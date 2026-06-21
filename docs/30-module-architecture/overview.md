@@ -4,7 +4,7 @@ Status: active
 
 Type: module-architecture
 
-Last Updated: 2026-06-17
+Last Updated: 2026-06-21
 
 ## Purpose
 
@@ -32,8 +32,9 @@ Last Updated: 2026-06-17
 9. [llm-provider-assembly.md](llm-provider-assembly.md)
 10. [eventhub-driven-workorchd-state-loop-design.md](eventhub-driven-workorchd-state-loop-design.md)
 11. [runtime-execution-event-queue-state-loop-design.md](runtime-execution-event-queue-state-loop-design.md)
-12. [storage-readmodel.md](storage-readmodel.md)
-13. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
+12. [run-resume-gap-confirmation-design.md](run-resume-gap-confirmation-design.md)
+13. [storage-readmodel.md](storage-readmodel.md)
+14. [projection-first-readmodel-io-closure-design.md](projection-first-readmodel-io-closure-design.md)
 
 ## Cross-Layer Boundary
 

@@ -32,9 +32,26 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 			State:            common.RunStateBlockedOnDecision,
 			BlockingTicketID: ticket.ID,
 			ExecutionContext: map[string]any{
-				"coverageWorkItems": []any{map[string]any{"id": "cwi-001"}},
+				"coverageWorkItems": []any{map[string]any{
+					"id":                   "cwi-001",
+					"acceptedEvidenceRefs": []any{"evidence-derived-accepted"},
+					"rejectedEvidenceByKind": map[string]any{
+						"validation": []any{"evidence-derived-rejected"},
+					},
+				}},
 				"coverageWorkItemContext": map[string]any{
-					"summary": map[string]any{"open": float64(1)},
+					"definitionRevision":   "rev-coverage",
+					"coverageBaselineHash": "sha256:baseline",
+					"summary":              map[string]any{"open": float64(1)},
+					"currentFocus":         map[string]any{"id": "cwi-001", "status": "open"},
+					"unresolvedItems": []any{map[string]any{
+						"id":                   "cwi-001",
+						"sourceScope":          "goal",
+						"sourcePath":           "goal.leaves[0]",
+						"missingEvidenceKinds": []any{"state_change"},
+						"status":               "open",
+						"reason":               "missing state change evidence",
+					}},
 				},
 				"acceptanceSlices": []any{map[string]any{
 					"id":                    "slice-001",
@@ -53,7 +70,7 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 					"attempt":             float64(2),
 				},
 				"convergenceBudget": map[string]any{
-					"decision":              "continue",
+					"decision":              "resume",
 					"repairAttempts":        float64(2),
 					"noCoverageDeltaRounds": float64(1),
 				},
@@ -88,6 +105,21 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 	if got.CoverageWorkItemContext["summary"] == nil {
 		t.Fatalf("CoverageWorkItemContext = %+v, want copied coverage context", got.CoverageWorkItemContext)
 	}
+	if got.GapBaseline == nil || got.GapBaseline.DefinitionRevision != "rev-coverage" || got.GapBaseline.BaselineRevision != "sha256:baseline" {
+		t.Fatalf("GapBaseline = %+v, want projected revision", got.GapBaseline)
+	}
+	if got.GapBaseline.NextAction.Kind != "wait_decision" {
+		t.Fatalf("GapBaseline.NextAction = %+v, want wait_decision", got.GapBaseline.NextAction)
+	}
+	if len(got.GapBaseline.TodoItems) != 1 || got.GapBaseline.TodoItems[0].SourceRef != "goal.leaves[0]" || got.GapBaseline.TodoItems[0].RequiredEvidenceKinds[0] != "state_change" {
+		t.Fatalf("GapBaseline.TodoItems = %+v, want coverage todo", got.GapBaseline.TodoItems)
+	}
+	if len(got.GapBaseline.AcceptedEvidenceRefs) != 1 || got.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-derived-accepted" {
+		t.Fatalf("GapBaseline.AcceptedEvidenceRefs = %+v, want derived accepted evidence", got.GapBaseline.AcceptedEvidenceRefs)
+	}
+	if len(got.GapBaseline.RejectedEvidenceRefs) != 1 || got.GapBaseline.RejectedEvidenceRefs[0] != "evidence-derived-rejected" {
+		t.Fatalf("GapBaseline.RejectedEvidenceRefs = %+v, want derived rejected evidence", got.GapBaseline.RejectedEvidenceRefs)
+	}
 	if got.Acceptance.ActiveSliceID != "slice-001" || got.Acceptance.Summary.ActiveSlices != 1 {
 		t.Fatalf("Acceptance = %+v, want active slice projection", got.Acceptance)
 	}
@@ -100,6 +132,68 @@ func TestRunSnapshotFromModelsProjectsBlockingDecisionStepAndCoverage(t *testing
 	observability := MapRunObservability(got)
 	if observability.Acceptance.ActiveSliceID != "slice-001" {
 		t.Fatalf("RunObservability.Acceptance = %+v, want run acceptance", observability.Acceptance)
+	}
+}
+
+func TestRunSnapshotFromModelsPrefersPersistedGapBaseline(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-run-snapshot-persisted-gap")
+	runID := common.RunID("run-snapshot-persisted-gap")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "projection workspace", State: common.WorkspaceStateRunning},
+		Run: &runmodel.Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			State:       common.RunStateRunning,
+			ExecutionContext: map[string]any{
+				"coverageWorkItemContext": map[string]any{
+					"definitionRevision":   "rev-derived",
+					"coverageBaselineHash": "sha256:derived",
+					"unresolvedItems": []any{map[string]any{
+						"id":                   "cwi-derived",
+						"sourcePath":           "goal.derived",
+						"missingEvidenceKinds": []any{"validation"},
+					}},
+				},
+				"gapBaseline": map[string]any{
+					"definitionRevision":   "rev-persisted",
+					"baselineRevision":     "gap-persisted",
+					"acceptedEvidenceRefs": []any{"evidence-accepted"},
+					"rejectedEvidenceRefs": []any{"evidence-rejected"},
+					"todoItems": []any{map[string]any{
+						"id":                    "todo-persisted",
+						"source":                "goal",
+						"sourceRef":             "goal.persisted",
+						"coverageWorkItemIds":   []any{"cwi-persisted"},
+						"requiredEvidenceKinds": []any{"state_change"},
+						"status":                "open",
+						"priority":              float64(7),
+						"reason":                "persisted baseline checkpoint",
+					}},
+					"nextAction": map[string]any{
+						"kind":   "schedule_step",
+						"reason": "persisted next action",
+					},
+				},
+			},
+		},
+	})
+
+	if got.GapBaseline == nil || got.GapBaseline.DefinitionRevision != "rev-persisted" || got.GapBaseline.BaselineRevision != "gap-persisted" {
+		t.Fatalf("GapBaseline = %+v, want persisted baseline", got.GapBaseline)
+	}
+	if len(got.GapBaseline.TodoItems) != 1 || got.GapBaseline.TodoItems[0].ID != "todo-persisted" || got.GapBaseline.TodoItems[0].Priority != 7 {
+		t.Fatalf("GapBaseline.TodoItems = %+v, want persisted todo", got.GapBaseline.TodoItems)
+	}
+	if len(got.GapBaseline.AcceptedEvidenceRefs) != 1 || got.GapBaseline.AcceptedEvidenceRefs[0] != "evidence-accepted" {
+		t.Fatalf("GapBaseline.AcceptedEvidenceRefs = %+v, want persisted accepted evidence", got.GapBaseline.AcceptedEvidenceRefs)
+	}
+	if len(got.GapBaseline.RejectedEvidenceRefs) != 1 || got.GapBaseline.RejectedEvidenceRefs[0] != "evidence-rejected" {
+		t.Fatalf("GapBaseline.RejectedEvidenceRefs = %+v, want persisted rejected evidence", got.GapBaseline.RejectedEvidenceRefs)
+	}
+	if got.GapBaseline.NextAction.Kind != "schedule_step" || got.GapBaseline.NextAction.Reason != "persisted next action" {
+		t.Fatalf("GapBaseline.NextAction = %+v, want persisted next action", got.GapBaseline.NextAction)
 	}
 }
 
@@ -223,6 +317,45 @@ func TestRunSnapshotFromModelsProjectsRuntimeExecutionResultAvailableGap(t *test
 		got.RuntimeExecution.Pending != true ||
 		got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
 		t.Fatalf("RuntimeExecution = %+v, want result-available finalize gap", got.RuntimeExecution)
+	}
+}
+
+func TestRunSnapshotFromModelsProjectsContractViolationWithoutRuntimeProgress(t *testing.T) {
+	t.Parallel()
+
+	workspaceID := common.WorkspaceID("ws-run-contract-violation-projection")
+	runID := common.RunID("run-contract-violation-projection")
+	stepID := common.StepID("step-contract-violation")
+	got := RunSnapshotFromModels(RunSnapshotModelInput{
+		Workspace: &workspacemodel.Workspace{ID: workspaceID, Title: "contract violation projection", State: common.WorkspaceStateRunning},
+		Run:       &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateRunning},
+		Steps: []*runmodel.Step{{
+			ID:    stepID,
+			RunID: runID,
+			Kind:  "llm/workspace_execution",
+			State: common.StepStateFailed,
+			Output: map[string]any{
+				"contractViolation": map[string]any{
+					"id":               "violation-001",
+					"workspaceId":      string(workspaceID),
+					"runId":            string(runID),
+					"stepId":           string(stepID),
+					"violatedRule":     "state_changing_required_missing",
+					"recoverability":   "retry_same_contract",
+					"failureSignature": "class=runtime_failed|rule=state_changing_required_missing",
+				},
+			},
+		}},
+	})
+
+	if got.RuntimeExecution == nil {
+		t.Fatal("RuntimeExecution is nil, want contract violation projection")
+	}
+	if got.RuntimeExecution.ContractViolation == nil ||
+		got.RuntimeExecution.ContractViolation.ID != "violation-001" ||
+		got.RuntimeExecution.ContractViolation.ViolatedRule != "state_changing_required_missing" ||
+		got.RuntimeExecution.ContractViolation.Recoverability != "retry_same_contract" {
+		t.Fatalf("RuntimeExecution.ContractViolation = %+v, want projected contract violation", got.RuntimeExecution.ContractViolation)
 	}
 }
 

@@ -8,6 +8,7 @@ BASE_URL="${WORKORCH_TUI_LONG_OUTPUT_BASE_URL:-${WORKORCH_BASE_URL:-http://127.0
 MOCK_ADDR="${WORKORCH_TUI_LONG_OUTPUT_MOCK_ADDR:-127.0.0.1:18182}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_TUI_LONG_OUTPUT_SUFFIX:-$$}"
+ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_TUI_LONG_OUTPUT_ACTIVATION_RUN_WAIT_SECONDS:-60}"
 PROVIDER_ID="verify-tui-long-output-$VERIFY_SUFFIX"
 SKILL_ID="skill-tui-long-output-$VERIFY_SUFFIX"
 SOUL_ID="soul-tui-long-output-$VERIFY_SUFFIX"
@@ -280,6 +281,81 @@ wait_run_state() {
   return 1
 }
 
+capture_runs_before_activation() {
+  local output_file="$1"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"
+}
+
+validate_activation_command_response() {
+  local response_file="$1"
+  local expected_request_id="$2"
+  local expected_reason="$3"
+  python3 - "$response_file" "$expected_request_id" "$expected_reason" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+expected_request_id = sys.argv[2]
+expected_reason = sys.argv[3]
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("requestId") != expected_request_id:
+    errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
+if data.get("reason") != expected_reason:
+    errors.append(f"reason is {data.get('reason')!r}, want {expected_reason!r}")
+if errors:
+    raise SystemExit("\n".join(errors))
+PY
+}
+
+wait_activation_run() {
+  local before_runs_file="$1"
+  local runs_file="$2"
+  local output_file="$3"
+  local run_id=""
+  local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
+  while (( SECONDS <= deadline )); do
+    if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$runs_file"; then
+      run_id="$(python3 - "$runs_file" "$before_runs_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+before_data = json.load(open(sys.argv[2], encoding="utf-8"))
+before = {str(item.get("id") or "") for item in before_data.get("runs", []) if item.get("id")}
+new_runs = [
+    item for item in data.get("runs", [])
+    if item.get("id") and str(item.get("id")) not in before
+]
+if not new_runs:
+    raise SystemExit(1)
+print(new_runs[-1]["id"])
+PY
+)" && {
+        python3 - "$runs_file" "$run_id" "$output_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+run_id = sys.argv[2]
+run = next((item for item in data.get("runs", []) if item.get("id") == run_id), {"id": run_id})
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+        echo "$run_id"
+        return 0
+      }
+    fi
+    sleep 1
+  done
+  echo "activation accepted but run did not materialize within ${ACTIVATION_RUN_WAIT_SECONDS}s for workspace $workspace_id" >&2
+  return 1
+}
+
 write_llm_update_payloads() {
   python3 - "$TMP_DIR/configuration.json" "$TMP_DIR/original-llm-update.json" "$TMP_DIR/verify-llm-update.json" "$MOCK_BASE_URL" "$PROVIDER_ID" <<'PY'
 import json
@@ -439,10 +515,14 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/skills" -H 'Content-Type: applicati
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/souls" -H 'Content-Type: application/json' \
   -d '{"id":"'"$SOUL_ID"'","name":"TUI Long Output E2E Soul","description":"Soul for deterministic long-output viewport verification.","businessDomains":["workorch","tui"],"soulMd":"# TUI Long Output E2E\n\nComplete directly through LLM and return long final result details for viewport verification.","allowedSkillRefs":["'"$SKILL_ID"'"],"allowedToolKinds":["llm/chat"]}' >"$TMP_DIR/soul.json"
 
+activation_request_id="tui-long-output-e2e-$VERIFY_SUFFIX"
+activation_reason="e2e_resume"
+capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"priority":2}' >"$TMP_DIR/activation.json"
-run_id="$(json_path "$TMP_DIR/activation.json" "activation.run.id")"
+  -d '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","soulId":"'"$SOUL_ID"'","soulBindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"},"skillIds":["'"$SKILL_ID"'"],"priority":2}' >"$TMP_DIR/activation.json"
+validate_activation_command_response "$TMP_DIR/activation.json" "$activation_request_id" "$activation_reason"
+run_id="$(wait_activation_run "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json" "$TMP_DIR/activation-run.json")"
 [[ -n "$run_id" ]]
 
 wait_run_state "$workspace_id" "$run_id" "completed" "$TMP_DIR/status.json"

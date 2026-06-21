@@ -73,6 +73,9 @@ require_file_contains "$SRC_DIR/pages/WorkspaceBoardPage.tsx" "/workorchd/worksp
 require_file_contains "$SRC_DIR/pages/WorkspaceBoardPage.tsx" "workorchApi.readWorkspaceSnapshotProjection(workspace.id)" "workspace board uses server workspace projection for activation hints"
 require_file_contains "$SRC_DIR/api.ts" "readRunSnapshot: async (runId: string, workspaceId: string)" "run snapshot API requires workspace scope"
 require_file_contains "$SRC_DIR/api.ts" "runPath(workspaceId, runId, 'snapshot')" "run snapshot API uses workspace-scoped path"
+require_file_contains "$SRC_DIR/api.ts" "runCommandBody('resume', workspaceId, runId)" "web resume sends canonical resume intent"
+require_file_contains "$SRC_DIR/api.ts" "source: 'web'" "web run command carries source"
+require_file_contains "$SRC_DIR/api.ts" "reason: 'user_requested'" "web run command carries reason"
 
 forbid_file_contains "$SRC_DIR/pages/WorkspaceDetailPage.tsx" "projectedRunSnapshot" "client-side projected run snapshot state"
 forbid_file_contains "$SRC_DIR/pages/WorkspaceDetailPage.tsx" "buildProjectedRunSnapshot" "client-side projected run snapshot builder"

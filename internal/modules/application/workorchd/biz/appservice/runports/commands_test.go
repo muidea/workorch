@@ -86,7 +86,7 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 		return events.Response(envelope)
 	})
 	run := &runmodel.Run{ID: "run-resume-command", WorkspaceID: "ws-resume-command"}
-	patch := map[string]any{"mode": "continue"}
+	patch := map[string]any{"mode": "resume"}
 
 	if err := ResumeRun(ctx, hub, run, patch); err != nil {
 		t.Fatalf("ResumeRun: %v", err)
@@ -100,7 +100,7 @@ func TestResumeRunPublishesCommandPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload command = %T, want ResumeRunCommand", published[0].Payload[events.PayloadKeyCommand])
 	}
-	if cmd.RunID != run.ID || cmd.WorkspaceID != run.WorkspaceID || cmd.ExecutionContextPatch["mode"] != "continue" {
+	if cmd.RunID != run.ID || cmd.WorkspaceID != run.WorkspaceID || cmd.ExecutionContextPatch["mode"] != "resume" {
 		t.Fatalf("command = %+v, want populated resume command", cmd)
 	}
 	if _, ok := published[0].Payload[events.PayloadKeyRunID]; ok {

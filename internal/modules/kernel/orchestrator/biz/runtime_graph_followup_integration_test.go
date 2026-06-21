@@ -2175,7 +2175,7 @@ func TestValidateLLMFollowUpGraphRejectsVerificationReadOnlyGraphAsValidationEvi
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrection(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneRetry(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
@@ -2183,33 +2183,33 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
 	var assessmentOnlySeen bool
-	var correctionSeen bool
+	var retrySeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
+			if recovery := mapFromValue(request.Input[stepInputKeyContractViolationRecovery]); len(recovery) > 0 {
+				retrySeen = true
+				if _, ok := request.Input[stepOutputKeyExecutionGraph]; ok {
+					t.Fatalf("retry input retained executionGraph: %+v", request.Input)
+				}
+				if actual := mapFromValue(recovery["actualOutputSummary"]); len(actual) > 0 && actual[stepOutputKeyExecutionGraph] == nil {
+					t.Fatalf("contractViolationRecovery.actualOutputSummary = %+v, want compact rejected graph summary", actual)
+				}
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":   true,
+						"summary":     "assessment-only retry completed",
+						"goalOutcome": "assessment-only retry completed",
+						"items": []map[string]any{{
+							"item":         "contract corrected",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
 			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
 				assessmentOnlySeen = true
-				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
-					correctionSeen = true
-					if _, ok := request.Input[stepOutputKeyExecutionGraph]; ok {
-						t.Fatalf("correction input retained executionGraph: %+v", request.Input)
-					}
-					if previous := mapFromValue(request.Input["previousInvalidAssessmentOutput"]); len(previous) == 0 || previous[stepOutputKeyExecutionGraph] != nil {
-						t.Fatalf("previousInvalidAssessmentOutput = %+v, want sanitized contract violation output", previous)
-					}
-					return map[string]any{
-						"status": "completed",
-						stepOutputKeyDoDAssessment: map[string]any{
-							"satisfied":   true,
-							"summary":     "assessment-only correction completed",
-							"goalOutcome": "assessment-only correction completed",
-							"items": []map[string]any{{
-								"item":         "contract corrected",
-								"state":        "satisfied",
-								"evidenceRefs": []string{string(request.StepID)},
-							}},
-						},
-					}, nil
-				}
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -2268,8 +2268,8 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 	if !assessmentOnlySeen {
 		t.Fatalf("assessment-only follow-up was not reached")
 	}
-	if !correctionSeen {
-		t.Fatalf("assessment-only contract correction follow-up was not reached")
+	if !retrySeen {
+		t.Fatalf("assessment-only contract violation retry was not reached")
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
@@ -2277,7 +2277,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationDispatchesOneCorrect
 	}
 	if runItem.State != common.RunStateCompleted {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want completed after contract correction", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want completed after contract violation retry", runItem, steps)
 	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -2376,24 +2376,43 @@ func TestAssessmentOnlyContractCorrectionInputStripsRecoveryMarkersAndNestedExec
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyExecutableOutputRetriesWithoutSideEffects(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
+	memoryRepo := memory.NewMemoryItemRepository()
 	var assessmentOnlySeen bool
-	var correctionSeen bool
+	var contractRetrySeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
-			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
-				assessmentOnlySeen = true
-				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
-					correctionSeen = true
-				}
+			if len(mapFromValue(request.Input[stepInputKeyContractViolationRecovery])) > 0 {
+				contractRetrySeen = true
 				return map[string]any{
 					"status": "completed",
+					stepOutputKeyDoDAssessment: map[string]any{
+						"satisfied":   true,
+						"summary":     "assessment-only corrected after rejected executable output",
+						"goalOutcome": "assessment-only corrected after rejected executable output",
+						"items": []map[string]any{{
+							"item":         "contract corrected",
+							"state":        "satisfied",
+							"evidenceRefs": []string{string(request.StepID)},
+						}},
+					},
+				}, nil
+			}
+			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
+				assessmentOnlySeen = true
+				return map[string]any{
+					"status": "completed",
+					stepOutputKeyMemoryWrites: []map[string]any{{
+						"memoryType": "project_context",
+						"summary":    "assessment-only rejected output must not persist",
+						"content":    "This memory write belongs to an invalid assessment-only response.",
+					}},
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
 						{ID: "must_not_execute", Kind: "graph/mock"},
 					}},
@@ -2436,7 +2455,17 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 			}, nil
 		},
 	}
-	orch := NewRuntimeOrchestrator(runtime, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, events.NewMemoryHub())
+	orch := NewRuntimeOrchestratorWithResolutionsAndEvidence(
+		runtime,
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		ticketRepo,
+		memory.NewDecisionResolutionRepository(),
+		approvalRepo,
+		RuntimeEvidenceRepositories{MemoryItems: memoryRepo},
+		events.NewMemoryHub(),
+	)
 
 	workspaceID := common.WorkspaceID("ws-assessment-only-ignores-graph-with-assessment")
 	runID := common.RunID("run-assessment-only-ignores-graph-with-assessment")
@@ -2459,8 +2488,8 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 	if !assessmentOnlySeen {
 		t.Fatalf("assessment-only follow-up was not reached")
 	}
-	if correctionSeen {
-		t.Fatalf("assessment-only correction should not be dispatched when a dodAssessment is present")
+	if !contractRetrySeen {
+		t.Fatalf("contract violation retry was not reached")
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
@@ -2468,7 +2497,7 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 	}
 	if runItem.State != common.RunStateCompleted {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want completed after ignoring assessment-only graph", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want completed after rejected assessment-only graph retry", runItem, steps)
 	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {
@@ -2479,32 +2508,43 @@ func TestRuntimeOrchestrator_AssessmentOnlyIgnoresGraphWhenAssessmentIsPresent(t
 		if strings.Contains(string(step.ID), "must_not_execute") {
 			t.Fatalf("steps = %+v, assessment-only executionGraph must not execute", steps)
 		}
-		if boolValue(step.Output["assessmentOnlyContractViolation"]) && boolValue(step.Output["ignoredExecutionGraph"]) {
+		if stringFromMap(step.Output, outputKeyContractViolationType) == contractViolationAssessmentOnlyExecutableOutput ||
+			len(mapFromValue(step.Output[stepOutputKeyContractViolation])) > 0 {
 			violationMarked = true
+			if refs := stringSliceFromValue(step.Output[stepOutputKeyMemoryRefs]); len(refs) > 0 {
+				t.Fatalf("contract violation step memoryRefs = %+v, rejected output must not create memory refs", refs)
+			}
 		}
 	}
 	if !violationMarked {
-		t.Fatalf("steps = %+v, want ignored graph contract marker on assessment step", steps)
+		t.Fatalf("steps = %+v, want rejected diagnostic marker on assessment step", steps)
+	}
+	memories, err := memoryRepo.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("list memory: %v", err)
+	}
+	for _, item := range memories {
+		if strings.Contains(item.Summary, "assessment-only rejected output must not persist") ||
+			strings.Contains(item.Content, "This memory write belongs to an invalid assessment-only response.") {
+			t.Fatalf("memories = %+v, rejected assessment-only output must not create long-term memory", memories)
+		}
 	}
 }
 
-func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsRepeatedGraph(t *testing.T) {
+func TestRuntimeOrchestrator_AssessmentOnlyContractViolationEscalatesRepeatedGraph(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()
 	runRepo := memory.NewRunRepository()
 	stepRepo := memory.NewStepRepository()
 	ticketRepo := memory.NewDecisionTicketRepository()
 	approvalRepo := memory.NewApprovalRepository()
-	var correctionSeen bool
+	var retrySeen bool
 	runtime := &stubRuntimeAdapter{
 		fnRequest: func(request runtimemodel.StepExecutionRequest) (map[string]any, error) {
-			if boolValue(request.Input[stepInputKeyRuntimeRepairFollowUp]) {
-				t.Fatalf("runtime repair follow-up should not be dispatched for repeated assessment-only graph violation")
+			if len(mapFromValue(request.Input[stepInputKeyContractViolationRecovery])) > 0 {
+				retrySeen = true
 			}
 			if boolValue(request.Input[stepInputKeyAssessmentOnly]) {
-				if boolValue(request.Input["assessmentOnlyContractCorrection"]) {
-					correctionSeen = true
-				}
 				return map[string]any{
 					"status": "completed",
 					stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{Nodes: []runtimemodel.BlockExecutionNode{
@@ -2559,17 +2599,16 @@ func TestRuntimeOrchestrator_AssessmentOnlyContractViolationFailsRepeatedGraph(t
 	if err := orch.StartRun(ctx, runID); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if !correctionSeen {
-		t.Fatalf("assessment-only contract correction follow-up was not reached")
+	if !retrySeen {
+		t.Fatalf("contract violation retry was not reached")
 	}
 	runItem, err := runRepo.Get(ctx, runID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if runItem.State != common.RunStateFailed ||
-		!strings.Contains(runItem.FailureReason, "assessment-only step returned executionGraph") {
+	if runItem.State != common.RunStateBlockedOnDecision || runItem.BlockingTicketID == "" {
 		steps, _ := stepRepo.ListByRun(ctx, runID)
-		t.Fatalf("run = %+v steps=%+v, want failed after repeated contract violation", runItem, steps)
+		t.Fatalf("run = %+v steps=%+v, want decision after repeated contract violation", runItem, steps)
 	}
 	steps, err := stepRepo.ListByRun(ctx, runID)
 	if err != nil {

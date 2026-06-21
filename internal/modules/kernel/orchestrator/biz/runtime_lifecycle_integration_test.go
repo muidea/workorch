@@ -327,6 +327,44 @@ func TestRuntimeOrchestrator_TerminalRunDismissesOpenDecisionBlocker(t *testing.
 	}
 }
 
+func TestRuntimeOrchestrator_SupersedeCreatedRunReleasesWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspaceRepo := memory.NewWorkspaceRepository()
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	ticketRepo := memory.NewDecisionTicketRepository()
+	approvalRepo := memory.NewApprovalRepository()
+	hub := events.NewMemoryHub()
+	orch := NewRuntimeOrchestrator(&stubRuntimeAdapter{output: map[string]any{"ok": true}}, runRepo, stepRepo, workspaceRepo, ticketRepo, approvalRepo, hub)
+
+	workspaceID := common.WorkspaceID("ws-supersede-created")
+	runID := common.RunID("run-supersede-created")
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCreated}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := orch.SupersedeRun(ctx, runID); err != nil {
+		t.Fatalf("supersede created run: %v", err)
+	}
+	run, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.State != common.RunStateSuperseded {
+		t.Fatalf("run state = %s, want superseded", run.State)
+	}
+	workspace, err := workspaceRepo.Get(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if workspace.ActiveRunID != "" {
+		t.Fatalf("workspace = %+v, want activeRunId released", workspace)
+	}
+}
+
 func TestRuntimeOrchestrator_StartRunRejectsDifferentActiveRun(t *testing.T) {
 	ctx := context.Background()
 	workspaceRepo := memory.NewWorkspaceRepository()

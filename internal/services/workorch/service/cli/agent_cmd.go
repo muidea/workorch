@@ -61,7 +61,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			var answer string
 			fmt.Scanln(&answer)
 			if answer == "" {
-				answer = "continue"
+				answer = "resume"
 			}
 			if err := a.ResolveDecision(ctx, info.WorkspaceID, info.TicketID, "provide_missing_info", answer); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)

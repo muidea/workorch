@@ -75,6 +75,19 @@ type RuntimeProgressUpdate struct {
 	WorkerEventAt string
 }
 
+type RunCommandAcceptedUpdate struct {
+	WorkspaceID        string
+	RunID              string
+	Intent             string
+	Reason             string
+	RequestID          string
+	Source             string
+	DefinitionRevision string
+	DecisionID         string
+	Revision           int64
+	AcceptedAt         string
+}
+
 type Loader interface {
 	ListWorkspaces(context.Context) ([]appmodelcore.Workspace, error)
 	ReadWorkspace(context.Context, string) (appmodelcore.Workspace, error)

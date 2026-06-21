@@ -145,6 +145,7 @@ func applyRuntimeRepairFailureProjection(input map[string]any, failedStep *runMo
 	if input == nil || failedStep == nil {
 		return
 	}
+	applyRuntimeRepairGapBaselineProjection(input, failedStep)
 	if diagnostics := runtimeRepairLastFailureDiagnostics(failedStep); len(diagnostics) > 0 {
 		input["lastFailureDiagnostics"] = diagnostics
 	}
@@ -181,6 +182,26 @@ func applyRuntimeRepairFailureProjection(input map[string]any, failedStep *runMo
 			"For validation items, produce bounded validation evidence or mark the item failed/skipped; do not claim accepted completion while it remains unresolved.",
 			"For state_change items, produce the smallest state-changing action that matches the coverage work item, then validate it.",
 		)
+	}
+}
+
+func applyRuntimeRepairGapBaselineProjection(input map[string]any, failedStep *runModel.Step) {
+	if input == nil || failedStep == nil {
+		return
+	}
+	if len(mapFromValue(input[gapBaselineKey])) > 0 {
+		return
+	}
+	for _, candidate := range []map[string]any{
+		mapFromValue(failedStep.Input[gapBaselineKey]),
+		mapFromValue(failedStep.Output[gapBaselineKey]),
+		mapFromValue(mapFromValue(failedStep.Output["runtimeDiagnostics"])[gapBaselineKey]),
+	} {
+		if len(candidate) == 0 {
+			continue
+		}
+		input[gapBaselineKey] = cloneStepPayload(candidate)
+		return
 	}
 }
 

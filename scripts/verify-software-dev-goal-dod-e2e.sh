@@ -247,21 +247,47 @@ activate_workspace_execution() {
   local output_file="$3"
   local known_run_ids_csv="$4"
   local recovery_file="$TMP_DIR/${workspace_id}-activation-recovery-runs.json"
-  local run_id=""
+  local request_id="software-dev-e2e-$(basename "${output_file%.json}")"
+  local request_body=""
 
+  request_body="$(python3 - "$payload" "$request_id" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+payload.setdefault("intent", "resume")
+payload.setdefault("requestId", sys.argv[2])
+payload.setdefault("reason", "e2e_resume")
+payload.setdefault("source", "e2e")
+print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+PY
+)"
   if ! curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
     -H 'Content-Type: application/json' \
-    -d "$payload" >"$output_file"; then
-    echo "execution activation response unavailable, attempting run recovery" >&2
+    -d "$request_body" >"$output_file"; then
+    echo "execution activation command response unavailable, attempting run recovery" >&2
+  else
+    python3 - "$output_file" "$request_id" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+expected_request_id = sys.argv[2]
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("requestId") != expected_request_id:
+    errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
+if data.get("reason") != "e2e_resume":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if errors:
+    raise SystemExit("\n".join(errors))
+PY
   fi
 
-  run_id="$(json_path_or_empty "$output_file" "activation.run.id")"
-  if [[ -n "$run_id" ]]; then
-    printf '%s\n' "$run_id"
-    return 0
-  fi
-
-  echo "execution activation response missing valid run id, recovering from workspace runs" >&2
+  echo "execution activation accepted; recovering materialized run from workspace runs" >&2
   recover_activation_run_id "$workspace_id" "$known_run_ids_csv" "$recovery_file"
 }
 

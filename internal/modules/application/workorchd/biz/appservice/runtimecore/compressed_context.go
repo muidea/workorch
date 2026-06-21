@@ -52,7 +52,7 @@ func CreatedRunCompressedContext(item *runmodel.Run, language string) map[string
 			{ID: "formal_result", Title: localizationcore.MilestoneTitle(language, "formal_result"), State: "pending"},
 		},
 		Recovery: readmodelcore.RecoveryPlan{
-			Mode:       "continue",
+			Mode:       "resume",
 			NextAction: localizationcore.RecoveryNextAction(language),
 			RunID:      string(item.ID),
 		},

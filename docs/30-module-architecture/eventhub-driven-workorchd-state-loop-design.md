@@ -89,7 +89,7 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 - `workspaceviewcore.Manager` 订阅 WorkOrch owner events，并维护服务端 ViewModel projection。
 - `serverState.registerAutoGovernanceResumeWatcher` 订阅 auto-governance resolved event。
 - `serverState.registerReplanContinuationWatcher` 已存在但当前为空逻辑。
-- `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/continue/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
+- `runContinuationScheduler` 管理 periodic stale dispatched runtime gap recovery、manual governance/replan/resume/restart continuation；服务启动只注册 periodic watchdog timer，不自动恢复历史 running run。resolved governance 必须由 decision/approval resolve 主路径发布 continuation command，不能依赖 watchdog 扫描兜底。
 - Workspace activation/restart、run start/resume、governance continuation 和 replan continuation 已统一通过 workorchd scheduler command handler 入队。同步 command 只有在 scheduler owner 返回明确 accepted response 且后台 work item 已成功提交后，REST/TUI 才能报告 accepted。
 
 剩余长期方向是把当前 server-local scheduler pending 进一步持久化或 owner 化；短期不得绕过现有 scheduler command ack 规则，也不得让 watchdog 代替正常 command 主路径。
@@ -105,7 +105,7 @@ internal/modules/application/workorchd/service/server/http_workspace.go
 | `/decision replan` | resolve decision with `resolutionType=replan` | Decision owner, then workorchd continuation loop |
 | `/decision answer` | resolve decision with `resolutionType=provide_missing_info` or equivalent | Decision owner, then workorchd continuation loop |
 | approval approve/reject | resolve approval | Approval owner, then workorchd continuation loop |
-| `/run continue` | request run continuation | workorchd scheduler/orchestrator loop |
+| `/run resume` | request current run resume/continuation | workorchd scheduler/orchestrator loop |
 | `/run restart` | request workspace restart / replacement run | workorchd scheduler/activation loop |
 | REST execution activation | request workspace execution activation | workorchd scheduler/activation loop |
 | REST run start/resume | request run execution command | workorchd scheduler/orchestrator loop |
@@ -222,15 +222,15 @@ BackgroundRoutine worker
 - restart 是明确的执行意图：旧 active path 被 supersede/terminated/replaced，新 run 必须可追踪 lineage。
 - 如果 workspace 缺失或当前状态不允许 restart，应产生明确失败事件和端侧错误，而不是静默返回现有 run。
 
-### Run Continue
+### Run Resume
 
 目标链路：
 
 ```text
 TUI/Web
-  -> RunContinuationRequested command
+  -> WorkspaceRunRequested(intent=resume) command
 workorchd command subscriber
-  -> enqueue run continuation work item
+  -> enqueue run resume/continuation work item
 BackgroundRoutine worker
   -> acquire run slot
   -> Send orchestrator resume command
@@ -239,8 +239,8 @@ BackgroundRoutine worker
 
 关键点：
 
-- `/run continue`、decision resolved auto-resume、approval resolved auto-resume 都应复用同一个 continuation worker，只是 source/reason 不同。
-- continue 只能在 owner state 仍需要继续时执行；否则幂等清除 pending。
+- `/run resume`、decision resolved auto-resume、approval resolved auto-resume 都应复用同一个 continuation worker，只是 source/reason 不同。
+- resume 只能在 owner state 仍需要继续时执行；否则幂等清除 pending。
 
 ### Projection Refresh
 
@@ -354,7 +354,7 @@ Web/TUI
 
 - port 层保留中立命令接口，不暴露 HTTP 细节。
 - `/run restart` 对应 port command 应表达 restart intent，而不是普通 activate。
-- `/run continue` 对应 port command 应表达 continuation intent。
+- `/run resume` 对应 port command 应表达 resume intent。
 - Decision/Approval resolve 返回后，端侧只依据 projection/event 刷新状态，不自行推断 run 已继续。
 
 ### `internal/pkg/workorchclient`
@@ -420,7 +420,7 @@ Web/TUI
 
 - HTTP handler 从直接执行改为发布 command event。
 - TUI `/run restart` 从 activation 改为 restart command。
-- TUI `/run continue`、decision/approval resolve 只提交 command，不复制恢复逻辑。
+- TUI `/run resume`、decision/approval resolve 只提交 command，不复制恢复逻辑。
 - Web action button 对齐同一 command endpoint。
 
 ### Phase 5: Verification

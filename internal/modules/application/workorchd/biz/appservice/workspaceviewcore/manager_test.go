@@ -110,6 +110,81 @@ func TestStoreDegradedAndDetailNotReady(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertWorkspaceSynchronizesDetailWorkspaceState(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			RunCommand: &readmodelcore.RunCommandStatus{
+				WorkspaceID: "ws-a",
+				RunID:       "run-a",
+				Intent:      "replan",
+				RequestID:   "request-a",
+				Revision:    7,
+			},
+			GapBaseline: &readmodelcore.GapBaseline{
+				WorkspaceID:      "ws-a",
+				RunID:            "run-a",
+				BaselineRevision: "gap-a",
+			},
+		},
+	}, nil)
+
+	store.UpsertWorkspace(appmodelcore.Workspace{ID: "ws-a", State: "running", ActiveRunID: "run-a"})
+
+	items, _, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(items) != 1 || items[0].State != "running" || items[0].BlockingTicketID != "" {
+		t.Fatalf("list workspace = %+v, want running without blocker", items)
+	}
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.Workspace.State != "running" || snapshot.Workspace.BlockingTicketID != "" {
+		t.Fatalf("snapshot workspace = %+v, want synchronized running state", snapshot.Workspace)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-a" {
+		t.Fatalf("RunCommand = %+v, want retained command projection", snapshot.RunCommand)
+	}
+	if snapshot.GapBaseline == nil || snapshot.GapBaseline.BaselineRevision != "gap-a" {
+		t.Fatalf("GapBaseline = %+v, want retained baseline projection", snapshot.GapBaseline)
+	}
+}
+
+func TestStoreReplaceWorkspaceListSynchronizesDetailWorkspaceState(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace:  readmodelcore.Workspace{ID: "ws-a", State: "waiting_decision", ActiveRunID: "run-a", BlockingTicketID: "ticket-a"},
+			RunCommand: &readmodelcore.RunCommandStatus{WorkspaceID: "ws-a", RunID: "run-a", Intent: "resume", RequestID: "request-a", Revision: 9},
+			GapBaseline: &readmodelcore.GapBaseline{
+				WorkspaceID:      "ws-a",
+				RunID:            "run-a",
+				BaselineRevision: "gap-a",
+			},
+		},
+	}, nil)
+
+	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, nil)
+
+	snapshot, _, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.Workspace.State != "active" || snapshot.Workspace.ActiveRunID != "" || snapshot.Workspace.BlockingTicketID != "" {
+		t.Fatalf("snapshot workspace = %+v, want synchronized active state", snapshot.Workspace)
+	}
+	if snapshot.RunCommand == nil || snapshot.RunCommand.RequestID != "request-a" {
+		t.Fatalf("RunCommand = %+v, want retained command projection", snapshot.RunCommand)
+	}
+	if snapshot.GapBaseline == nil || snapshot.GapBaseline.BaselineRevision != "gap-a" {
+		t.Fatalf("GapBaseline = %+v, want retained baseline projection", snapshot.GapBaseline)
+	}
+}
+
 func TestStoreMarksStaleWithSourceEventRevision(t *testing.T) {
 	store := NewStore()
 	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
@@ -516,6 +591,133 @@ func TestStoreRuntimeProgressResetsExecutionStateForNewStep(t *testing.T) {
 		snapshot.RuntimeExecution.WorkerStoppedAt != "" ||
 		snapshot.RuntimeExecution.DoneAt != "" {
 		t.Fatalf("RuntimeExecution retained old step fields: %+v", snapshot.RuntimeExecution)
+	}
+}
+
+func TestStoreRunCommandAcceptedProjectsCommandRevision(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {
+			Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"},
+		},
+	}, nil)
+
+	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
+		WorkspaceID:        "ws-a",
+		RunID:              "run-a",
+		Intent:             "resume",
+		Reason:             "user_requested",
+		RequestID:          "request-a",
+		Source:             "tui",
+		DefinitionRevision: "rev-a",
+		DecisionID:         "ticket-a",
+		Revision:           42,
+		AcceptedAt:         "2026-06-21T00:00:00Z",
+	}) {
+		t.Fatalf("ApplyRunCommandAccepted returned false")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.WorkspaceID != "ws-a" ||
+		snapshot.RunCommand.RunID != "run-a" ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-a" ||
+		snapshot.RunCommand.DefinitionRevision != "rev-a" ||
+		snapshot.RunCommand.DecisionID != "ticket-a" ||
+		snapshot.RunCommand.Revision != 42 {
+		t.Fatalf("RunCommand = %+v, want accepted command projection", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 42 || status.ProjectedSourceRevision != 42 {
+		t.Fatalf("status revisions = %+v, want accepted command revision", status)
+	}
+}
+
+func TestStoreRunCommandAcceptedCreatesDetailPlaceholderForKnownWorkspace(t *testing.T) {
+	store := NewStore()
+	store.ReplaceWorkspaceList([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, nil)
+
+	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
+		WorkspaceID: "ws-a",
+		RunID:       "run-a",
+		Intent:      "replan",
+		RequestID:   "request-a",
+		Revision:    42,
+	}) {
+		t.Fatalf("ApplyRunCommandAccepted returned false")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.Workspace.ID != "ws-a" || snapshot.Workspace.State != "active" {
+		t.Fatalf("Workspace = %+v, want placeholder workspace detail", snapshot.Workspace)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.WorkspaceID != "ws-a" ||
+		snapshot.RunCommand.RunID != "run-a" ||
+		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.RequestID != "request-a" ||
+		snapshot.RunCommand.Revision != 42 {
+		t.Fatalf("RunCommand = %+v, want accepted command projection", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 42 || status.ProjectedSourceRevision != 42 {
+		t.Fatalf("status revisions = %+v, want accepted command revision", status)
+	}
+}
+
+func TestStoreUpsertSnapshotPreservesAcceptedRunCommand(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	if !store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{
+		WorkspaceID: "ws-a",
+		Intent:      "resume",
+		RequestID:   "request-a",
+		Revision:    42,
+	}) {
+		t.Fatalf("ApplyRunCommandAccepted returned false")
+	}
+
+	store.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: "ws-a", State: "running"},
+	})
+
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-a" ||
+		snapshot.RunCommand.Revision != 42 {
+		t.Fatalf("RunCommand = %+v, want preserved accepted command", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 42 {
+		t.Fatalf("status = %+v, want source revision retained", status)
+	}
+}
+
+func TestStoreRunCommandAcceptedRejectsUnknownWorkspace(t *testing.T) {
+	store := NewStore()
+	store.ReplaceAll([]appmodelcore.Workspace{{ID: "ws-a", State: "active"}}, map[string]readmodelcore.WorkspaceSnapshot{
+		"ws-a": {Workspace: readmodelcore.Workspace{ID: "ws-a", State: "active"}},
+	}, nil)
+	if store.ApplyRunCommandAccepted(RunCommandAcceptedUpdate{WorkspaceID: "ws-b", Intent: "resume", Revision: 2}) {
+		t.Fatal("ApplyRunCommandAccepted returned true for unknown workspace")
+	}
+	snapshot, status, err := store.GetSnapshot("ws-a")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snapshot.RunCommand != nil {
+		t.Fatalf("RunCommand = %+v, want no cross-workspace command projection", snapshot.RunCommand)
+	}
+	if status.SourceEventRevision != 0 || status.ProjectedSourceRevision != 0 {
+		t.Fatalf("status after rejected command = %+v, want unchanged revisions", status)
 	}
 }
 

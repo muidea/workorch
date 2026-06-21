@@ -274,7 +274,7 @@ rg -n "ExecuteRuntimeStep\\(" internal/modules internal/pkg -g "*.go"
 rg -n "TopicRuntimeBlockCommandExecute|runtime/block/execute|NewSimpleObserver|Subscribe" internal/modules/blocks internal/modules/kernel internal/pkg -g "*.go"
 rg -n "dispatchGraphStepBatchWithWorkspace|dispatchRuntimeRepairFollowUp|dispatchStepWithWorkspace|WaitGroup" internal/modules/kernel/orchestrator -g "*.go"
 rg -n "recoverStaleDispatched|stale dispatched|step_dispatched|runtime_step_done|finalize" internal/modules/application internal/modules/kernel -g "*.go"
-rg -n "decision >|Submitting|replan|restart|continue current run|workspace projection" internal/services/workorch/service/tui internal/modules/application/workorchd -g "*.go"
+rg -n "decision >|Submitting|replan|restart|resume current run|workspace projection" internal/services/workorch/service/tui internal/modules/application/workorchd -g "*.go"
 ```
 
 ### Implementation Guardrails
@@ -797,7 +797,7 @@ orchestrator result subscriber receives completed step
 - `verify-deployed-full` 已纳入 `verify-real-runtime-closure`，部署全量验证会执行真实 provider 并行闭环与 runtime observation。
 - `loadtest-governed-workspace-concurrency.py` 的 summary 已输出每个 workspace 的 `workspaceState`、`runState`、`runStatusState`、`progressState`、`progressTerminal`、LLM step terminal 计数和 LLM usage trace/summary 计数。
 - `loadtest-governed-workspace-concurrency.py` 已兼容异步 activation 返回：activation 只返回 accepted 时，会通过 workspace snapshot / run list 等待 active run materialize 后再进入状态驱动。
-- `loadtest-governed-workspace-concurrency.py` 已把 `provider-retry-exhausted` 识别为真实 runtime closure 失败证据；真实 provider 场景不得把 provider 配置/外部依赖恢复类 blocker 自动 resolve 成无限 replan/continue 循环。
+- `loadtest-governed-workspace-concurrency.py` 已把 `provider-retry-exhausted` 识别为真实 runtime closure 失败证据；真实 provider 场景不得把 provider 配置/外部依赖恢复类 blocker 自动 resolve 成无限 replan/resume 循环。
 - `loadtest-governed-workspace-concurrency.py` 已在 failure evidence path 回填 failed workspace 的 workspace/run/progress terminal state、LLM step terminal/non-terminal counts、LLM usage trace/summary counts，避免真实 provider 失败时 summary 丢失 runtime closure 证据。
 - Orchestrator resume 已补充 config-only dependency gate：resolved decision 未声明 `externalDependencyRecovered` / `systemConfigChanged` / `runtimeDependencyRecovered` 时保持 blocked，不重新调度 provider retry，也不重复创建同类 provider blocker ticket。
 - `verify-real-runtime-closure.sh` 已对 successful workspace 增加硬断言：completed projection、terminal progress、LLM terminal step、usage trace 非空且 summary 计数一致、并行 overlap 通过。

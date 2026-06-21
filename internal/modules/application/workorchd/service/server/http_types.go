@@ -400,7 +400,7 @@ type createRunRequest struct {
 	DoDID  string `json:"doDId,omitempty"`
 }
 
-type activateWorkspaceExecutionRequest struct {
+type workspaceExecutionCommandRequest struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
 	LLMProviderID         string            `json:"llmProviderId,omitempty"`
@@ -412,6 +412,12 @@ type activateWorkspaceExecutionRequest struct {
 	MemoryIDs             []string          `json:"memoryIds,omitempty"`
 	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
 	Priority              int               `json:"priority,omitempty"`
+	RequestID             string            `json:"requestId,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Source                string            `json:"source,omitempty"`
+	Intent                string            `json:"intent,omitempty"`
+	DefinitionRevision    string            `json:"definitionRevision,omitempty"`
+	DecisionID            string            `json:"decisionId,omitempty"`
 	Restart               bool              `json:"restart,omitempty"`
 	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }
@@ -517,7 +523,7 @@ type listEventRecordsFunc func(context.Context, string, string, appservice.Event
 type listRunInstancesFunc func(context.Context, string, string, string) ([]appservice.Run, error)
 type startRunInstanceFunc func(context.Context, string, string, string) (appservice.Run, error)
 type resumeRunInstanceFunc func(context.Context, string, string, string, ...map[string]any) (appservice.Run, error)
-type activateWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
+type resumeWorkspaceExecutionFunc func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error)
 type listDecisionsFunc func(context.Context, string, string, string, string) ([]appservice.Decision, error)
 type listDecisionPageFunc func(context.Context, string, string, appservice.DecisionQuery) (appservice.DecisionPage, error)
 type readDecisionFunc func(context.Context, string, string, string) (appservice.Decision, error)
@@ -612,7 +618,7 @@ type serverState struct {
 	listRuns                     listRunInstancesFunc
 	startRun                     startRunInstanceFunc
 	resumeRun                    resumeRunInstanceFunc
-	activateWorkspace            activateWorkspaceExecutionFunc
+	resumeWorkspaceExecution     resumeWorkspaceExecutionFunc
 	listDecisions                listDecisionsFunc
 	listDecisionPage             listDecisionPageFunc
 	readDecision                 readDecisionFunc
@@ -1066,7 +1072,7 @@ func newServerStateWithBackground(config Config, eventHub events.Hub, background
 		listRuns:                     defaultListRuns,
 		startRun:                     defaultStartRun,
 		resumeRun:                    defaultResumeRun,
-		activateWorkspace:            defaultActivateWorkspaceExecution,
+		resumeWorkspaceExecution:     defaultResumeWorkspaceExecution,
 		listDecisions:                defaultListDecisions,
 		listDecisionPage:             defaultListDecisionPage,
 		readDecision:                 defaultReadDecision,
@@ -1509,7 +1515,7 @@ func (s *serverState) configureSessionBackedOperations(session *appservice.Runti
 		})
 		return ret, err
 	}
-	s.activateWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	s.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		var ret appservice.WorkspaceExecutionActivation
 		err := s.withSharedSession(ctx, func(session *appservice.RuntimeSession) error {
 			var err error
@@ -1912,9 +1918,30 @@ func (s *serverState) publishGovernanceContinuationFromResolvedEvent(envelope ev
 	if workspaceID == "" || runID == "" {
 		return
 	}
+	intent := "resume"
+	reason := "governance_resolved"
+	decisionID := ""
+	if envelope.Topic == decisionevents.TopicTicketResolved {
+		reason = "decision_resolved"
+		decisionID = firstNonEmptySchedulerString(
+			schedulerStringValue(envelope.Payload, events.PayloadKeyDecisionID),
+			schedulerStringValue(envelope.Payload, events.PayloadKeyBlockingTicketID),
+			envelope.SubjectID,
+		)
+		if strings.TrimSpace(schedulerStringValue(envelope.Payload, events.PayloadKeyType)) == "replan" {
+			intent = "replan"
+			reason = "decision_replan_resolved"
+		}
+	} else if envelope.Topic == approvalevents.TopicApprovalResolved {
+		reason = "approval_resolved"
+	}
 	if err := s.publishGovernanceContinuationRequested(context.Background(), []governanceRunResumeRef{{
 		WorkspaceID: workspaceID,
 		RunID:       runID,
+		Intent:      intent,
+		Reason:      reason,
+		RequestID:   governanceRunResumeRequestID("event", envelope.SubjectID, intent),
+		DecisionID:  decisionID,
 	}}, 0); err != nil {
 		slog.Warn("workorch governance continuation command publish failed", "topic", envelope.Topic, "workspaceID", workspaceID, "runID", runID, "err", err)
 	}

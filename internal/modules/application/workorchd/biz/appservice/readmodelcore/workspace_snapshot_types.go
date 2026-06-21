@@ -11,9 +11,11 @@ type WorkspaceSnapshot struct {
 	TaskProgress          TaskProgress            `json:"taskProgress"`
 	RunHeartbeat          RunHeartbeat            `json:"runHeartbeat,omitempty"`
 	RuntimeExecution      *RuntimeExecutionState  `json:"runtimeExecution,omitempty"`
+	RunCommand            *RunCommandStatus       `json:"runCommand,omitempty"`
 	SchedulerDiagnostics  *SchedulerDiagnostics   `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle         *ContextBundle          `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any          `json:"coverageSummary,omitempty"`
+	GapBaseline           *GapBaseline            `json:"gapBaseline,omitempty"`
 	Acceptance            AcceptanceProjection    `json:"acceptance"`
 	TaskDecompositions    []TaskDecomposition     `json:"taskDecompositions,omitempty"`
 	ExecutionSections     []ExecutionSection      `json:"executionSections,omitempty"`
@@ -32,6 +34,19 @@ type WorkspaceSnapshot struct {
 	EventRecords          []EventRecord           `json:"eventRecords,omitempty"`
 	Decisions             []Decision              `json:"decisions,omitempty"`
 	Approvals             []Approval              `json:"approvals,omitempty"`
+}
+
+type RunCommandStatus struct {
+	WorkspaceID        string `json:"workspaceId,omitempty"`
+	RunID              string `json:"runId,omitempty"`
+	Intent             string `json:"intent,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+	RequestID          string `json:"requestId,omitempty"`
+	Source             string `json:"source,omitempty"`
+	DefinitionRevision string `json:"definitionRevision,omitempty"`
+	DecisionID         string `json:"decisionId,omitempty"`
+	AcceptedAt         string `json:"acceptedAt,omitempty"`
+	Revision           int64  `json:"revision,omitempty"`
 }
 
 type WorkspaceExecutionActivation struct {

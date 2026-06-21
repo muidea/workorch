@@ -15,7 +15,7 @@ func NormalizeRuntimeRepairRecoveryAction(value string) string {
 	}):
 		return "terminate"
 	case ContainsAnyRepairResolutionCue(text, []string{
-		"retry_same_step", "retrysamestep", "retry", "rerun", "resume", "continue", "proceed", "goahead", "again",
+		"retry_same_step", "retrysamestep", "retry", "rerun", "resume", "proceed", "goahead", "again",
 		"重试", "重新尝试", "再次尝试", "继续", "继续执行", "重新执行", "恢复执行", "再试", "同意", "确认", "可以", "好的",
 	}):
 		return "retry_same_step"

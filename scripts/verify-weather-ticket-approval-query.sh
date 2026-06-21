@@ -7,6 +7,7 @@ BASE_URL="${WORKORCH_WEATHER_GOVERNANCE_BASE_URL:-${WORKORCH_BASE_URL:-http://12
 MOCK_ADDR="${WORKORCH_WEATHER_GOVERNANCE_MOCK_ADDR:-127.0.0.1:18190}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_WEATHER_GOVERNANCE_SUFFIX:-$$}"
+ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_WEATHER_GOVERNANCE_ACTIVATION_RUN_WAIT_SECONDS:-60}"
 LLM_MODE="${WORKORCH_WEATHER_GOVERNANCE_LLM_MODE:-}"
 if [[ -z "$LLM_MODE" ]]; then
   if [[ "${CI:-}" == "true" ]]; then
@@ -725,6 +726,81 @@ PY
   return 1
 }
 
+capture_runs_before_activation() {
+  local output_file="$1"
+  curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"
+}
+
+validate_activation_command_response() {
+  local response_file="$1"
+  local expected_request_id="$2"
+  local expected_reason="$3"
+  python3 - "$response_file" "$expected_request_id" "$expected_reason" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+expected_request_id = sys.argv[2]
+expected_reason = sys.argv[3]
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if data.get("requestId") != expected_request_id:
+    errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
+if data.get("reason") != expected_reason:
+    errors.append(f"reason is {data.get('reason')!r}, want {expected_reason!r}")
+if errors:
+    raise SystemExit("\n".join(errors))
+PY
+}
+
+wait_activation_run() {
+  local before_runs_file="$1"
+  local runs_file="$2"
+  local output_file="$3"
+  local run_id=""
+  local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
+  while (( SECONDS <= deadline )); do
+    if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$runs_file"; then
+      run_id="$(python3 - "$runs_file" "$before_runs_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+before_data = json.load(open(sys.argv[2], encoding="utf-8"))
+before = {str(item.get("id") or "") for item in before_data.get("runs", []) if item.get("id")}
+new_runs = [
+    item for item in data.get("runs", [])
+    if item.get("id") and str(item.get("id")) not in before
+]
+if not new_runs:
+    raise SystemExit(1)
+print(new_runs[-1]["id"])
+PY
+)" && {
+        python3 - "$runs_file" "$run_id" "$output_file" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+run_id = sys.argv[2]
+run = next((item for item in data.get("runs", []) if item.get("id") == run_id), {"id": run_id})
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump({"run": run}, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+        echo "$run_id"
+        return 0
+      }
+    fi
+    sleep 1
+  done
+  echo "activation accepted but run did not materialize within ${ACTIVATION_RUN_WAIT_SECONDS}s for workspace $workspace_id" >&2
+  return 1
+}
+
 wait_workspace_list_projection() {
   local workspace_id="$1"
   local run_id="$2"
@@ -970,19 +1046,18 @@ post_json_file "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" "$TMP_D
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 [[ -n "$dod_id" ]]
 
+activation_request_id="weather-governance-e2e-$VERIFY_SUFFIX"
+activation_reason="e2e_resume"
+capture_runs_before_activation "$TMP_DIR/decision-activation-before-runs.json"
 post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-  '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
+  '{"intent":"resume","requestId":"'"$activation_request_id"'","reason":"'"$activation_reason"'","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"'"$PROVIDER_ID"'","mcpServerIds":["'"$MCP_SERVER_ID"'"],"priority":3}' \
   "$TMP_DIR/decision-activation.json"
-run_id="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.id")"
-activation_state="$(json_path "$TMP_DIR/decision-activation.json" "activation.run.state")"
-activation_state_file="$TMP_DIR/decision-activation.json"
-activation_state_prefix="activation.run"
-if [[ "$activation_state" == "running" ]]; then
-  wait_run_state_any "$run_id" "$TMP_DIR/decision-status.json" "blocked_on_decision" "blocked_on_approval" "completed"
-  activation_state="$(json_path "$TMP_DIR/decision-status.json" "status.state")"
-  activation_state_file="$TMP_DIR/decision-status.json"
-  activation_state_prefix="status"
-fi
+validate_activation_command_response "$TMP_DIR/decision-activation.json" "$activation_request_id" "$activation_reason"
+run_id="$(wait_activation_run "$TMP_DIR/decision-activation-before-runs.json" "$TMP_DIR/decision-activation-runs.json" "$TMP_DIR/decision-activation-run.json")"
+wait_run_state_any "$run_id" "$TMP_DIR/decision-status.json" "blocked_on_decision" "blocked_on_approval" "completed"
+activation_state="$(json_path "$TMP_DIR/decision-status.json" "status.state")"
+activation_state_file="$TMP_DIR/decision-status.json"
+activation_state_prefix="status"
 
 python3 - "$TMP_DIR/decision-resolution.json" "$COUNTRY" "$PROVINCE" "$CITY" "$LOOKUP_NAME" <<'PY'
 import json

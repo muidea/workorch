@@ -52,7 +52,7 @@ func ActivateWorkspaceExecutionView(ctx context.Context, request ActivateWorkspa
 				if strings.TrimSpace(cmd.GoalID) != "" || strings.TrimSpace(cmd.DoDID) != "" {
 					return readmodelcore.WorkspaceExecutionActivation{}, replaceErr
 				}
-			} else if cmd.Restart && run.State != common.RunStateCreated {
+			} else if cmd.Restart {
 				runID, err := createReplacementWorkspaceExecutionRun(ctx, request, workspace, goal, dod, run.ID)
 				if err != nil {
 					return readmodelcore.WorkspaceExecutionActivation{}, err

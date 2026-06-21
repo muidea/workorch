@@ -13,7 +13,7 @@ func MapTaskProgress(snapshot readmodelcore.RunSnapshot, labels RunTaskProgressL
 		RunID:       snapshot.Run.ID,
 		State:       snapshot.Run.State,
 		Recovery: readmodelcore.RecoveryPlan{
-			Mode:       "continue",
+			Mode:       "resume",
 			NextAction: labels.RecoveryNextAction,
 			RunID:      snapshot.Run.ID,
 		},

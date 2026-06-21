@@ -137,9 +137,15 @@ func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText
 	if err != nil {
 		return fmt.Errorf("define dod: %w", err)
 	}
-	run, err := a.be.Run().Activate(ctx, common.WorkspaceID(workspaceID), backend.ActivateRunRequest{
-		GoalID: goal.ID,
-		DoDID:  dod.ID,
+	run, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
+		WorkspaceID: common.WorkspaceID(workspaceID),
+		Intent:      backend.RunCommandIntentResume,
+		Reason:      "user_requested",
+		Source:      "agent",
+		Activation: backend.ActivateRunRequest{
+			GoalID: goal.ID,
+			DoDID:  dod.ID,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("activate execution: %w", err)
@@ -276,7 +282,17 @@ func (a *Agent) ResumeRun(ctx context.Context, workspaceID string, runID string)
 	if a.be == nil {
 		return fmt.Errorf("agent backend is required")
 	}
-	_, err := a.be.Run().Resume(ctx, common.WorkspaceID(strings.TrimSpace(workspaceID)), common.RunID(runID))
+	wsID := common.WorkspaceID(strings.TrimSpace(workspaceID))
+	if wsID == "" {
+		return fmt.Errorf("workspace is required")
+	}
+	_, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
+		WorkspaceID:   wsID,
+		ExpectedRunID: common.RunID(strings.TrimSpace(runID)),
+		Intent:        backend.RunCommandIntentResume,
+		Reason:        "user_requested",
+		Source:        "agent",
+	})
 	return err
 }
 

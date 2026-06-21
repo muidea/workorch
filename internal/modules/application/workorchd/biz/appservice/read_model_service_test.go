@@ -468,14 +468,14 @@ func TestProjectRunSnapshotDetailBoundsLargeCollectionsAndOmitsRawPayloads(t *te
 				"failedStepInput":        rawPayload,
 			},
 			ResolutionID:      "resolution-" + suffix,
-			ResolutionType:    "continue",
+			ResolutionType:    "resume",
 			ResolutionPayload: rawPayload,
 		})
 		snapshot.Approvals = append(snapshot.Approvals, Approval{
 			ID:      "approval-" + suffix,
 			RunID:   "run-large",
 			Reason:  "needs approval",
-			Action:  "continue",
+			Action:  "resume",
 			State:   "approved",
 			Context: rawPayload,
 		})
@@ -3153,7 +3153,7 @@ func TestMapTaskProgressProjectsRepairLoopState(t *testing.T) {
 		progress.RepairLoop.LastFailureClass != "shell_command_failed" ||
 		progress.RepairLoop.LastFailureSignature != "kind=shell/command" ||
 		progress.RepairLoop.LastFailureStepID != "run-repair-loop/block/run-tests" ||
-		progress.RepairLoop.NextAction != "continue_run" ||
+		progress.RepairLoop.NextAction != "resume_run" ||
 		progress.RepairLoop.LastFailureTargetScope != "target.txt" ||
 		progress.RepairLoop.RepeatedFailureReason != "same_target_scope_repeated_failure" ||
 		progress.RepairLoop.LastRepairInputBytes == 0 {
@@ -3450,8 +3450,8 @@ func TestReadRunContextBundleWithBackendReturnsRecoveryContextAndCompressionCand
 	if bundle.WorkspaceID != string(workspaceID) || bundle.RunID != string(runID) || bundle.Mode != "run_recovery" {
 		t.Fatalf("bundle identity = %+v, want run recovery bundle", bundle)
 	}
-	if bundle.TaskProgress.RunID != string(runID) || bundle.Recovery.Mode != "continue" {
-		t.Fatalf("bundle progress/recovery = %+v/%+v, want continue run progress", bundle.TaskProgress, bundle.Recovery)
+	if bundle.TaskProgress.RunID != string(runID) || bundle.Recovery.Mode != "resume" {
+		t.Fatalf("bundle progress/recovery = %+v/%+v, want resume run progress", bundle.TaskProgress, bundle.Recovery)
 	}
 	if bundle.CompressedContext.Version != "workorch.compressedContext.v1" ||
 		bundle.CompressedContext.Mode != "deterministic_recovery_summary" ||

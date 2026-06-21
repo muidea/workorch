@@ -488,7 +488,7 @@ func TestResolveDecisionWithSessionSelectsContinuationCandidateFromApproveIntent
 		t.Fatalf("decision = %+v, want resolved provide_missing_info", item)
 	}
 	if item.ResolutionPayload["executionTargetMode"] != "init_from_scratch" ||
-		item.ResolutionPayload["candidateSelectionMode"] != "semantic_continue" {
+		item.ResolutionPayload["candidateSelectionMode"] != "semantic_resume" {
 		t.Fatalf("resolutionPayload = %+v, want selected continuation candidate", item.ResolutionPayload)
 	}
 	fields, ok := item.ResolutionPayload["selectedCandidateFields"].([]any)

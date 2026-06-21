@@ -1586,6 +1586,88 @@ func TestBuildConvergenceContractRestoresProfileRequiredStateChangingEvidenceWhe
 	}
 }
 
+func TestBuildConvergenceContractAllowsPrimaryStateChangeFromCoverageTargetsWithoutSnapshot(t *testing.T) {
+	run := &runmodel.Run{
+		ID: "run-convergence-primary-state-change-greenfield",
+		ExecutionContext: map[string]any{
+			"executionContract": map[string]any{
+				"profileContracts": map[string]any{
+					"neutral-profile": map[string]any{
+						"evidenceRequirements": []map[string]any{{
+							"id":                    "source_change",
+							"scope":                 "deliverable",
+							"evidenceRole":          "primary_state_change",
+							"acceptedStepKinds":     []string{"patch/apply"},
+							"requireDirectEvidence": true,
+						}},
+					},
+				},
+			},
+		},
+	}
+	input := map[string]any{
+		stepInputKeyRuntimeStage:          runtimeStageRepair,
+		stepInputKeyRuntimeStageMode:      "strict_convergence",
+		"repairObjective":                 repairObjectiveAcquireFailureEvidence,
+		"concreteFailureEvidenceRequired": true,
+		"coverageRepairRequired":          true,
+		coverageFocusKey: map[string]any{
+			"id":                  "focus-cwi-source-change",
+			"coverageWorkItemIds": []string{"cwi-source-change"},
+			"evidenceRole":        "primary_state_change",
+			"targetRefs":          []string{"source_change"},
+			"state":               "active",
+		},
+		"coverageTargetSet": []map[string]any{{
+			"kind":                "deliverable",
+			"item":                "source_change",
+			"coverageTargetToken": "source_change",
+			"targetText":          "source_change",
+			"evidenceRole":        "primary_state_change",
+			"state":               "failed",
+		}},
+		"repairActionPackage": map[string]any{
+			"coverageRepairRequired": true,
+			"coverageTargetSet": []map[string]any{{
+				"kind":                "deliverable",
+				"item":                "source_change",
+				"coverageTargetToken": "source_change",
+				"targetText":          "source_change",
+				"evidenceRole":        "primary_state_change",
+				"state":               "failed",
+			}},
+			"requiredOutput": evidenceAcquisitionRequiredOutput(stateChangingRepairRequiredOutput()),
+		},
+	}
+	failed := &runmodel.Step{
+		ID:     "run-convergence-primary-state-change-greenfield/repair-001",
+		Kind:   llmWorkspaceExecutionStepKind,
+		Input:  cloneStepPayload(input),
+		Output: map[string]any{"error": "invalid llm decision json: no json object found"},
+	}
+
+	contract := BuildConvergenceContract(run, nil, failed, map[string]any{"input": cloneStepPayload(input)}, nil)
+
+	if contract.State != convergenceStateNeedStateChange {
+		t.Fatalf("contract state = %q, want %q; contract=%+v", contract.State, convergenceStateNeedStateChange, contract)
+	}
+	pkg := mapFromValue(contract.RepairActionPackage)
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) ||
+		!stringSliceContains(stringSliceFromValue(required["acceptedKinds"]), "patch/apply") ||
+		boolValue(required["stateChangingForbidden"]) {
+		t.Fatalf("requiredOutput = %+v, want patch/apply state-changing output allowed", required)
+	}
+	if !boolValue(pkg["primaryStateChangeWithoutTargetEvidence"]) ||
+		!boolValue(pkg["primaryStateChangeCoverageScoped"]) {
+		t.Fatalf("repairActionPackage = %+v, want coverage-scoped primary state change without target evidence", pkg)
+	}
+	applied := ApplyConvergenceContract(cloneStepPayload(input), contract)
+	if boolValue(applied["concreteFailureEvidenceRequired"]) || stringFromMap(applied, "repairObjective") != repairObjectiveStateChangingOutput {
+		t.Fatalf("applied input = %+v, want state-changing repair instead of evidence acquisition", applied)
+	}
+}
+
 func TestBuildConvergenceContractDerivesProfileEvidenceTargetFromCoverageWorkItemContext(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-convergence-profile-evidence-cwi-target",

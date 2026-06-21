@@ -236,6 +236,9 @@ func runExecutionContextPackage(ctx context.Context, deps executionContextPackag
 	if context := mapFromValue(executionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		ret[coverageWorkItemContextKey] = context
 	}
+	if baseline := mapFromValue(executionContext[gapBaselineKey]); len(baseline) > 0 {
+		ret[gapBaselineKey] = baseline
+	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(executionContext); len(acceptance) > 0 {
 		ret["acceptance"] = acceptance
 	}

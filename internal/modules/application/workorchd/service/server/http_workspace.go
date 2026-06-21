@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -299,29 +300,36 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			http.NotFound(w, r)
 			return
 		}
-		var req activateWorkspaceExecutionRequest
+		var req workspaceExecutionCommandRequest
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.metrics.workspaceActivationRequests.Add(1)
 		priority := runPriorityFromRequest(r, req.Priority)
-		topic := workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested
-		if req.Restart {
-			topic = workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested
+		topic := workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested
+		intent := strings.TrimSpace(req.Intent)
+		if intent == "" {
+			intent = "resume"
 		}
-		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, workspaceID, "", activationRequestSchedulerPayload(workspaceID, req, priority)); err != nil {
+		if req.Restart {
+			intent = "restart"
+		}
+		switch intent {
+		case "resume", "restart":
+		default:
+			writeBusinessError(w, fmt.Errorf("%w: workspace execution command supports resume or restart intent, got %q", common.ErrInvalidArgument, intent))
+			return
+		}
+		payload := workspaceExecutionCommandSchedulerPayload(workspaceID, req, priority)
+		payload[events.PayloadKeyIntent] = intent
+		payload = prepareHTTPSchedulerCommandPayload(topic, workspaceID, "", payload)
+		if err := state.publishWorkorchDSchedulerCommand(r.Context(), topic, workspaceID, "", payload); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"service":     "workorch",
-			"backend":     state.config.Backend,
-			"dataRoot":    state.config.DataRoot,
-			"accepted":    true,
-			"workspaceId": workspaceID,
-		})
+		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, workspaceID, "", "execution-activation", payload))
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/execution-restarts", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -330,25 +338,22 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 			http.NotFound(w, r)
 			return
 		}
-		var req activateWorkspaceExecutionRequest
+		var req workspaceExecutionCommandRequest
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		priority := runPriorityFromRequest(r, req.Priority)
 		req.Restart = true
-		if err := state.publishWorkorchDSchedulerCommand(r.Context(), workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested, workspaceID, "", activationRequestSchedulerPayload(workspaceID, req, priority)); err != nil {
+		payload := workspaceExecutionCommandSchedulerPayload(workspaceID, req, priority)
+		payload[events.PayloadKeyIntent] = "restart"
+		payload = prepareHTTPSchedulerCommandPayload(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, "", payload)
+		if err := state.publishWorkorchDSchedulerCommand(r.Context(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, "", payload); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"service":     "workorch",
-			"backend":     state.config.Backend,
-			"dataRoot":    state.config.DataRoot,
-			"accepted":    true,
-			"workspaceId": workspaceID,
-		})
+		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(state.config, workspaceID, "", "execution-restart", payload))
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/template-binding-refresh", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(appservice.ContextWithEventHub(r.Context(), state.eventHub))
@@ -552,7 +557,7 @@ func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverStat
 	})
 }
 
-func activationRequestSchedulerPayload(workspaceID string, req activateWorkspaceExecutionRequest, priority int) map[string]any {
+func workspaceExecutionCommandSchedulerPayload(workspaceID string, req workspaceExecutionCommandRequest, priority int) map[string]any {
 	return map[string]any{
 		events.PayloadKeyWorkspaceID:           workspaceID,
 		events.PayloadKeyGoalID:                req.GoalID,
@@ -565,6 +570,11 @@ func activationRequestSchedulerPayload(workspaceID string, req activateWorkspace
 		"capabilityIds":                        req.CapabilityIDs,
 		"memoryIds":                            req.MemoryIDs,
 		"dialogLanguage":                       req.DialogLanguage,
+		events.PayloadKeyReason:                req.Reason,
+		events.PayloadKeySource:                schedulerCommandSource(req.Source, "http"),
+		events.PayloadKeyRequestID:             req.RequestID,
+		events.PayloadKeyDefinitionRevision:    req.DefinitionRevision,
+		events.PayloadKeyDecisionID:            req.DecisionID,
 		events.PayloadKeyPriority:              priority,
 		events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
 	}

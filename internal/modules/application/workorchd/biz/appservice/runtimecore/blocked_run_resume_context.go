@@ -16,8 +16,8 @@ func ResolvedDecisionBlockerContext(item *runmodel.Run, language string) (readmo
 		EvidenceRef: string(item.BlockingTicketID),
 	}
 	recovery := readmodelcore.RecoveryPlan{
-		Mode:             "continue",
-		NextAction:       "continue_run",
+		Mode:             "resume",
+		NextAction:       "resume_run",
 		RunID:            string(item.ID),
 		BlockingTicketID: string(item.BlockingTicketID),
 		Reason:           localizationcore.BlockerReason(language, "decision", "resolved"),
@@ -34,8 +34,8 @@ func ApprovedApprovalBlockerContext(item *runmodel.Run, language string) (readmo
 		EvidenceRef: string(item.BlockingApprovalID),
 	}
 	recovery := readmodelcore.RecoveryPlan{
-		Mode:               "continue",
-		NextAction:         "continue_run",
+		Mode:               "resume",
+		NextAction:         "resume_run",
 		RunID:              string(item.ID),
 		BlockingApprovalID: string(item.BlockingApprovalID),
 		Reason:             localizationcore.BlockerReason(language, "approval", "approved"),

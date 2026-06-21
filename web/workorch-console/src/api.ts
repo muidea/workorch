@@ -101,6 +101,30 @@ function runPath(workspaceId: string, runId: string, action?: string) {
   return `${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodedRunId}${suffix}`;
 }
 
+type RunCommandAcceptedResponse = {
+  accepted?: boolean;
+  workspaceId?: string;
+  runId?: string;
+  action?: string;
+  intent?: string;
+  requestId?: string;
+  run?: Run;
+};
+
+function runCommandRequestId(intent: string, workspaceId: string, runId: string) {
+  const suffix = Math.random().toString(36).slice(2, 10);
+  return `web-${intent}-${workspaceId || 'workspace'}-${runId || 'run'}-${Date.now()}-${suffix}`;
+}
+
+function runCommandBody(intent: string, workspaceId: string, runId: string) {
+  return JSON.stringify({
+    intent,
+    requestId: runCommandRequestId(intent, workspaceId, runId),
+    reason: 'user_requested',
+    source: 'web'
+  });
+}
+
 export const workorchApi = {
   healthz: () => request<ServiceStatus>('/healthz'),
   readyz: () => request<ServiceStatus>('/readyz'),
@@ -338,23 +362,34 @@ export const workorchApi = {
     return body.run;
   },
   startRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
-    const body = await request<{ run: Run }>(`${runPath(workspaceId, runId, 'start')}${querySuffix({ priority })}`, { method: 'POST' });
-    return body.run;
+    return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'start')}${querySuffix({ priority })}`, {
+      method: 'POST',
+      body: runCommandBody('resume', workspaceId, runId)
+    });
   },
   resumeRun: async (runId: string, priority: number | undefined, workspaceId: string) => {
-    const body = await request<{ run: Run }>(`${runPath(workspaceId, runId, 'resume')}${querySuffix({ priority })}`, { method: 'POST' });
-    return body.run;
+    return request<RunCommandAcceptedResponse>(`${runPath(workspaceId, runId, 'resume')}${querySuffix({ priority })}`, {
+      method: 'POST',
+      body: runCommandBody('resume', workspaceId, runId)
+    });
   },
-  activateWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
+  resumeWorkspaceExecution: async (workspaceId: string, goalIdOrRequest?: string | WorkspaceExecutionActivationRequest, doDId?: string) => {
     const requestBody: WorkspaceExecutionActivationRequest = typeof goalIdOrRequest === 'object'
       ? goalIdOrRequest
       : { goalId: goalIdOrRequest, doDId };
     const activationRequest: WorkspaceExecutionActivationRequest = !requestBody.dialogLanguage && typeof navigator !== 'undefined'
       ? { ...requestBody, dialogLanguage: navigator.language }
       : requestBody;
-    const body = await request<{ activation: WorkspaceExecutionActivation }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
+    const commandRequest: WorkspaceExecutionActivationRequest = {
+      ...activationRequest,
+      intent: activationRequest.intent || 'resume',
+      requestId: activationRequest.requestId || runCommandRequestId('resume', workspaceId, 'workspace'),
+      reason: activationRequest.reason || 'user_requested',
+      source: activationRequest.source || 'web'
+    };
+    const body = await request<{ activation?: WorkspaceExecutionActivation } & RunCommandAcceptedResponse>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',
-      body: JSON.stringify(activationRequest)
+      body: JSON.stringify(commandRequest)
     });
     return body.activation;
   },

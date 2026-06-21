@@ -131,6 +131,9 @@ func BuildConvergenceContract(
 		contract.GovernanceReason = governanceReason
 		return contract
 	}
+	if recoveryContract, ok := contractViolationRecoveryStateChangingContract(input, failedStep, contract.SourceRefs); ok {
+		return recoveryContract
+	}
 	if convergenceCapabilityInputLocatorNeedsEvidence(input, failedStep) {
 		contract.State = convergenceStateNeedEvidence
 		contract.RuntimeStage = runtimeStageRepair
@@ -257,6 +260,55 @@ func BuildConvergenceContract(
 		return contract
 	}
 	return contract
+}
+
+func contractViolationRecoveryStateChangingContract(input map[string]any, failedStep *runModel.Step, sourceRefs []map[string]any) (ConvergenceContract, bool) {
+	if len(input) == 0 || !boolValue(input["contractViolationRetry"]) {
+		return ConvergenceContract{}, false
+	}
+	recovery := mapFromValue(input[stepInputKeyContractViolationRecovery])
+	if len(recovery) == 0 {
+		return ConvergenceContract{}, false
+	}
+	expected := mapFromValue(recovery["expectedContract"])
+	if len(expected) == 0 {
+		return ConvergenceContract{}, false
+	}
+	if !boolValue(expected["stateChangingOutputRequired"]) &&
+		strings.TrimSpace(stringFromMap(expected, "repairObjective")) != repairObjectiveStateChangingOutput {
+		if convergence := mapFromValue(expected["convergenceContract"]); len(convergence) > 0 {
+			if !boolValue(convergence["stateChangingOutputRequired"]) &&
+				strings.TrimSpace(stringFromMap(convergence, "repairObjective")) != repairObjectiveStateChangingOutput &&
+				strings.TrimSpace(stringFromMap(convergence, "state")) != convergenceStateNeedStateChange {
+				return ConvergenceContract{}, false
+			}
+		} else {
+			return ConvergenceContract{}, false
+		}
+	}
+	pkg := cloneStepPayload(mapFromValue(input["repairActionPackage"]))
+	if len(pkg) == 0 && failedStep != nil {
+		pkg = cloneStepPayload(mapFromValue(failedStep.Input["repairActionPackage"]))
+	}
+	if len(pkg) == 0 {
+		pkg = map[string]any{}
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) {
+		required = enforceStateChangingRequiredOutputForConvergence(pkg)
+		addStrategyReassessmentRequiredOutputContract(pkg, required)
+	}
+	pkg["requiredOutput"] = required
+	return ConvergenceContract{
+		State:                       convergenceStateNeedStateChange,
+		RuntimeStage:                runtimeStageRepair,
+		RuntimeStageMode:            "strict_convergence",
+		RepairObjective:             repairObjectiveStateChangingOutput,
+		StateChangingOutputRequired: true,
+		RepairActionPackage:         pkg,
+		TargetEvidence:              convergenceTargetEvidence(input, pkg),
+		SourceRefs:                  sourceRefs,
+	}, true
 }
 
 func convergenceStateChangingRepairActionPackage(input map[string]any, failedStep *runModel.Step) map[string]any {
@@ -2004,9 +2056,15 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 	mergeCurrentRepairTargetEvidenceForProfileStateChange(input, pkg, required)
 	if primaryStateChangeRequired {
 		if !stateChangingRepairHasActionableImplementationSurface(input, pkg) {
-			return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
-		}
-		if boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) {
+			if !profilePrimaryStateChangeCanProceedFromCoverageTargets(input, pkg, targets) {
+				return profileStateChangingEvidenceAcquisitionRepairActionPackage(pkg, required)
+			}
+			pkg["primaryStateChangeWithoutTargetEvidence"] = true
+			pkg["primaryStateChangeCoverageScoped"] = true
+			required["mustReferenceCoverageWorkItem"] = true
+			required["targetRelation"] = "coverage_target_scoped_greenfield_or_expansion_state_change"
+			required["coverageScopedTargetRule"] = "when no current target snapshot is available, patch/apply may create or extend cohesive deliverable resources only when it declares coverageTargets matching coverageTargetSet and does not claim to patch an existing unsafe snapshot"
+		} else if boolValue(input["emptyWorkspaceEvidenceEscalatedToImplementation"]) {
 			pkg["primaryStateChangeWithoutTargetEvidence"] = true
 			required["mustReferenceCoverageWorkItem"] = true
 		}
@@ -2021,6 +2079,91 @@ func stateChangingEvidenceRequirementRepairActionPackage(run *runModel.Run, inpu
 		"failed_assessment_or_blocker_when_required_evidence_cannot_be_produced",
 	}
 	return pkg
+}
+
+func profilePrimaryStateChangeCanProceedFromCoverageTargets(input map[string]any, pkg map[string]any, targets []map[string]any) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromMap(input, "repairObjective")) != repairObjectiveAcquireFailureEvidence ||
+		!boolValue(input["concreteFailureEvidenceRequired"]) {
+		return false
+	}
+	if repairContextHasCapabilityInputLocatorInvalid(input, pkg) {
+		return false
+	}
+	if boolValue(input["requiresCurrentTargetSnapshotForStateChange"]) ||
+		boolValue(pkg["requiresCurrentTargetSnapshotForStateChange"]) {
+		return false
+	}
+	if !coverageInputCurrentFocusAllowsPrimaryStateChange(input) {
+		return false
+	}
+	for _, target := range targets {
+		if coverageTargetClosedForPrimaryStateChange(target) {
+			continue
+		}
+		for _, key := range []string{"coverageTargetToken", "goalRequirementId", "sourceRequirementId", "targetText", "item", "raw", "requirement"} {
+			if strings.TrimSpace(stringFromMap(target, key)) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageInputCurrentFocusAllowsPrimaryStateChange(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, focus := range []map[string]any{
+		mapFromValue(input[coverageFocusKey]),
+		mapFromValue(mapFromValue(input[coverageWorkItemContextKey])["currentFocus"]),
+		mapFromValue(mapFromValue(mapFromValue(input["repairActionPackage"])[coverageWorkItemContextKey])["currentFocus"]),
+		mapFromValue(mapFromValue(input["repairActionPackage"])[coverageFocusKey]),
+	} {
+		if !coverageFocusAllowsPrimaryStateChange(focus) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func coverageFocusAllowsPrimaryStateChange(focus map[string]any) bool {
+	if len(focus) == 0 {
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(focus, "state")) {
+	case "satisfied", "evidence_ready":
+		return false
+	}
+	switch strings.TrimSpace(stringFromMap(focus, "status")) {
+	case "satisfied", "evidence_ready":
+		return false
+	}
+	if normalizedCoverageEvidenceRole(stringFromMap(focus, "evidenceRole")) == "primary_state_change" {
+		return true
+	}
+	for _, key := range []string{"id", "sliceId", "sourceRequirementId", "targetText", "coverageTargetToken", "sourcePath"} {
+		if coverageFocusTokenAllowsPrimaryStateChange(stringFromMap(focus, key)) {
+			return true
+		}
+	}
+	for _, key := range []string{"targetRefs", "sourceRequirementAliases", "coverageTargets"} {
+		for _, token := range stringSliceFromValue(focus[key]) {
+			if coverageFocusTokenAllowsPrimaryStateChange(token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverageFocusTokenAllowsPrimaryStateChange(token string) bool {
+	token = normalizeCoverageGapRepairToken(token)
+	compact := strings.NewReplacer("_", "", "-", "", " ", "").Replace(token)
+	return strings.Contains(compact, "primarystatechange")
 }
 
 func coverageTargetsMissingProfileStateChangeEvidence(targets []map[string]any) []map[string]any {

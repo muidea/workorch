@@ -692,19 +692,21 @@ Web/TUI 自行 fallback 聚合。
 - `memoryItemsResponse.memory`
   - 可附带 `vectorReady` / `vectorDimension` / `vectorScore`
 
-#### Activation / Setup Projection Semantics
+#### Execution Command / Setup Projection Semantics
 
 | Response | 字段 | 语义方向 |
 | --- | --- | --- |
 | `workspaceSetupDraftSessionResponse.draftSession.workspace` | 创建前 workspace 草案 | 仅服务 setup draft，不是正式 workspace |
 | `workspaceSetupDraftSessionResponse.draftSession.messages` | 对话历史 | 用于草案修订，不进入 run/ticket/approval |
 | `workspaceSetupDraftSessionResponse.draftSession.draft` | Goal/DoD 结构化草案 | 需用户确认后才正式落库 |
-| `workspaceExecutionActivationResponse.activation` | execution activation contract | 轻量返回本次 run 生效的 execution context / contract / bindings |
+| `workspaceRunCommandAcceptedResponse` | command accepted metadata | `accepted` / `intent` / `requestId` / `source` / `reason`，表示命令已进入 workorchd 调度主路径 |
+| `workspaceExecutionActivationResponse.activation` | execution activation contract | 兼容轻量视图；语义上只是本次 run 生效的 execution context / contract / bindings，不代表端侧拥有 activation 状态机 |
 
 补充：
 
 - `activation.snapshot`
-  - 是 lightweight activation projection，不等于 full workspace snapshot
+  - 是 lightweight execution-context projection，不等于 full workspace snapshot
+  - 新的 Web/TUI 默认执行路径应以 command accepted response + workorchd projection 为准，不依赖同步 activation snapshot 推断运行状态
 
 #### Coverage / Capability / Trace Fields
 
@@ -777,9 +779,9 @@ Web/TUI 自行 fallback 聚合。
 - create / update workspace
   - `createWorkspaceRequest`
   - `deleteWorkspaceRequest`
-- run / activation
+- run / execution command
   - `createRunRequest`
-  - `activateWorkspaceExecutionRequest`
+  - `resumeWorkspaceExecutionRequest`
 - governance
   - `resolveDecisionRequest`
   - `batchResolveDecisionsRequest`
@@ -806,7 +808,7 @@ Web/TUI 自行 fallback 聚合。
 | --- | --- |
 | workspace create/delete | `createWorkspaceRequest` / `deleteWorkspaceRequest` |
 | run create | `createRunRequest` |
-| execution activation | `activateWorkspaceExecutionRequest` |
+| workspace execution resume command | `resumeWorkspaceExecutionRequest` |
 | decision resolve | `resolveDecisionRequest` / `batchResolveDecisionsRequest` |
 | approval resolve | `batchResolveApprovalsRequest` |
 | goal / DoD write | `defineGoalRequest` / `defineDoDRequest` / `goalDoDQualityCheckRequest` |
@@ -826,7 +828,7 @@ Web/TUI 自行 fallback 聚合。
 
 - 业务写接口优先使用结构化 command/request body
 - root/generated IDs 不应由客户端自由覆盖，除非接口明确允许
-- activation / governance / registry 写入都通过 appservice command 路径进入业务层
+- execution command / governance / registry 写入都通过 appservice command 路径进入业务层
 
 ### First-Cut Write Contract
 
@@ -834,7 +836,7 @@ Web/TUI 自行 fallback 聚合。
 | --- | --- | --- |
 | `createWorkspaceRequest` | `workspaceId?` / `title` / `deliverableDirectory` / `templateId` | 创建 Workspace，本体目录和 template 初始化入口 |
 | `createRunRequest` | `runId` / `goalId` / `doDId` | 在已定义 Goal/DoD 上创建 Run |
-| `activateWorkspaceExecutionRequest` | `goalId` / `doDId` / `llmProviderId` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 生成 execution activation contract |
+| `resumeWorkspaceExecutionRequest` | `intent=resume` / `requestId` / `source` / `reason` / `goalId` / `doDId` / `llmProviderId` / `soulId` / `skillIds` / `mcpServerIds` / `capabilityIds` / `memoryIds` | 提交 workspace-scoped resume command，并携带生成 execution activation contract 所需输入 |
 | `resolveDecisionRequest` | `resolutionType` / `resolutionPayload` | 解决 Ticket |
 | `batchResolveApprovalsRequest` | `approvalIds` / `action` | 批量批准/拒绝 Approval |
 | `defineGoalRequest` | `text` | 创建或更新 Goal 文本 |
@@ -877,7 +879,7 @@ Web/TUI 自行 fallback 聚合。
 
 优先顺序建议：
 
-1. `activateWorkspaceExecutionRequest`
+1. `resumeWorkspaceExecutionRequest`
 2. `resolveDecisionRequest` / `batchResolveApprovalsRequest`
 3. `goalDoDQualityCheckRequest`
 4. `createWorkspaceSetupDraftSessionRequest` / `appendWorkspaceSetupDraftMessageRequest`
@@ -1513,10 +1515,11 @@ HTTP 层统一支持：
 
 当前例外：
 
-- `POST /workspaces/:workspaceId/execution-activations` 返回 `200`
-  - 因为它返回 activation contract，而不是单纯资源创建确认
-- `POST /workspaces/:workspaceId/runs/:runId/start` / `POST /workspaces/:workspaceId/runs/:runId/resume` 返回 `200`
-  - 返回最新 `run` 视图
+- `POST /workspaces/:workspaceId/execution-activations` 返回 `202`
+  - 表示 workspace-scoped execution command 已被接受；响应必须携带 `intent`、`requestId`、`source`、`reason` 等 command metadata
+  - 该 endpoint 的资源名保留 execution activation，是因为请求体可携带生成 run execution context 的输入；端侧不得把它当作独立 activation 状态机
+- `POST /workspaces/:workspaceId/runs/:runId/start` / `POST /workspaces/:workspaceId/runs/:runId/resume` 返回 `202`
+  - 表示 run-scoped command 已被接受；后续状态以 workorchd projection / run snapshot 为准
 - `DELETE /memory/:memoryId` 返回 `200` + `{ "deleted": true }`
   - 不走 `204`
 
@@ -1528,8 +1531,10 @@ HTTP 层统一支持：
   - `workspaceId` 不能由客户端指定
 - `createRunRequest`
   - `goalId` 和 `doDId` 必须引用已定义对象
-- `activateWorkspaceExecutionRequest`
+- `resumeWorkspaceExecutionRequest`
+  - `intent` 为空时按 `resume` 处理；显式 `restart` 只允许 workspace-scoped replacement run；`replan` / `recover` 必须走 run-scoped command path
   - `priority` 既可来自请求体，也可被 query `priority` 覆盖
+  - 未提供 `requestId` 时由 workorchd 生成，并在 accepted response 与 projection 中暴露
 - `resolveDecisionRequest`
   - 通过 `resolutionType` / `resolutionPayload` 进入结构化治理路径
 - `batchResolveApprovalsRequest`

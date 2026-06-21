@@ -391,9 +391,15 @@ func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []
 		if err != nil {
 			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
 		}
-		run, err := be.Run().Activate(ctx, wsID, backend.ActivateRunRequest{
-			GoalID: goal.ID,
-			DoDID:  dod.ID,
+		run, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+			WorkspaceID: wsID,
+			Intent:      backend.RunCommandIntentResume,
+			Reason:      "user_requested",
+			Source:      "tui",
+			Activation: backend.ActivateRunRequest{
+				GoalID: goal.ID,
+				DoDID:  dod.ID,
+			},
 		})
 		if err != nil {
 			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
@@ -422,7 +428,7 @@ func PersistDoD(be backend.Backend, workspaceID string, items []string) tea.Cmd 
 
 const maxOperatorInputQueueItems = 20
 
-func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
+func ResumeRun(be backend.Backend, workspaceID string, runID string, operatorInput string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -452,30 +458,71 @@ func ContinueRun(be backend.Backend, workspaceID string, runID string, operatorI
 		}
 		if run == nil {
 			displayRun := selectWorkspaceDisplayRun(snapshot)
-			if displayRun != nil && runStateIsTerminal(displayRun.State) {
-				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Message: terminalRunContinueMessage(displayRun)}
+			expectedRunID := common.RunID("")
+			if runBelongsToWorkspace(displayRun, wsID) {
+				expectedRunID = displayRun.ID
 			}
-			return activateWorkspaceRunWithMessage(ctx, be, wsID, displayRun, operatorInput, "Activating workspace execution")
+			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+				WorkspaceID:           wsID,
+				ExpectedRunID:         expectedRunID,
+				Intent:                backend.RunCommandIntentResume,
+				Reason:                "user_requested",
+				Source:                "tui",
+				ExecutionContextPatch: operatorInputPatch(displayRun, operatorInput),
+			})
+			if err != nil {
+				return RunControlMsg{Run: displayRun, WorkspaceID: workspaceID, Error: err}
+			}
+			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
 		}
 		switch run.State {
 		case common.RunStateCompleted, common.RunStateFailed, common.RunStateCancelled, common.RunStateSuperseded:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: terminalRunContinueMessage(run)}
-		case common.RunStateRunning:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is already running; refreshing workspace state."}
-		case common.RunStateBlockedOnDecision:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before continuing."}
-		case common.RunStateBlockedOnApproval:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before continuing."}
-		case common.RunStateCreated:
-			return activateWorkspaceRunWithMessage(ctx, be, wsID, run, operatorInput, "Activating workspace execution")
-		case common.RunStateValidating:
-			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
-		default:
-			resumed, err := be.Run().Resume(ctx, wsID, run.ID, operatorInputPatch(run, operatorInput))
+			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+				WorkspaceID:           wsID,
+				ExpectedRunID:         run.ID,
+				Intent:                backend.RunCommandIntentResume,
+				Reason:                "user_requested",
+				Source:                "tui",
+				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+			})
 			if err != nil {
 				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
 			}
-			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Continuing active run"}
+			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Run resume accepted; refreshing workspace state."}
+		case common.RunStateRunning:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is already running; refreshing workspace state."}
+		case common.RunStateBlockedOnDecision:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for decision; answer the decision before resuming."}
+		case common.RunStateBlockedOnApproval:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is waiting for approval; resolve the approval before resuming."}
+		case common.RunStateCreated:
+			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+				WorkspaceID:           wsID,
+				ExpectedRunID:         run.ID,
+				Intent:                backend.RunCommandIntentResume,
+				Reason:                "user_requested",
+				Source:                "tui",
+				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+			})
+			if err != nil {
+				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
+			}
+			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming workspace execution"}
+		case common.RunStateValidating:
+			return RunControlMsg{Run: run, WorkspaceID: workspaceID, Message: "Run is validating; refreshing workspace state."}
+		default:
+			resumed, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+				WorkspaceID:           wsID,
+				ExpectedRunID:         run.ID,
+				Intent:                backend.RunCommandIntentResume,
+				Reason:                "user_requested",
+				Source:                "tui",
+				ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+			})
+			if err != nil {
+				return RunControlMsg{Run: run, WorkspaceID: workspaceID, Error: err}
+			}
+			return RunControlMsg{Run: resumed, WorkspaceID: workspaceID, Message: "Resuming active run"}
 		}
 	}
 }
@@ -508,21 +555,21 @@ func selectWorkspaceDisplayRun(snapshot *backend.WorkspaceSnapshotInfo) *backend
 	return selectWorkspaceRun("", snapshot.Runs)
 }
 
-func terminalRunContinueMessage(run *backend.RunInfo) string {
+func terminalRunResumeMessage(run *backend.RunInfo) string {
 	if run == nil {
-		return "No active workspace run; submit a goal or use /run restart."
+		return "No active workspace run; use /run resume to resume this workspace."
 	}
 	switch run.State {
 	case common.RunStateCompleted:
 		return "Workspace run is completed; use /run restart to start a new run."
 	case common.RunStateFailed:
-		return "Workspace run is failed; inspect failure or use /run restart."
+		return "Workspace run is failed; use /run resume to attempt recovery."
 	case common.RunStateCancelled:
-		return "Workspace run is cancelled; use /run restart to start a new run."
+		return "Workspace run is cancelled; use /run resume to resume if recoverable."
 	case common.RunStateSuperseded:
-		return "Workspace run is superseded; use /run restart to start a new run."
+		return "Workspace run is superseded; use /run resume to resume the current workspace."
 	default:
-		return "No active workspace run; submit a goal or use /run restart."
+		return "No active workspace run; use /run resume to resume this workspace."
 	}
 }
 
@@ -545,7 +592,15 @@ func RestartWorkspaceRun(be backend.Backend, workspaceID string, operatorInput s
 }
 
 func restartWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, operatorInput string) tea.Msg {
-	run, err := be.Run().Restart(ctx, workspaceID, backend.ActivateRunRequest{
+	run, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+		WorkspaceID: workspaceID,
+		Intent:      backend.RunCommandIntentRestart,
+		Reason:      "user_requested",
+		Source:      "tui",
+		Activation: backend.ActivateRunRequest{
+			Source:                "tui",
+			ExecutionContextPatch: operatorInputPatch(nil, operatorInput),
+		},
 		ExecutionContextPatch: operatorInputPatch(nil, operatorInput),
 	})
 	if err != nil {
@@ -559,7 +614,15 @@ func activateWorkspaceRun(ctx context.Context, be backend.Backend, workspaceID c
 }
 
 func activateWorkspaceRunWithMessage(ctx context.Context, be backend.Backend, workspaceID common.WorkspaceID, run *backend.RunInfo, operatorInput string, message string) tea.Msg {
-	activated, err := be.Run().Activate(ctx, workspaceID, backend.ActivateRunRequest{
+	activated, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
+		WorkspaceID: workspaceID,
+		Intent:      backend.RunCommandIntentResume,
+		Reason:      "user_requested",
+		Source:      "tui",
+		Activation: backend.ActivateRunRequest{
+			Source:                "tui",
+			ExecutionContextPatch: operatorInputPatch(run, operatorInput),
+		},
 		ExecutionContextPatch: operatorInputPatch(run, operatorInput),
 	})
 	if err != nil {

@@ -66,6 +66,8 @@ func contractViolationRuleFromType(violationType string) string {
 	case contractViolationGraphNodeReturnedGraph,
 		contractViolationRepairReturnedGraph:
 		return contractViolationRuleWrongOutputShape
+	case contractViolationAssessmentOnlyExecutableOutput:
+		return contractViolationRuleWrongOutputShape
 	case contractViolationCoverageTargetsRequired:
 		return contractViolationRuleCoverageMapIncomplete
 	case contractViolationDoDAssessmentEvidenceMissing:

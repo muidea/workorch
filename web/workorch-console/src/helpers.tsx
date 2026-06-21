@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
-import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, Decision, DoD, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetTrace, LLMModelCapabilityConfiguration, LLMProviderTemplate, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeExecution, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskProgress, UpdateLLMConfigurationRequest, UpdateLLMProviderConfiguration, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionActivationRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import { workorchApi } from './api';
 import { modelLabels } from './utils/constants';
 
@@ -71,7 +71,7 @@ export const progressKindLabels: Record<string, string> = {
 
 export const recoveryModeLabels: Record<string, string> = {
   idle: '待启动',
-  continue: '可继续',
+  resume: '可恢复',
   wait_decision: '等待决策',
   wait_approval: '等待审批',
   inspect_failure: '排查失败',
@@ -80,10 +80,10 @@ export const recoveryModeLabels: Record<string, string> = {
 };
 
 export const recoveryActionLabels: Record<string, string> = {
-  start_workspace_execution: '启动工作空间执行',
+  start_workspace_execution: '提交工作空间执行',
   inspect_active_run: '查看活跃运行',
-  continue_run: '继续运行',
-  continue_validation: '继续验收',
+  resume_run: '恢复运行',
+  resume_validation: '恢复验收',
   resolve_decision_ticket: '补充或处理决策工单',
   resolve_approval: '处理审批工单',
   inspect_result: '查看结果（Result）/交付物（Artifact）',
@@ -314,11 +314,11 @@ export function workspaceProcessItems(snapshot?: WorkspaceSnapshot, goals?: Goal
     ? stateLabel(currentRun?.state)
     : failed ? stateLabel(currentRun?.state)
       : currentRun?.state === 'validating' ? `正在执行${modelLabels.doDAssessment}`
-        : currentRun ? '等待运行证据闭环' : `尚未启动${modelLabels.run}`;
+        : currentRun ? '等待运行证据闭环' : `尚未提交${modelLabels.run}`;
   return [
     { title: '工作空间', description: snapshot?.workspace ? stateLabel(snapshot.workspace.state) : '未选择', status: snapshot?.workspace ? 'finish' as const : 'wait' as const },
     { title: '目标与验收', description: hasDefinition ? `${modelLabels.goal} / ${modelLabels.dod} 已定义` : missingDefinition, status: hasDefinition ? 'finish' as const : 'process' as const },
-    { title: '启动执行', description: currentRun ? `${currentRun.id} / ${stateLabel(currentRun.state)}` : `尚未启动${modelLabels.run}`, status: currentRun ? 'finish' as const : 'wait' as const },
+    { title: '提交执行', description: currentRun ? `${currentRun.id} / ${stateLabel(currentRun.state)}` : `尚未提交${modelLabels.run}`, status: currentRun ? 'finish' as const : 'wait' as const },
     { title: '治理处理', description: governanceDescription, status: blocked ? 'process' as const : currentRun ? 'finish' as const : 'wait' as const },
     { title: '证据验收', description: evidenceDescription, status: failed ? 'error' as const : completed ? 'finish' as const : terminal ? 'finish' as const : currentRun ? 'process' as const : 'wait' as const }
   ];
@@ -404,6 +404,76 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
       ) : null}
     </Space>
   );
+}
+
+export function gapBaselineCard(gap?: GapBaseline) {
+  if (!gap || gapBaselineEmpty(gap)) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 GapBaseline 投影" />;
+  }
+  const focusId = gapFocusValue(gap.currentFocus, 'id');
+  const focusState = gapFocusValue(gap.currentFocus, 'state');
+  const openCount = gap.openCoverageWorkItems?.length ?? 0;
+  const todoCount = gap.todoItems?.length ?? 0;
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap>
+        {gap.nextAction?.kind ? <Tag color="blue">next: {gap.nextAction.kind}</Tag> : null}
+        <Tag>todo {todoCount}</Tag>
+        <Tag>open {openCount}</Tag>
+        <Tag color="green">accepted evidence {gap.acceptedEvidenceRefs?.length ?? 0}</Tag>
+        <Tag color="red">rejected evidence {gap.rejectedEvidenceRefs?.length ?? 0}</Tag>
+      </Space>
+      <Descriptions
+        column={{ xs: 1, md: 2 }}
+        size="small"
+        items={[
+          { key: 'baselineRevision', label: 'Baseline Revision', children: gap.baselineRevision || '-' },
+          { key: 'definitionRevision', label: 'Definition Revision', children: gap.definitionRevision || '-' },
+          { key: 'run', label: 'Run', children: gap.runId || '-' },
+          { key: 'nextReason', label: 'Next Reason', children: gap.nextAction?.reason || '-' },
+          { key: 'currentFocus', label: 'Current Focus', children: focusId || '-' },
+          { key: 'focusState', label: 'Focus State', children: focusState ? stateTag(focusState) : '-' },
+          { key: 'acceptedEvidence', label: 'Accepted Evidence', children: compactTags(gap.acceptedEvidenceRefs ?? [], 4) },
+          { key: 'rejectedEvidence', label: 'Rejected Evidence', children: compactTags(gap.rejectedEvidenceRefs ?? [], 4) }
+        ]}
+      />
+      {gap.todoItems?.length ? (
+        <ProTable<GapTodoItem>
+          rowKey={(item, index) => item.id || `todo-${index}`}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 5 }}
+          size="small"
+          columns={[
+            { title: 'Todo', dataIndex: 'id', ellipsis: true },
+            { title: 'Source', dataIndex: 'source', width: 120 },
+            { title: 'Source Ref', dataIndex: 'sourceRef', ellipsis: true },
+            { title: 'Status', dataIndex: 'status', width: 120, render: (_, item) => item.status ? stateTag(item.status) : '-' },
+            { title: 'Priority', dataIndex: 'priority', width: 90 },
+            { title: 'Required Evidence', dataIndex: 'requiredEvidenceKinds', ellipsis: true, render: (_, item) => compactTags(item.requiredEvidenceKinds ?? [], 3) },
+            { title: 'Reason', dataIndex: 'reason', ellipsis: true }
+          ]}
+          dataSource={gap.todoItems}
+        />
+      ) : null}
+    </Space>
+  );
+}
+
+function gapBaselineEmpty(gap: GapBaseline) {
+  return !gap.baselineRevision &&
+    !gap.definitionRevision &&
+    !gap.nextAction?.kind &&
+    !gap.currentFocus &&
+    !(gap.openCoverageWorkItems?.length) &&
+    !(gap.todoItems?.length) &&
+    !(gap.acceptedEvidenceRefs?.length) &&
+    !(gap.rejectedEvidenceRefs?.length);
+}
+
+function gapFocusValue(focus: Record<string, unknown> | undefined, key: string) {
+  const value = focus?.[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function acceptanceProjectionEmpty(acceptance: AcceptanceProjection) {
@@ -2620,13 +2690,13 @@ export function workspaceBoardActivationHint(item: WorkspaceBoardItem) {
   const goals = item.snapshot.goals ?? [];
   const availableDoDs = readyDoDs(item.snapshot.dods ?? []);
   if (goals.length === 0) {
-    return `当前工作空间尚未定义目标，请进入工作空间补齐${modelLabels.goal}后再启动执行`;
+    return `当前工作空间尚未定义目标，请进入工作空间补齐${modelLabels.goal}后再提交执行`;
   }
   if (availableDoDs.length === 0) {
-    return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再启动执行`;
+    return `当前工作空间尚无可用验收标准，请进入工作空间补齐${modelLabels.dod}后再提交执行`;
   }
   if (goals.length > 1 || availableDoDs.length > 1) {
-    return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再启动执行`;
+    return `当前工作空间存在多个目标或验收标准，请进入工作空间选择明确的${modelLabels.goal}/${modelLabels.dod}后再提交执行`;
   }
-  return '当前工作空间无法确定启动上下文，请进入工作空间核对后再启动执行';
+  return '当前工作空间无法确定执行上下文，请进入工作空间核对后再提交执行';
 }

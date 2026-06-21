@@ -31,10 +31,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecs(
 		}
 		return nil, common.ErrConflict
 	}
-	if o.ensureCoverageLedger(ctx, run) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
-			return nil, err
-		}
+	if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+		return nil, err
+	}
+	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
+		return nil, err
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {
@@ -190,10 +191,11 @@ func (o *RuntimeOrchestrator) nextDispatchSpecsAfterStep(
 	if run == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	if o.ensureCoverageLedger(ctx, run) && o.runs != nil {
-		if err := o.runs.Update(ctx, run); err != nil {
-			return nil, err
-		}
+	if err := o.ensureGapBaselineBeforeDispatch(ctx, run); err != nil {
+		return nil, err
+	}
+	if gated, err := gapBaselineDispatchGate(run); gated || err != nil {
+		return nil, err
 	}
 	steps, err := o.steps.ListByRun(ctx, run.ID)
 	if err != nil {

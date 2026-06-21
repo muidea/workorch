@@ -162,6 +162,20 @@ func (f *fakeDoD) Update(ctx context.Context, wsID common.WorkspaceID, id common
 
 type fakeRun struct{ b *fakeBackend }
 
+func (f *fakeRun) Command(ctx context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+	switch req.Intent {
+	case "", backend.RunCommandIntentResume:
+		if req.ExpectedRunID == "" {
+			return f.Activate(ctx, req.WorkspaceID, req.Activation)
+		}
+		return f.Resume(ctx, req.WorkspaceID, req.ExpectedRunID, req.ExecutionContextPatch)
+	case backend.RunCommandIntentRestart:
+		return f.Restart(ctx, req.WorkspaceID, req.Activation)
+	default:
+		return nil, common.ErrInvalidArgument
+	}
+}
+
 func (f *fakeRun) Activate(ctx context.Context, wsID common.WorkspaceID, req backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	f.b.mu.Lock()
 	f.b.ActivateCalls = append(f.b.ActivateCalls, req)

@@ -45,7 +45,7 @@ func TestValidateLLMRepairCoverageFocusRejectsUnboundPatchGraph(t *testing.T) {
 					"patchType":       "file_write",
 					"content":         "secondary update",
 					"baseHash":        "hash-secondary",
-					"coverageTargets": []string{"secondary closure"},
+					"coverageTargets": []string{"unrelated closure"},
 				},
 			}},
 		},
@@ -54,6 +54,30 @@ func TestValidateLLMRepairCoverageFocusRejectsUnboundPatchGraph(t *testing.T) {
 	err := validateLLMExecutionOutputContract(run, step, output)
 	if err == nil || !strings.Contains(err.Error(), "repair_focus_mismatch") {
 		t.Fatalf("validateLLMExecutionOutputContract err = %v, want repair_focus_mismatch", err)
+	}
+}
+
+func TestValidateLLMRepairCoverageFocusAllowsCurrentCoverageTargetBinding(t *testing.T) {
+	run := repairFocusContractRun()
+	step := repairFocusContractStep()
+	output := map[string]any{
+		stepOutputKeyExecutionGraph: runtimemodel.BlockExecutionGraph{
+			Nodes: []runtimemodel.BlockExecutionNode{{
+				ID:   "change-primary",
+				Kind: "patch/apply",
+				Input: map[string]any{
+					"targetRef":       "primary-resource",
+					"patchType":       "file_write",
+					"content":         "primary update",
+					"baseHash":        "hash-primary",
+					"coverageTargets": []string{"primary closure"},
+				},
+			}},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want current coverage target binding allowed", err)
 	}
 }
 

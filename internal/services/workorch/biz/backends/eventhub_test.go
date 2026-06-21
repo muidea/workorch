@@ -134,7 +134,7 @@ func TestEventHubRunResourceMapCompactsExecutionContext(t *testing.T) {
 		ExecutionContext: map[string]any{
 			"goal":               map[string]any{"text": "goal text"},
 			"dod":                map[string]any{"items": []any{"dod item"}},
-			"operatorInputQueue": []map[string]any{{"content": "continue"}},
+			"operatorInputQueue": []map[string]any{{"content": "resume"}},
 			"processEvidenceTimeline": []any{
 				map[string]any{"content": large},
 			},
@@ -185,6 +185,68 @@ func TestEventHubSnapshotResourceMapCompactsRunExecutionContext(t *testing.T) {
 	goal, _ := contextMap["goal"].(map[string]any)
 	if goal["text"] != "goal text" {
 		t.Fatalf("goal = %+v, want preserved run goal context", goal)
+	}
+}
+
+func TestEventHubRunRestartPublishesUnifiedWorkspaceRunCommand(t *testing.T) {
+	ctx := context.Background()
+	be, eventHub := newEventHubBackendWithDispatcher(t, ctx)
+
+	if _, err := be.Run().Command(ctx, WorkspaceRunCommand{
+		WorkspaceID:        "ws-restart-unified",
+		Intent:             RunCommandIntentRestart,
+		RequestID:          "request-restart-unified",
+		Reason:             "test_restart_unified",
+		Source:             "test",
+		Priority:           7,
+		DefinitionRevision: "rev-restart-unified",
+		DecisionID:         "ticket-restart-unified",
+		ExecutionContextPatch: map[string]any{
+			"latestOperatorInput": map[string]any{"source": "test", "content": "restart"},
+		},
+		Activation: ActivateRunRequest{
+			GoalID:        "goal-restart-unified",
+			DoDID:         "dod-restart-unified",
+			LLMProviderID: "provider-restart-unified",
+			SoulID:        "soul-restart-unified",
+		},
+	}); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+
+	publishedHub, ok := eventHub.(interface{ Published() []events.Envelope })
+	if !ok {
+		t.Fatal("event hub does not expose published envelopes")
+	}
+	var sawUnified bool
+	const legacyRestartTopic = "/workorchd/command/workspace-restart/requested"
+	for _, envelope := range publishedHub.Published() {
+		if envelope.Topic == legacyRestartTopic {
+			t.Fatalf("published legacy restart topic: %+v", envelope)
+		}
+		if envelope.Topic != workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
+			continue
+		}
+		if envelope.WorkspaceID != "ws-restart-unified" ||
+			envelope.SubjectType != "workspace-run" ||
+			envelope.Payload[events.PayloadKeyIntent] != string(RunCommandIntentRestart) ||
+			envelope.Payload[events.PayloadKeyRequestID] != "request-restart-unified" ||
+			envelope.Payload[events.PayloadKeyReason] != "test_restart_unified" ||
+			envelope.Payload[events.PayloadKeySource] != "test" ||
+			envelope.Payload[events.PayloadKeyDefinitionRevision] != "rev-restart-unified" ||
+			envelope.Payload[events.PayloadKeyDecisionID] != "ticket-restart-unified" ||
+			envelope.Payload[events.PayloadKeyPriority] != 7 ||
+			envelope.Payload[events.PayloadKeyGoalID] != "goal-restart-unified" ||
+			envelope.Payload[events.PayloadKeyDoDID] != "dod-restart-unified" {
+			t.Fatalf("workspace run restart envelope = %+v", envelope)
+		}
+		if patch, _ := envelope.Payload[events.PayloadKeyExecutionContextPatch].(map[string]any); patch == nil {
+			t.Fatalf("restart envelope missing execution context patch: %+v", envelope.Payload)
+		}
+		sawUnified = true
+	}
+	if !sawUnified {
+		t.Fatal("restart did not publish unified workspace-run command")
 	}
 }
 

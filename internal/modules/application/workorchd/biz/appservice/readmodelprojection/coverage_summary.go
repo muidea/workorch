@@ -1,6 +1,11 @@
 package readmodelprojection
 
-import "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+)
 
 func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshot) map[string]any {
 	ctx := snapshot.CoverageWorkItemContext
@@ -17,4 +22,250 @@ func CoverageSummaryFromRunSnapshot(snapshot readmodelcore.RunSnapshot) map[stri
 		return nil
 	}
 	return ret
+}
+
+func GapBaselineFromRunSnapshot(snapshot readmodelcore.RunSnapshot) *readmodelcore.GapBaseline {
+	if persisted := gapBaselineFromMap(MapValue(snapshot.Run.ExecutionContext["gapBaseline"])); persisted != nil {
+		if persisted.WorkspaceID == "" {
+			persisted.WorkspaceID = snapshot.Workspace.ID
+		}
+		if persisted.RunID == "" {
+			persisted.RunID = snapshot.Run.ID
+		}
+		return persisted
+	}
+	ctx := snapshot.CoverageWorkItemContext
+	if len(ctx) == 0 {
+		return nil
+	}
+	baseline := &readmodelcore.GapBaseline{
+		WorkspaceID:        snapshot.Workspace.ID,
+		RunID:              snapshot.Run.ID,
+		DefinitionRevision: stringValue(ctx, "definitionRevision"),
+		BaselineRevision:   stringValue(ctx, "coverageBaselineHash", "baselineRevision"),
+		CurrentFocus:       CloneMap(MapValue(ctx["currentFocus"])),
+	}
+	unresolved := MapSliceValue(ctx["unresolvedItems"])
+	if len(unresolved) == 0 {
+		unresolved = MapSliceValue(ctx["currentFocusItems"])
+	}
+	baseline.OpenCoverageWorkItems = readModelMapSliceValue(unresolved)
+	baseline.AcceptedEvidenceRefs = gapEvidenceRefsFromCoverageItems(snapshot.CoverageWorkItems, true)
+	baseline.RejectedEvidenceRefs = gapEvidenceRefsFromCoverageItems(snapshot.CoverageWorkItems, false)
+	baseline.TodoItems = gapTodoItemsFromCoverageItems(unresolved)
+	baseline.NextAction = gapNextActionFromSnapshot(snapshot, len(unresolved))
+	if baseline.DefinitionRevision == "" && baseline.BaselineRevision == "" && len(baseline.OpenCoverageWorkItems) == 0 && len(baseline.CurrentFocus) == 0 && len(baseline.AcceptedEvidenceRefs) == 0 && len(baseline.RejectedEvidenceRefs) == 0 {
+		return nil
+	}
+	return baseline
+}
+
+func gapBaselineFromMap(input map[string]any) *readmodelcore.GapBaseline {
+	if len(input) == 0 {
+		return nil
+	}
+	ret := &readmodelcore.GapBaseline{
+		WorkspaceID:           stringValue(input, "workspaceId"),
+		RunID:                 stringValue(input, "runId"),
+		DefinitionRevision:    stringValue(input, "definitionRevision"),
+		BaselineRevision:      stringValue(input, "baselineRevision", "coverageBaselineHash"),
+		CurrentFocus:          CloneMap(MapValue(input["currentFocus"])),
+		OpenCoverageWorkItems: readModelMapSliceValue(input["openCoverageWorkItems"]),
+		AcceptedEvidenceRefs:  readModelStringSliceValue(input["acceptedEvidenceRefs"]),
+		RejectedEvidenceRefs:  readModelStringSliceValue(input["rejectedEvidenceRefs"]),
+		TodoItems:             gapTodoItemsFromPersistedBaseline(input["todoItems"]),
+		NextAction:            gapNextActionFromMap(MapValue(input["nextAction"])),
+	}
+	if ret.DefinitionRevision == "" && ret.BaselineRevision == "" && len(ret.OpenCoverageWorkItems) == 0 && len(ret.TodoItems) == 0 && len(ret.CurrentFocus) == 0 && len(ret.AcceptedEvidenceRefs) == 0 && len(ret.RejectedEvidenceRefs) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func gapEvidenceRefsFromCoverageItems(items []map[string]any, accepted bool) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ret []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		ret = append(ret, value)
+	}
+	refKey := "rejectedEvidenceRefs"
+	byKindKey := "rejectedEvidenceByKind"
+	if accepted {
+		refKey = "acceptedEvidenceRefs"
+		byKindKey = "acceptedEvidenceByKind"
+	}
+	for _, item := range items {
+		for _, ref := range readModelStringSliceValue(item[refKey]) {
+			add(ref)
+		}
+		for _, refs := range readModelStringSliceMapValue(item[byKindKey]) {
+			for _, ref := range refs {
+				add(ref)
+			}
+		}
+	}
+	return ret
+}
+
+func gapTodoItemsFromPersistedBaseline(value any) []readmodelcore.GapTodoItem {
+	items := readModelMapSliceValue(value)
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]readmodelcore.GapTodoItem, 0, len(items))
+	for _, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		ret = append(ret, readmodelcore.GapTodoItem{
+			ID:                    stringValue(item, "id"),
+			Source:                stringValue(item, "source"),
+			SourceRef:             stringValue(item, "sourceRef"),
+			CoverageWorkItemIDs:   readModelStringSliceValue(item["coverageWorkItemIds"]),
+			RequiredEvidenceKinds: readModelStringSliceValue(item["requiredEvidenceKinds"]),
+			Status:                stringValue(item, "status"),
+			Priority:              intValue(item, "priority"),
+			Reason:                stringValue(item, "reason"),
+			Metadata:              CloneMap(MapValue(item["metadata"])),
+		})
+	}
+	return ret
+}
+
+func gapNextActionFromMap(input map[string]any) readmodelcore.GapNextAction {
+	if len(input) == 0 {
+		return readmodelcore.GapNextAction{}
+	}
+	return readmodelcore.GapNextAction{
+		Kind:   stringValue(input, "kind"),
+		Reason: stringValue(input, "reason"),
+	}
+}
+
+func intValue(input map[string]any, key string) int {
+	if len(input) == 0 {
+		return 0
+	}
+	switch typed := input[key].(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func gapTodoItemsFromCoverageItems(items []map[string]any) []readmodelcore.GapTodoItem {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]readmodelcore.GapTodoItem, 0, len(items))
+	for idx, item := range items {
+		if len(item) == 0 {
+			continue
+		}
+		id := stringValue(item, "id")
+		if id == "" {
+			id = fmt.Sprintf("todo-%03d", idx+1)
+		}
+		workItemIDs := readModelStringSliceValue(item["coverageWorkItemIds"])
+		if len(workItemIDs) == 0 {
+			workItemIDs = readModelStringSliceValue(item["coverageWorkItemIDs"])
+		}
+		if len(workItemIDs) == 0 && stringValue(item, "id") != "" {
+			workItemIDs = []string{stringValue(item, "id")}
+		}
+		source := stringValue(item, "sourceScope", "source")
+		if source == "" {
+			source = "coverage"
+		}
+		status := stringValue(item, "status")
+		if status == "" {
+			status = "open"
+		}
+		ret = append(ret, readmodelcore.GapTodoItem{
+			ID:                    id,
+			Source:                source,
+			SourceRef:             gapTodoSourceRef(item),
+			CoverageWorkItemIDs:   workItemIDs,
+			RequiredEvidenceKinds: readModelStringSliceValue(item["missingEvidenceKinds"]),
+			Status:                status,
+			Priority:              idx + 1,
+			Reason:                gapTodoReason(item),
+			Metadata:              gapTodoMetadata(item),
+		})
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func gapNextActionFromSnapshot(snapshot readmodelcore.RunSnapshot, openItems int) readmodelcore.GapNextAction {
+	switch strings.TrimSpace(snapshot.Run.State) {
+	case "blocked_on_decision":
+		return readmodelcore.GapNextAction{Kind: "wait_decision", Reason: "run waiting for decision"}
+	case "blocked_on_approval":
+		return readmodelcore.GapNextAction{Kind: "wait_approval", Reason: "run waiting for approval"}
+	case "completed":
+		return readmodelcore.GapNextAction{Kind: "no_action", Reason: "run completed"}
+	case "failed":
+		return readmodelcore.GapNextAction{Kind: "fail_fast", Reason: "run failed"}
+	default:
+		if openItems > 0 {
+			return readmodelcore.GapNextAction{Kind: "schedule_step", Reason: "open coverage work items"}
+		}
+		return readmodelcore.GapNextAction{Kind: "no_action", Reason: "no open coverage work items"}
+	}
+}
+
+func gapTodoSourceRef(item map[string]any) string {
+	return firstNonEmptyProjectionString(
+		stringValue(item, "sourceRef"),
+		stringValue(item, "sourcePath"),
+		stringValue(item, "sourceRequirementId"),
+		stringValue(item, "id"),
+	)
+}
+
+func gapTodoReason(item map[string]any) string {
+	return firstNonEmptyProjectionString(
+		stringValue(item, "reason"),
+		stringValue(item, "targetText"),
+		stringValue(item, "summary"),
+		"coverage work item remains open",
+	)
+}
+
+func gapTodoMetadata(item map[string]any) map[string]any {
+	ret := map[string]any{}
+	for _, key := range []string{"definitionRevision", "evidenceRole", "sourceScope", "targetRef", "targetText"} {
+		if value, ok := item[key]; ok && value != nil {
+			ret[key] = value
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
+func firstNonEmptyProjectionString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

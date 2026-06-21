@@ -13,6 +13,7 @@ CURL_CONNECT_TIMEOUT="${WORKORCH_VERIFY_CURL_CONNECT_TIMEOUT_SECONDS:-5}"
 CURL_MAX_TIME="${WORKORCH_VERIFY_CURL_MAX_TIME_SECONDS:-30}"
 SCRIPT_TIMEOUT_SECONDS="${WORKORCH_CONTRACT_VIOLATION_VERIFY_TIMEOUT_SECONDS:-240}"
 RUN_WAIT_SECONDS="${WORKORCH_CONTRACT_VIOLATION_VERIFY_RUN_WAIT_SECONDS:-90}"
+ACTIVATION_RUN_WAIT_SECONDS="${WORKORCH_CONTRACT_VIOLATION_VERIFY_ACTIVATION_RUN_WAIT_SECONDS:-60}"
 PROVIDER_ID="verify-contract-violation-$VERIFY_SUFFIX"
 MOCK_PID=""
 WATCHDOG_PID=""
@@ -390,45 +391,49 @@ PY
 wait_activation_run() {
   local activation_file="$1"
   local workspace_id="$2"
-  local output_file="$3"
-  local deadline=$((SECONDS + 45))
+  local before_runs_file="$3"
+  local output_file="$4"
+  local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
   local run_id=""
 
-  run_id="$(python3 - "$activation_file" <<'PY'
+  python3 - "$activation_file" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-for path in [
-    ("activation", "run", "id"),
-    ("run", "id"),
-]:
-    current = data
-    for part in path:
-        if not isinstance(current, dict):
-            current = {}
-            break
-        current = current.get(part)
-    if current:
-        print(current)
-        raise SystemExit(0)
-raise SystemExit(1)
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if not str(data.get("requestId") or "").strip():
+    errors.append("requestId is empty")
+if data.get("reason") != "e2e_resume":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if errors:
+    raise SystemExit("\n".join(errors))
 PY
-)" && {
-    echo "$run_id"
-    return 0
-  }
 
   while (( SECONDS <= deadline )); do
     curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$output_file"
-    run_id="$(python3 - "$output_file" <<'PY'
+    run_id="$(python3 - "$output_file" "$before_runs_file" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
+before = set()
+try:
+    before_data = json.load(open(sys.argv[2], encoding="utf-8"))
+    before = {str(item.get("id") or "") for item in before_data.get("runs", []) if item.get("id")}
+except FileNotFoundError:
+    before = set()
 runs = data.get("runs") or []
-if runs:
-    print(runs[-1].get("id") or "")
+new_runs = [
+    item for item in runs
+    if item.get("id") and str(item.get("id")) not in before
+]
+if new_runs:
+    print(new_runs[-1].get("id") or "")
     raise SystemExit(0)
 raise SystemExit(1)
 PY
@@ -556,12 +561,16 @@ curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H '
   -d '{"items":["contract violation recovery completes without manual replan"]}' >"$TMP_DIR/dod.json"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
 
-python3 - "$TMP_DIR/activation-request.json" "$goal_id" "$dod_id" "$PROVIDER_ID" <<'PY'
+python3 - "$TMP_DIR/activation-request.json" "$goal_id" "$dod_id" "$PROVIDER_ID" "$VERIFY_SUFFIX" <<'PY'
 import json
 import sys
 
-path, goal_id, dod_id, provider_id = sys.argv[1:]
+path, goal_id, dod_id, provider_id, suffix = sys.argv[1:]
 payload = {
+    "intent": "resume",
+    "requestId": f"contract-violation-e2e-{suffix}",
+    "reason": "e2e_resume",
+    "source": "e2e",
     "goalId": goal_id,
     "doDId": dod_id,
     "llmProviderId": provider_id,
@@ -571,10 +580,11 @@ with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, separators=(",", ":"))
 PY
 
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" >"$TMP_DIR/activation-before-runs.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
   -H 'Content-Type: application/json' \
   -d @"$TMP_DIR/activation-request.json" >"$TMP_DIR/activation.json"
-run_id="$(wait_activation_run "$TMP_DIR/activation.json" "$workspace_id" "$TMP_DIR/activation-runs.json")"
+run_id="$(wait_activation_run "$TMP_DIR/activation.json" "$workspace_id" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-runs.json")"
 [[ -n "$run_id" ]]
 
 terminal_state="$(wait_run_terminal "$run_id" "$workspace_id" "$TMP_DIR/status.json")"

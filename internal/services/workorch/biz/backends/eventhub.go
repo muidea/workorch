@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -341,40 +342,46 @@ func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID
 
 type eventHubRunBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
-	result, err := b.parent.sendCommand(ctx, events.CommandRunActivate, wsID, "", "run", "", map[string]any{
-		"goalId":                string(req.GoalID),
-		"doDId":                 string(req.DoDID),
-		"dialogLanguage":        req.DialogLanguage,
-		"soulId":                string(req.SoulID),
-		"skillIds":              skillIDStrings(req.SkillIDs),
-		"mcpServerIds":          mcpServerIDStrings(req.MCPServerIDs),
-		"priority":              req.Priority,
-		"executionContextPatch": req.ExecutionContextPatch,
-	})
-	return decodeResultResource[RunInfo](result, err)
-}
-
-func (b *eventHubRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
-	if b == nil || b.parent == nil || b.parent.eventHub == nil || wsID == "" {
+func (b *eventHubRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
+	if b == nil || b.parent == nil || b.parent.eventHub == nil || req.WorkspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
+	intent := req.Intent
+	if intent == "" {
+		intent = RunCommandIntentResume
+	}
+	switch intent {
+	case RunCommandIntentResume, RunCommandIntentRestart, RunCommandIntentReplan, RunCommandIntentRecover:
+	default:
+		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, req.Intent)
+	}
+	activation := mergeActivationRequest(req.Activation, req)
+	source := normalizedRunCommandSource(firstNonEmptyBackendString(req.Source, activation.Source))
+	payload := map[string]any{
+		events.PayloadKeyWorkspaceID:        string(req.WorkspaceID),
+		events.PayloadKeyRunID:              string(req.ExpectedRunID),
+		events.PayloadKeyIntent:             string(intent),
+		events.PayloadKeyReason:             req.Reason,
+		events.PayloadKeySource:             source,
+		events.PayloadKeyRequestID:          req.RequestID,
+		events.PayloadKeyDefinitionRevision: firstNonEmptyBackendString(req.DefinitionRevision, activation.DefinitionRevision),
+		events.PayloadKeyDecisionID:         firstNonEmptyBackendString(string(req.DecisionID), string(activation.DecisionID)),
+		events.PayloadKeyPriority:           req.Priority,
+	}
+	payload[events.PayloadKeyGoalID] = string(activation.GoalID)
+	payload[events.PayloadKeyDoDID] = string(activation.DoDID)
+	payload[events.PayloadKeyLLMProviderID] = activation.LLMProviderID
+	payload[events.PayloadKeySoulID] = string(activation.SoulID)
+	payload["dialogLanguage"] = activation.DialogLanguage
+	payload[events.PayloadKeyExecutionContextPatch] = activation.ExecutionContextPatch
 	envelope := events.Envelope{
-		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested,
-		SourceModule: "workorch-cli",
-		SubjectType:  "workspace-restart",
-		SubjectID:    string(wsID),
-		WorkspaceID:  string(wsID),
-		Payload: map[string]any{
-			events.PayloadKeyWorkspaceID:           string(wsID),
-			events.PayloadKeyGoalID:                string(req.GoalID),
-			events.PayloadKeyDoDID:                 string(req.DoDID),
-			events.PayloadKeyLLMProviderID:         req.LLMProviderID,
-			events.PayloadKeySoulID:                string(req.SoulID),
-			"dialogLanguage":                       req.DialogLanguage,
-			events.PayloadKeyPriority:              req.Priority,
-			events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
-		},
+		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		SourceModule: "workorch/" + source,
+		SubjectType:  "workspace-run",
+		SubjectID:    string(req.WorkspaceID),
+		WorkspaceID:  string(req.WorkspaceID),
+		RunID:        string(req.ExpectedRunID),
+		Payload:      payload,
 	}
 	if err := b.parent.eventHub.Publish(ctx, envelope); err != nil {
 		if _, ok := events.ResponseEnvelope(err); ok {
@@ -385,14 +392,24 @@ func (b *eventHubRunBackend) Restart(ctx context.Context, wsID common.WorkspaceI
 	return nil, nil
 }
 
-func (b *eventHubRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
-	var payload map[string]any
-	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
-		payload = map[string]any{"executionContextPatch": executionContextPatch[0]}
+func normalizedRunCommandSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "client"
 	}
-	result, err := b.parent.sendCommand(ctx, events.CommandRunResume, wsID, id, "run", string(id), payload)
-	return decodeResultResource[RunInfo](result, err)
+	return source
 }
+
+func firstNonEmptyBackendString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (b *eventHubRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
 	result, err := b.parent.sendCommand(ctx, events.CommandRunGet, wsID, id, "run", string(id), nil)
 	return decodeResultResource[RunInfo](result, err)
@@ -641,7 +658,9 @@ func workspaceSnapshotResourceMap(snapshot WorkspaceSnapshotInfo) map[string]any
 		"TaskProgress":          snapshot.TaskProgress,
 		"RunHeartbeat":          snapshot.RunHeartbeat,
 		"RuntimeExecution":      snapshot.RuntimeExecution,
+		"RunCommand":            snapshot.RunCommand,
 		"CoverageSummary":       cloneCLIResultValue(snapshot.CoverageSummary, 0),
+		"GapBaseline":           cloneCLIResultValue(snapshot.GapBaseline, 0),
 		"Acceptance":            snapshot.Acceptance,
 		"TaskDecompositions":    snapshot.TaskDecompositions,
 		"Goals":                 snapshot.Goals,

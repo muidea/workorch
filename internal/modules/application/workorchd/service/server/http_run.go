@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	engine "github.com/muidea/magicEngine/http"
@@ -272,55 +273,80 @@ func (s *serverState) handleWorkspaceScopedRunPost(w http.ResponseWriter, r *htt
 	ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
 	switch action {
 	case "start":
-		priority := runPriorityFromRequest(r, 0)
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
-			events.PayloadKeyWorkspaceID: workspaceID,
-			events.PayloadKeyRunID:       runID,
-			events.PayloadKeyAction:      "start",
-			events.PayloadKeyPriority:    priority,
-		}); err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		s.rebuildProjectedWorkspace(ctx, workspaceID)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"service":     "workorch",
-			"backend":     s.config.Backend,
-			"dataRoot":    s.config.DataRoot,
-			"accepted":    true,
-			"workspaceId": workspaceID,
-			"runId":       runID,
-			"action":      "start",
-		})
-	case "resume":
 		var req struct {
-			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+			RequestID          string `json:"requestId,omitempty"`
+			Reason             string `json:"reason,omitempty"`
+			Source             string `json:"source,omitempty"`
+			DefinitionRevision string `json:"definitionRevision,omitempty"`
+			DecisionID         string `json:"decisionId,omitempty"`
 		}
 		if err := decodeOptionalJSON(r, &req); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		priority := runPriorityFromRequest(r, 0)
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
-			events.PayloadKeyWorkspaceID:           workspaceID,
-			events.PayloadKeyRunID:                 runID,
-			events.PayloadKeyAction:                "resume",
-			events.PayloadKeyPriority:              priority,
-			events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
-		}); err != nil {
+		payload := prepareHTTPSchedulerCommandPayload(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, map[string]any{
+			events.PayloadKeyWorkspaceID:        workspaceID,
+			events.PayloadKeyRunID:              runID,
+			events.PayloadKeyIntent:             "resume",
+			events.PayloadKeyAction:             "start",
+			events.PayloadKeyReason:             req.Reason,
+			events.PayloadKeySource:             req.Source,
+			events.PayloadKeyRequestID:          req.RequestID,
+			events.PayloadKeyDefinitionRevision: req.DefinitionRevision,
+			events.PayloadKeyDecisionID:         req.DecisionID,
+			events.PayloadKeyPriority:           priority,
+		})
+		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, payload); err != nil {
 			writeBusinessError(w, err)
 			return
 		}
 		s.rebuildProjectedWorkspace(ctx, workspaceID)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"service":     "workorch",
-			"backend":     s.config.Backend,
-			"dataRoot":    s.config.DataRoot,
-			"accepted":    true,
-			"workspaceId": workspaceID,
-			"runId":       runID,
-			"action":      "resume",
+		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(s.config, workspaceID, runID, "start", payload))
+	case "resume":
+		var req struct {
+			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+			Intent                string         `json:"intent,omitempty"`
+			RequestID             string         `json:"requestId,omitempty"`
+			Reason                string         `json:"reason,omitempty"`
+			Source                string         `json:"source,omitempty"`
+			DefinitionRevision    string         `json:"definitionRevision,omitempty"`
+			DecisionID            string         `json:"decisionId,omitempty"`
+		}
+		if err := decodeOptionalJSON(r, &req); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		intent := strings.TrimSpace(req.Intent)
+		if intent == "" {
+			intent = "resume"
+		}
+		switch intent {
+		case "resume", "replan", "recover":
+		default:
+			writeBusinessError(w, common.ErrInvalidArgument)
+			return
+		}
+		priority := runPriorityFromRequest(r, 0)
+		payload := prepareHTTPSchedulerCommandPayload(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, map[string]any{
+			events.PayloadKeyWorkspaceID:           workspaceID,
+			events.PayloadKeyRunID:                 runID,
+			events.PayloadKeyIntent:                intent,
+			events.PayloadKeyAction:                "resume",
+			events.PayloadKeyReason:                req.Reason,
+			events.PayloadKeySource:                req.Source,
+			events.PayloadKeyRequestID:             req.RequestID,
+			events.PayloadKeyDefinitionRevision:    req.DefinitionRevision,
+			events.PayloadKeyDecisionID:            req.DecisionID,
+			events.PayloadKeyPriority:              priority,
+			events.PayloadKeyExecutionContextPatch: req.ExecutionContextPatch,
 		})
+		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, payload); err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		s.rebuildProjectedWorkspace(ctx, workspaceID)
+		writeJSON(w, http.StatusAccepted, schedulerAcceptedHTTPBody(s.config, workspaceID, runID, "resume", payload))
 	default:
 		http.NotFound(w, r)
 	}

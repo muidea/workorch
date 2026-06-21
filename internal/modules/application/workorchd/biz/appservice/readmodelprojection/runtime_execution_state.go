@@ -42,7 +42,7 @@ func MapRuntimeExecutionState(steps []presenter.StepView, checkpoints []readmode
 		applyRuntimeExecutionCheckpoint(state, checkpoint)
 	}
 	deriveRuntimeExecutionGap(state)
-	if state.RequestID == "" && state.AcceptedAt == "" && state.LastProgressAt == "" && state.DoneAt == "" && state.FailedAt == "" && state.FinalizedAt == "" && state.Gap == "" {
+	if state.RequestID == "" && state.AcceptedAt == "" && state.LastProgressAt == "" && state.DoneAt == "" && state.FailedAt == "" && state.FinalizedAt == "" && state.Gap == "" && state.ContractViolation == nil {
 		return nil
 	}
 	return state

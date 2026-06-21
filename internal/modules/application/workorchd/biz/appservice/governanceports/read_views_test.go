@@ -116,8 +116,8 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 		if cmd.Type != "provide_missing_info" {
 			t.Fatalf("resolution type = %q, want provide_missing_info", cmd.Type)
 		}
-		if cmd.Payload["answer"] != "continue" {
-			t.Fatalf("payload = %#v, want answer continue", cmd.Payload)
+		if cmd.Payload["answer"] != "resume" {
+			t.Fatalf("payload = %#v, want answer resume", cmd.Payload)
 		}
 		return events.Response(events.Envelope{
 			Topic: envelope.Topic + "/response",
@@ -140,7 +140,7 @@ func TestResolveDecisionViewResolvesOpenTicket(t *testing.T) {
 
 	item, err := ResolveDecisionView(ctx, hub, nil, "ticket-001", appmodelcore.ResolveDecisionCommand{
 		ResolutionType:    "provide_missing_info",
-		ResolutionPayload: map[string]any{"answer": "continue"},
+		ResolutionPayload: map[string]any{"answer": "resume"},
 	}, workspaceID)
 	if err != nil {
 		t.Fatalf("ResolveDecisionView err = %v", err)
@@ -281,7 +281,7 @@ func TestBatchResolveDecisionViewsReadsTicketsWithExplicitScope(t *testing.T) {
 	items, err := BatchResolveDecisionViews(ctx, hub, nil, appmodelcore.BatchResolveDecisionCommand{
 		TicketIDs:         ticketIDs,
 		ResolutionType:    "provide_missing_info",
-		ResolutionPayload: map[string]any{"answer": "continue"},
+		ResolutionPayload: map[string]any{"answer": "resume"},
 	}, workspaceID)
 	if err != nil {
 		t.Fatalf("BatchResolveDecisionViews err = %v", err)

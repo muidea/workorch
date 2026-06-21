@@ -26,7 +26,7 @@ Last Updated: 2026-05-30
 ### Input Contract
 
 - 正常状态 prompt 使用中立 `ws-xxx >`
-- 默认输入采用 slash commands，例如 `/goal`、`/run continue`、`/run restart`、`/dod`、`/memory`、`/result`
+- 默认输入采用 slash commands，例如 `/goal`、`/run resume`、`/run restart`、`/dod`、`/memory`、`/result`
 - 普通状态下裸文本不应被隐式当作 goal
 - decision blocker 时 prompt 进入 `decision` 上下文，plain text 作为 decision answer
 - approval blocker 时 prompt 进入 `approval` 上下文，plain text 作为 approve/reject intent，歧义时要求显式 slash command
@@ -50,7 +50,7 @@ Last Updated: 2026-05-30
 - `/dod`
 - `/result`
 - `/memory`
-- `/run continue`
+- `/run resume`
 - `/run restart`
 - `/decision show` / `/decision list`
 - `/decision answer`

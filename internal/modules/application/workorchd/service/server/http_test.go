@@ -31,6 +31,7 @@ import (
 	magictask "github.com/muidea/magicCommon/task"
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server/consoleassets"
 	llmcommon "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/common"
@@ -913,7 +914,7 @@ func TestWorkspaceExecutionActivationSchedulesReplanContinuationForSupersededRun
 		}, nil
 	}
 	var calls atomic.Int32
-	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if workspaceID != "ws-http-replan" {
 			t.Fatalf("workspaceID = %q, want ws-http-replan", workspaceID)
 		}
@@ -1706,7 +1707,7 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 			t.Fatalf("console js body does not contain %q", want)
 		}
 	}
-	for _, want := range []string{"创建工作空间", "定义目标", "定义验收标准", "启动执行", "运行摘要", "当前运行"} {
+	for _, want := range []string{"创建工作空间", "定义目标", "定义验收标准", "提交执行", "运行摘要", "当前运行"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("console js body does not contain required business action %q", want)
 		}
@@ -1984,7 +1985,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if runID != "run-native-read" {
 			t.Fatalf("runID = %q, want run-native-read", runID)
 		}
-		return appservice.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+		return appservice.TaskProgress{WorkspaceID: "ws-native-read", RunID: runID, State: "running", Recovery: appservice.RecoveryPlan{Mode: "resume"}}, nil
 	}
 	state.readRunContextBundle = func(ctx context.Context, _, _, runID string) (appservice.ContextBundle, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -1993,7 +1994,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		if runID != "run-native-read" {
 			t.Fatalf("runID = %q, want run-native-read", runID)
 		}
-		return appservice.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: appservice.RecoveryPlan{Mode: "continue"}}, nil
+		return appservice.ContextBundle{WorkspaceID: "ws-native-read", RunID: runID, Mode: "run_recovery", Recovery: appservice.RecoveryPlan{Mode: "resume"}}, nil
 	}
 	state.readRunTaskDecompositions = func(ctx context.Context, _, _, runID string) ([]appservice.TaskDecomposition, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
@@ -2126,7 +2127,7 @@ func TestNativeBusinessRoutesInjectEventHub(t *testing.T) {
 		}
 		return appservice.Run{ID: runID, WorkspaceID: "ws-native-read", State: "completed"}, nil
 	}
-	state.activateWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(ctx context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if got := appservice.EventHubFromContext(ctx); got != hub {
 			t.Fatalf("workspace activation event hub = %#v, want injected hub", got)
 		}
@@ -4138,6 +4139,73 @@ func TestDecisionResolveEndpointResolvesTicketAndAllowsRunResume(t *testing.T) {
 	}
 }
 
+func TestDecisionResolveEndpointProjectsReplanRunCommand(t *testing.T) {
+	dataRoot := t.TempDir()
+	routine := &recordingBackgroundRoutine{}
+	config := normalizeConfig(Config{Backend: "file", DataRoot: dataRoot})
+	state := newServerStateWithBackground(config, nil, routine)
+	configureIsolatedTestSession(t, state, config)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = state.close(ctx)
+	})
+	handler := newMuxWithState(state)
+	runID := "run-decision-replan-command-http"
+
+	workspace, started := seedBlockedDecisionRunForHTTP(t, dataRoot, "decision replan command http workspace", runID)
+	state.rebuildProjectedWorkspace(context.Background(), workspace.ID)
+
+	resolveReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/decisions/"+started.BlockingTicketID+"/resolve?priority=3", strings.NewReader(`{"resolutionType":"replan","resolutionPayload":{"operator":"http-replan"}}`))
+	resolveReq.Header.Set("Content-Type", "application/json")
+	resolveRec := httptest.NewRecorder()
+	handler.ServeHTTP(resolveRec, resolveReq)
+	if resolveRec.Code != http.StatusOK {
+		t.Fatalf("decision replan resolve status = %d, want 200, body=%s", resolveRec.Code, resolveRec.Body.String())
+	}
+	if !routine.asyncFunctionCalled {
+		t.Fatal("decision replan resolve did not submit a governance continuation work item")
+	}
+	expectedRef := governanceRunResumeRef{
+		WorkspaceID: workspace.ID,
+		RunID:       runID,
+		Intent:      "replan",
+		Reason:      "decision_replan_resolved",
+		RequestID:   governanceRunResumeRequestID("decision", started.BlockingTicketID, "replan"),
+		DecisionID:  started.BlockingTicketID,
+	}
+	expectedKey := governanceRunResumeKey(expectedRef)
+	state.runContinuations.governanceMu.Lock()
+	pendingRef, governancePending := state.runContinuations.governancePending[expectedKey]
+	_, governanceStarted := state.runContinuations.governanceStarted[expectedKey]
+	state.runContinuations.governanceMu.Unlock()
+	if !governancePending || !governanceStarted {
+		t.Fatalf("decision replan resolve continuation pending=%v started=%v for key %q, want queued background work", governancePending, governanceStarted, expectedKey)
+	}
+	if pendingRef != expectedRef {
+		t.Fatalf("pending governance continuation = %+v, want %+v", pendingRef, expectedRef)
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID+"/snapshot", nil)
+	snapshotRec := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want 200, body=%s", snapshotRec.Code, snapshotRec.Body.String())
+	}
+	var body workspaceSnapshotResponse
+	if err := json.Unmarshal(snapshotRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal workspace snapshot: %v", err)
+	}
+	if body.Snapshot.RunCommand == nil ||
+		body.Snapshot.RunCommand.Intent != "replan" ||
+		body.Snapshot.RunCommand.Reason != "decision_replan_resolved" ||
+		body.Snapshot.RunCommand.DecisionID != started.BlockingTicketID ||
+		body.Snapshot.RunCommand.Source != "governance" ||
+		body.Snapshot.RunCommand.RequestID == "" {
+		t.Fatalf("projected run command = %+v, want decision-scoped replan command", body.Snapshot.RunCommand)
+	}
+}
+
 func TestDecisionResolveEndpointStoresLongResolutionIDWithSafeFileName(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newFileMuxWithCleanup(t, dataRoot)
@@ -4280,7 +4348,7 @@ func TestServerStateSchedulesReplanContinuationForSupersededReplanRun(t *testing
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
 		return nil, nil
 	}
-	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if workspaceID != "ws-replan-continuation" {
 			t.Fatalf("workspaceID = %q, want ws-replan-continuation", workspaceID)
 		}
@@ -4336,8 +4404,8 @@ func TestServerStateSkipsReplanContinuationWhenRuntimeSuccessorExists(t *testing
 			},
 		}, nil
 	}
-	state.activateWorkspace = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
-		t.Fatalf("activateWorkspace should not be called when runtime successor exists")
+	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		t.Fatalf("resumeWorkspaceExecution should not be called when runtime successor exists")
 		return appservice.WorkspaceExecutionActivation{}, nil
 	}
 
@@ -4377,7 +4445,7 @@ func TestServerStateReplanContinuationIgnoresPrefixOnlySuccessor(t *testing.T) {
 			},
 		}, nil
 	}
-	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, _ appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		activated <- gotWorkspaceID
 		return appservice.WorkspaceExecutionActivation{
 			Run: appservice.Run{ID: runID + "-replan-002", WorkspaceID: gotWorkspaceID, State: string(common.RunStateRunning)},
@@ -4424,7 +4492,7 @@ func TestServerStateReplanContinuationRetriesAfterActivationFailure(t *testing.T
 		return nil, nil
 	}
 	var calls atomic.Int32
-	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if gotWorkspaceID != workspaceID {
 			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
 		}
@@ -4480,7 +4548,7 @@ func TestServerStateReplanContinuationWatcherDoesNotDuplicateRuntimeSuccessor(t 
 		t.Fatalf("server state eventHub is nil, want shared session event hub")
 	}
 	activated := make(chan struct{}, 1)
-	state.activateWorkspace = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(context.Context, string, string, string, appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		activated <- struct{}{}
 		return appservice.WorkspaceExecutionActivation{}, nil
 	}
@@ -4537,7 +4605,7 @@ func TestServerStateAutoGovernanceResolvedSchedulesResumeAndReplanContinuation(t
 	state.listRuns = func(context.Context, string, string, string) ([]appservice.Run, error) {
 		return nil, nil
 	}
-	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if workspaceID != "ws-auto-replan" {
 			t.Fatalf("workspaceID = %q, want ws-auto-replan", workspaceID)
 		}
@@ -4610,6 +4678,40 @@ func TestServerStateOwnerResolvedEventsScheduleGovernanceResume(t *testing.T) {
 	}
 }
 
+func TestServerStateDecisionReplanResolvedEventProjectsReplanCommand(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	const workspaceID = "ws-owner-replan-resolved"
+	const runID = "run-owner-replan-resolved"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "waiting_decision", ActiveRunID: runID},
+	})
+
+	if err := state.eventHub.Publish(context.Background(), events.Envelope{
+		Topic:       decisionevents.TopicTicketResolved,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		SubjectID:   "ticket-owner-replan-resolved",
+		Payload: map[string]any{
+			events.PayloadKeyType: decisioncommon.ResolutionTypeReplan,
+		},
+	}); err != nil {
+		t.Fatalf("publish replan decision resolved event: %v", err)
+	}
+
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.Reason != "decision_replan_resolved" ||
+		snapshot.RunCommand.RequestID == "" ||
+		snapshot.RunCommand.Source != "governance" ||
+		snapshot.RunCommand.DecisionID != "ticket-owner-replan-resolved" {
+		t.Fatalf("projected run command = %+v, want accepted governance replan command with decision scope", snapshot.RunCommand)
+	}
+}
+
 func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
 	t.Cleanup(func() {
@@ -4653,7 +4755,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesSupersededReplanRuns(t *t
 			},
 		}, nil
 	}
-	state.activateWorkspace = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if cmd.Priority != 4 {
 			t.Fatalf("activation priority = %d, want 4", cmd.Priority)
 		}
@@ -4727,12 +4829,12 @@ func TestServerStateGovernanceRunResumeCoalescesDuplicateRunID(t *testing.T) {
 	close(release)
 	waitForCondition(t, time.Second, func() bool {
 		state.runContinuations.governanceMu.Lock()
-		_, stillMarked := state.runContinuations.governanceStarted["ws-duplicate-resume/run-duplicate-resume"]
+		_, stillMarked := state.runContinuations.governanceStarted[governanceRunResumeKey(governanceRunResumeRef{WorkspaceID: "ws-duplicate-resume", RunID: "run-duplicate-resume"})]
 		state.runContinuations.governanceMu.Unlock()
 		return calls.Load() == 1 && state.metrics.runQueueWaiting.Load() == 0 && !stillMarked
 	})
 	state.runContinuations.governanceMu.Lock()
-	_, stillMarked := state.runContinuations.governanceStarted["ws-duplicate-resume/run-duplicate-resume"]
+	_, stillMarked := state.runContinuations.governanceStarted[governanceRunResumeKey(governanceRunResumeRef{WorkspaceID: "ws-duplicate-resume", RunID: "run-duplicate-resume"})]
 	state.runContinuations.governanceMu.Unlock()
 	if stillMarked {
 		t.Fatalf("governance resume mark was not cleared after completion")
@@ -4976,8 +5078,9 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 	}}, 0)
+	pendingKey := governanceRunResumeKey(governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID})
 	state.runContinuations.governanceMu.Lock()
-	_, pending := state.runContinuations.governancePending[workspaceID+"/"+runID]
+	_, pending := state.runContinuations.governancePending[pendingKey]
 	state.runContinuations.governanceMu.Unlock()
 	if !pending {
 		t.Fatalf("governance resume pending entry was dropped after background submit failure")
@@ -5010,7 +5113,7 @@ func TestServerStateGovernanceResumeKeepsPendingAfterBackgroundSubmitFailure(t *
 		t.Fatalf("governance resume pending entry did not execute after reschedule")
 	}
 	state.runContinuations.governanceMu.Lock()
-	_, pending = state.runContinuations.governancePending[workspaceID+"/"+runID]
+	_, pending = state.runContinuations.governancePending[pendingKey]
 	state.runContinuations.governanceMu.Unlock()
 	if pending {
 		t.Fatalf("governance resume pending entry was not cleared after successful resume")
@@ -5041,7 +5144,7 @@ func TestServerStateWorkspaceExecutionKeepsPendingAfterBackgroundSubmitFailure(t
 
 	routine.err = nil
 	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
-	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if gotWorkspaceID != workspaceID {
 			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
 		}
@@ -5128,7 +5231,7 @@ func TestServerStateRunContinuationKeepsPendingAfterBackgroundSubmitFailure(t *t
 	}
 }
 
-func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
+func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesRunContinuationByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
@@ -5136,12 +5239,13 @@ func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *tes
 	const runID = "run-001"
 
 	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
-		Topic:       workorchdevents.TopicWorkorchDCommandRunContinuationRequested,
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		Payload: map[string]any{
 			events.PayloadKeyWorkspaceID: workspaceID,
 			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyIntent:      "resume",
 			events.PayloadKeyAction:      "resume",
 			events.PayloadKeyPriority:    5,
 		},
@@ -5160,17 +5264,295 @@ func TestWorkorchDSchedulerCommandEnqueuesRunContinuationByWorkspaceScope(t *tes
 	}
 }
 
-func TestWorkorchDSchedulerCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
+func TestWorkorchDWorkspaceRunCommandResumeEnqueuesRunContinuation(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-workspace-run-resume"
+	const runID = "run-001"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
+
+	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:        workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		SourceModule: "workorchd/test",
+		WorkspaceID:  workspaceID,
+		RunID:        runID,
+		Revision:     17,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID: workspaceID,
+			events.PayloadKeyRunID:       runID,
+			events.PayloadKeyIntent:      "resume",
+			events.PayloadKeyRequestID:   "request-resume",
+			events.PayloadKeySource:      "tui",
+			events.PayloadKeyPriority:    7,
+		},
+	}); err != nil {
+		t.Fatalf("publish workspace run command: %v", err)
+	}
+
+	state.runContinuations.runMu.Lock()
+	req, pending := state.runContinuations.runPending[workspaceID+"/"+runID+"/resume"]
+	state.runContinuations.runMu.Unlock()
+	if !pending {
+		t.Fatalf("workspace run resume command did not create run continuation pending entry")
+	}
+	if req.WorkspaceID != workspaceID || req.RunID != runID || req.Action != "resume" || req.Priority != 7 {
+		t.Fatalf("workspace run resume pending request = %+v, want scoped resume priority 7", req)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-resume" ||
+		snapshot.RunCommand.Source != "tui" ||
+		snapshot.RunCommand.Revision <= 0 {
+		t.Fatalf("projected run command = %+v, want accepted resume command", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDWorkspaceRunCommandGeneratesRequestIDWhenMissing(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-generated-request"
+	state.workspaceProjection.UpsertSnapshot(readmodelcore.WorkspaceSnapshot{
+		Workspace: readmodelcore.Workspace{ID: workspaceID, State: "active"},
+	})
+
+	if err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: workspaceID,
+		events.PayloadKeyIntent:      "resume",
+		events.PayloadKeyReason:      "test_generated_request",
+	}); err != nil {
+		t.Fatalf("publish workspace run command: %v", err)
+	}
+
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspaceID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID == "" ||
+		snapshot.RunCommand.Source != "http" ||
+		!strings.Contains(snapshot.RunCommand.RequestID, "workspace_run") {
+		t.Fatalf("projected run command = %+v, want generated resume request id and default source", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "activation request id", "workspaces/activation-request-id")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"goalId":"`+goalID+`",
+		"doDId":"`+dodID+`",
+		"intent":"resume",
+		"requestId":"request-http-activation",
+		"reason":"http_test",
+		"source":"web",
+		"definitionRevision":"rev-http-activation",
+		"decisionId":"ticket-http-activation"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activation status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode activation response: %v", err)
+	}
+	if body["accepted"] != true ||
+		body["intent"] != "resume" ||
+		body["requestId"] != "request-http-activation" ||
+		body["source"] != "web" ||
+		body["reason"] != "http_test" ||
+		body["definitionRevision"] != "rev-http-activation" ||
+		body["decisionId"] != "ticket-http-activation" {
+		t.Fatalf("activation response = %+v, want accepted command metadata", body)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "resume" ||
+		snapshot.RunCommand.RequestID != "request-http-activation" ||
+		snapshot.RunCommand.Reason != "http_test" ||
+		snapshot.RunCommand.Source != "web" ||
+		snapshot.RunCommand.DefinitionRevision != "rev-http-activation" ||
+		snapshot.RunCommand.DecisionID != "ticket-http-activation" {
+		t.Fatalf("projected run command = %+v, want HTTP request id, reason, source, definition revision, and decision id", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDRunResumeHTTPProjectsReplanIntent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "run resume replan intent", "workspaces/run-resume-replan-intent")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-http-replan/resume", strings.NewReader(`{
+		"intent":"replan",
+		"requestId":"request-http-replan",
+		"reason":"decision_replan_resolved",
+		"source":"web",
+		"definitionRevision":"rev-http-replan",
+		"decisionId":"ticket-http-replan"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("run resume replan status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode run resume response: %v", err)
+	}
+	if body["accepted"] != true ||
+		body["intent"] != "replan" ||
+		body["requestId"] != "request-http-replan" ||
+		body["source"] != "web" ||
+		body["reason"] != "decision_replan_resolved" ||
+		body["definitionRevision"] != "rev-http-replan" ||
+		body["decisionId"] != "ticket-http-replan" ||
+		body["runId"] != "run-http-replan" {
+		t.Fatalf("run resume response = %+v, want accepted replan metadata", body)
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "replan" ||
+		snapshot.RunCommand.RunID != "run-http-replan" ||
+		snapshot.RunCommand.RequestID != "request-http-replan" ||
+		snapshot.RunCommand.Reason != "decision_replan_resolved" ||
+		snapshot.RunCommand.Source != "web" ||
+		snapshot.RunCommand.DefinitionRevision != "rev-http-replan" ||
+		snapshot.RunCommand.DecisionID != "ticket-http-replan" {
+		t.Fatalf("projected run command = %+v, want HTTP replan command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDRunResumeHTTPReturnsGeneratedRequestID(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "run resume generated request id", "workspaces/run-resume-generated-request-id")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-http-generated/resume", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("run resume status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode run resume response: %v", err)
+	}
+	requestID, _ := body["requestId"].(string)
+	if body["accepted"] != true ||
+		body["intent"] != "resume" ||
+		body["source"] != "http" ||
+		body["runId"] != "run-http-generated" ||
+		requestID == "" ||
+		!strings.Contains(requestID, "workspace_run") {
+		t.Fatalf("run resume response = %+v, want generated request id and default command metadata", body)
+	}
+}
+
+func TestWorkorchDActivationHTTPRejectsRunScopedIntent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "activation rejects replan", "workspaces/activation-rejects-replan")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
+		"goalId":"`+goalID+`",
+		"doDId":"`+dodID+`",
+		"intent":"replan",
+		"requestId":"request-http-replan-without-run"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("activation replan status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkorchDRunResumeHTTPRejectsRestartIntent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "run resume rejects restart intent", "workspaces/run-resume-rejects-restart")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs/run-http-restart/resume", strings.NewReader(`{"intent":"restart","requestId":"request-http-restart"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("run resume restart status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkorchDWorkspaceRestartHTTPProjectsRestartIntent(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}), nil)
+	handler := newMuxWithState(state)
+	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-restarts", strings.NewReader(`{
+		"goalId":"`+goalID+`",
+		"doDId":"`+dodID+`",
+		"requestId":"request-http-restart",
+		"reason":"operator_restart",
+		"source":"web",
+		"definitionRevision":"rev-http-restart",
+		"decisionId":"ticket-http-restart"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("workspace restart status = %d, want 202, body=%s", rec.Code, rec.Body.String())
+	}
+	snapshot, _, err := state.readProjectedWorkspaceSnapshot(workspace.ID)
+	if err != nil {
+		t.Fatalf("read projected workspace snapshot: %v", err)
+	}
+	if snapshot.RunCommand == nil ||
+		snapshot.RunCommand.Intent != "restart" ||
+		snapshot.RunCommand.RunID != "" ||
+		snapshot.RunCommand.RequestID != "request-http-restart" ||
+		snapshot.RunCommand.Reason != "operator_restart" ||
+		snapshot.RunCommand.Source != "web" ||
+		snapshot.RunCommand.DefinitionRevision != "rev-http-restart" ||
+		snapshot.RunCommand.DecisionID != "ticket-http-restart" {
+		t.Fatalf("projected run command = %+v, want HTTP restart command metadata", snapshot.RunCommand)
+	}
+}
+
+func TestWorkorchDSchedulerWorkspaceRunCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *testing.T) {
 	routine := &recordingBackgroundRoutine{}
 	hub := events.NewMemoryHub()
 	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
 	const workspaceID = "ws-scheduler-restart-command"
 
 	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
-		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested,
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
 		WorkspaceID: workspaceID,
 		Payload: map[string]any{
 			events.PayloadKeyWorkspaceID:   workspaceID,
+			events.PayloadKeyIntent:        "restart",
 			events.PayloadKeyGoalID:        "goal-restart",
 			events.PayloadKeyDoDID:         "dod-restart",
 			events.PayloadKeyLLMProviderID: "llm-restart",
@@ -5191,6 +5573,38 @@ func TestWorkorchDSchedulerCommandEnqueuesWorkspaceRestartByWorkspaceScope(t *te
 	}
 }
 
+func TestWorkorchDWorkspaceRunCommandRestartEnqueuesWorkspaceRestart(t *testing.T) {
+	routine := &recordingBackgroundRoutine{}
+	hub := events.NewMemoryHub()
+	state := newServerStateWithBackground(normalizeConfig(Config{Backend: "memory"}), hub, routine)
+	const workspaceID = "ws-scheduler-workspace-run-restart"
+
+	if err := publishHTTPTestCommand(context.Background(), hub, events.Envelope{
+		Topic:       workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
+		WorkspaceID: workspaceID,
+		Payload: map[string]any{
+			events.PayloadKeyWorkspaceID:   workspaceID,
+			events.PayloadKeyIntent:        "restart",
+			events.PayloadKeyGoalID:        "goal-restart",
+			events.PayloadKeyDoDID:         "dod-restart",
+			events.PayloadKeyLLMProviderID: "llm-restart",
+			events.PayloadKeyPriority:      8,
+		},
+	}); err != nil {
+		t.Fatalf("publish workspace run restart command: %v", err)
+	}
+
+	state.runContinuations.restartMu.Lock()
+	req, pending := state.runContinuations.restartPending["workspace_restart/"+workspaceID]
+	state.runContinuations.restartMu.Unlock()
+	if !pending {
+		t.Fatalf("workspace run restart command did not create workspace restart pending entry")
+	}
+	if req.WorkspaceID != workspaceID || req.Priority != 8 || !req.Command.Restart || req.Command.GoalID != "goal-restart" || req.Command.DoDID != "dod-restart" || req.Command.LLMProviderID != "llm-restart" {
+		t.Fatalf("workspace run restart pending request = %+v, want scoped restart command", req)
+	}
+}
+
 func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *testing.T) {
 	routine := &recordingBackgroundRoutine{err: errors.New("background closed")}
 	hub := events.NewMemoryHub()
@@ -5198,9 +5612,10 @@ func TestWorkorchDSchedulerCommandReturnsErrorWhenRunContinuationQueueFails(t *t
 	const workspaceID = "ws-scheduler-run-command-fail"
 	const runID = "run-scheduler-command-fail"
 
-	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandRunContinuationRequested, workspaceID, runID, map[string]any{
+	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspaceID, runID, map[string]any{
 		events.PayloadKeyWorkspaceID: workspaceID,
 		events.PayloadKeyRunID:       runID,
+		events.PayloadKeyIntent:      "resume",
 		events.PayloadKeyAction:      "resume",
 	})
 	if !errors.Is(err, common.ErrConflict) {
@@ -5222,8 +5637,9 @@ func TestWorkorchDSchedulerCommandRequiresAcceptedResponse(t *testing.T) {
 	}
 	state.eventUnsubscribes = nil
 
-	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested, "ws-missing-scheduler", "", map[string]any{
+	err := state.publishWorkorchDSchedulerCommand(context.Background(), workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, "ws-missing-scheduler", "", map[string]any{
 		events.PayloadKeyWorkspaceID: "ws-missing-scheduler",
+		events.PayloadKeyIntent:      "resume",
 	})
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("publish scheduler command error = %v, want conflict for missing accepted response", err)
@@ -5384,7 +5800,7 @@ func TestServerStateRecoverReplanContinuationsSchedulesWaitingDecisionActiveSupe
 			},
 		}, nil
 	}
-	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if gotWorkspaceID != workspaceID {
 			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
 		}
@@ -5440,7 +5856,7 @@ func TestServerStateRecoverReplanContinuationsRetriesAfterActivationFailure(t *t
 		}, nil
 	}
 	var calls atomic.Int32
-	state.activateWorkspace = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+	state.resumeWorkspaceExecution = func(_ context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 		if gotWorkspaceID != workspaceID {
 			t.Fatalf("workspaceID = %q, want %s", gotWorkspaceID, workspaceID)
 		}
@@ -5943,6 +6359,101 @@ func TestHTTPServerStartupLeavesFileBackedRunningRunForManualRecovery(t *testing
 	}
 	if body.Run.State != string(common.RunStateRunning) || body.Run.FailureReason != "" {
 		t.Fatalf("run = %+v, want running run preserved for manual recovery", body.Run)
+	}
+}
+
+func TestServiceRunRecoveredWorkspaceResumeEnqueuesWorkspaceActivation(t *testing.T) {
+	dataRoot := t.TempDir()
+	useWorkorchRuntimeTestConfig(t, "file", dataRoot)
+	ctx := context.Background()
+	first := newTestHTTPServer(t, Config{Backend: "file", DataRoot: dataRoot})
+	handler := first.http.Handler
+	workspace := createWorkspaceForHTTP(t, handler, "startup recovered resume workspace", "workspaces/startup-recovered-resume")
+	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	runID := "run-startup-recovered-resume"
+	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
+	runReq.Header.Set("Content-Type", "application/json")
+	runRec := httptest.NewRecorder()
+	handler.ServeHTTP(runRec, runReq)
+	if runRec.Code != http.StatusCreated {
+		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
+	}
+
+	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(dataRoot)
+	runItem, err := repos.Runs.Get(ctx, common.RunID(runID))
+	if err != nil {
+		t.Fatalf("get seeded run: %v", err)
+	}
+	runItem.State = common.RunStateRunning
+	if err := repos.Runs.Update(ctx, runItem); err != nil {
+		t.Fatalf("mark seeded run running: %v", err)
+	}
+	workspaceItem, err := repos.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get seeded workspace: %v", err)
+	}
+	workspaceItem.State = common.WorkspaceStateRunning
+	workspaceItem.ActiveRunID = common.RunID(runID)
+	if err := repos.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("mark seeded workspace running: %v", err)
+	}
+
+	routine := &recordingBackgroundRoutine{}
+	svc := &Service{
+		http:              NewHTTPServerWithEventHubAndBackground(Config{Addr: "127.0.0.1:0", Backend: "file", DataRoot: dataRoot}, nil, routine),
+		backgroundRoutine: routine,
+		done:              make(chan error, 1),
+	}
+	if err := svc.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	recoveredWorkspace, err := appservice.ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspace.ID)
+	if err != nil {
+		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
+	}
+	if recoveredWorkspace.State != string(common.WorkspaceStateActive) || recoveredWorkspace.ActiveRunID != "" {
+		t.Fatalf("workspace after startup recovery = %+v, want active without active run", recoveredWorkspace)
+	}
+
+	activated := make(chan appservice.ActivateWorkspaceExecutionCommand, 1)
+	svc.http.state.resumeWorkspaceExecution = func(runCtx context.Context, _, _, gotWorkspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+		if gotWorkspaceID != workspace.ID {
+			t.Fatalf("activation workspaceID = %q, want %s", gotWorkspaceID, workspace.ID)
+		}
+		if scope := common.RuntimeWorkspaceIDFromContext(runCtx); string(scope) != workspace.ID {
+			t.Fatalf("activation workspace scope = %q, want %s", scope, workspace.ID)
+		}
+		activated <- cmd
+		return appservice.WorkspaceExecutionActivation{
+			Workspace: appservice.Workspace{ID: workspace.ID, State: string(common.WorkspaceStateActive)},
+			Run:       appservice.Run{ID: "run-startup-recovered-resume-new", WorkspaceID: workspace.ID, State: string(common.RunStateRunning)},
+		}, nil
+	}
+	if err := svc.http.state.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, workspace.ID, "", map[string]any{
+		events.PayloadKeyWorkspaceID: workspace.ID,
+		events.PayloadKeyIntent:      "resume",
+		events.PayloadKeyRequestID:   "request-startup-recovered-resume",
+		events.PayloadKeySource:      "tui",
+		events.PayloadKeyReason:      "service_recovery_resume",
+		events.PayloadKeyGoalID:      goalID,
+		events.PayloadKeyDoDID:       dodID,
+	}); err != nil {
+		t.Fatalf("publish resume command: %v", err)
+	}
+	if routine.function == nil {
+		t.Fatal("resume command did not enqueue workspace activation")
+	}
+	routine.function()
+	select {
+	case cmd := <-activated:
+		if cmd.Restart {
+			t.Fatalf("activation command Restart = true, want recovered resume to activate without restart")
+		}
+		if cmd.GoalID != goalID || cmd.DoDID != dodID {
+			t.Fatalf("activation command definitions = %+v, want goal %s dod %s", cmd, goalID, dodID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resume command did not execute workspace activation task")
 	}
 }
 

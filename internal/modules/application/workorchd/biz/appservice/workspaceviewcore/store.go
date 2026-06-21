@@ -43,6 +43,13 @@ type workspaceProjectionEntry struct {
 	RebuiltAt               time.Time
 }
 
+func (e *workspaceProjectionEntry) syncSnapshotWorkspace() {
+	if e == nil || !e.HasSnapshot || !e.HasWorkspace {
+		return
+	}
+	e.Snapshot.Workspace = cloneWorkspace(e.Workspace)
+}
+
 func NewStore() *Store {
 	return &Store{
 		state:      StateBuilding,
@@ -261,6 +268,7 @@ func (s *Store) ReplaceWorkspaceList(workspaces []appmodelcore.Workspace, degrad
 		entry := s.cloneEntryForReplace(item.ID)
 		entry.Workspace = cloneWorkspace(item)
 		entry.HasWorkspace = true
+		entry.syncSnapshotWorkspace()
 		entry.Revision++
 		nextWorkspaces[item.ID] = entry
 		nextOrder = append(nextOrder, item.ID)
@@ -308,6 +316,10 @@ func (s *Store) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	entry := s.entryForUpdateLocked(workspaceID)
+	if snapshot.RunCommand == nil && entry.HasSnapshot && entry.Snapshot.RunCommand != nil {
+		command := *entry.Snapshot.RunCommand
+		snapshot.RunCommand = &command
+	}
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
 	entry.HasWorkspace = true
 	if !stringSliceContains(s.workspaceOrder, workspaceID) {
@@ -341,6 +353,7 @@ func (s *Store) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	entry := s.entryForUpdateLocked(workspace.ID)
 	entry.Workspace = cloneWorkspace(workspace)
 	entry.HasWorkspace = true
+	entry.syncSnapshotWorkspace()
 	if !stringSliceContains(s.workspaceOrder, workspace.ID) {
 		s.workspaceOrder = append(s.workspaceOrder, workspace.ID)
 		sort.Strings(s.workspaceOrder)
@@ -374,6 +387,60 @@ func (s *Store) ApplyRuntimeProgress(update RuntimeProgressUpdate) bool {
 	snapshot := entry.Snapshot
 	if !applyRuntimeProgressToSnapshot(&snapshot, update, now) {
 		return false
+	}
+	entry.Snapshot = snapshot
+	entry.Workspace = cloneWorkspace(snapshot.Workspace)
+	entry.HasWorkspace = true
+	entry.HasSnapshot = true
+	entry.Revision++
+	s.globalRevision++
+	if update.Revision > entry.SourceRevision {
+		entry.SourceRevision = update.Revision
+	}
+	entry.ProjectedSourceRevision = entry.SourceRevision
+	entry.RebuiltAt = now
+	entry.Stale = false
+	entry.StaleReason = ""
+	entry.Error = ""
+	s.refreshProjectedSourceRevisionLocked()
+	s.globalStale = false
+	s.globalStaleReason = ""
+	s.state = StateReady
+	s.errText = ""
+	s.updatedAt = now
+	return true
+}
+
+func (s *Store) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
+	if s == nil || strings.TrimSpace(update.WorkspaceID) == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.workspaces[update.WorkspaceID]
+	if entry == nil || !entry.HasWorkspace {
+		return false
+	}
+	now := time.Now().UTC()
+	snapshot := entry.Snapshot
+	if !entry.HasSnapshot || strings.TrimSpace(snapshot.Workspace.ID) == "" {
+		snapshot.Workspace = cloneWorkspace(entry.Workspace)
+	}
+	acceptedAt := strings.TrimSpace(update.AcceptedAt)
+	if acceptedAt == "" {
+		acceptedAt = formatProjectionTime(now)
+	}
+	snapshot.RunCommand = &readmodelcore.RunCommandStatus{
+		WorkspaceID:        strings.TrimSpace(update.WorkspaceID),
+		RunID:              strings.TrimSpace(update.RunID),
+		Intent:             strings.TrimSpace(update.Intent),
+		Reason:             strings.TrimSpace(update.Reason),
+		RequestID:          strings.TrimSpace(update.RequestID),
+		Source:             strings.TrimSpace(update.Source),
+		DefinitionRevision: strings.TrimSpace(update.DefinitionRevision),
+		DecisionID:         strings.TrimSpace(update.DecisionID),
+		AcceptedAt:         acceptedAt,
+		Revision:           update.Revision,
 	}
 	entry.Snapshot = snapshot
 	entry.Workspace = cloneWorkspace(snapshot.Workspace)
@@ -544,7 +611,7 @@ func activeCoverageFocusState(state string) bool {
 
 func convergenceBudgetEscalated(decision string) bool {
 	switch strings.TrimSpace(decision) {
-	case "", "continue":
+	case "", "resume":
 		return false
 	default:
 		return true
@@ -810,6 +877,28 @@ func cloneWorkspaceSnapshot(item readmodelcore.WorkspaceSnapshot) readmodelcore.
 	if item.ContextBundle != nil {
 		bundle := cloneContextBundle(*item.ContextBundle)
 		item.ContextBundle = &bundle
+	}
+	if item.RunCommand != nil {
+		status := *item.RunCommand
+		item.RunCommand = &status
+	}
+	if item.GapBaseline != nil {
+		baseline := cloneGapBaseline(*item.GapBaseline)
+		item.GapBaseline = &baseline
+	}
+	return item
+}
+
+func cloneGapBaseline(item readmodelcore.GapBaseline) readmodelcore.GapBaseline {
+	item.CurrentFocus = cloneStringAnyMap(item.CurrentFocus)
+	item.OpenCoverageWorkItems = cloneMapSlice(item.OpenCoverageWorkItems)
+	item.AcceptedEvidenceRefs = append([]string(nil), item.AcceptedEvidenceRefs...)
+	item.RejectedEvidenceRefs = append([]string(nil), item.RejectedEvidenceRefs...)
+	item.TodoItems = append([]readmodelcore.GapTodoItem(nil), item.TodoItems...)
+	for idx := range item.TodoItems {
+		item.TodoItems[idx].CoverageWorkItemIDs = append([]string(nil), item.TodoItems[idx].CoverageWorkItemIDs...)
+		item.TodoItems[idx].RequiredEvidenceKinds = append([]string(nil), item.TodoItems[idx].RequiredEvidenceKinds...)
+		item.TodoItems[idx].Metadata = cloneStringAnyMap(item.TodoItems[idx].Metadata)
 	}
 	return item
 }

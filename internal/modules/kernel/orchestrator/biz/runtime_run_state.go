@@ -126,7 +126,7 @@ func compressedContextForCreatedRuntimeRun(run *runModel.Run) map[string]any {
 			{"id": "formal_result", "title": localizedRuntimeMilestoneTitle(language, "formal_result"), "state": "pending"},
 		},
 		"recovery": map[string]any{
-			"mode":       "continue",
+			"mode":       "resume",
 			"nextAction": localizedRuntimeRecoveryNextAction(language),
 			"runId":      string(run.ID),
 		},
@@ -176,9 +176,9 @@ func localizedRuntimeMilestoneTitle(language string, key string) string {
 
 func localizedRuntimeRecoveryNextAction(language string) string {
 	if prefersChinese(language) {
-		return "继续执行_run"
+		return "恢复执行_run"
 	}
-	return "continue_run"
+	return "resume_run"
 }
 
 func localizedRuntimeRetentionPolicy(language string) string {
@@ -336,7 +336,7 @@ func canCloseRunAs(current common.RunState, target common.RunState) bool {
 		}
 	case common.RunStateSuperseded:
 		switch current {
-		case common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
+		case common.RunStateCreated, common.RunStateRunning, common.RunStateBlockedOnDecision, common.RunStateBlockedOnApproval, common.RunStateValidating:
 			return true
 		}
 	}

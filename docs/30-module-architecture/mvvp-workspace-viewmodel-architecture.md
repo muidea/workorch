@@ -793,7 +793,7 @@ TUI 输入只转为 command：
 - create workspace
 - submit goal
 - define DoD
-- start/continue/restart run
+- start/resume/restart run
 - resolve decision
 - approve/reject approval
 - inspect/detail refresh

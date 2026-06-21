@@ -44,3 +44,12 @@ func FailRun(ctx context.Context, hub events.Hub, item *runmodel.Run, reason str
 		events.PayloadKeyFailureReason: reason,
 	})
 }
+
+func CancelRun(ctx context.Context, hub events.Hub, item *runmodel.Run) error {
+	if item == nil || item.ID == "" {
+		return common.ErrInvalidArgument
+	}
+	return ownercommandports.Publish(ctx, hub, orchestratorevents.TopicOrchestratorCommandCancelRun, "run", string(item.ID), item.WorkspaceID, item.ID, map[string]any{
+		events.PayloadKeyRunID: string(item.ID),
+	})
+}

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	runModel "github.com/muidea/workorch/internal/modules/kernel/run/pkg/models"
@@ -17,6 +18,9 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	stage := runtimeStageFromStepInput(step.Input)
+	if err := validateAssessmentOnlyOutputContract(step, output); err != nil {
+		return err
+	}
 	if err := validateIncrementalArtifactOutputContract(run, step, output); err != nil {
 		return err
 	}
@@ -123,6 +127,98 @@ func validateLLMExecutionOutputContract(run *runModel.Run, step *runModel.Step, 
 		return nil
 	}
 	return newRuntimeContractViolationError(contractViolationExecutionNoStateChangingOutput, "state-changing execution-stage llm graph node returned no state-changing output")
+}
+
+func validateAssessmentOnlyOutputContract(step *runModel.Step, output map[string]any) error {
+	if step == nil || step.Input == nil || output == nil {
+		return nil
+	}
+	if !boolValue(step.Input[stepInputKeyAssessmentOnly]) && !boolValue(step.Input["providerRetryAssessmentOnly"]) {
+		return nil
+	}
+	fields := assessmentOnlyExecutableOutputFields(output)
+	if len(fields) == 0 {
+		return nil
+	}
+	return newRuntimeContractViolationError(
+		contractViolationAssessmentOnlyExecutableOutput,
+		fmt.Sprintf("assessment-only step returned executable or state-changing output fields: %s", strings.Join(fields, ", ")),
+	)
+}
+
+func assessmentOnlyExecutableOutputFields(output map[string]any) []string {
+	if output == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, field := range assessmentOnlyExecutableFieldsInPayload(output, "") {
+		if _, ok := seen[field]; ok {
+			continue
+		}
+		seen[field] = struct{}{}
+	}
+	ret := stringStructKeys(seen)
+	sort.Strings(ret)
+	return ret
+}
+
+func assessmentOnlyExecutableFieldsInPayload(payload map[string]any, prefix string) []string {
+	if payload == nil {
+		return nil
+	}
+	ret := []string{}
+	for _, key := range []string{
+		stepOutputKeyExecutionGraph,
+		"shellCommands",
+		"patchRequests",
+		"mcpToolCalls",
+		stepOutputKeyMemoryWrites,
+		stepOutputKeyMemoryRefs,
+		"nextAction",
+		stepOutputKeyNextStep,
+		stepOutputKeyNextKind,
+		stepOutputKeyNextInput,
+		stepOutputKeyPatches,
+		"artifactPlan",
+		"artifactChunk",
+		"artifactChunkRepair",
+	} {
+		if !assessmentOnlyOutputFieldPresent(payload, key) {
+			continue
+		}
+		ret = append(ret, prefix+key)
+	}
+	for _, nestedKey := range []string{stepOutputKeyLLMDecision} {
+		if nested := mapFromValue(payload[nestedKey]); len(nested) > 0 {
+			ret = append(ret, assessmentOnlyExecutableFieldsInPayload(nested, prefix+nestedKey+".")...)
+		}
+	}
+	return ret
+}
+
+func assessmentOnlyOutputFieldPresent(payload map[string]any, key string) bool {
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return false
+	}
+	if key == stepOutputKeyExecutionGraph {
+		_, ok := runtimeGraphSpecFromValue(value)
+		return ok
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	case []string:
+		return len(typed) > 0
+	case map[string]any:
+		return len(typed) > 0
+	default:
+		return true
+	}
 }
 
 func validateConcreteValidationEvidenceOutputContract(step *runModel.Step, output map[string]any) error {

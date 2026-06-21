@@ -51,7 +51,7 @@ export const progressKindLabels: Record<string, string> = {
 // 恢复模式标签
 export const recoveryModeLabels: Record<string, string> = {
   idle: '待启动',
-  continue: '可继续',
+  resume: '可恢复',
   wait_decision: '等待决策',
   wait_approval: '等待审批',
   inspect_failure: '排查失败',
@@ -61,10 +61,10 @@ export const recoveryModeLabels: Record<string, string> = {
 
 // 恢复操作标签
 export const recoveryActionLabels: Record<string, string> = {
-  start_workspace_execution: '启动工作空间执行',
+  start_workspace_execution: '提交工作空间执行',
   inspect_active_run: '查看活跃运行',
-  continue_run: '继续运行',
-  continue_validation: '继续验收',
+  resume_run: '恢复运行',
+  resume_validation: '恢复验收',
   resolve_decision_ticket: '补充或处理决策工单',
   resolve_approval: '处理审批工单',
   inspect_result: '查看结果（Result）/交付物（Artifact）',

@@ -78,10 +78,54 @@ func initialStepInput(run *runModel.Run) map[string]any {
 					}
 				}
 			}
+		} else {
+			input = applyFirstRunGapBaselineStateChangingContract(input)
 		}
 	}
 	contract := BuildConvergenceContract(run, nil, nil, map[string]any{"input": input}, nil)
 	input = ApplyConvergenceContract(input, contract)
+	return input
+}
+
+func applyFirstRunGapBaselineStateChangingContract(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	if boolValue(input["stateChangingOutputRequired"]) || len(mapFromValue(input["repairActionPackage"])) > 0 {
+		return input
+	}
+	baseline := mapFromValue(input[gapBaselineKey])
+	if len(baseline) == 0 || strings.TrimSpace(stringFromMap(mapFromValue(baseline["nextAction"]), "kind")) != "schedule_step" {
+		return input
+	}
+	context := coverageWorkItemContextFromInput(input)
+	if len(context) == 0 || !coverageWorkItemContextHasMissingEvidenceKind(context, "state_change") {
+		return input
+	}
+	targets := coverageTargetSetFromWorkItemContext(context)
+	if len(targets) == 0 {
+		return input
+	}
+	setRuntimeStage(input, runtimeStageRepair)
+	input[stepInputKeySoulStage] = soulStageExecution
+	input["repairObjective"] = repairObjectiveStateChangingOutput
+	input["stateChangingOutputRequired"] = true
+	input["firstRunGapStateChangingContract"] = true
+	input["emptyWorkspaceEvidenceEscalatedToImplementation"] = true
+	pkg := map[string]any{
+		coverageWorkItemContextKey: context,
+		"coverageRepairRequired":   true,
+		"coverageTargetSet":        targets,
+		"requiredOutput":           stateChangingRepairRequiredOutput(),
+	}
+	required := mapFromValue(pkg["requiredOutput"])
+	required["mustDeclareCoverageTargets"] = true
+	required["mustReferenceCoverageWorkItem"] = true
+	required["coverageTargetMatchRule"] = "patch/apply coverageTargets must match one unresolved DoD item text, goalRequirementId, goal item, or deliverable item from coverageTargetSet"
+	pkg["requiredOutput"] = required
+	input["repairActionPackage"] = pkg
+	input["coverageRepairRequired"] = true
+	input["coverageTargetSet"] = targets
 	return input
 }
 
@@ -706,6 +750,9 @@ func runExecutionInput(run *runModel.Run, previousStepID common.StepID) map[stri
 	if context := mapFromValue(run.ExecutionContext[coverageWorkItemContextKey]); len(context) > 0 {
 		input[coverageWorkItemContextKey] = context
 	}
+	if baseline := mapFromValue(run.ExecutionContext[gapBaselineKey]); len(baseline) > 0 {
+		input[gapBaselineKey] = baseline
+	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(run.ExecutionContext); len(acceptance) > 0 {
 		input["acceptance"] = acceptance
 		if focus := mapFromValue(run.ExecutionContext[coverageFocusKey]); len(focus) > 0 {
@@ -780,6 +827,9 @@ func slimExecutionContextForStepInput(executionContext map[string]any) map[strin
 	}
 	if value := mapFromValue(executionContext[coverageWorkItemContextKey]); len(value) > 0 {
 		ret[coverageWorkItemContextKey] = value
+	}
+	if value := mapFromValue(executionContext[gapBaselineKey]); len(value) > 0 {
+		ret[gapBaselineKey] = value
 	}
 	if acceptance := runtimeAcceptanceSignalFromExecutionContext(executionContext); len(acceptance) > 0 {
 		ret["acceptance"] = acceptance

@@ -177,8 +177,13 @@ func (c *Client) UpdateDoD(ctx context.Context, workspaceID string, dodID string
 	return decodeEnvelope[DoD](resp, "dod")
 }
 
-// ActivateWorkspaceExecution activates a workspace execution (create + start run).
-func (c *Client) ActivateWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*Activation, error) {
+// ResumeWorkspaceExecution submits the workspace-scoped resume command.
+//
+// The REST resource path is still named execution-activations because it
+// returns the execution activation contract used to create or resume the run.
+// Client callers should treat this as command acceptance, not as a local
+// activation state machine.
+func (c *Client) ResumeWorkspaceExecution(ctx context.Context, workspaceID string, req *ActivationRequest) (*Activation, error) {
 	path := fmt.Sprintf("/api/v1/workorch/workspaces/%s/execution-activations", escapePath(workspaceID))
 	resp, err := c.do(ctx, "POST", path, req)
 	if err != nil {
@@ -202,7 +207,8 @@ func (c *Client) RestartWorkspaceExecution(ctx context.Context, workspaceID stri
 	return nil
 }
 
-// ActivationRequest is the request body for activating workspace execution.
+// ActivationRequest is the request body for workspace execution resume/restart
+// commands that may carry the execution activation contract inputs.
 type ActivationRequest struct {
 	GoalID                string            `json:"goalId,omitempty"`
 	DoDID                 string            `json:"doDId,omitempty"`
@@ -215,6 +221,12 @@ type ActivationRequest struct {
 	MemoryIDs             []string          `json:"memoryIds,omitempty"`
 	DialogLanguage        string            `json:"dialogLanguage,omitempty"`
 	Priority              int               `json:"priority,omitempty"`
+	RequestID             string            `json:"requestId,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Source                string            `json:"source,omitempty"`
+	Intent                string            `json:"intent,omitempty"`
+	DefinitionRevision    string            `json:"definitionRevision,omitempty"`
+	DecisionID            string            `json:"decisionId,omitempty"`
 	Restart               bool              `json:"restart,omitempty"`
 	ExecutionContextPatch map[string]any    `json:"executionContextPatch,omitempty"`
 }

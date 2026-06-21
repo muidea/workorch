@@ -38,6 +38,6 @@ func NormalizeCandidateSelectionResolutionPayloadForTicket(ticket *decisionmodel
 		return payload
 	}
 	ret["selectedCandidateFields"] = selected
-	ret["candidateSelectionMode"] = "semantic_continue"
+	ret["candidateSelectionMode"] = "semantic_resume"
 	return ret
 }

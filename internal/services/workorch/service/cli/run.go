@@ -104,7 +104,13 @@ var runActivateCmd = &cobra.Command{
 		}
 		req.Priority, _ = cmd.Flags().GetInt("priority")
 
-		run, err := mustBackend().Run().Activate(ctx(), common.WorkspaceID(args[0]), req)
+		run, err := mustBackend().Run().Command(ctx(), backend.WorkspaceRunCommand{
+			WorkspaceID: common.WorkspaceID(args[0]),
+			Intent:      backend.RunCommandIntentResume,
+			Reason:      "user_requested",
+			Source:      "cli",
+			Activation:  req,
+		})
 		if err != nil {
 			return fmt.Errorf("activate execution: %w", err)
 		}
@@ -152,14 +158,29 @@ var runStatusCmd = &cobra.Command{
 
 var runResumeCmd = &cobra.Command{
 	Use:   "resume <id>",
-	Short: "Resume a blocked run",
+	Short: "Resume the current workspace run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := mustBackend().Run().Resume(runCommandContext(cmd), runCommandWorkspaceID(cmd), common.RunID(args[0]))
+		workspaceID := runCommandWorkspaceID(cmd)
+		if workspaceID == "" {
+			return fmt.Errorf("workspace is required")
+		}
+		r, err := mustBackend().Run().Command(runCommandContext(cmd), backend.WorkspaceRunCommand{
+			WorkspaceID:   workspaceID,
+			ExpectedRunID: common.RunID(args[0]),
+			Intent:        backend.RunCommandIntentResume,
+			Reason:        "user_requested",
+			Source:        "cli",
+		})
 		if err != nil {
 			return fmt.Errorf("resume run: %w", err)
 		}
-		fmt.Println(styleSuccess.Render("Run resumed: " + string(r.ID)))
+		if r == nil {
+			fmt.Println(styleSuccess.Render("Run resume accepted."))
+			fmt.Printf("  Run: %s\n", args[0])
+			return nil
+		}
+		fmt.Println(styleSuccess.Render("Run resume accepted: " + string(r.ID)))
 		fmt.Printf("  State: %s\n", stateIcon(string(r.State)))
 		return nil
 	},

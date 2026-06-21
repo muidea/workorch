@@ -225,7 +225,7 @@ func TestRuntimeGapRecoveryPatchContainsGapSpecificContext(t *testing.T) {
 		t.Fatalf("runtimeGapRecovery = %T, want map", patch["runtimeGapRecovery"])
 	}
 	if recovery["mode"] != "runtime_gap_recovery" ||
-		recovery["nextAction"] != "continue_run" ||
+		recovery["nextAction"] != "resume_run" ||
 		recovery["workspaceId"] != string(cmd.WorkspaceID) ||
 		recovery["runId"] != string(cmd.RunID) ||
 		recovery["stepId"] != string(cmd.StepID) ||

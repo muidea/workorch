@@ -21,7 +21,7 @@ const {
   acceptanceCard,
   boundedParagraph, checkpointTypeLabel, compactJSON, compactTags, contextBundleCard,
   dodAssessmentItems, errorMessage, eventRecordState, eventRecordSubject, eventRecordSummary,
-  evidenceCount, executionSectionsCard, goalOutcomeState, goalOutcomeSummary,
+  evidenceCount, executionSectionsCard, gapBaselineCard, goalOutcomeState, goalOutcomeSummary,
   hasWorkspaceSetupDraftContent, hasWorkspaceSetupDraftInfoItems, isNotFoundError,
   joinLines, llmContextBudgetCard, llmUsageCard, memoryRecallCard,
   memoryRefIDs, mergeById, metricGrid, normalizeSoulBindingFormValues, numberText, percentText,
@@ -1055,7 +1055,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   };
 
-  const activateWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
+  const resumeWorkspaceExecution = (request: WorkspaceExecutionActivationRequest) => {
     if (!workspaceId) {
       return;
     }
@@ -1072,9 +1072,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setActivationTracking(true);
     activationForm.resetFields();
     message.info('工作空间执行已提交，已转入后台跟踪');
-    void workorchApi.activateWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
-      .then(async (activation) => {
-        setSnapshot(activation.snapshot);
+    void workorchApi.resumeWorkspaceExecution(targetWorkspaceId, requestWithCapabilityServers)
+      .then(async () => {
         setWorkspaceProjection(undefined);
         setRunSnapshot(undefined);
         setRunObservability(undefined);
@@ -1172,7 +1171,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 .catch((error: unknown) => message.error(errorMessage(error)));
             }}
           >
-            继续运行
+            恢复运行
           </Button>
         </Space>
       )
@@ -1227,7 +1226,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           </div>
           <div className="workspace-header-actions-main">
-            <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>启动执行</Button>
+            <Button type="primary" disabled={!workspaceId} onClick={requestWorkspaceActivation}>提交执行</Button>
             <Button onClick={() => void openWorkspaceSetup()}>创建工作空间</Button>
             <Dropdown
               menu={{
@@ -1591,6 +1590,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             extra={<Tag>{runObservability?.acceptance?.activeSliceId ?? runSnapshot?.acceptance?.activeSliceId ?? snapshot.acceptance?.activeSliceId ?? '未激活'}</Tag>}
           >
             {acceptanceCard(runObservability?.acceptance ?? runSnapshot?.acceptance ?? snapshot.acceptance)}
+          </ProCard>
+          <ProCard
+            title="GapBaseline"
+            className="workorch-section"
+            extra={<Tag>{runSnapshot?.gapBaseline?.nextAction?.kind ?? snapshot.gapBaseline?.nextAction?.kind ?? '未生成'}</Tag>}
+          >
+            {gapBaselineCard(runSnapshot?.gapBaseline ?? snapshot.gapBaseline)}
           </ProCard>
           <ProCard
             title="任务拆分图"
@@ -2209,7 +2215,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       >
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary">
-            执行人格（Soul）是工作空间的执行配置。先维护目标（Goal）和验收标准（DoD），再按需设置默认执行人格与阶段覆盖；启动执行时仍可做单次覆盖。
+            执行人格（Soul）是工作空间的执行配置。先维护目标（Goal）和验收标准（DoD），再按需设置默认执行人格与阶段覆盖；提交执行时仍可做单次覆盖。
           </Typography.Paragraph>
           <Descriptions
             size="small"
@@ -2619,7 +2625,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         </Form>
       </Modal>
       <Modal
-        title="启动工作空间执行"
+        title="提交工作空间执行"
         open={activationOpen}
         confirmLoading={activationLoading}
         onCancel={() => setActivationOpen(false)}
@@ -2629,7 +2635,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         <Form
           form={activationForm}
           layout="vertical"
-          onFinish={(values: WorkspaceExecutionActivationRequest) => void activateWorkspaceExecution(values)}
+          onFinish={(values: WorkspaceExecutionActivationRequest) => void resumeWorkspaceExecution(values)}
         >
           <Form.Item name="goalId" label="目标" rules={[{ required: true }]}>
             <Select options={goals.map((item) => ({ value: item.id, label: `${item.text} (${item.id})` }))} />

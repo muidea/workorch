@@ -421,6 +421,36 @@ type RuntimeExecution struct {
 	Gap                 string                          `json:"gap,omitempty"`
 }
 
+type GapBaseline struct {
+	WorkspaceID           string           `json:"workspaceId,omitempty"`
+	RunID                 string           `json:"runId,omitempty"`
+	DefinitionRevision    string           `json:"definitionRevision,omitempty"`
+	BaselineRevision      string           `json:"baselineRevision,omitempty"`
+	CurrentFocus          map[string]any   `json:"currentFocus,omitempty"`
+	OpenCoverageWorkItems []map[string]any `json:"openCoverageWorkItems,omitempty"`
+	AcceptedEvidenceRefs  []string         `json:"acceptedEvidenceRefs,omitempty"`
+	RejectedEvidenceRefs  []string         `json:"rejectedEvidenceRefs,omitempty"`
+	TodoItems             []GapTodoItem    `json:"todoItems,omitempty"`
+	NextAction            GapNextAction    `json:"nextAction,omitempty"`
+}
+
+type GapTodoItem struct {
+	ID                    string         `json:"id,omitempty"`
+	Source                string         `json:"source,omitempty"`
+	SourceRef             string         `json:"sourceRef,omitempty"`
+	CoverageWorkItemIDs   []string       `json:"coverageWorkItemIds,omitempty"`
+	RequiredEvidenceKinds []string       `json:"requiredEvidenceKinds,omitempty"`
+	Status                string         `json:"status,omitempty"`
+	Priority              int            `json:"priority,omitempty"`
+	Reason                string         `json:"reason,omitempty"`
+	Metadata              map[string]any `json:"metadata,omitempty"`
+}
+
+type GapNextAction struct {
+	Kind   string `json:"kind,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 type ContinuationDiagnostic struct {
 	WorkspaceID        string   `json:"workspaceId,omitempty"`
 	RunID              string   `json:"runId,omitempty"`
@@ -685,9 +715,11 @@ type WorkspaceSnapshot struct {
 	TaskProgress          TaskProgress           `json:"taskProgress"`
 	RunHeartbeat          RunHeartbeat           `json:"runHeartbeat,omitempty"`
 	RuntimeExecution      *RuntimeExecution      `json:"runtimeExecution,omitempty"`
+	RunCommand            *RunCommandStatus      `json:"runCommand,omitempty"`
 	SchedulerDiagnostics  *SchedulerDiagnostics  `json:"schedulerDiagnostics,omitempty"`
 	ContextBundle         map[string]any         `json:"contextBundle,omitempty"`
 	CoverageSummary       map[string]any         `json:"coverageSummary,omitempty"`
+	GapBaseline           *GapBaseline           `json:"gapBaseline,omitempty"`
 	Acceptance            AcceptanceProjection   `json:"acceptance"`
 	Goals                 []Goal                 `json:"goals,omitempty"`
 	DoDs                  []DoD                  `json:"dods,omitempty"`
@@ -706,6 +738,19 @@ type WorkspaceSnapshot struct {
 	LLMUsageTraces        []LLMUsageTrace        `json:"llmUsageTraces,omitempty"`
 	LLMUsageSummary       LLMUsageSummary        `json:"llmUsageSummary"`
 	EventRecords          []EventRecord          `json:"eventRecords,omitempty"`
+}
+
+type RunCommandStatus struct {
+	WorkspaceID        string `json:"workspaceId,omitempty"`
+	RunID              string `json:"runId,omitempty"`
+	Intent             string `json:"intent,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+	RequestID          string `json:"requestId,omitempty"`
+	Source             string `json:"source,omitempty"`
+	DefinitionRevision string `json:"definitionRevision,omitempty"`
+	DecisionID         string `json:"decisionId,omitempty"`
+	AcceptedAt         string `json:"acceptedAt,omitempty"`
+	Revision           int64  `json:"revision,omitempty"`
 }
 
 type RunHeartbeat struct {
@@ -753,6 +798,7 @@ type RunSnapshot struct {
 	LLMUsageSummary         LLMUsageSummary        `json:"llmUsageSummary"`
 	CoverageWorkItems       []map[string]any       `json:"coverageWorkItems,omitempty"`
 	CoverageWorkItemContext map[string]any         `json:"coverageWorkItemContext,omitempty"`
+	GapBaseline             *GapBaseline           `json:"gapBaseline,omitempty"`
 	Acceptance              AcceptanceProjection   `json:"acceptance"`
 	EventRecords            []EventRecord          `json:"eventRecords,omitempty"`
 }

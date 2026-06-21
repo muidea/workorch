@@ -17,6 +17,7 @@ const (
 	schedulerDetailLimit      = 512
 
 	schedulerKindWorkspaceActivation    = "workspace_activation"
+	schedulerKindWorkspaceRun           = "workspace_run"
 	schedulerKindWorkspaceRestart       = "workspace_restart"
 	schedulerKindRunContinuation        = "run_continuation"
 	schedulerKindGovernanceContinuation = "governance_continuation"
@@ -353,13 +354,15 @@ func schedulerRecommendedActions(kind, reason, recoverability string) []string {
 		return nil
 	}
 	switch kind {
-	case schedulerKindWorkspaceActivation, schedulerKindWorkspaceRestart, schedulerKindReplanContinuation:
+	case schedulerKindWorkspaceRestart:
 		return []string{"workspace_restart"}
+	case schedulerKindWorkspaceActivation, schedulerKindReplanContinuation:
+		return []string{"run_resume"}
 	case schedulerKindRunContinuation, schedulerKindGovernanceContinuation:
-		return []string{"run_continue"}
+		return []string{"run_resume"}
 	default:
 		if reason == schedulerReasonRunSlotUnavailable || reason == schedulerReasonServiceShuttingDown {
-			return []string{"run_continue", "workspace_restart"}
+			return []string{"run_resume", "workspace_restart"}
 		}
 		return nil
 	}

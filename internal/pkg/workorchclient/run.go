@@ -73,13 +73,32 @@ func (c *Client) ResumeRun(ctx context.Context, workspaceID, runID string, execu
 	return c.resumeRun(ctx, runPath(workspaceID, runID, "resume"), executionContextPatch...)
 }
 
+type RunResumeRequest struct {
+	ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
+	Intent                string         `json:"intent,omitempty"`
+	RequestID             string         `json:"requestId,omitempty"`
+	Reason                string         `json:"reason,omitempty"`
+	Source                string         `json:"source,omitempty"`
+	DefinitionRevision    string         `json:"definitionRevision,omitempty"`
+	DecisionID            string         `json:"decisionId,omitempty"`
+}
+
+func (c *Client) ResumeRunWithRequest(ctx context.Context, workspaceID, runID string, req *RunResumeRequest) (*Run, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspaceId is required")
+	}
+	return c.resumeRunWithBody(ctx, runPath(workspaceID, runID, "resume"), req)
+}
+
 func (c *Client) resumeRun(ctx context.Context, path string, executionContextPatch ...map[string]any) (*Run, error) {
 	var body any
 	if len(executionContextPatch) > 0 && len(executionContextPatch[0]) > 0 {
-		body = struct {
-			ExecutionContextPatch map[string]any `json:"executionContextPatch,omitempty"`
-		}{ExecutionContextPatch: executionContextPatch[0]}
+		body = &RunResumeRequest{ExecutionContextPatch: executionContextPatch[0]}
 	}
+	return c.resumeRunWithBody(ctx, path, body)
+}
+
+func (c *Client) resumeRunWithBody(ctx context.Context, path string, body any) (*Run, error) {
 	resp, err := c.do(ctx, "POST", path, body)
 	if err != nil {
 		return nil, err

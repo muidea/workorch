@@ -263,11 +263,54 @@ func (b *remoteDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, 
 
 type remoteRunBackend struct{ cl *client.Client }
 
-func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
-	act, err := b.cl.ActivateWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
+func (b *remoteRunBackend) Command(ctx context.Context, req WorkspaceRunCommand) (*RunInfo, error) {
+	if req.WorkspaceID == "" {
+		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+	}
+	switch req.Intent {
+	case "", RunCommandIntentResume:
+		if req.ExpectedRunID == "" {
+			return b.resumeWorkspaceExecution(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
+		}
+		return b.runCommandViaResume(ctx, req, RunCommandIntentResume)
+	case RunCommandIntentRestart:
+		return b.restart(ctx, req.WorkspaceID, mergeActivationRequest(req.Activation, req))
+	case RunCommandIntentReplan, RunCommandIntentRecover:
+		if req.ExpectedRunID == "" {
+			return nil, fmt.Errorf("%w: expectedRunId is required for %s", common.ErrInvalidArgument, req.Intent)
+		}
+		return b.runCommandViaResume(ctx, req, req.Intent)
+	default:
+		return nil, fmt.Errorf("%w: unsupported run command intent %q", common.ErrInvalidArgument, req.Intent)
+	}
+}
+
+func (b *remoteRunBackend) runCommandViaResume(ctx context.Context, req WorkspaceRunCommand, intent RunCommandIntent) (*RunInfo, error) {
+	r, err := b.cl.ResumeRunWithRequest(ctx, string(req.WorkspaceID), string(req.ExpectedRunID), &client.RunResumeRequest{
+		ExecutionContextPatch: req.ExecutionContextPatch,
+		Intent:                string(intent),
+		RequestID:             req.RequestID,
+		Reason:                req.Reason,
+		Source:                normalizedRunCommandSource(req.Source),
+		DefinitionRevision:    req.DefinitionRevision,
+		DecisionID:            string(req.DecisionID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return remoteRunInfoFromClientRun(r), nil
+}
+
+func (b *remoteRunBackend) resumeWorkspaceExecution(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
+	act, err := b.cl.ResumeWorkspaceExecution(ctx, string(wsID), &client.ActivationRequest{
 		GoalID: string(req.GoalID), DoDID: string(req.DoDID),
 		LLMProviderID:  req.LLMProviderID,
 		DialogLanguage: req.DialogLanguage, SoulID: string(req.SoulID), Priority: req.Priority,
+		RequestID: req.RequestID, Reason: req.Reason,
+		Source:                normalizedRunCommandSource(req.Source),
+		Intent:                string(RunCommandIntentResume),
+		DefinitionRevision:    req.DefinitionRevision,
+		DecisionID:            string(req.DecisionID),
 		ExecutionContextPatch: req.ExecutionContextPatch,
 	})
 	if err != nil {
@@ -287,7 +330,7 @@ func (b *remoteRunBackend) Activate(ctx context.Context, wsID common.WorkspaceID
 	}, nil
 }
 
-func (b *remoteRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
+func (b *remoteRunBackend) restart(ctx context.Context, wsID common.WorkspaceID, req ActivateRunRequest) (*RunInfo, error) {
 	if wsID == "" {
 		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
 	}
@@ -298,6 +341,12 @@ func (b *remoteRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID,
 		DialogLanguage:        req.DialogLanguage,
 		SoulID:                string(req.SoulID),
 		Priority:              req.Priority,
+		RequestID:             req.RequestID,
+		Reason:                req.Reason,
+		Source:                normalizedRunCommandSource(req.Source),
+		Intent:                string(RunCommandIntentRestart),
+		DefinitionRevision:    req.DefinitionRevision,
+		DecisionID:            string(req.DecisionID),
 		Restart:               true,
 		ExecutionContextPatch: req.ExecutionContextPatch,
 	})
@@ -307,16 +356,34 @@ func (b *remoteRunBackend) Restart(ctx context.Context, wsID common.WorkspaceID,
 	return nil, nil
 }
 
-func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, id common.RunID, executionContextPatch ...map[string]any) (*RunInfo, error) {
-	if wsID == "" {
-		return nil, fmt.Errorf("%w: workspaceId is required", common.ErrInvalidArgument)
+func mergeActivationRequest(base ActivateRunRequest, req WorkspaceRunCommand) ActivateRunRequest {
+	if req.Priority != 0 {
+		base.Priority = req.Priority
 	}
-	r, err := b.cl.ResumeRun(ctx, string(wsID), string(id), executionContextPatch...)
-	if err != nil {
-		return nil, err
+	if req.RequestID != "" {
+		base.RequestID = req.RequestID
 	}
+	if req.Reason != "" {
+		base.Reason = req.Reason
+	}
+	if req.Source != "" {
+		base.Source = req.Source
+	}
+	if req.DefinitionRevision != "" {
+		base.DefinitionRevision = req.DefinitionRevision
+	}
+	if req.DecisionID != "" {
+		base.DecisionID = req.DecisionID
+	}
+	if len(req.ExecutionContextPatch) > 0 {
+		base.ExecutionContextPatch = req.ExecutionContextPatch
+	}
+	return base
+}
+
+func remoteRunInfoFromClientRun(r *client.Run) *RunInfo {
 	if r == nil {
-		return nil, nil
+		return nil
 	}
 	return &RunInfo{
 		ID: common.RunID(r.ID), WorkspaceID: common.WorkspaceID(r.WorkspaceID),
@@ -326,7 +393,7 @@ func (b *remoteRunBackend) Resume(ctx context.Context, wsID common.WorkspaceID, 
 		BlockingTicketID:   common.TicketID(r.BlockingTicketID),
 		BlockingApprovalID: common.ApprovalID(r.BlockingApprovalID),
 		FailureReason:      r.FailureReason,
-	}, nil
+	}
 }
 func (b *remoteRunBackend) Get(ctx context.Context, wsID common.WorkspaceID, id common.RunID) (*RunInfo, error) {
 	if wsID == "" {

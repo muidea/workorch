@@ -18,7 +18,7 @@ func newWorkspaceTaskProgressBase(snapshot readmodelcore.WorkspaceSnapshot, labe
 	if snapshot.Workspace.ActiveRunID != "" {
 		ret.RunID = snapshot.Workspace.ActiveRunID
 		ret.Recovery.RunID = snapshot.Workspace.ActiveRunID
-		ret.Recovery.Mode = "continue"
+		ret.Recovery.Mode = "resume"
 		ret.Recovery.NextAction = "inspect_active_run"
 		ret.Recovery.Reason = labels.ActiveRun
 	}

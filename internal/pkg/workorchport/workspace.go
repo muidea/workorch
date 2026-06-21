@@ -103,6 +103,36 @@ type AcceptanceProjectionInfo struct {
 	Summary       AcceptanceSummaryInfo
 }
 
+type GapBaselineInfo struct {
+	WorkspaceID           common.WorkspaceID
+	RunID                 common.RunID
+	DefinitionRevision    string
+	BaselineRevision      string
+	CurrentFocus          map[string]any
+	OpenCoverageWorkItems []map[string]any
+	AcceptedEvidenceRefs  []string
+	RejectedEvidenceRefs  []string
+	TodoItems             []GapTodoItemInfo
+	NextAction            GapNextActionInfo
+}
+
+type GapTodoItemInfo struct {
+	ID                    string
+	Source                string
+	SourceRef             string
+	CoverageWorkItemIDs   []string
+	RequiredEvidenceKinds []string
+	Status                string
+	Priority              int
+	Reason                string
+	Metadata              map[string]any
+}
+
+type GapNextActionInfo struct {
+	Kind   string
+	Reason string
+}
+
 type WorkspaceOutcomeInfo struct {
 	WorkspaceID  common.WorkspaceID
 	State        string
@@ -123,9 +153,11 @@ type WorkspaceSnapshotInfo struct {
 	TaskProgress          TaskProgressInfo
 	RunHeartbeat          RunHeartbeatInfo
 	RuntimeExecution      *RuntimeExecutionInfo
+	RunCommand            *RunCommandStatusInfo
 	SchedulerDiagnostics  *SchedulerDiagnosticsInfo
 	ContextBundle         map[string]any
 	CoverageSummary       map[string]any
+	GapBaseline           *GapBaselineInfo
 	Acceptance            AcceptanceProjectionInfo
 	TaskDecompositions    []TaskDecompositionInfo
 	Goals                 []GoalInfo
@@ -142,6 +174,19 @@ type WorkspaceSnapshotInfo struct {
 	EventRecords          []EventRecordInfo
 	Decisions             []DecisionInfo
 	Approvals             []ApprovalInfo
+}
+
+type RunCommandStatusInfo struct {
+	WorkspaceID        common.WorkspaceID
+	RunID              common.RunID
+	Intent             string
+	Reason             string
+	RequestID          string
+	Source             string
+	DefinitionRevision string
+	DecisionID         common.TicketID
+	AcceptedAt         string
+	Revision           int64
 }
 
 type RunHeartbeatInfo struct {

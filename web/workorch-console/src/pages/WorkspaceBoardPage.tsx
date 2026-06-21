@@ -53,19 +53,19 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     onReconnect: () => void loadBoard(false)
   });
 
-  const trackWorkspaceActivationInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
-    void workorchApi.activateWorkspaceExecution(workspaceId, request)
+  const trackWorkspaceResumeInBackground = (workspaceId: string, request: WorkspaceExecutionActivationRequest) => {
+    void workorchApi.resumeWorkspaceExecution(workspaceId, request)
       .then(() => {
-        message.success('工作空间执行已在后台启动');
+        message.success('工作空间执行已提交');
         void loadBoard();
       })
       .catch((error: unknown) => {
-        message.error(`工作空间执行后台启动失败：${errorMessage(error)}`);
+        message.error(`工作空间执行提交失败：${errorMessage(error)}`);
         void loadBoard();
       });
   };
 
-  const activateWorkspaceExecution = async (workspace: Workspace) => {
+  const resumeWorkspaceExecution = async (workspace: Workspace) => {
     const detail = await workorchApi.readWorkspaceSnapshotProjection(workspace.id);
     const item = { snapshot: detail.snapshot };
     const request = workspaceBoardActivationRequest(item);
@@ -73,8 +73,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       message.warning(workspaceBoardActivationHint(item));
       return;
     }
-    message.info('工作空间执行已提交，正在后台启动');
-    trackWorkspaceActivationInBackground(workspace.id, request);
+    message.info('工作空间执行已提交，正在后台处理');
+    trackWorkspaceResumeInBackground(workspace.id, request);
   };
 
   return (
@@ -128,8 +128,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                 </Space>
                 <Space className="workorch-section" wrap>
                   <Button type="primary" onClick={() => onOpenWorkspace(workspace.id)}>进入工作空间</Button>
-                  {canStartRun ? <Button onClick={() => void activateWorkspaceExecution(workspace).catch((error: unknown) => message.error(errorMessage(error)))}>启动执行</Button> : null}
-                  {workspace.activeRunId ? <Button onClick={() => void workorchApi.resumeRun(workspace.activeRunId || '', undefined, workspace.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>继续运行</Button> : null}
+                  {canStartRun ? <Button onClick={() => void resumeWorkspaceExecution(workspace).catch((error: unknown) => message.error(errorMessage(error)))}>提交执行</Button> : null}
+                  {workspace.activeRunId ? <Button onClick={() => void workorchApi.resumeRun(workspace.activeRunId || '', undefined, workspace.id).then(() => loadBoard()).catch((error: unknown) => message.error(errorMessage(error)))}>恢复运行</Button> : null}
                 </Space>
               </ProCard>
             );

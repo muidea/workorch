@@ -291,6 +291,85 @@ func TestValidateLLMExecutionOutputContractRejectsImplementationShellOnly(t *tes
 	}
 }
 
+func TestValidateLLMExecutionOutputContractRejectsAssessmentOnlyExecutableOutputs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-assessment-only-output-contract",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-assessment-only-output-contract/assess",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyAssessmentOnly: true,
+			stepInputKeyRuntimeStage:   runtimeStageVerification,
+		},
+	}
+	validAssessment := map[string]any{
+		stepOutputKeyDoDAssessment: map[string]any{
+			"satisfied": false,
+			"summary":   "gap remains open",
+			"items": []map[string]any{{
+				"item":  "coverage item",
+				"state": "open",
+			}},
+		},
+	}
+	if err := validateLLMExecutionOutputContract(run, step, validAssessment); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract valid assessment err = %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		output    map[string]any
+		wantField string
+	}{
+		{
+			name: "patch request",
+			output: map[string]any{
+				"patchRequests": []map[string]any{{"targetRef": "artifact://target", "patchType": "file_write"}},
+			},
+			wantField: "patchRequests",
+		},
+		{
+			name: "memory write",
+			output: map[string]any{
+				stepOutputKeyMemoryWrites: []map[string]any{{"kind": "diagnostic", "summary": "not allowed in assessment"}},
+			},
+			wantField: stepOutputKeyMemoryWrites,
+		},
+		{
+			name: "artifact plan",
+			output: map[string]any{
+				"artifactPlan": map[string]any{"artifacts": []map[string]any{{"artifactId": "artifact-1"}}},
+			},
+			wantField: "artifactPlan",
+		},
+		{
+			name: "nested llm decision patch request",
+			output: map[string]any{
+				stepOutputKeyLLMDecision: map[string]any{
+					"patchRequests": []map[string]any{{"targetRef": "artifact://target", "patchType": "file_write"}},
+				},
+			},
+			wantField: stepOutputKeyLLMDecision + ".patchRequests",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLLMExecutionOutputContract(run, step, tc.output)
+			if !errors.Is(err, common.ErrInvalidArgument) ||
+				!strings.Contains(err.Error(), "assessment-only step returned executable or state-changing output fields") ||
+				!strings.Contains(err.Error(), tc.wantField) {
+				t.Fatalf("validateLLMExecutionOutputContract err = %v, want assessment-only executable output rejection for %s", err, tc.wantField)
+			}
+			var structured runtimeContractViolationError
+			if !errors.As(err, &structured) || structured.violationType != contractViolationAssessmentOnlyExecutableOutput {
+				t.Fatalf("structured violation = %#v, want %s", structured, contractViolationAssessmentOnlyExecutableOutput)
+			}
+		})
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsStateChangingRepairReadOnlyGraph(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-state-changing-repair-contract",

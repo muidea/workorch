@@ -19,7 +19,7 @@ failure detected
 -> convergence contract / recovery decision
 -> retry / repair / governance / replan
 -> successor run or resumed run
--> continue with inherited contract and evidence
+-> resume with inherited contract and evidence
 ```
 
 ## Main Stages
@@ -79,7 +79,7 @@ replan 的职责是：
 
 恢复规则：
 
-- 服务重启后不自动重新派发或失败历史 `running + dispatched` run；需要由用户通过 `/run continue`、replan、restart 或显式诊断/恢复入口触发。
+- 服务重启后不自动重新派发或失败历史 `running + dispatched` run；需要由用户通过 `/run resume`、replan、restart 或显式诊断/恢复入口触发。
 - 显式恢复重新派发时必须复用原 step id、kind 与 input，由 runtime adapter 重新生成 output。
 - 该场景不得伪造业务失败，也不得直接将 run 留在空转 `running`。
 - 若重新派发后 adapter 返回 provider/config/runtime failure，继续进入既有 provider retry、repair、decision 或 terminal failure 合同。

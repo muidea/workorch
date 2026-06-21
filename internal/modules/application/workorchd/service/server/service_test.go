@@ -146,8 +146,8 @@ func TestServiceRunRecoversStartupInactiveRunningWorkspaceBeforeProjection(t *te
 	if err != nil {
 		t.Fatalf("ReadRunWithBackend: %v", err)
 	}
-	if run.State != string(common.RunStateFailed) {
-		t.Fatalf("run = %+v, want failed startup inactive run", run)
+	if run.State != string(common.RunStateCancelled) {
+		t.Fatalf("run = %+v, want cancelled startup inactive run", run)
 	}
 	if err := svc.http.state.workspaceProjection.RebuildWorkspace(ctx, workspaceID); err != nil {
 		t.Fatalf("RebuildWorkspace: %v", err)

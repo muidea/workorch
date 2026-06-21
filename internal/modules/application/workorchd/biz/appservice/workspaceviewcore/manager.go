@@ -203,6 +203,25 @@ func (m *Manager) UpsertWorkspace(workspace appmodelcore.Workspace) {
 	m.publishProjectionChanged(context.Background(), workspace.ID, "overview")
 }
 
+func (m *Manager) UpsertSnapshot(snapshot readmodelcore.WorkspaceSnapshot) {
+	if m == nil || m.store == nil {
+		return
+	}
+	m.store.UpsertSnapshot(snapshot)
+	m.publishProjectionChanged(context.Background(), snapshot.Workspace.ID, "detail")
+}
+
+func (m *Manager) ApplyRunCommandAccepted(update RunCommandAcceptedUpdate) bool {
+	if m == nil || m.store == nil {
+		return false
+	}
+	if !m.store.ApplyRunCommandAccepted(update) {
+		return false
+	}
+	m.publishProjectionChanged(context.Background(), update.WorkspaceID, "run_command_accepted")
+	return true
+}
+
 func (m *Manager) DeleteWorkspace(workspaceID string) {
 	if m == nil || m.store == nil {
 		return

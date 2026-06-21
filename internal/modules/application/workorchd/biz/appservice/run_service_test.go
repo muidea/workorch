@@ -307,7 +307,7 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 	}
 	decisionRecovery, _ := decision["recovery"].(map[string]any)
 	if decisionRecovery["blockingTicketId"] != "ticket-lightweight-resume" ||
-		decisionRecovery["nextAction"] != "continue_run" {
+		decisionRecovery["nextAction"] != "resume_run" {
 		t.Fatalf("decision recovery = %+v, want resolved ticket resume", decisionRecovery)
 	}
 
@@ -325,7 +325,7 @@ func TestCompressedContextForBlockedRunResumeUsesLightweightGovernanceProjection
 	}
 	approvalRecovery, _ := approval["recovery"].(map[string]any)
 	if approvalRecovery["blockingApprovalId"] != "approval-lightweight-resume" ||
-		approvalRecovery["nextAction"] != "continue_run" {
+		approvalRecovery["nextAction"] != "resume_run" {
 		t.Fatalf("approval recovery = %+v, want approved approval resume", approvalRecovery)
 	}
 
@@ -869,11 +869,11 @@ func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToActi
 	if err != nil {
 		t.Fatalf("RecoverStartupInactiveRunningWorkspacesWithBackend: %v", err)
 	}
-	if len(recovered) != 1 || recovered[0].ID != runID || recovered[0].WorkspaceID != workspaceID || recovered[0].State != string(common.RunStateFailed) {
-		t.Fatalf("recovered = %+v, want failed inactive run", recovered)
+	if len(recovered) != 1 || recovered[0].ID != runID || recovered[0].WorkspaceID != workspaceID || recovered[0].State != string(common.RunStateCancelled) {
+		t.Fatalf("recovered = %+v, want cancelled inactive run", recovered)
 	}
-	if recovered[0].FailureReason != runports.StartupInactiveRunFailureReason {
-		t.Fatalf("failure reason = %q, want %q", recovered[0].FailureReason, runports.StartupInactiveRunFailureReason)
+	if recovered[0].FailureReason != runports.StartupInactiveRunRecoveryReason {
+		t.Fatalf("failure reason = %q, want %q", recovered[0].FailureReason, runports.StartupInactiveRunRecoveryReason)
 	}
 	workspace, err := ReadWorkspaceWithBackend(ctx, "file", dataRoot, workspaceID)
 	if err != nil {
@@ -886,8 +886,8 @@ func TestRecoverStartupInactiveRunningWorkspacesWithBackendResetsWorkspaceToActi
 	if err != nil {
 		t.Fatalf("ReadRunWithBackend: %v", err)
 	}
-	if run.State != string(common.RunStateFailed) {
-		t.Fatalf("run = %+v, want failed", run)
+	if run.State != string(common.RunStateCancelled) {
+		t.Fatalf("run = %+v, want cancelled", run)
 	}
 	recoveredAgain, err := RecoverStartupInactiveRunningWorkspacesWithBackend(ctx, "file", dataRoot)
 	if err != nil {

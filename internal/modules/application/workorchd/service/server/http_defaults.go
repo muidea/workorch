@@ -178,7 +178,7 @@ func defaultResumeRun(ctx context.Context, backend string, dataRoot string, runI
 	return appservice.ResumeRunWithBackend(ctx, backend, dataRoot, runID, executionContextPatch...)
 }
 
-func defaultActivateWorkspaceExecution(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
+func defaultResumeWorkspaceExecution(ctx context.Context, backend string, dataRoot string, workspaceID string, cmd appservice.ActivateWorkspaceExecutionCommand) (appservice.WorkspaceExecutionActivation, error) {
 	return appservice.ActivateWorkspaceExecutionWithBackend(ctx, backend, dataRoot, workspaceID, cmd)
 }
 

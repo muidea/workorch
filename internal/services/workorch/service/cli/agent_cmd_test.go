@@ -128,6 +128,9 @@ func (agentCommandDoDBackend) Update(context.Context, common.WorkspaceID, common
 
 type agentCommandRunBackend struct{}
 
+func (agentCommandRunBackend) Command(context.Context, backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+	return nil, common.ErrInvalidArgument
+}
 func (agentCommandRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
 	return nil, common.ErrInvalidArgument
 }

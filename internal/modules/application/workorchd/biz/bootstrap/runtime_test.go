@@ -461,7 +461,7 @@ func TestWorkspaceScopedGovernanceRepositoriesUseRuntimeWorkspaceForDuplicateIDs
 			RunID:       runID,
 			StepID:      "run-001/step-1",
 			Reason:      "approval " + string(workspaceID),
-			Action:      "continue",
+			Action:      "resume",
 			State:       common.ApprovalStatePending,
 		}); err != nil {
 			t.Fatalf("create approval %s: %v", workspaceID, err)

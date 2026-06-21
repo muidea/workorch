@@ -52,7 +52,7 @@ func TestBlockedRunResumeCompressedContext(t *testing.T) {
 		t.Fatalf("compressed = %+v, want run identity and execution milestone", compressed)
 	}
 	recoveryMap, _ := compressed["recovery"].(map[string]any)
-	if recoveryMap["blockingTicketId"] != "ticket-core-decision" || recoveryMap["nextAction"] != "continue_run" {
+	if recoveryMap["blockingTicketId"] != "ticket-core-decision" || recoveryMap["nextAction"] != "resume_run" {
 		t.Fatalf("recovery = %+v, want resolved ticket resume", recoveryMap)
 	}
 }

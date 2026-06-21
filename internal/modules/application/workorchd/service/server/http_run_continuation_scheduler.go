@@ -273,7 +273,7 @@ func (s *runContinuationScheduler) resolvedGovernanceResumeRefForRun(ctx context
 	default:
 		return governanceRunResumeRef{}, false
 	}
-	return governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID}, true
+	return governanceRunResumeRef{WorkspaceID: workspaceID, RunID: runID, Intent: "resume", Reason: "governance_recovery"}, true
 }
 
 func (s *runContinuationScheduler) runHasResolvedDecision(ctx context.Context, workspaceID string, runID string, ticketID string) bool {
@@ -690,7 +690,7 @@ func (s *runContinuationScheduler) scheduleReplanContinuationIfNeeded(ctx contex
 			return
 		}
 		defer release()
-		activation, err := state.activateWorkspace(runCtx, state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
+		activation, err := state.resumeWorkspaceExecution(runCtx, state.config.Backend, state.config.DataRoot, workspaceID, appservice.ActivateWorkspaceExecutionCommand{Priority: priority})
 		if err != nil {
 			s.clearReplanContinuationStarted(key)
 			s.recordContinuationFailed(workspaceID, runID, schedulerKindReplanContinuation, schedulerReasonOwnerCommandFailed, err)
@@ -829,7 +829,7 @@ func (s *runContinuationScheduler) drainWorkspaceExecutionQueue() bool {
 				return
 			}
 			defer release()
-			activation, err := state.activateWorkspace(runCtx, state.config.Backend, state.config.DataRoot, req.WorkspaceID, req.Command)
+			activation, err := state.resumeWorkspaceExecution(runCtx, state.config.Backend, state.config.DataRoot, req.WorkspaceID, req.Command)
 			if err != nil {
 				slog.Warn("workorch workspace execution activation failed", "task", taskName, "workspaceID", req.WorkspaceID, "err", err)
 				state.notifyRunStatusChanged()

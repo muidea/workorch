@@ -158,6 +158,215 @@ func TestRuntimeOrchestrator_DispatchRequestedStepSkipsSecondActiveLLMWorkspaceE
 	}
 }
 
+func TestRuntimeOrchestrator_DispatchRequestedStepHydratesGapBaseline(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-gap-baseline")
+	workspaceID := common.WorkspaceID("ws-dispatch-gap-baseline")
+	stepID := common.StepID(runID + "/step-1")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateRunning, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "- complete the current requested outcome",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	if err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        llmcommon.StepKindWorkspaceExecution,
+		Input:       map[string]any{"operator": "requested"},
+	}); err != nil {
+		t.Fatalf("DispatchRequestedStep: %v", err)
+	}
+	created, err := stepRepo.Get(ctx, stepID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	if baseline := mapFromValue(created.Input[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("step input = %+v, want hydrated gapBaseline", created.Input)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("run executionContext = %+v, want persisted gapBaseline", persisted.ExecutionContext)
+	}
+}
+
+func TestRuntimeOrchestrator_NextDispatchSpecsHonorsGapBaselineWaitAction(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-gap-baseline-wait-decision")
+	workspaceID := common.WorkspaceID("ws-gap-baseline-wait-decision")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	run := &runmodel.Run{
+		ID:               runID,
+		WorkspaceID:      workspaceID,
+		State:            common.RunStateBlockedOnDecision,
+		BlockingTicketID: "ticket-gap-baseline-wait",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-gap-baseline-wait",
+				"text": "- close the current accepted gap",
+			},
+			"dod": map[string]any{
+				"id":    "dod-gap-baseline-wait",
+				"items": []string{"gap is closed with evidence"},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{runs: runRepo, steps: stepRepo}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("nextDispatchSpecs err = %v, want blocked", err)
+	}
+	if len(specs) != 0 {
+		t.Fatalf("specs = %+v, want no dispatch while waiting decision", specs)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "wait_decision" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want wait_decision", baseline["nextAction"])
+	}
+}
+
+func TestRuntimeOrchestrator_DispatchRequestedStepHonorsGapBaselineWaitAction(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-dispatch-gap-baseline-wait-approval")
+	workspaceID := common.WorkspaceID("ws-dispatch-gap-baseline-wait-approval")
+	stepID := common.StepID(runID + "/step-1")
+	runRepo := memoryrepo.NewRunRepository()
+	stepRepo := memoryrepo.NewStepRepository()
+	workspaceRepo := memoryrepo.NewWorkspaceRepository()
+	if err := workspaceRepo.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, State: common.WorkspaceStateBlocked, ActiveRunID: runID}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := runRepo.Create(ctx, &runmodel.Run{
+		ID:                 runID,
+		WorkspaceID:        workspaceID,
+		State:              common.RunStateBlockedOnApproval,
+		BlockingApprovalID: "approval-gap-baseline-wait",
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-dispatch-gap-baseline-wait",
+				"text": "- close the current accepted gap",
+			},
+			"dod": map[string]any{
+				"id":    "dod-dispatch-gap-baseline-wait",
+				"items": []string{"gap is closed with evidence"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := NewRuntimeOrchestrator(
+		&stubRuntimeAdapter{output: map[string]any{"completionState": "completed"}},
+		runRepo,
+		stepRepo,
+		workspaceRepo,
+		memoryrepo.NewDecisionTicketRepository(),
+		memoryrepo.NewApprovalRepository(),
+		events.NewMemoryHub(),
+	)
+
+	err := orch.DispatchRequestedStep(ctx, orchestratorcontracts.DispatchStepCommand{
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		StepID:      stepID,
+		Kind:        llmcommon.StepKindWorkspaceExecution,
+		Input:       map[string]any{"operator": "requested"},
+	})
+	if !errors.Is(err, common.ErrBlocked) {
+		t.Fatalf("DispatchRequestedStep err = %v, want blocked", err)
+	}
+	if _, err := stepRepo.Get(ctx, stepID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("step err = %v, want not found while waiting approval", err)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey])
+	if got := stringFromMap(mapFromValue(baseline["nextAction"]), "kind"); got != "wait_approval" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want wait_approval", baseline["nextAction"])
+	}
+}
+
+func TestRuntimeOrchestrator_NextDispatchSpecsHonorsGapBaselineTerminalActions(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		state   common.RunState
+		wantErr error
+	}{
+		{name: "completed no action", state: common.RunStateCompleted},
+		{name: "failed fail fast", state: common.RunStateFailed, wantErr: common.ErrConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runID := common.RunID("run-gap-baseline-terminal-" + strings.ReplaceAll(tc.name, " ", "-"))
+			runRepo := memoryrepo.NewRunRepository()
+			stepRepo := memoryrepo.NewStepRepository()
+			run := &runmodel.Run{
+				ID:          runID,
+				WorkspaceID: common.WorkspaceID("ws-" + runID),
+				State:       tc.state,
+				ExecutionContext: map[string]any{
+					"goal": map[string]any{
+						"id":   "goal-gap-baseline-terminal",
+						"text": "- close the current accepted gap",
+					},
+					"dod": map[string]any{
+						"id":    "dod-gap-baseline-terminal",
+						"items": []string{"gap is closed with evidence"},
+					},
+				},
+			}
+			if err := runRepo.Create(ctx, run); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
+			orch := &RuntimeOrchestrator{runs: runRepo, steps: stepRepo}
+
+			specs, err := orch.nextDispatchSpecs(ctx, run)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("nextDispatchSpecs err = %v, want %v", err, tc.wantErr)
+			}
+			if len(specs) != 0 {
+				t.Fatalf("specs = %+v, want no dispatch for %s", specs, tc.state)
+			}
+		})
+	}
+}
+
 func TestRuntimeOrchestrator_RunLLMDispatchLockSerializesSameRun(t *testing.T) {
 	runID := common.RunID("run-llm-dispatch-lock")
 	orch := &RuntimeOrchestrator{}

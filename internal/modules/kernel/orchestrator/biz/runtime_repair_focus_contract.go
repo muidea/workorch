@@ -174,6 +174,13 @@ func repairCoverageFocusBindingContractForStep(step *runModel.Step) repairCovera
 			}
 		}
 	}
+	if boolValue(required["mustDeclareCoverageTargets"]) || boolValue(pkg["coverageRepairRequired"]) {
+		for _, item := range mapSliceFromValue(pkg["coverageTargetSet"]) {
+			for _, key := range []string{"coverageWorkItemId", "id", "coverageTargetToken", "goalRequirementId", "sourceRequirementId", "targetText", "item", "raw", "requirement"} {
+				add(stringFromMap(item, key))
+			}
+		}
+	}
 	return repairCoverageFocusBindingContract{
 		FocusID:        focusID,
 		WorkItemIDs:    compactUniqueStrings(workItemIDs),

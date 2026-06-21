@@ -76,6 +76,172 @@ func TestEnsureRunCoverageWorkItemsBuildsNeutralBaseline(t *testing.T) {
 	}
 }
 
+func TestNextDispatchSpecsPersistsGapBaselineBeforeInitialStep(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-gap-baseline-initial")
+	workspaceID := common.WorkspaceID("ws-gap-baseline-initial")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-gap-baseline",
+				"text": "- produce the requested deliverable",
+			},
+			"dod": map[string]any{
+				"id":    "dod-gap-baseline",
+				"items": []string{"deliverable can be verified"},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:  runRepo,
+		steps: stepRepo,
+	}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecs: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v, want one initial step", specs)
+	}
+	if baseline := mapFromValue(specs[0].Input[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("initial step input = %+v, want gapBaseline", specs[0].Input)
+	} else if todos := mapSliceFromValue(baseline["todoItems"]); len(todos) == 0 {
+		t.Fatalf("gapBaseline = %+v, want todoItems", baseline)
+	}
+	persisted, err := runRepo.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if baseline := mapFromValue(persisted.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("persisted executionContext = %+v, want gapBaseline before dispatch", persisted.ExecutionContext)
+	} else if stringFromMap(mapFromValue(baseline["nextAction"]), "kind") != "schedule_step" {
+		t.Fatalf("gapBaseline.nextAction = %+v, want schedule_step", baseline["nextAction"])
+	}
+}
+
+func TestInitialDispatchBuildsStateChangingContractFromGapBaseline(t *testing.T) {
+	ctx := context.Background()
+	runID := common.RunID("run-gap-baseline-state-changing")
+	workspaceID := common.WorkspaceID("ws-gap-baseline-state-changing")
+	runRepo := memory.NewRunRepository()
+	stepRepo := memory.NewStepRepository()
+	run := &runmodel.Run{
+		ID:          runID,
+		WorkspaceID: workspaceID,
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"id":   "goal-gap-state-changing",
+				"text": "- produce the first deliverable",
+			},
+			"dod": map[string]any{
+				"id":    "dod-gap-state-changing",
+				"items": []string{"first deliverable has implementation evidence"},
+			},
+			"executionContract": map[string]any{
+				"stateChangePolicy": "must_produce_state_change",
+				"profileContracts": map[string]any{
+					"neutral": map[string]any{
+						"deliverableExpectations": []map[string]any{{
+							"id":           "first-deliverable",
+							"required":     true,
+							"evidenceRole": "primary_state_change",
+						}},
+					},
+				},
+			},
+		},
+	}
+	if err := runRepo.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	orch := &RuntimeOrchestrator{
+		runs:  runRepo,
+		steps: stepRepo,
+	}
+
+	specs, err := orch.nextDispatchSpecs(ctx, run)
+	if err != nil {
+		t.Fatalf("nextDispatchSpecs: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v, want one initial step", specs)
+	}
+	input := specs[0].Input
+	baseline := mapFromValue(input[gapBaselineKey])
+	if todos := mapSliceFromValue(baseline["todoItems"]); len(todos) == 0 {
+		t.Fatalf("gapBaseline = %+v, want todoItems", baseline)
+	}
+	contract := mapFromValue(input["convergenceContract"])
+	if stringFromMap(contract, "state") != convergenceStateNeedStateChange {
+		t.Fatalf("convergenceContract = %+v, want state-changing contract from first-run gap", contract)
+	}
+	if !boolValue(input["stateChangingOutputRequired"]) || stringFromMap(input, "repairObjective") != repairObjectiveStateChangingOutput {
+		t.Fatalf("input = %+v, want state-changing output required", input)
+	}
+	pkg := mapFromValue(input["repairActionPackage"])
+	required := mapFromValue(pkg["requiredOutput"])
+	if !boolValue(required["mustIncludeStateChangingNode"]) || !boolValue(required["mustDeclareCoverageTargets"]) {
+		t.Fatalf("requiredOutput = %+v, want state-changing coverage target contract", required)
+	}
+	if targets := mapSliceFromValue(pkg["coverageTargetSet"]); len(targets) == 0 || stringFromMap(targets[0], "coverageWorkItemId") == "" {
+		t.Fatalf("repairActionPackage = %+v, want coverage target set from gap baseline", pkg)
+	}
+	if focus := mapFromValue(mapFromValue(pkg[coverageWorkItemContextKey])["currentFocus"]); stringFromMap(focus, "id") == "" {
+		t.Fatalf("repairActionPackage = %+v, want current focus", pkg)
+	}
+}
+
+func TestGapBaselineFromRunPreservesAcceptedAndRejectedEvidenceRefs(t *testing.T) {
+	run := &runmodel.Run{
+		ID:          "run-gap-baseline-evidence",
+		WorkspaceID: "ws-gap-baseline-evidence",
+		State:       common.RunStateRunning,
+		ExecutionContext: map[string]any{
+			coverageWorkItemContextKey: map[string]any{
+				"definitionRevision":   "rev-evidence",
+				"coverageBaselineHash": "sha256:evidence",
+				"unresolvedItems": []map[string]any{{
+					"id":                   "cwi-001",
+					"sourcePath":           "goal.leaves[0]",
+					"missingEvidenceKinds": []string{"validation"},
+				}},
+			},
+			coverageWorkItemsKey: []map[string]any{{
+				"id":                   "cwi-001",
+				"status":               "failed",
+				"acceptedEvidenceRefs": []string{"evidence-accepted-a"},
+				"rejectedEvidenceRefs": []string{"evidence-rejected-a"},
+				"acceptedEvidenceByKind": map[string][]string{"state_change": {
+					"evidence-accepted-a",
+					"evidence-accepted-b",
+				}},
+				"rejectedEvidenceByKind": map[string][]string{"validation": {
+					"evidence-rejected-a",
+					"evidence-rejected-b",
+				}},
+			}},
+		},
+	}
+
+	baseline := gapBaselineFromRun(run)
+	if got := stringSliceFromValue(baseline["acceptedEvidenceRefs"]); len(got) != 2 || got[0] != "evidence-accepted-a" || got[1] != "evidence-accepted-b" {
+		t.Fatalf("acceptedEvidenceRefs = %+v, want compact accepted refs", got)
+	}
+	if got := stringSliceFromValue(baseline["rejectedEvidenceRefs"]); len(got) != 2 || got[0] != "evidence-rejected-a" || got[1] != "evidence-rejected-b" {
+		t.Fatalf("rejectedEvidenceRefs = %+v, want compact rejected refs", got)
+	}
+}
+
 func TestEnsureRunCoverageWorkItemsBuildsAcceptanceSlicesFromGenericPolicy(t *testing.T) {
 	run := &runmodel.Run{
 		ID: "run-acceptance-slices",

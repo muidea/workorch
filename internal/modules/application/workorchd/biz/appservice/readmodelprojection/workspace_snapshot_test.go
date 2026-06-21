@@ -83,9 +83,20 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 			ID:    "step-current",
 			State: string(common.StepStateCompleted),
 		},
-		TaskProgress:       readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
-		Acceptance:         readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
-		RuntimeExecution:   &readmodelcore.RuntimeExecutionState{StepID: "step-current", RequestID: "request-current", Pending: true, Gap: "runtime_terminal_not_finalized"},
+		TaskProgress: readmodelcore.TaskProgress{WorkspaceID: string(workspaceID), RunID: string(runID), State: string(common.RunStateCompleted), CurrentStepID: "step-current"},
+		Acceptance:   readmodelcore.AcceptanceProjection{ActiveSliceID: "slice-run", Summary: readmodelcore.AcceptanceSummary{ActiveSlices: 1}},
+		GapBaseline:  &readmodelcore.GapBaseline{WorkspaceID: string(workspaceID), RunID: string(runID), BaselineRevision: "gap-run"},
+		RuntimeExecution: &readmodelcore.RuntimeExecutionState{
+			StepID:    "step-current",
+			RequestID: "request-current",
+			Pending:   true,
+			Gap:       "runtime_terminal_not_finalized",
+			ContractViolation: &orchestratormodel.ContractViolation{
+				ID:             "violation-workspace-merge",
+				ViolatedRule:   "state_changing_required_missing",
+				Recoverability: "retry_same_contract",
+			},
+		},
 		TaskDecompositions: []readmodelcore.TaskDecomposition{{ID: "decomposition-run"}},
 		ExecutionSections:  []readmodelcore.ExecutionSection{{ID: "section-run"}},
 		MemoryRecallTraces: []readmodelcore.MemoryRecallTrace{{ID: "memory-run", RunID: string(runID)}},
@@ -129,6 +140,9 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	if got.Acceptance.ActiveSliceID != "slice-run" || got.Acceptance.Summary.ActiveSlices != 1 {
 		t.Fatalf("Acceptance = %+v, want merged run acceptance", got.Acceptance)
 	}
+	if got.GapBaseline == nil || got.GapBaseline.BaselineRevision != "gap-run" {
+		t.Fatalf("GapBaseline = %+v, want merged run gap baseline", got.GapBaseline)
+	}
 	if len(got.Patches) != 3 || got.Patches[0].State != string(common.PatchStateFailed) {
 		t.Fatalf("Patches = %+v, want merged run patch override", got.Patches)
 	}
@@ -146,6 +160,11 @@ func TestWorkspaceSnapshotWithRunSnapshotMergesRunProjection(t *testing.T) {
 	}
 	if got.RuntimeExecution == nil || got.RuntimeExecution.RequestID != "request-current" || got.RuntimeExecution.Gap != "runtime_terminal_not_finalized" {
 		t.Fatalf("RuntimeExecution = %+v, want run runtime projection", got.RuntimeExecution)
+	}
+	if got.RuntimeExecution.ContractViolation == nil ||
+		got.RuntimeExecution.ContractViolation.ID != "violation-workspace-merge" ||
+		got.RuntimeExecution.ContractViolation.ViolatedRule != "state_changing_required_missing" {
+		t.Fatalf("RuntimeExecution.ContractViolation = %+v, want merged run contract violation", got.RuntimeExecution.ContractViolation)
 	}
 	if len(got.Decisions) != 3 || got.Decisions[0].State != "resolved" {
 		t.Fatalf("Decisions = %+v, want run decision override merged into workspace snapshot", got.Decisions)

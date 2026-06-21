@@ -51,7 +51,7 @@ func TestHasContinuationCheckpointUsesLatestRecoveryCheckpoint(t *testing.T) {
 		ID:             "run-recovery-checkpoint/checkpoint-001",
 		RunID:          runID,
 		CheckpointType: common.CheckpointTypeRunState,
-		Data:           map[string]any{"nextAction": "continue"},
+		Data:           map[string]any{"nextAction": "observe"},
 		OccurredAt:     "2026-06-04T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed progress checkpoint: %v", err)
@@ -131,7 +131,7 @@ func TestIsStuckRunningRunCandidateRequiresRunningUnblockedRunWithoutContinuatio
 		WorkspaceID:    candidate.WorkspaceID,
 		RunID:          candidate.ID,
 		CheckpointType: common.CheckpointTypeRecovery,
-		Data:           map[string]any{"nextAction": "continue_run"},
+		Data:           map[string]any{"nextAction": "resume_run"},
 		OccurredAt:     "2026-06-04T00:03:00Z",
 	}); err != nil {
 		t.Fatalf("seed continuation checkpoint: %v", err)
@@ -1175,7 +1175,7 @@ func TestBlockedRunResumeCompressedContextUsesResolvedDecision(t *testing.T) {
 		t.Fatalf("compressed = %+v, want run identity", compressed)
 	}
 	recovery, _ := compressed["recovery"].(map[string]any)
-	if recovery["blockingTicketId"] != string(run.BlockingTicketID) || recovery["nextAction"] != "continue_run" {
+	if recovery["blockingTicketId"] != string(run.BlockingTicketID) || recovery["nextAction"] != "resume_run" {
 		t.Fatalf("recovery = %+v, want resolved decision continuation", recovery)
 	}
 }
@@ -1208,7 +1208,7 @@ func TestBlockedRunResumeCompressedContextUsesResolvedReplanDecision(t *testing.
 		t.Fatalf("compressed = %+v, want run identity for resolved replan", compressed)
 	}
 	recovery, _ := compressed["recovery"].(map[string]any)
-	if recovery["blockingTicketId"] != string(run.BlockingTicketID) || recovery["nextAction"] != "continue_run" {
+	if recovery["blockingTicketId"] != string(run.BlockingTicketID) || recovery["nextAction"] != "resume_run" {
 		t.Fatalf("recovery = %+v, want resolved replan continuation", recovery)
 	}
 }
@@ -1239,7 +1239,7 @@ func TestBlockedRunResumeCompressedContextUsesApprovedApproval(t *testing.T) {
 		t.Fatalf("compressed = %+v, want run identity", compressed)
 	}
 	recovery, _ := compressed["recovery"].(map[string]any)
-	if recovery["blockingApprovalId"] != string(run.BlockingApprovalID) || recovery["nextAction"] != "continue_run" {
+	if recovery["blockingApprovalId"] != string(run.BlockingApprovalID) || recovery["nextAction"] != "resume_run" {
 		t.Fatalf("recovery = %+v, want approved approval continuation", recovery)
 	}
 }

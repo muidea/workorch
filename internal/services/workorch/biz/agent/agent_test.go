@@ -62,6 +62,17 @@ func TestAgentRunCompletesFromBackendEvent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for agent completion")
 	}
+	if be.runCommand.WorkspaceID != "ws-1" ||
+		be.runCommand.Intent != backend.RunCommandIntentResume ||
+		be.runCommand.Reason != "user_requested" ||
+		be.runCommand.Source != "agent" ||
+		be.runCommand.Activation.GoalID != "goal-1" ||
+		be.runCommand.Activation.DoDID != "dod-1" {
+		t.Fatalf("run command = %+v, want agent first-run resume command", be.runCommand)
+	}
+	if be.activateCalled {
+		t.Fatal("agent first run used legacy Run.Activate path")
+	}
 }
 
 func TestAgentEventTypes(t *testing.T) {
@@ -96,8 +107,37 @@ func TestDecisionApprovalInfoTypes(t *testing.T) {
 	}
 }
 
+func TestAgentResumeRunUsesUnifiedWorkspaceRunCommand(t *testing.T) {
+	runBackend := &recordingAgentRunBackend{}
+	a := NewWithBackend(agentResumeBackend{fakeBackend: newFakeBackend(), run: runBackend})
+
+	if err := a.ResumeRun(context.Background(), "ws-agent-resume", "run-agent-resume"); err != nil {
+		t.Fatalf("ResumeRun: %v", err)
+	}
+	if runBackend.resumeCalled {
+		t.Fatal("agent used legacy Run.Resume path")
+	}
+	got := runBackend.command
+	if got.WorkspaceID != "ws-agent-resume" ||
+		got.ExpectedRunID != "run-agent-resume" ||
+		got.Intent != backend.RunCommandIntentResume ||
+		got.Reason != "user_requested" ||
+		got.Source != "agent" {
+		t.Fatalf("command = %+v, want scoped agent resume command", got)
+	}
+}
+
+func TestAgentResumeRunRequiresWorkspaceScope(t *testing.T) {
+	a := NewWithBackend(agentResumeBackend{fakeBackend: newFakeBackend(), run: &recordingAgentRunBackend{}})
+	if err := a.ResumeRun(context.Background(), "", "run-agent-resume"); err == nil {
+		t.Fatal("ResumeRun error = nil, want workspace required")
+	}
+}
+
 type fakeBackend struct {
-	handlers []backend.EventHandler
+	handlers       []backend.EventHandler
+	runCommand     backend.WorkspaceRunCommand
+	activateCalled bool
 }
 
 func newFakeBackend() *fakeBackend { return &fakeBackend{} }
@@ -105,7 +145,7 @@ func newFakeBackend() *fakeBackend { return &fakeBackend{} }
 func (b *fakeBackend) Workspace() backend.WorkspaceBackend { return fakeWorkspace{} }
 func (b *fakeBackend) Goal() backend.GoalBackend           { return fakeGoal{} }
 func (b *fakeBackend) DoD() backend.DoDBackend             { return fakeDoD{} }
-func (b *fakeBackend) Run() backend.RunBackend             { return fakeRun{} }
+func (b *fakeBackend) Run() backend.RunBackend             { return fakeRun{parent: b} }
 func (b *fakeBackend) Decision() backend.DecisionBackend   { return fakeDecision{} }
 func (b *fakeBackend) Approval() backend.ApprovalBackend   { return fakeApproval{} }
 func (b *fakeBackend) Soul() backend.SoulBackend           { return fakeSoul{} }
@@ -164,9 +204,18 @@ func (fakeDoD) Update(context.Context, common.WorkspaceID, common.DoDID, []strin
 	return &backend.DoDInfo{}, nil
 }
 
-type fakeRun struct{}
+type fakeRun struct{ parent *fakeBackend }
 
-func (fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+func (f fakeRun) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+	if f.parent != nil {
+		f.parent.runCommand = req
+	}
+	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
+}
+func (f fakeRun) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	if f.parent != nil {
+		f.parent.activateCalled = true
+	}
 	return &backend.RunInfo{ID: "run-1", WorkspaceID: "ws-1", State: common.RunStateRunning}, nil
 }
 func (fakeRun) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
@@ -181,6 +230,48 @@ func (fakeRun) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.
 func (fakeRun) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) { return nil, nil }
 func (fakeRun) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
 	return &backend.RunStatusInfo{}, nil
+}
+
+type agentResumeBackend struct {
+	*fakeBackend
+	run backend.RunBackend
+}
+
+func (b agentResumeBackend) Run() backend.RunBackend { return b.run }
+
+type recordingAgentRunBackend struct {
+	command      backend.WorkspaceRunCommand
+	resumeCalled bool
+}
+
+func (b *recordingAgentRunBackend) Command(_ context.Context, req backend.WorkspaceRunCommand) (*backend.RunInfo, error) {
+	b.command = req
+	return nil, nil
+}
+
+func (b *recordingAgentRunBackend) Activate(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return nil, common.ErrInvalidArgument
+}
+
+func (b *recordingAgentRunBackend) Restart(context.Context, common.WorkspaceID, backend.ActivateRunRequest) (*backend.RunInfo, error) {
+	return nil, common.ErrInvalidArgument
+}
+
+func (b *recordingAgentRunBackend) Resume(context.Context, common.WorkspaceID, common.RunID, ...map[string]any) (*backend.RunInfo, error) {
+	b.resumeCalled = true
+	return nil, common.ErrInvalidArgument
+}
+
+func (b *recordingAgentRunBackend) Get(context.Context, common.WorkspaceID, common.RunID) (*backend.RunInfo, error) {
+	return nil, common.ErrNotFound
+}
+
+func (b *recordingAgentRunBackend) List(context.Context, common.WorkspaceID) ([]backend.RunInfo, error) {
+	return nil, nil
+}
+
+func (b *recordingAgentRunBackend) Status(context.Context, common.WorkspaceID, common.RunID) (*backend.RunStatusInfo, error) {
+	return nil, common.ErrNotFound
 }
 
 type fakeDecision struct{}

@@ -14,7 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/events"
 )
 
-const StartupInactiveRunFailureReason = "startup inactive running run recovered: previous process has no active execution; workspace reset to active"
+const StartupInactiveRunRecoveryReason = "startup inactive running run recovered: previous process has no active execution; workspace reset to active"
 
 func RecoverStartupInactiveRunningWorkspaceViews(ctx context.Context, hub events.Hub) ([]appmodelcore.Run, error) {
 	if hub == nil {
@@ -34,7 +34,7 @@ func RecoverStartupInactiveRunningWorkspaceViews(ctx context.Context, hub events
 			return nil, fmt.Errorf("recover startup inactive workspace %q: %w", workspaceIDForRecoveryError(workspace), err)
 		}
 		if changed && recovered != nil {
-			ret = append(ret, RunViewWithFailureReason(recovered, StartupInactiveRunFailureReason))
+			ret = append(ret, RunViewWithFailureReason(recovered, StartupInactiveRunRecoveryReason))
 		}
 	}
 	return ret, nil
@@ -101,17 +101,17 @@ func recoverStartupInactiveWorkspace(ctx context.Context, hub events.Hub, worksp
 	default:
 		return nil, false, nil
 	}
-	if err := FailRun(runCtx, hub, run, StartupInactiveRunFailureReason); err != nil {
-		return nil, false, fmt.Errorf("fail inactive run %q: %w", run.ID, err)
+	if err := CancelRun(runCtx, hub, run); err != nil {
+		return nil, false, fmt.Errorf("cancel inactive run %q: %w", run.ID, err)
 	}
-	failed, err := ReadRun(runCtx, hub, run.ID)
+	cancelled, err := ReadRun(runCtx, hub, run.ID)
 	if err != nil {
-		return nil, false, fmt.Errorf("read failed inactive run %q: %w", run.ID, err)
+		return nil, false, fmt.Errorf("read cancelled inactive run %q: %w", run.ID, err)
 	}
 	workspace.ActiveRunID = ""
 	workspace.State = common.WorkspaceStateActive
 	if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, workspace); err != nil {
 		return nil, false, fmt.Errorf("clear inactive run pointer: %w", err)
 	}
-	return failed, true, nil
+	return cancelled, true, nil
 }

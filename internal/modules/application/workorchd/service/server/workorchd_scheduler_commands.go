@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -18,6 +20,20 @@ type workspaceRestartRequest struct {
 	Command     appservice.ActivateWorkspaceExecutionCommand
 }
 
+type workspaceRunRequest struct {
+	WorkspaceID           string
+	RunID                 string
+	Intent                string
+	Action                string
+	Reason                string
+	RequestID             string
+	DefinitionRevision    string
+	DecisionID            string
+	Priority              int
+	ExecutionContextPatch map[string]any
+	Command               appservice.ActivateWorkspaceExecutionCommand
+}
+
 type runContinuationRequest struct {
 	WorkspaceID           string
 	RunID                 string
@@ -28,9 +44,22 @@ type runContinuationRequest struct {
 
 func (s *serverState) publishGovernanceContinuationRequested(ctx context.Context, refs []governanceRunResumeRef, priority int) error {
 	for _, ref := range uniqueGovernanceRunResumeRefs(refs) {
-		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested, ref.WorkspaceID, ref.RunID, map[string]any{
+		intent := strings.TrimSpace(ref.Intent)
+		if intent == "" {
+			intent = "resume"
+		}
+		reason := strings.TrimSpace(ref.Reason)
+		if reason == "" {
+			reason = "governance_resolved"
+		}
+		if err := s.publishWorkorchDSchedulerCommand(ctx, workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, ref.WorkspaceID, ref.RunID, map[string]any{
 			events.PayloadKeyWorkspaceID: ref.WorkspaceID,
 			events.PayloadKeyRunID:       ref.RunID,
+			events.PayloadKeyIntent:      intent,
+			events.PayloadKeyReason:      reason,
+			events.PayloadKeyRequestID:   ref.RequestID,
+			events.PayloadKeySource:      "governance",
+			events.PayloadKeyDecisionID:  ref.DecisionID,
 			events.PayloadKeyPriority:    priority,
 		}); err != nil {
 			return err
@@ -43,6 +72,8 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 	if s == nil || s.schedulerHub == nil || strings.TrimSpace(topic) == "" {
 		return common.ErrInvalidArgument
 	}
+	payload = ensureSchedulerCommandRequestID(topic, workspaceID, runID, payload)
+	payload[events.PayloadKeySource] = schedulerCommandSource(schedulerStringValue(payload, events.PayloadKeySource), "http")
 	envelope := events.Envelope{
 		Topic:        topic,
 		SourceModule: "workorchd/http",
@@ -66,6 +97,87 @@ func (s *serverState) publishWorkorchDSchedulerCommand(ctx context.Context, topi
 	}
 	s.recordSchedulerCommandResult(topic, "missing_response")
 	return fmt.Errorf("%w: scheduler command %s returned no accepted response", common.ErrConflict, topic)
+}
+
+func schedulerCommandSource(source string, fallback string) string {
+	source = strings.TrimSpace(source)
+	if source != "" {
+		return source
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback != "" {
+		return fallback
+	}
+	return "unknown"
+}
+
+func firstNonEmptySchedulerString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func ensureSchedulerCommandRequestID(topic string, workspaceID string, runID string, payload map[string]any) map[string]any {
+	ret := cloneSchedulerPayload(payload)
+	if ret == nil {
+		ret = map[string]any{}
+	}
+	if strings.TrimSpace(schedulerStringValue(ret, events.PayloadKeyRequestID)) != "" {
+		return ret
+	}
+	parts := []string{
+		"workorchd",
+		schedulerKindFromTopic(topic),
+		strings.TrimSpace(workspaceID),
+		strings.TrimSpace(runID),
+		fmt.Sprintf("%d", time.Now().UTC().UnixNano()),
+	}
+	for idx, part := range parts {
+		if part == "" {
+			parts[idx] = "none"
+		}
+	}
+	ret[events.PayloadKeyRequestID] = strings.Join(parts, "-")
+	return ret
+}
+
+func prepareHTTPSchedulerCommandPayload(topic string, workspaceID string, runID string, payload map[string]any) map[string]any {
+	ret := ensureSchedulerCommandRequestID(topic, workspaceID, runID, payload)
+	ret[events.PayloadKeySource] = schedulerCommandSource(schedulerStringValue(ret, events.PayloadKeySource), "http")
+	return ret
+}
+
+func schedulerAcceptedHTTPBody(config Config, workspaceID string, runID string, action string, payload map[string]any) map[string]any {
+	body := map[string]any{
+		"service":     "workorch",
+		"backend":     config.Backend,
+		"dataRoot":    config.DataRoot,
+		"accepted":    true,
+		"workspaceId": workspaceID,
+	}
+	if strings.TrimSpace(runID) != "" {
+		body["runId"] = runID
+	}
+	if value := strings.TrimSpace(action); value != "" {
+		body["action"] = value
+	}
+	for _, key := range []string{
+		events.PayloadKeyIntent,
+		events.PayloadKeyRequestID,
+		events.PayloadKeySource,
+		events.PayloadKeyReason,
+		events.PayloadKeyDefinitionRevision,
+		events.PayloadKeyDecisionID,
+	} {
+		if value := schedulerStringValue(payload, key); value != "" {
+			body[key] = value
+		}
+	}
+	return body
 }
 
 func validateWorkorchDSchedulerAcceptedResponse(topic string, response events.Envelope) error {
@@ -94,16 +206,8 @@ func cloneSchedulerPayload(input map[string]any) map[string]any {
 
 func schedulerSubjectType(topic string) string {
 	switch topic {
-	case workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested:
-		return "workspace-activation"
-	case workorchdevents.TopicWorkorchDCommandRunContinuationRequested:
-		return "run-continuation"
-	case workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested:
-		return "governance-continuation"
-	case workorchdevents.TopicWorkorchDCommandReplanContinuationRequested:
-		return "replan-continuation"
-	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
-		return "workspace-restart"
+	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
+		return "workspace-run"
 	default:
 		return "workorchd-scheduler-command"
 	}
@@ -111,16 +215,8 @@ func schedulerSubjectType(topic string) string {
 
 func schedulerKindFromTopic(topic string) string {
 	switch topic {
-	case workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested:
-		return schedulerKindWorkspaceActivation
-	case workorchdevents.TopicWorkorchDCommandRunContinuationRequested:
-		return schedulerKindRunContinuation
-	case workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested:
-		return schedulerKindGovernanceContinuation
-	case workorchdevents.TopicWorkorchDCommandReplanContinuationRequested:
-		return schedulerKindReplanContinuation
-	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
-		return schedulerKindWorkspaceRestart
+	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
+		return schedulerKindWorkspaceRun
 	default:
 		return "workorchd_scheduler_command"
 	}
@@ -153,7 +249,7 @@ func (s *serverState) recordSchedulerCommandEnqueueFailure(topic string, workspa
 
 func schedulerSubjectID(topic string, workspaceID string, runID string, payload map[string]any) string {
 	switch topic {
-	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
+	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
 		return strings.TrimSpace(workspaceID)
 	default:
 		if id := strings.TrimSpace(runID); id != "" {
@@ -171,11 +267,7 @@ func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
 		return
 	}
 	topics := []string{
-		workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested,
-		workorchdevents.TopicWorkorchDCommandRunContinuationRequested,
-		workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested,
-		workorchdevents.TopicWorkorchDCommandReplanContinuationRequested,
-		workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested,
+		workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested,
 	}
 	for _, topic := range topics {
 		topic := topic
@@ -183,6 +275,7 @@ func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
 			if err := s.handleWorkorchDSchedulerCommand(ctx, envelope); err != nil {
 				return err
 			}
+			s.projectAcceptedSchedulerCommand(envelope)
 			return events.Response(events.Envelope{
 				Topic:        envelope.Topic + "/accepted",
 				SourceModule: "workorchd/scheduler",
@@ -199,56 +292,118 @@ func (s *serverState) registerWorkorchDSchedulerCommandWatcher() {
 	}
 }
 
+func (s *serverState) projectAcceptedSchedulerCommand(envelope events.Envelope) {
+	if s == nil || s.workspaceProjection == nil {
+		return
+	}
+	workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
+	if strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	s.workspaceProjection.ApplyRunCommandAccepted(workspaceviewcore.RunCommandAcceptedUpdate{
+		WorkspaceID:        workspaceID,
+		RunID:              schedulerString(envelope, events.PayloadKeyRunID, envelope.RunID),
+		Intent:             acceptedSchedulerCommandIntent(envelope),
+		Reason:             schedulerStringValue(envelope.Payload, events.PayloadKeyReason),
+		RequestID:          schedulerStringValue(envelope.Payload, events.PayloadKeyRequestID),
+		Source:             acceptedSchedulerCommandSource(envelope),
+		DefinitionRevision: schedulerStringValue(envelope.Payload, events.PayloadKeyDefinitionRevision),
+		DecisionID:         schedulerStringValue(envelope.Payload, events.PayloadKeyDecisionID),
+		Revision:           envelope.Revision,
+		AcceptedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func acceptedSchedulerCommandSource(envelope events.Envelope) string {
+	if source := schedulerStringValue(envelope.Payload, events.PayloadKeySource); source != "" {
+		return source
+	}
+	return strings.TrimSpace(envelope.SourceModule)
+}
+
+func acceptedSchedulerCommandIntent(envelope events.Envelope) string {
+	if intent := schedulerStringValue(envelope.Payload, events.PayloadKeyIntent); intent != "" {
+		return intent
+	}
+	return ""
+}
+
 func (s *serverState) handleWorkorchDSchedulerCommand(ctx context.Context, envelope events.Envelope) error {
 	switch envelope.Topic {
-	case workorchdevents.TopicWorkorchDCommandWorkspaceActivationRequested:
-		req := workspaceRestartRequestFromEnvelope(envelope)
-		req.Command.Restart = false
-		if strings.TrimSpace(req.WorkspaceID) == "" {
+	case workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested:
+		req := workspaceRunRequestFromEnvelope(envelope)
+		if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.Intent) == "" {
 			return common.ErrInvalidArgument
 		}
-		if !s.runContinuations.scheduleWorkspaceActivation(req) {
-			return schedulerCommandQueueError(envelope.Topic)
-		}
-		return nil
-	case workorchdevents.TopicWorkorchDCommandRunContinuationRequested:
-		req := runContinuationRequestFromEnvelope(envelope)
-		if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.Action) == "" {
+		switch req.Intent {
+		case "resume":
+			if strings.TrimSpace(req.RunID) != "" {
+				action := strings.TrimSpace(req.Action)
+				if action == "" {
+					action = "resume"
+				}
+				if !s.runContinuations.scheduleRunContinuation(runContinuationRequest{
+					WorkspaceID:           req.WorkspaceID,
+					RunID:                 req.RunID,
+					Action:                action,
+					Priority:              req.Priority,
+					ExecutionContextPatch: req.ExecutionContextPatch,
+				}) {
+					return schedulerCommandQueueError(envelope.Topic)
+				}
+				return nil
+			}
+			req.Command.Restart = false
+			if !s.runContinuations.scheduleWorkspaceActivation(workspaceRestartRequest{
+				WorkspaceID: req.WorkspaceID,
+				Priority:    req.Priority,
+				Command:     req.Command,
+			}) {
+				return schedulerCommandQueueError(envelope.Topic)
+			}
+			return nil
+		case "restart":
+			req.Command.Restart = true
+			if !s.runContinuations.scheduleWorkspaceRestart(workspaceRestartRequest{
+				WorkspaceID: req.WorkspaceID,
+				Priority:    req.Priority,
+				Command:     req.Command,
+			}) {
+				return schedulerCommandQueueError(envelope.Topic)
+			}
+			return nil
+		case "replan":
+			if strings.TrimSpace(req.RunID) == "" {
+				return common.ErrInvalidArgument
+			}
+			if !s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{
+				WorkspaceID: req.WorkspaceID,
+				RunID:       req.RunID,
+				Intent:      "replan",
+				Reason:      req.Reason,
+				RequestID:   req.RequestID,
+				DecisionID:  req.DecisionID,
+			}}, req.Priority) {
+				return schedulerCommandQueueError(envelope.Topic)
+			}
+			return nil
+		case "recover":
+			if strings.TrimSpace(req.RunID) == "" {
+				return common.ErrInvalidArgument
+			}
+			if !s.runContinuations.scheduleRunContinuation(runContinuationRequest{
+				WorkspaceID:           req.WorkspaceID,
+				RunID:                 req.RunID,
+				Action:                "resume",
+				Priority:              req.Priority,
+				ExecutionContextPatch: req.ExecutionContextPatch,
+			}) {
+				return schedulerCommandQueueError(envelope.Topic)
+			}
+			return nil
+		default:
 			return common.ErrInvalidArgument
 		}
-		if !s.runContinuations.scheduleRunContinuation(req) {
-			return schedulerCommandQueueError(envelope.Topic)
-		}
-		return nil
-	case workorchdevents.TopicWorkorchDCommandGovernanceContinuationRequested:
-		workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
-		runID := schedulerString(envelope, events.PayloadKeyRunID, envelope.RunID)
-		if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
-			return common.ErrInvalidArgument
-		}
-		if !s.scheduleGovernanceRunResumeRefs([]governanceRunResumeRef{{WorkspaceID: workspaceID, RunID: runID}}, schedulerInt(envelope.Payload, events.PayloadKeyPriority)) {
-			return schedulerCommandQueueError(envelope.Topic)
-		}
-		return nil
-	case workorchdevents.TopicWorkorchDCommandReplanContinuationRequested:
-		workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
-		runID := schedulerString(envelope, events.PayloadKeyRunID, envelope.RunID)
-		if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(runID) == "" {
-			return common.ErrInvalidArgument
-		}
-		if !s.scheduleReplanContinuationIfNeeded(ctx, workspaceID, runID, schedulerInt(envelope.Payload, events.PayloadKeyPriority)) {
-			return schedulerCommandQueueError(envelope.Topic)
-		}
-		return nil
-	case workorchdevents.TopicWorkorchDCommandWorkspaceRestartRequested:
-		req := workspaceRestartRequestFromEnvelope(envelope)
-		if strings.TrimSpace(req.WorkspaceID) == "" {
-			return common.ErrInvalidArgument
-		}
-		if !s.runContinuations.scheduleWorkspaceRestart(req) {
-			return schedulerCommandQueueError(envelope.Topic)
-		}
-		return nil
 	default:
 		return common.ErrInvalidArgument
 	}
@@ -258,20 +413,10 @@ func schedulerCommandQueueError(topic string) error {
 	return fmt.Errorf("%w: scheduler command %s was not queued", common.ErrConflict, topic)
 }
 
-func runContinuationRequestFromEnvelope(envelope events.Envelope) runContinuationRequest {
-	payload := envelope.Payload
-	return runContinuationRequest{
-		WorkspaceID:           schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID),
-		RunID:                 schedulerString(envelope, events.PayloadKeyRunID, envelope.RunID),
-		Action:                schedulerStringValue(payload, events.PayloadKeyAction),
-		Priority:              schedulerInt(payload, events.PayloadKeyPriority),
-		ExecutionContextPatch: schedulerMap(payload, events.PayloadKeyExecutionContextPatch),
-	}
-}
-
-func workspaceRestartRequestFromEnvelope(envelope events.Envelope) workspaceRestartRequest {
+func workspaceRunRequestFromEnvelope(envelope events.Envelope) workspaceRunRequest {
 	payload := envelope.Payload
 	workspaceID := schedulerString(envelope, events.PayloadKeyWorkspaceID, envelope.WorkspaceID)
+	runID := schedulerString(envelope, events.PayloadKeyRunID, envelope.RunID)
 	priority := schedulerInt(payload, events.PayloadKeyPriority)
 	cmd := appservice.ActivateWorkspaceExecutionCommand{
 		GoalID:                schedulerStringValue(payload, events.PayloadKeyGoalID),
@@ -285,10 +430,21 @@ func workspaceRestartRequestFromEnvelope(envelope events.Envelope) workspaceRest
 		MemoryIDs:             schedulerStringSlice(payload, "memoryIds"),
 		DialogLanguage:        schedulerStringValue(payload, "dialogLanguage"),
 		Priority:              priority,
-		Restart:               true,
 		ExecutionContextPatch: schedulerMap(payload, events.PayloadKeyExecutionContextPatch),
 	}
-	return workspaceRestartRequest{WorkspaceID: workspaceID, Priority: priority, Command: cmd}
+	return workspaceRunRequest{
+		WorkspaceID:           workspaceID,
+		RunID:                 runID,
+		Intent:                schedulerStringValue(payload, events.PayloadKeyIntent),
+		Action:                schedulerStringValue(payload, events.PayloadKeyAction),
+		Reason:                schedulerStringValue(payload, events.PayloadKeyReason),
+		RequestID:             schedulerStringValue(payload, events.PayloadKeyRequestID),
+		DefinitionRevision:    schedulerStringValue(payload, events.PayloadKeyDefinitionRevision),
+		DecisionID:            schedulerStringValue(payload, events.PayloadKeyDecisionID),
+		Priority:              priority,
+		ExecutionContextPatch: schedulerMap(payload, events.PayloadKeyExecutionContextPatch),
+		Command:               cmd,
+	}
 }
 
 func schedulerString(envelope events.Envelope, key string, fallback string) string {

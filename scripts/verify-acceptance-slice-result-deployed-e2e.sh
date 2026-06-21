@@ -289,36 +289,23 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
 
-  run_id="$(python3 - "$activation_file" <<'PY'
+  python3 - "$activation_file" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-for path in (("activation", "run", "id"), ("run", "id")):
-    current = data
-    for part in path:
-        if not isinstance(current, dict):
-            current = {}
-            break
-        current = current.get(part)
-    if current:
-        print(current)
-        raise SystemExit(0)
-raise SystemExit(1)
+errors = []
+if data.get("accepted") is not True:
+    errors.append(f"accepted is {data.get('accepted')!r}, want true")
+if data.get("intent") != "resume":
+    errors.append(f"intent is {data.get('intent')!r}, want resume")
+if not str(data.get("requestId") or "").strip():
+    errors.append("requestId is empty")
+if data.get("reason") != "e2e_resume":
+    errors.append(f"reason is {data.get('reason')!r}, want e2e_resume")
+if errors:
+    raise SystemExit("\n".join(errors))
 PY
-)" && {
-    python3 - "$activation_file" "$run_id" "$output_file" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-run_id = sys.argv[2]
-run = ((data.get("activation") or {}).get("run") or data.get("run") or {"id": run_id})
-json.dump({"run": run}, open(sys.argv[3], "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-PY
-    echo "$run_id"
-    return 0
-  }
 
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$WORKSPACE_ID/runs" >"$runs_file"; then
@@ -438,7 +425,7 @@ dod_id="$(json_field "$TMP_DIR/dod.json" dod.id)"
 capture_runs_before_activation "$TMP_DIR/activation-before-runs.json"
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$WORKSPACE_ID/execution-activations" \
   -H 'Content-Type: application/json' \
-  -d '{"goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"acceptance-slice-verify","executionContextPatch":{"executionContract":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v1","maxWorkItems":1,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed"}}}}' >"$TMP_DIR/activation.json"
+  -d '{"intent":"resume","requestId":"acceptance-slice-e2e-'"$VERIFY_SUFFIX"'","reason":"e2e_resume","source":"e2e","goalId":"'"$goal_id"'","doDId":"'"$dod_id"'","llmProviderId":"acceptance-slice-verify","executionContextPatch":{"executionContract":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy.v1","maxWorkItems":1,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed"}}}}' >"$TMP_DIR/activation.json"
 
 run_id="$(wait_activation_run "$TMP_DIR/activation.json" "$TMP_DIR/activation-before-runs.json" "$TMP_DIR/activation-run.json")"
 wait_run_completed "$run_id"

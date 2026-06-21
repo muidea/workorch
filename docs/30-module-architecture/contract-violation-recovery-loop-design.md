@@ -129,7 +129,7 @@ LLM output
 2. 不把自然语言违例文本作为业务规则来源。
 3. 不在 orchestrator 中写入软件开发、验证命令、特定文件或 provider 品牌特判。
 4. 不把所有失败都自动重试；外部依赖、权限、approval、不可解析 provider 输出仍应按现有治理路径处理。
-5. 不用无限 replan/continue 替代明确的 failure / decision。
+5. 不用无限 replan/resume 替代明确的 failure / decision。
 6. 不让端侧 UI 自己判断是否可恢复。
 
 ## Core Concepts
@@ -310,7 +310,7 @@ runtime completed event
 
 ### User Command Interaction
 
-用户通过 TUI/Web 提交 `/decision replan`、`/run continue` 或 REST command 时，只产生 command event：
+用户通过 TUI/Web 提交 `/decision replan`、`/run resume` 或 REST command 时，只产生 command event：
 
 ```text
 TUI/Web command
@@ -484,7 +484,7 @@ TUI/Web 只展示：
 - 当前 rule / attempt / source step
 - 若升级 decision，则展示 blocker 和 violation history
 
-TUI/Web 不根据 `rule` 自行决定 replan、continue 或 retry。
+TUI/Web 不根据 `rule` 自行决定 replan、resume 或 retry。
 
 ## Consistency and Idempotency
 
@@ -567,7 +567,7 @@ TUI/Web 不根据 `rule` 自行决定 replan、continue 或 retry。
 | Port/client | 保持 Web/TUI/CLI DTO 一致 | REST/client/port 透传同一 `contractViolation` 摘要字段 | 不让 remote/local backend 字段不一致 |
 | TUI/Web | 只负责交互和显示 | 展示 retrying/escalated 状态，prompt 基于 projection 刷新 | 不自动补偿 retry，不保留另一套状态机 |
 | Template/Soul/policy | 承载业务策略 | 必要时补充 `requiredOutput`、acceptedKinds、evidencePolicies 和业务提示 | 不要求 core 根据模板或业务文本判定违例 |
-| Tests/e2e | 证明主路径闭环 | 覆盖 invalid first output -> automatic retry -> valid output -> continue | 不只测 helper，不验证 side effect 隔离 |
+| Tests/e2e | 证明主路径闭环 | 覆盖 invalid first output -> automatic retry -> valid output -> resume | 不只测 helper，不验证 side effect 隔离 |
 
 ### Minimal Atomic Delivery Units
 

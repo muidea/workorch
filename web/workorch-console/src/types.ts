@@ -400,6 +400,12 @@ export type WorkspaceExecutionActivationRequest = {
   memoryIds?: string[];
   dialogLanguage?: string;
   priority?: number;
+  intent?: 'resume' | 'restart' | string;
+  requestId?: string;
+  reason?: string;
+  source?: string;
+  definitionRevision?: string;
+  decisionId?: string;
 };
 
 export type Soul = {
@@ -1065,6 +1071,36 @@ export type AcceptanceProjection = {
   summary: AcceptanceSummary;
 };
 
+export type GapTodoItem = {
+  id?: string;
+  source?: string;
+  sourceRef?: string;
+  coverageWorkItemIds?: string[];
+  requiredEvidenceKinds?: string[];
+  status?: string;
+  priority?: number;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type GapNextAction = {
+  kind?: string;
+  reason?: string;
+};
+
+export type GapBaseline = {
+  workspaceId?: string;
+  runId?: string;
+  definitionRevision?: string;
+  baselineRevision?: string;
+  currentFocus?: Record<string, unknown>;
+  openCoverageWorkItems?: Record<string, unknown>[];
+  acceptedEvidenceRefs?: string[];
+  rejectedEvidenceRefs?: string[];
+  todoItems?: GapTodoItem[];
+  nextAction?: GapNextAction;
+};
+
 export type TaskProgress = {
   workspaceId: string;
   runId?: string;
@@ -1307,6 +1343,7 @@ export type RunSnapshot = {
   runHeartbeat?: RunHeartbeat;
   repairLoop: RepairLoop;
   acceptance: AcceptanceProjection;
+  gapBaseline?: GapBaseline;
   runtimeExecution?: RuntimeExecution;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];
@@ -1338,6 +1375,7 @@ export type WorkspaceSnapshot = {
   runtimeExecution?: RuntimeExecution;
   contextBundle?: ContextBundle;
   coverageSummary?: Record<string, unknown>;
+  gapBaseline?: GapBaseline;
   acceptance: AcceptanceProjection;
   taskDecompositions?: TaskDecomposition[];
   executionSections?: ExecutionSection[];

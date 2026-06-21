@@ -925,9 +925,9 @@ func (m AppModel) renderInput(width int) string {
 }
 
 func (m AppModel) renderHelp(width int) string {
-	help := "enter: submit | /goal | /run continue | /dod | /status | /coverage | /timeline | /memory | /config | /exit"
+	help := "enter: submit | /goal | /run resume | /dod | /status | /coverage | /timeline | /memory | /config | /exit"
 	if width < 120 {
-		help = "enter | /goal | /dod | /run continue | /status | /coverage | /memory | /exit"
+		help = "enter | /goal | /dod | /run resume | /status | /coverage | /memory | /exit"
 	}
 	if m.workspaceSelectMode {
 		help = "ws select: up/down/j/k move | enter confirm | ctrl+w cancel | esc cancel"
@@ -941,8 +941,8 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"",
 		"Workflow:",
 		"  /goal <text>         submit a new goal",
-		"  /run continue [text] continue the active run",
-		"  /run restart [text]  restart workspace execution",
+		"  /run resume [text]   resume the active run",
+		"  /run restart [text]  start a replacement run",
 		"  /dod <items>         set acceptance criteria",
 		"",
 		"Inspect:",
@@ -969,7 +969,7 @@ func (m AppModel) renderHelpOverlay(width, height int) string {
 		"  /exit                quit",
 		"",
 		"Enter: submit command; decision/approval prompts accept plain answers",
-		"Plain text continues an active run, or creates a new goal when idle",
+		"Plain text resumes an active run, or creates a new goal when idle",
 		"Alt+Enter: insert newline",
 		"Ctrl+P / Ctrl+N: input history",
 		"Tab: slash command completion",

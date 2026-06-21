@@ -55,6 +55,11 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 		WorkspaceID:     workspaceID,
 		State:           common.RunStateRunning,
 		InitialStepKind: llmcommon.StepKindWorkspaceExecution,
+		ExecutionContext: map[string]any{
+			"goal": map[string]any{
+				"text": "- complete the current requested outcome after replan",
+			},
+		},
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -127,6 +132,15 @@ func TestRuntimeOrchestrator_RunningResumeReplansFromResolvedDecisionOnFailedNon
 	}
 	if successor.ExecutionContext == nil || successor.ExecutionContext["replanContinuation"] == nil {
 		t.Fatalf("successor execution context = %#v, want replan continuation", successor.ExecutionContext)
+	}
+	if baseline := mapFromValue(successor.ExecutionContext[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("successor execution context = %#v, want gapBaseline after replan start", successor.ExecutionContext)
+	}
+	if len(runtime.requests) == 0 {
+		t.Fatalf("runtime requests = 0, want successor dispatch")
+	}
+	if baseline := mapFromValue(runtime.requests[len(runtime.requests)-1].Input[gapBaselineKey]); len(baseline) == 0 {
+		t.Fatalf("successor runtime input = %#v, want gapBaseline", runtime.requests[len(runtime.requests)-1].Input)
 	}
 }
 

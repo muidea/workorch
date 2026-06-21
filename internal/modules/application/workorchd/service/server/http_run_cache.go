@@ -524,6 +524,10 @@ func durationFromMillisQuery(values url.Values, key string, fallback time.Durati
 type governanceRunResumeRef struct {
 	WorkspaceID string
 	RunID       string
+	Intent      string
+	Reason      string
+	RequestID   string
+	DecisionID  string
 }
 
 func (s *serverState) scheduleGovernanceRunResumeRefs(refs []governanceRunResumeRef, priority int) bool {
@@ -591,9 +595,19 @@ func runIDsFromApprovals(items []appservice.Approval) []string {
 func runResumeRefsFromDecisions(items []appservice.Decision) []governanceRunResumeRef {
 	ret := make([]governanceRunResumeRef, 0, len(items))
 	for _, item := range items {
+		intent := "resume"
+		reason := "decision_resolved"
+		if strings.TrimSpace(item.ResolutionType) == decisioncommon.ResolutionTypeReplan {
+			intent = "replan"
+			reason = "decision_replan_resolved"
+		}
 		ret = append(ret, governanceRunResumeRef{
 			WorkspaceID: item.WorkspaceID,
 			RunID:       item.RunID,
+			Intent:      intent,
+			Reason:      reason,
+			RequestID:   governanceRunResumeRequestID("decision", item.ID, intent),
+			DecisionID:  item.ID,
 		})
 	}
 	return ret
@@ -605,9 +619,22 @@ func runResumeRefsFromApprovals(items []appservice.Approval) []governanceRunResu
 		ret = append(ret, governanceRunResumeRef{
 			WorkspaceID: item.WorkspaceID,
 			RunID:       item.RunID,
+			Intent:      "resume",
+			Reason:      "approval_resolved",
+			RequestID:   governanceRunResumeRequestID("approval", item.ID, "resume"),
 		})
 	}
 	return ret
+}
+
+func governanceRunResumeRequestID(kind string, id string, intent string) string {
+	parts := []string{"governance", strings.TrimSpace(kind), strings.TrimSpace(id), strings.TrimSpace(intent)}
+	for idx, part := range parts {
+		if part == "" {
+			parts[idx] = "none"
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceRunResumeRef {
@@ -616,6 +643,13 @@ func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceR
 	for _, item := range items {
 		item.WorkspaceID = strings.TrimSpace(item.WorkspaceID)
 		item.RunID = strings.TrimSpace(item.RunID)
+		item.Intent = strings.TrimSpace(item.Intent)
+		item.Reason = strings.TrimSpace(item.Reason)
+		item.RequestID = strings.TrimSpace(item.RequestID)
+		item.DecisionID = strings.TrimSpace(item.DecisionID)
+		if item.Intent == "" {
+			item.Intent = "resume"
+		}
 		if item.WorkspaceID == "" || item.RunID == "" {
 			continue
 		}
@@ -630,10 +664,17 @@ func uniqueGovernanceRunResumeRefs(items []governanceRunResumeRef) []governanceR
 }
 
 func governanceRunResumeKey(item governanceRunResumeRef) string {
-	if item.WorkspaceID == "" {
-		return "/" + item.RunID
+	intent := strings.TrimSpace(item.Intent)
+	if intent == "" {
+		intent = "resume"
 	}
-	return item.WorkspaceID + "/" + item.RunID
+	if item.WorkspaceID == "" {
+		return intent + "//" + item.RunID
+	}
+	if item.DecisionID != "" {
+		return intent + "/" + item.WorkspaceID + "/" + item.RunID + "/" + item.DecisionID
+	}
+	return intent + "/" + item.WorkspaceID + "/" + item.RunID
 }
 
 func uniqueNonEmptyStrings(items []string) []string {

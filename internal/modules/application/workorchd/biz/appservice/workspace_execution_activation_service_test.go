@@ -3877,6 +3877,59 @@ func TestActivateWorkspaceExecutionWithBackendStartsCreatedActiveRun(t *testing.
 	}
 }
 
+func TestActivateWorkspaceExecutionWithBackendRestartReplacesCreatedActiveRun(t *testing.T) {
+	useUnavailableLLMProvider(t)
+	dataRoot := t.TempDir()
+	cleanupSharedBackendSession(t, "file", dataRoot)
+	workspace, err := createWorkspaceWithIDWithBackend(context.Background(), "file", dataRoot, "ws-activation-restart-created-active", "activation restart created active workspace", "", "workspaces/activation-restart-created-active")
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
+	}
+	goal, err := DefineGoalWithBackend(context.Background(), "file", dataRoot, workspace.ID, "restart created active goal")
+	if err != nil {
+		t.Fatalf("DefineGoalWithBackend: %v", err)
+	}
+	dod, err := DefineDoDWithBackend(context.Background(), "file", dataRoot, workspace.ID, []string{"restart created active dod"})
+	if err != nil {
+		t.Fatalf("DefineDoDWithBackend: %v", err)
+	}
+	created, err := CreateRunWithBackend(context.Background(), "file", dataRoot, workspace.ID, "run-activation-restart-created-active", goal.ID, dod.ID)
+	if err != nil {
+		t.Fatalf("CreateRunWithBackend: %v", err)
+	}
+	session, ctx := newTestRuntimeSession(t, "file", dataRoot)
+	exports := session.Bootstrap.Exports()
+	workspaceItem, err := exports.Repositories.Workspaces.Get(ctx, common.WorkspaceID(workspace.ID))
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	workspaceItem.ActiveRunID = common.RunID(created.ID)
+	if err := exports.Repositories.Workspaces.Update(ctx, workspaceItem); err != nil {
+		t.Fatalf("update workspace active run: %v", err)
+	}
+
+	item, err := ActivateWorkspaceExecutionWithBackend(context.Background(), "file", dataRoot, workspace.ID, ActivateWorkspaceExecutionCommand{Restart: true})
+	if err != nil {
+		t.Fatalf("ActivateWorkspaceExecutionWithBackend restart: %v", err)
+	}
+	if item.Run.ID == created.ID {
+		t.Fatalf("activation run id = %q, want replacement run", item.Run.ID)
+	}
+	if item.Run.State == "created" {
+		t.Fatalf("replacement run = %+v, want started observable run", item.Run)
+	}
+	oldRun, err := exports.Repositories.Runs.Get(ctx, common.RunID(created.ID))
+	if err != nil {
+		t.Fatalf("get old run: %v", err)
+	}
+	if oldRun.State != common.RunStateSuperseded {
+		t.Fatalf("old run state = %q, want superseded", oldRun.State)
+	}
+	if item.Snapshot.Workspace.ActiveRunID != item.Run.ID {
+		t.Fatalf("snapshot activeRunId = %q, want replacement %q", item.Snapshot.Workspace.ActiveRunID, item.Run.ID)
+	}
+}
+
 func TestActivateWorkspaceExecutionWithBackendIgnoresTerminalActiveRun(t *testing.T) {
 	useUnavailableLLMProvider(t)
 	dataRoot := t.TempDir()
