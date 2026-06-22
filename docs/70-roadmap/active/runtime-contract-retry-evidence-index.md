@@ -1390,6 +1390,21 @@ This is the L2 evidence index for the runtime contract retry convergence audit. 
 | closureBatch | 7 |
 | loadByDefault | false |
 
+### ev:code/scoped-root-cause-strategy-reassessment/20260622-025
+
+| Field | Value |
+| --- | --- |
+| claimId | `C-B7-SCOPED-ROOT-CAUSE-STRATEGY-REASSESSMENT-20260622-025` |
+| workspaceId | `ws-7ced70e98ea50c43` |
+| runId | `run-002-replan-001-replan-001-replan-001-replan-001-replan-001-r-replan-003` |
+| evidenceKind | live-output-audit-and-code-test-output |
+| sourcePath | deployed `http://127.0.0.1:8080` plus local worktree |
+| extractCommand | `curl -fsS http://127.0.0.1:8080/api/v1/workorch/workspaces/ws-7ced70e98ea50c43/snapshot; jq '.promptContext.sections[] | select(.id=="C3.repair-action-package") | .content' .workorch-data/internal/workspaces/ws-7ced70e98ea50c43/runs/<run>/llm-calls/<run>/003-contract-retry-001-of-planning-001-2/request.json; jq '.executionGraph.nodes[] | select(.kind=="patch/apply") | .input | {targetRef,patchType,failedSurface,rootCauseTarget,repairMode}' .workorch-data/internal/workspaces/ws-7ced70e98ea50c43/runs/<run>/steps/<run>/003-contract-retry-001-of-planning-001-2/output.json; go test ./internal/modules/kernel/orchestrator/biz -run 'TestValidateLLMExecutionOutputContract(RejectsUndistinguishedStrategyReassessmentRootCause|AllowsScopedRootCauseWithinFailedSurface|RejectsRepeatedFailedSurfacePatchWithoutTargetShift|AllowsRepeatedFailedSurfaceSameTargetWhenPrimaryDiagnosticAddressed|AllowsGroundedRootCauseCandidateShift)' -count=1` |
+| extractedSummary | Live audit of `replan-003` showed the provider-facing `C3.repair-action-package` now carries the complete current target snapshot (`contentView=complete`, `contentComplete=true`, `safeForFileWrite=true`), so the previous unsafe compaction issue was not the active blocker. The next blocker was strategy reassessment: two state-changing outputs declared `repairMode=shift_root_cause_target`, used current target content, and changed a concrete sub-scope inside the failed resource, but the core contract rejected them because the patch target still matched the coarse failed-surface resource. Local core closure keeps broad repeated same-surface rejection intact, but recognizes a neutral scoped root-cause inside the failed resource when `rootCauseTarget` names the target plus an additional sub-scope, the patch is substantive, and verification remains bounded. `rootCauseTarget` parsing now treats `resource:scope` / `resource#scope` as the same resource plus sub-scope for consistency checks. Focused regression tests prove undistinguished root causes are still rejected while scoped root-cause repair is accepted. Full redeploy plus fresh replan/resume is still required to prove live positive convergence. |
+| owner | core |
+| closureBatch | 7 |
+| loadByDefault | false |
+
 ## Default Load Set For Next Code Closure
 
 Load only:

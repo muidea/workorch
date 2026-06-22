@@ -859,6 +859,11 @@ func rootCauseTargetRefsFromStrategyValue(value any) []string {
 		ref = strings.Trim(ref, "`'\"()[]{}<>;,")
 		if strings.Contains(ref, ".") {
 			add(ref)
+			for _, separator := range []string{":", "#"} {
+				if prefix, _, ok := strings.Cut(ref, separator); ok && strings.Contains(prefix, ".") {
+					add(prefix)
+				}
+			}
 		}
 	}
 	return ret

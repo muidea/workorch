@@ -65,7 +65,9 @@ func validateLLMRepairStrategyReassessmentContract(step *runModel.Step, output m
 				continue
 			}
 			if strategyReassessmentRequiresRootCauseTargetShift(reassessment) &&
-				strategyCandidatePatchesFailedSurface(candidate, expectedSurface) && !surfaceCorrection {
+				strategyCandidatePatchesFailedSurface(candidate, expectedSurface) &&
+				!strategyCandidateDeclaresScopedRootCauseWithinFailedSurface(candidate, expectedSurface) &&
+				!surfaceCorrection {
 				return fmt.Errorf("%w: strategyReassessment.required=true repairMode=shift_root_cause_target requires repeated failed-surface repairs to patch a distinct root-cause target or return a real governance blocker", common.ErrInvalidArgument)
 			}
 		default:
@@ -328,6 +330,10 @@ func strategyPatchUsesCurrentRepairTargetSnapshot(step *runModel.Step, request r
 	if !targetMatched {
 		return false
 	}
+	return runtimePatchRequestHasSubstantiveChange(request)
+}
+
+func runtimePatchRequestHasSubstantiveChange(request runtimePatchRequest) bool {
 	switch strings.TrimSpace(request.PatchType) {
 	case "text_replace":
 		return request.OldText != "" && request.OldText != request.NewText
@@ -612,6 +618,44 @@ func strategyRootCauseDistinguishableFromFailedSurface(candidate map[string]any,
 		return true
 	}
 	return rootCause != failedSurface
+}
+
+func strategyCandidateDeclaresScopedRootCauseWithinFailedSurface(candidate map[string]any, expectedSurface string) bool {
+	if len(candidate) == 0 || !strategyRootCauseDistinguishableFromFailedSurface(candidate, expectedSurface) {
+		return false
+	}
+	request, err := runtimePatchRequestFromMap(candidate)
+	if err != nil || !runtimePatchRequestHasSubstantiveChange(request) {
+		return false
+	}
+	targetRef := normalizeRepairPatchTargetRef(request.TargetRef)
+	if targetRef == "" {
+		return false
+	}
+	surfaceRefs := strategySurfaceTargetRefs(expectedSurface)
+	if len(surfaceRefs) == 0 || !repairPatchTargetRefMatches(targetRef, surfaceRefs) {
+		return false
+	}
+	rootCauseRefs := rootCauseTargetRefsFromStrategyValue(candidate["rootCauseTarget"])
+	if len(rootCauseRefs) > 0 && !repairPatchTargetRefMatches(targetRef, rootCauseRefs) {
+		return false
+	}
+	rootCauseText := strings.TrimSpace(stringFromAny(candidate["rootCauseTarget"]))
+	return strategyRootCauseTextNamesScopedTarget(rootCauseText, targetRef)
+}
+
+func strategyRootCauseTextNamesScopedTarget(rootCauseText string, targetRef string) bool {
+	rootCauseText = strings.TrimSpace(rootCauseText)
+	targetRef = normalizeRepairPatchTargetRef(targetRef)
+	if rootCauseText == "" || targetRef == "" {
+		return false
+	}
+	normalizedRoot := normalizeStrategyContractText(rootCauseText)
+	normalizedTarget := normalizeStrategyContractText(targetRef)
+	if normalizedRoot == "" || normalizedRoot == normalizedTarget || !strings.Contains(normalizedRoot, normalizedTarget) {
+		return false
+	}
+	return len(normalizedRoot) > len(normalizedTarget)
 }
 
 func strategyReassessmentRequiresRootCauseTargetShift(reassessment map[string]any) bool {

@@ -498,6 +498,76 @@ func TestValidateLLMExecutionOutputContractRejectsUndistinguishedStrategyReasses
 	}
 }
 
+func TestValidateLLMExecutionOutputContractAllowsScopedRootCauseWithinFailedSurface(t *testing.T) {
+	run := &runmodel.Run{
+		ID:              "run-strategy-reassessment-scoped-root-cause",
+		InitialStepKind: llmWorkspaceExecutionStepKind,
+	}
+	step := &runmodel.Step{
+		ID:   "run-strategy-reassessment-scoped-root-cause/repair-001",
+		Kind: llmWorkspaceExecutionStepKind,
+		Input: map[string]any{
+			stepInputKeyRuntimeRepairFollowUp: true,
+			stepInputKeyRuntimeStage:          runtimeStageRepair,
+			"repairObjective":                 repairObjectiveStateChangingOutput,
+			"stateChangingOutputRequired":     true,
+			"strategyReassessment": map[string]any{
+				"required":             true,
+				"reason":               "same_target_scope_repeated_failure",
+				"targetRepairAttempts": 2,
+				"failedSurface":        "failureTargets=target.txt",
+				"requiredDecisionFields": []string{
+					"failedSurface",
+					"rootCauseTarget",
+					"repairTargetDecision",
+					"repairMode",
+					"forbiddenRepair",
+					"verificationPlan",
+				},
+			},
+		},
+	}
+	output := map[string]any{
+		"status": "completed",
+		"stage":  "llm_execution_graph_plan",
+		stepOutputKeyExecutionGraph: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "patch-scoped-root-cause",
+					"kind": "patch/apply",
+					"input": map[string]any{
+						"targetRef":            "target.txt",
+						"patchType":            "text_replace",
+						"oldText":              "old scoped behavior",
+						"newText":              "new scoped behavior",
+						"failedSurface":        "failureTargets=target.txt",
+						"rootCauseTarget":      "target.txt:scoped behavior block",
+						"repairTargetDecision": "patch the scoped behavior block within the failed target using the current snapshot",
+						"repairMode":           "shift_root_cause_target",
+						"forbiddenRepair":      "do not repeat a broad file-level rewrite",
+						"verificationPlan":     "run targeted verification for target.txt scoped behavior",
+					},
+				},
+				{
+					"id":        "verify-scoped-root-cause",
+					"kind":      "shell/command",
+					"dependsOn": []string{"patch-scoped-root-cause"},
+					"input": map[string]any{
+						"command":           "verify",
+						"args":              []string{"--target=target.txt"},
+						"targetRef":         "target.txt",
+						"verificationScope": "bounded_to_target.txt_scoped_behavior",
+					},
+				},
+			},
+		},
+	}
+
+	if err := validateLLMExecutionOutputContract(run, step, output); err != nil {
+		t.Fatalf("validateLLMExecutionOutputContract err = %v, want scoped root-cause repair accepted", err)
+	}
+}
+
 func TestValidateLLMExecutionOutputContractRejectsUnboundedVerificationForScopedFailedSurface(t *testing.T) {
 	run := &runmodel.Run{
 		ID:              "run-strategy-reassessment-unbounded-verification",

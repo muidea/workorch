@@ -453,6 +453,7 @@ go test ./... -count=1
    - stale patch `baseHash mismatch` refresh repair budget and action contract (`ev:code/patch-basehash-refresh-repair/20260622-021`, live-verified for that blocker by `ev:verify/live-patch-basehash-refresh/20260622-022`)
    - patch application failure narrow retry contract for stale `oldText`/diff/content after dispatch (`ev:code/patch-application-failure-narrow-retry/20260622-023`)
    - LLM-visible target snapshot compaction safety, so compacted snapshots cannot claim complete safe file-write or exact patch baseline (`ev:code/llm-target-snapshot-compaction-safety/20260622-024`)
+   - scoped root-cause strategy reassessment, so repeated failed-surface repair may accept a substantive patch to a declared sub-scope inside the failed resource without weakening broad same-surface rejection (`ev:code/scoped-root-cause-strategy-reassessment/20260622-025`)
 6. Continue Batch 7 regression and live verification.
 7. Re-run live workspace verification against fresh or resumed workspaces after the preceding gates are closed.
 
